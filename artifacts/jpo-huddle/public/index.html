@@ -33,44 +33,43 @@
       { label: "🛋 Lounge",    color: 0xf8c8e0, x: 2064, y: 864,  w: 288,  h: 624 },
     ];
 
-    // Each gap: x = left edge of the 48px opening, y = wall's y coordinate
     const doorGaps = [
-      { x: 288,  y: 672  },  // HR south
-      { x: 912,  y: 672  },  // Marketing south
-      { x: 1536, y: 672  },  // Engagement south
-      { x: 2112, y: 672  },  // Operations south
-      { x: 384,  y: 864  },  // Accounting north
-      { x: 1152, y: 864  },  // Canteen north
-      { x: 1776, y: 864  },  // MeetingA north
-      { x: 1776, y: 1200 },  // MeetingB north
-      { x: 2112, y: 864  },  // Lounge north
+      { x: 288,  y: 672  },
+      { x: 912,  y: 672  },
+      { x: 1536, y: 672  },
+      { x: 2112, y: 672  },
+      { x: 384,  y: 864  },
+      { x: 1152, y: 864  },
+      { x: 1776, y: 864  },
+      { x: 1776, y: 1200 },
+      { x: 2112, y: 864  },
     ];
 
     class OfficeScene extends Phaser.Scene {
       constructor() { super("OfficeScene"); }
 
-      preload() {}
+      preload() {
+        this.load.image("interiors", "/assets/Interiors_free_16x16.png");
+      }
 
       create() {
+        // ── Phase 1: floor plan ──────────────────────────────────────
+
         const g = this.add.graphics();
 
-        // --- fills ---
         for (const room of rooms) {
           g.fillStyle(room.color, 1);
           g.fillRect(room.x, room.y, room.w, room.h);
         }
 
-        // --- walls ---
         g.lineStyle(2, 0x2a2a3a, 1);
-
         for (const room of rooms) {
-          this.hWall(g, room.y,           room.x, room.x + room.w);  // top
-          this.hWall(g, room.y + room.h,  room.x, room.x + room.w);  // bottom
-          this.vWall(g, room.x,           room.y, room.y + room.h);  // left
-          this.vWall(g, room.x + room.w,  room.y, room.y + room.h);  // right
+          this.hWall(g, room.y,          room.x, room.x + room.w);
+          this.hWall(g, room.y + room.h, room.x, room.x + room.w);
+          this.vWall(g, room.x,          room.y, room.y + room.h);
+          this.vWall(g, room.x + room.w, room.y, room.y + room.h);
         }
 
-        // --- labels ---
         for (const room of rooms) {
           if (!room.label) continue;
           this.add.text(room.x + 10, room.y + 10, room.label, {
@@ -78,10 +77,88 @@
             fontSize: "13px",
             fontStyle: "bold",
             color: "#000000",
-          }).setAlpha(0.33);
+          }).setAlpha(0.33).setDepth(2);
         }
 
-        // --- camera ---
+        // ── Phase 2: furniture frames ────────────────────────────────
+        // Slice named frames from the interiors spritesheet.
+        // Each tile is 16x16 source; sizes below are in source pixels.
+        // At setScale(3) each source pixel becomes 3 world pixels.
+
+        const tex = this.textures.get("interiors");
+        //                  name          src  srcX  srcY   w    h
+        tex.add("desk",       0,    0,    0,  48,  48);  // 3×3 tiles
+        tex.add("plant",      0,  144,  512,  32,  48);  // 2×3 tiles
+        tex.add("bookshelf",  0,    0,  256,  48,  32);  // 3×2 tiles
+        tex.add("whiteboard", 0,  144,  576,  48,  32);  // 3×2 tiles
+        tex.add("roundtable", 0,  128,  160,  48,  48);  // 3×3 tiles
+        tex.add("longtable",  0,    0,  160,  64,  32);  // 4×2 tiles
+        tex.add("counter",    0,    0,  320,  64,  32);  // 4×2 tiles
+        tex.add("couch",      0,    0,  704,  64,  48);  // 4×3 tiles
+
+        const f = (key, wx, wy) =>
+          this.add.image(wx, wy, "interiors", key)
+            .setOrigin(0, 0)
+            .setScale(3)
+            .setDepth(1);
+
+        // HR
+        f("desk",      96,  144);
+        f("desk",      96,  288);
+        f("desk",     336,  144);
+        f("plant",    480,  144);
+        f("bookshelf", 96,  480);
+
+        // Marketing
+        f("desk",      720, 144);
+        f("desk",      720, 288);
+        f("desk",      960, 144);
+        f("whiteboard",1056,144);
+        f("plant",    1152, 480);
+
+        // Engagement
+        f("desk",     1344, 144);
+        f("desk",     1344, 288);
+        f("desk",     1584, 144);
+        f("plant",    1776, 144);
+        f("plant",    1776, 480);
+
+        // Operations
+        f("desk",     1968, 144);
+        f("desk",     1968, 288);
+        f("desk",     2112, 144);
+        f("bookshelf",1968, 480);
+
+        // Accounting
+        f("desk",       96,  960);
+        f("desk",       96, 1104);
+        f("desk",      336,  960);
+        f("desk",      336, 1104);
+        f("bookshelf", 672,  960);
+
+        // Canteen
+        f("roundtable",  912,  960);
+        f("roundtable", 1104,  960);
+        f("roundtable",  912, 1152);
+        f("roundtable", 1104, 1152);
+        f("counter",    1392,  960);
+        f("plant",      1488, 1344);
+
+        // Meeting A
+        f("longtable",  1680,  912);
+        f("whiteboard", 1680, 1056);
+
+        // Meeting B
+        f("longtable",  1680, 1248);
+        f("whiteboard", 1680, 1392);
+
+        // Lounge
+        f("couch",      2112,  912);
+        f("roundtable", 2208, 1056);
+        f("plant",      2064, 1296);
+        f("plant",      2256, 1296);
+
+        // ── Camera ──────────────────────────────────────────────────
         const zoom = Math.min(
           this.scale.width  / WORLD_W,
           this.scale.height / WORLD_H
@@ -91,13 +168,11 @@
         this.cameras.main.centerOn(1200, 744);
       }
 
-      // Horizontal wall segment with optional door gaps
       hWall(g, wallY, x1, x2) {
         const gaps = doorGaps
           .filter(d => d.y === wallY && d.x >= x1 && d.x < x2)
           .map(d => d.x)
           .sort((a, b) => a - b);
-
         let cx = x1;
         g.beginPath();
         for (const gx of gaps) {
@@ -108,7 +183,6 @@
         g.strokePath();
       }
 
-      // Vertical wall segment (no gaps on vertical walls)
       vWall(g, wallX, y1, y2) {
         g.beginPath();
         g.moveTo(wallX, y1);
@@ -124,6 +198,7 @@
       width: window.innerWidth,
       height: window.innerHeight,
       backgroundColor: "#f0ece4",
+      pixelArt: true,
       scene: OfficeScene,
     });
   </script>
