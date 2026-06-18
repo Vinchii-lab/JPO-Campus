@@ -15,18 +15,150 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
     const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+
+    const TILE_SRC = 16;
+    const TILE_DST = 48;
+    const WORLD_W = 50 * TILE_DST;
+    const WORLD_H = 36 * TILE_DST;
+
+    const rooms = [
+      { name: "HR",         icon: "👥", x: 1,  y: 1,  w: 12, h: 13, srcX: 0, srcY: 112 },
+      { name: "Marketing",  icon: "📣", x: 14, y: 1,  w: 12, h: 13, srcX: 0, srcY: 144 },
+      { name: "Engagement", icon: "🎯", x: 27, y: 1,  w: 12, h: 13, srcX: 0, srcY: 80  },
+      { name: "Operations", icon: "⚙️",  x: 40, y: 1,  w: 9,  h: 13, srcX: 0, srcY: 272 },
+      { name: "Corridor",   icon: null, x: 0,  y: 14, w: 50, h: 3,  srcX: 0, srcY: 272 },
+      { name: "Accounting", icon: "💰", x: 1,  y: 18, w: 16, h: 13, srcX: 0, srcY: 48  },
+      { name: "Canteen",    icon: "☕", x: 18, y: 18, w: 15, h: 13, srcX: 0, srcY: 176 },
+      { name: "MeetingA",   icon: "📋", x: 34, y: 18, w: 8,  h: 6,  srcX: 0, srcY: 208 },
+      { name: "MeetingB",   icon: "📋", x: 34, y: 25, w: 8,  h: 6,  srcX: 0, srcY: 208 },
+      { name: "Lounge",     icon: "🛋", x: 43, y: 18, w: 6,  h: 13, srcX: 0, srcY: 240 },
+    ];
+
+    // Each door gap: wallY = tile-row coordinate of the wall line,
+    // tileX = column where the 1-tile gap begins.
+    const doorGaps = [
+      { wallY: 14, tileX: 6  },
+      { wallY: 14, tileX: 19 },
+      { wallY: 14, tileX: 32 },
+      { wallY: 14, tileX: 44 },
+      { wallY: 18, tileX: 8  },
+      { wallY: 18, tileX: 24 },
+      { wallY: 18, tileX: 37 },
+      { wallY: 25, tileX: 37 },
+      { wallY: 18, tileX: 45 },
+    ];
+
+    function drawHWall(wallY, tileX1, tileX2) {
+      const py = wallY * TILE_DST;
+      const gaps = doorGaps
+        .filter(d => d.wallY === wallY && d.tileX >= tileX1 && d.tileX < tileX2)
+        .map(d => d.tileX * TILE_DST)
+        .sort((a, b) => a - b);
+
+      let cx = tileX1 * TILE_DST;
+      const endX = tileX2 * TILE_DST;
+
+      ctx.beginPath();
+      for (const gs of gaps) {
+        const ge = gs + TILE_DST;
+        if (gs > cx) {
+          ctx.moveTo(cx, py);
+          ctx.lineTo(gs, py);
+        }
+        cx = Math.max(cx, ge);
+      }
+      if (cx < endX) {
+        ctx.moveTo(cx, py);
+        ctx.lineTo(endX, py);
+      }
+      ctx.stroke();
+    }
+
+    function drawVWall(wallX, tileY1, tileY2) {
+      ctx.beginPath();
+      ctx.moveTo(wallX * TILE_DST, tileY1 * TILE_DST);
+      ctx.lineTo(wallX * TILE_DST, tileY2 * TILE_DST);
+      ctx.stroke();
+    }
+
+    let tileset = null;
+
+    function drawMap() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#f0ece4";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const scale = Math.min(canvas.width / WORLD_W, canvas.height / WORLD_H);
+      const offsetX = (canvas.width  - WORLD_W * scale) / 2;
+      const offsetY = (canvas.height - WORLD_H * scale) / 2;
+
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+
+      // --- floors ---
+      if (tileset) {
+        for (const room of rooms) {
+          for (let ty = 0; ty < room.h; ty++) {
+            for (let tx = 0; tx < room.w; tx++) {
+              ctx.drawImage(
+                tileset,
+                room.srcX, room.srcY, TILE_SRC, TILE_SRC,
+                (room.x + tx) * TILE_DST,
+                (room.y + ty) * TILE_DST,
+                TILE_DST, TILE_DST
+              );
+            }
+          }
+        }
+      }
+
+      // --- walls ---
+      ctx.strokeStyle = "#2a2a3a";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "square";
+
+      for (const room of rooms) {
+        drawHWall(room.y,           room.x, room.x + room.w);
+        drawHWall(room.y + room.h,  room.x, room.x + room.w);
+        drawVWall(room.x,           room.y, room.y + room.h);
+        drawVWall(room.x + room.w,  room.y, room.y + room.h);
+      }
+
+      // --- labels ---
+      // Target ~13 px on screen; divide by scale to get world-space size.
+      const fs = Math.ceil(13 / scale);
+      ctx.font = `bold ${fs}px monospace`;
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+
+      for (const room of rooms) {
+        if (!room.icon) continue;
+        ctx.fillText(
+          `${room.icon} ${room.name}`,
+          (room.x + 0.25) * TILE_DST,
+          (room.y + 0.75) * TILE_DST
+        );
+      }
+
+      ctx.restore();
+    }
 
     function resize() {
-      canvas.width = window.innerWidth;
+      canvas.width  = window.innerWidth;
       canvas.height = window.innerHeight;
+      drawMap();
     }
-    resize();
     window.addEventListener("resize", resize);
+    resize();
+
+    const img = new Image();
+    img.onload  = () => { tileset = img; drawMap(); };
+    img.onerror = () => console.warn("Tileset load failed — drawing without floor textures.");
+    img.src = "/assets/Room_Builder_free_16x16.png";
 
     const socket = io();
-    socket.on("connect", () => {
-      console.log("Connected to JPO Campus");
-    });
+    socket.on("connect", () => console.log("Connected to JPO Campus"));
   </script>
 </body>
 </html>
