@@ -23,16 +23,16 @@
     const WORLD_H = 36 * TILE_DST;
 
     const rooms = [
-      { name: "HR",         icon: "👥", x: 1,  y: 1,  w: 12, h: 13, srcX: 0, srcY: 112 },
-      { name: "Marketing",  icon: "📣", x: 14, y: 1,  w: 12, h: 13, srcX: 0, srcY: 144 },
-      { name: "Engagement", icon: "🎯", x: 27, y: 1,  w: 12, h: 13, srcX: 0, srcY: 80  },
-      { name: "Operations", icon: "⚙️",  x: 40, y: 1,  w: 9,  h: 13, srcX: 0, srcY: 272 },
-      { name: "Corridor",   icon: null, x: 0,  y: 14, w: 50, h: 3,  srcX: 0, srcY: 272 },
-      { name: "Accounting", icon: "💰", x: 1,  y: 18, w: 16, h: 13, srcX: 0, srcY: 48  },
-      { name: "Canteen",    icon: "☕", x: 18, y: 18, w: 15, h: 13, srcX: 0, srcY: 176 },
-      { name: "MeetingA",   icon: "📋", x: 34, y: 18, w: 8,  h: 6,  srcX: 0, srcY: 208 },
-      { name: "MeetingB",   icon: "📋", x: 34, y: 25, w: 8,  h: 6,  srcX: 0, srcY: 208 },
-      { name: "Lounge",     icon: "🛋", x: 43, y: 18, w: 6,  h: 13, srcX: 0, srcY: 240 },
+      { name: "HR",         icon: "👥", x: 1,  y: 1,  w: 12, h: 13, color: "#b8e8e0" },
+      { name: "Marketing",  icon: "📣", x: 14, y: 1,  w: 12, h: 13, color: "#f5d9b0" },
+      { name: "Engagement", icon: "🎯", x: 27, y: 1,  w: 12, h: 13, color: "#fef3b0" },
+      { name: "Operations", icon: "⚙️",  x: 40, y: 1,  w: 9,  h: 13, color: "#e8e8e8" },
+      { name: "Corridor",   icon: null, x: 0,  y: 14, w: 50, h: 3,  color: "#f0ece4" },
+      { name: "Accounting", icon: "💰", x: 1,  y: 18, w: 16, h: 13, color: "#e8c8f0" },
+      { name: "Canteen",    icon: "☕", x: 18, y: 18, w: 15, h: 13, color: "#fde8c0" },
+      { name: "MeetingA",   icon: "📋", x: 34, y: 18, w: 8,  h: 6,  color: "#c8e0f8" },
+      { name: "MeetingB",   icon: "📋", x: 34, y: 25, w: 8,  h: 6,  color: "#c8e0f8" },
+      { name: "Lounge",     icon: "🛋", x: 43, y: 18, w: 6,  h: 13, color: "#f8c8e0" },
     ];
 
     // Each door gap: wallY = tile-row coordinate of the wall line,
@@ -98,20 +98,14 @@
       ctx.scale(scale, scale);
 
       // --- floors ---
-      if (tileset) {
-        for (const room of rooms) {
-          for (let ty = 0; ty < room.h; ty++) {
-            for (let tx = 0; tx < room.w; tx++) {
-              ctx.drawImage(
-                tileset,
-                room.srcX, room.srcY, TILE_SRC, TILE_SRC,
-                (room.x + tx) * TILE_DST,
-                (room.y + ty) * TILE_DST,
-                TILE_DST, TILE_DST
-              );
-            }
-          }
-        }
+      for (const room of rooms) {
+        ctx.fillStyle = room.color;
+        ctx.fillRect(
+          room.x * TILE_DST,
+          room.y * TILE_DST,
+          room.w * TILE_DST,
+          room.h * TILE_DST
+        );
       }
 
       // --- walls ---
