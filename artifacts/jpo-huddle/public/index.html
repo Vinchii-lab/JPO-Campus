@@ -7,131 +7,32 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #f0ece4; overflow: hidden; }
-    canvas { display: block; }
   </style>
 </head>
 <body>
-  <canvas id="c"></canvas>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
-    const canvas = document.getElementById("c");
-    const ctx = canvas.getContext("2d");
-
-    const TILE_SRC = 16;
-    const TILE_DST = 48;
-    const WORLD_W = 50 * TILE_DST;
-    const WORLD_H = 36 * TILE_DST;
-
-    const rooms = [
-      { name: "HR",         icon: "👥", x: 1,  y: 1,  w: 12, h: 13, color: "#b8e8e0" },
-      { name: "Marketing",  icon: "📣", x: 14, y: 1,  w: 12, h: 13, color: "#f5d9b0" },
-      { name: "Engagement", icon: "🎯", x: 27, y: 1,  w: 12, h: 13, color: "#fef3b0" },
-      { name: "Operations", icon: "⚙️",  x: 40, y: 1,  w: 9,  h: 13, color: "#e8e8e8" },
-      { name: "Corridor",   icon: null, x: 0,  y: 14, w: 50, h: 3,  color: "#f0ece4" },
-      { name: "Accounting", icon: "💰", x: 1,  y: 18, w: 16, h: 13, color: "#e8c8f0" },
-      { name: "Canteen",    icon: "☕", x: 18, y: 18, w: 15, h: 13, color: "#fde8c0" },
-      { name: "MeetingA",   icon: "📋", x: 34, y: 18, w: 8,  h: 6,  color: "#c8e0f8" },
-      { name: "MeetingB",   icon: "📋", x: 34, y: 25, w: 8,  h: 6,  color: "#c8e0f8" },
-      { name: "Lounge",     icon: "🛋", x: 43, y: 18, w: 6,  h: 13, color: "#f8c8e0" },
-    ];
-
-    const doorGaps = [
-      { wallY: 14, tileX: 6  },
-      { wallY: 14, tileX: 19 },
-      { wallY: 14, tileX: 32 },
-      { wallY: 14, tileX: 44 },
-      { wallY: 18, tileX: 8  },
-      { wallY: 18, tileX: 24 },
-      { wallY: 18, tileX: 37 },
-      { wallY: 25, tileX: 37 },
-      { wallY: 18, tileX: 45 },
-    ];
-
-    function drawHWall(c, wallY, tileX1, tileX2) {
-      const py = wallY * TILE_DST;
-      const gaps = doorGaps
-        .filter(d => d.wallY === wallY && d.tileX >= tileX1 && d.tileX < tileX2)
-        .map(d => d.tileX * TILE_DST)
-        .sort((a, b) => a - b);
-
-      let cx = tileX1 * TILE_DST;
-      const endX = tileX2 * TILE_DST;
-
-      c.beginPath();
-      for (const gs of gaps) {
-        const ge = gs + TILE_DST;
-        if (gs > cx) { c.moveTo(cx, py); c.lineTo(gs, py); }
-        cx = Math.max(cx, ge);
-      }
-      if (cx < endX) { c.moveTo(cx, py); c.lineTo(endX, py); }
-      c.stroke();
-    }
-
-    function drawVWall(c, wallX, tileY1, tileY2) {
-      c.beginPath();
-      c.moveTo(wallX * TILE_DST, tileY1 * TILE_DST);
-      c.lineTo(wallX * TILE_DST, tileY2 * TILE_DST);
-      c.stroke();
-    }
-
-    function drawMap() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#f0ece4";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const scale   = Math.min(canvas.width / WORLD_W, canvas.height / WORLD_H);
-      const offsetX = (canvas.width  - WORLD_W * scale) / 2;
-      const offsetY = (canvas.height - WORLD_H * scale) / 2;
-
-      ctx.save();
-      ctx.translate(offsetX, offsetY);
-      ctx.scale(scale, scale);
-
-      // --- floors ---
-      for (const room of rooms) {
-        ctx.fillStyle = room.color;
-        ctx.fillRect(room.x * TILE_DST, room.y * TILE_DST, room.w * TILE_DST, room.h * TILE_DST);
-      }
-
-      // --- walls ---
-      ctx.strokeStyle = "#2a2a3a";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "square";
-
-      for (const room of rooms) {
-        drawHWall(ctx, room.y,           room.x, room.x + room.w);
-        drawHWall(ctx, room.y + room.h,  room.x, room.x + room.w);
-        drawVWall(ctx, room.x,           room.y, room.y + room.h);
-        drawVWall(ctx, room.x + room.w,  room.y, room.y + room.h);
-      }
-
-      // --- labels ---
-      const fs = Math.ceil(13 / scale);
-      ctx.font = `bold ${fs}px monospace`;
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
-
-      for (const room of rooms) {
-        if (!room.icon) continue;
-        ctx.fillText(
-          `${room.icon} ${room.name}`,
-          (room.x + 0.25) * TILE_DST,
-          (room.y + 0.75) * TILE_DST
-        );
-      }
-
-      ctx.restore();
-    }
-
-    function resize() {
-      canvas.width  = window.innerWidth;
-      canvas.height = window.innerHeight;
-      drawMap();
-    }
-    window.addEventListener("resize", resize);
-    resize();
-
     const socket = io();
     socket.on("connect", () => console.log("Connected to JPO Campus"));
+
+    const config = {
+      type: Phaser.AUTO,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: "#f0ece4",
+      scene: {
+        preload,
+        create,
+        update,
+      },
+    };
+
+    const game = new Phaser.Game(config);
+
+    function preload() {}
+    function create() {}
+    function update() {}
   </script>
 </body>
 </html>
