@@ -27,7 +27,7 @@
         this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
-        this.load.spritesheet("adam", "/assets/Adam_16x16.png", {
+        this.load.spritesheet("player", "/assets/Adam_16x16.png", {
           frameWidth: 16, frameHeight: 32,
         });
       }
@@ -44,32 +44,43 @@
         map.createLayer("Furniture", tilesets).setScale(3);
 
         // ── Animations ───────────────────────────────────────────────
-        // Spritesheet: 384×224px, frameWidth:16, frameHeight:32
-        // → 24 cols × 7 frame-rows.  Each row is one animation direction.
-        // Idle (frame-row 0): only cols 0-3 have pixels; cols 4-23 are empty.
-        // Walk rows (frame-rows 1-4): all 24 cols are populated → use cols 0-7.
-        this.anims.create({ key: "idle",
-          frames: this.anims.generateFrameNumbers("adam", { start: 0, end: 3 }),
-          frameRate: 4, repeat: -1 });
+        this.anims.create({
+          key: 'idle',
+          frames: this.anims.generateFrameNumbers('player', { start: 0, end: 0 }),
+          frameRate: 1,
+          repeat: -1
+        });
 
-        this.anims.create({ key: "walk_down",
-          frames: this.anims.generateFrameNumbers("adam", { start: 24, end: 31 }),
-          frameRate: 8, repeat: -1 });
+        this.anims.create({
+          key: 'walk_down',
+          frames: this.anims.generateFrameNumbers('player', { start: 0, end: 7 }),
+          frameRate: 8,
+          repeat: -1
+        });
 
-        this.anims.create({ key: "walk_up",
-          frames: this.anims.generateFrameNumbers("adam", { start: 48, end: 55 }),
-          frameRate: 8, repeat: -1 });
+        this.anims.create({
+          key: 'walk_up',
+          frames: this.anims.generateFrameNumbers('player', { start: 24, end: 31 }),
+          frameRate: 8,
+          repeat: -1
+        });
 
-        this.anims.create({ key: "walk_left",
-          frames: this.anims.generateFrameNumbers("adam", { start: 72, end: 79 }),
-          frameRate: 8, repeat: -1 });
+        this.anims.create({
+          key: 'walk_left',
+          frames: this.anims.generateFrameNumbers('player', { start: 48, end: 55 }),
+          frameRate: 8,
+          repeat: -1
+        });
 
-        this.anims.create({ key: "walk_right",
-          frames: this.anims.generateFrameNumbers("adam", { start: 96, end: 103 }),
-          frameRate: 8, repeat: -1 });
+        this.anims.create({
+          key: 'walk_right',
+          frames: this.anims.generateFrameNumbers('player', { start: 56, end: 63 }),
+          frameRate: 8,
+          repeat: -1
+        });
 
         // ── Player ───────────────────────────────────────────────────
-        this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "adam");
+        this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
         this.player.setDepth(10);
         this.player.play("idle");
