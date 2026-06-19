@@ -99,6 +99,7 @@
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
+        this.lastDir = null;
 
         // ── Furniture layer on top (inserted AFTER player) ───────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
@@ -173,26 +174,21 @@
           player.body.velocity.normalize().scale(SPEED);
         }
 
-        // All animations use the same 'player' texture — no cross-texture switching needed.
-        // walk_left row faces LEFT natively; walk_right mirrors it with setFlipX(true).
-        // Use play(key, true) — the second arg is ignoreIfPlaying, which lets Phaser
-        // track "already playing" internally rather than relying on currentAnim?.key,
-        // which can be null/stale for a frame during transitions and cause endless restarts.
-        if (left) {
-          player.setFlipX(false);
-          player.play("walk_left", true);
-        } else if (right) {
-          player.setFlipX(true);
-          player.play("walk_right", true);
-        } else if (up) {
-          player.setFlipX(false);
-          player.play("walk_up", true);
-        } else if (down) {
-          player.setFlipX(false);
-          player.play("walk_down", true);
-        } else if (player.body.velocity.x === 0 && player.body.velocity.y === 0) {
-          player.setFlipX(false);
-          player.play("idle", true);
+        // Direction state tracked in plain JS — never read Phaser's currentAnim.
+        // play() is only called when direction actually changes, so no mid-frame restarts.
+        let dir = 'idle';
+        if      (left)  dir = 'left';
+        else if (right) dir = 'right';
+        else if (up)    dir = 'up';
+        else if (down)  dir = 'down';
+
+        if (dir !== this.lastDir) {
+          this.lastDir = dir;
+          if      (dir === 'left')  { player.setFlipX(false); player.play('walk_left'); }
+          else if (dir === 'right') { player.setFlipX(true);  player.play('walk_right'); }
+          else if (dir === 'up')    { player.setFlipX(false); player.play('walk_up'); }
+          else if (dir === 'down')  { player.setFlipX(false); player.play('walk_down'); }
+          else                      { player.setFlipX(false); player.play('idle'); }
         }
       }
     }
