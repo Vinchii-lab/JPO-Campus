@@ -39,6 +39,9 @@
 
       create() {
         // ── Tilemap ──────────────────────────────────────────────────
+        // Spawn tile (22,17) = world (1080,840) — center of start room (cols 18-25, rows 15-20)
+        const SPAWN_X = 22 * 48 + 24;   // 1080
+        const SPAWN_Y = 17 * 48 + 24;   // 840
         const map     = this.make.tilemap({ key: "map" });
         const tsRoom  = map.addTilesetImage("Room_Builder",         "roombuilder");
         const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
@@ -96,15 +99,12 @@
         });
 
         // ── Player ───────────────────────────────────────────────────
-        this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player");
         this.player.setScale(3);
         this.player.setDepth(100);                // always render above all map layers
         this.player.setOrigin(0.5, 0.5);          // anchor at sprite center (standard)
-        // Feet-sized collision body — 12×12 source = 36×36 world at scale 3, fits through 1-tile gaps.
-        // offset is in WORLD pixels. With origin(0.5,0.5): displayOriginY=48.
-        // body.y = player.y - 48 + 60 = player.y+12; body bottom = player.y+48 = sprite bottom = feet.
+        // 12×12 source = 36×36 world (fits through 1-tile doorways). center=true auto-positions body.
         this.player.body.setSize(12, 12);
-        this.player.body.setOffset(6, 60);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
 
@@ -198,7 +198,7 @@
       height: window.innerHeight,
       backgroundColor: "#f0ece4",
       pixelArt: true,
-      physics: { default: "arcade", arcade: { debug: false } },
+      physics: { default: "arcade", arcade: { debug: true } },
       scene: OfficeScene,
     });
   </script>
