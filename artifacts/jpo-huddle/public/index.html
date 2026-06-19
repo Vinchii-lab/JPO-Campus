@@ -18,6 +18,7 @@
 
     const WORLD_W = 2400;   // 50 tiles * 16px * 3x
     const WORLD_H = 1728;   // 36 tiles * 16px * 3x
+    const SPEED   = 150;
 
     class OfficeScene extends Phaser.Scene {
       constructor() { super("OfficeScene"); }
@@ -26,36 +27,97 @@
         this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
+        this.load.spritesheet("adam", "/assets/Adam_16x16.png", {
+          frameWidth: 16, frameHeight: 16,
+        });
       }
 
       create() {
-        const map = this.make.tilemap({ key: "map" });
-
-        // Tileset names are derived from the .tsx source filenames (without extension)
-        const tsRoom  = map.addTilesetImage("Room_Builder",          "roombuilder");
-        const tsInter = map.addTilesetImage("Interiors_free_16x16",  "interiors");
+        // ── Tilemap ──────────────────────────────────────────────────
+        const map     = this.make.tilemap({ key: "map" });
+        const tsRoom  = map.addTilesetImage("Room_Builder",         "roombuilder");
+        const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
         const tilesets = [tsRoom, tsInter];
 
-        // Render layers in order: Floor → Wall → Furniture
-        // setScale(3) renders each 16px tile as 48px in world space
         map.createLayer("Floor",     tilesets).setScale(3);
         map.createLayer("Wall",      tilesets).setScale(3);
         map.createLayer("Furniture", tilesets).setScale(3);
 
-        // Camera: fit full map in viewport, centred on the corridor
+        // ── Animations ───────────────────────────────────────────────
+        this.anims.create({ key: "idle",
+          frames: [{ key: "adam", frame: 0 }], frameRate: 1, repeat: -1 });
+
+        this.anims.create({ key: "walk_down",
+          frames: this.anims.generateFrameNumbers("adam", { start: 24, end: 47 }),
+          frameRate: 8, repeat: -1 });
+
+        this.anims.create({ key: "walk_up",
+          frames: this.anims.generateFrameNumbers("adam", { start: 48, end: 71 }),
+          frameRate: 8, repeat: -1 });
+
+        this.anims.create({ key: "walk_left",
+          frames: this.anims.generateFrameNumbers("adam", { start: 72, end: 95 }),
+          frameRate: 8, repeat: -1 });
+
+        this.anims.create({ key: "walk_right",
+          frames: this.anims.generateFrameNumbers("adam", { start: 96, end: 119 }),
+          frameRate: 8, repeat: -1 });
+
+        // ── Player ───────────────────────────────────────────────────
+        this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "adam");
+        this.player.setScale(3);
+        this.player.setDepth(10);
+        this.player.play("idle");
+
+        // ── Input ────────────────────────────────────────────────────
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd    = this.input.keyboard.addKeys({
+          up:    Phaser.Input.Keyboard.KeyCodes.W,
+          down:  Phaser.Input.Keyboard.KeyCodes.S,
+          left:  Phaser.Input.Keyboard.KeyCodes.A,
+          right: Phaser.Input.Keyboard.KeyCodes.D,
+        });
+
+        // ── Camera ───────────────────────────────────────────────────
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
-        this.cameras.main.centerOn(1200, 744);
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
         // Mouse-wheel zoom: scroll up = zoom in, scroll down = zoom out
         this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
-          const cam = this.cameras.main;
+          const cam  = this.cameras.main;
           const next = Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 0.5, 4);
           cam.setZoom(next);
         });
       }
 
-      update() {}
+      update() {
+        const { cursors, wasd, player } = this;
+        const up    = cursors.up.isDown    || wasd.up.isDown;
+        const down  = cursors.down.isDown  || wasd.down.isDown;
+        const left  = cursors.left.isDown  || wasd.left.isDown;
+        const right = cursors.right.isDown || wasd.right.isDown;
+
+        player.setVelocity(0, 0);
+
+        if (left)       { player.setVelocityX(-SPEED); }
+        else if (right) { player.setVelocityX( SPEED); }
+
+        if (up)         { player.setVelocityY(-SPEED); }
+        else if (down)  { player.setVelocityY( SPEED); }
+
+        // Diagonal: normalise so speed is consistent
+        if ((left || right) && (up || down)) {
+          player.body.velocity.normalize().scale(SPEED);
+        }
+
+        // Animation
+        if (left)        { player.play("walk_left",  true); }
+        else if (right)  { player.play("walk_right", true); }
+        else if (up)     { player.play("walk_up",    true); }
+        else if (down)   { player.play("walk_down",  true); }
+        else             { player.play("idle",        true); }
+      }
     }
 
     const game = new Phaser.Game({
@@ -64,6 +126,7 @@
       height: window.innerHeight,
       backgroundColor: "#f0ece4",
       pixelArt: true,
+      physics: { default: "arcade", arcade: { debug: false } },
       scene: OfficeScene,
     });
   </script>
