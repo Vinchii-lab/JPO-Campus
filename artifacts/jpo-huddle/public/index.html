@@ -27,8 +27,9 @@
         this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
-        this.load.spritesheet("player", "/assets/Adam_16x16.png", {
-          frameWidth: 16, frameHeight: 32,
+        this.load.spritesheet('player', '/assets/Adam_16x16.png', {
+          frameWidth: 16,
+          frameHeight: 32
         });
       }
 
@@ -53,28 +54,28 @@
 
         this.anims.create({
           key: 'walk_down',
-          frames: this.anims.generateFrameNumbers('player', { start: 0, end: 7 }),
-          frameRate: 8,
-          repeat: -1
-        });
-
-        this.anims.create({
-          key: 'walk_up',
           frames: this.anims.generateFrameNumbers('player', { start: 24, end: 31 }),
           frameRate: 8,
           repeat: -1
         });
 
         this.anims.create({
-          key: 'walk_left',
+          key: 'walk_up',
           frames: this.anims.generateFrameNumbers('player', { start: 48, end: 55 }),
           frameRate: 8,
           repeat: -1
         });
 
         this.anims.create({
+          key: 'walk_left',
+          frames: this.anims.generateFrameNumbers('player', { start: 72, end: 79 }),
+          frameRate: 8,
+          repeat: -1
+        });
+
+        this.anims.create({
           key: 'walk_right',
-          frames: this.anims.generateFrameNumbers('player', { start: 56, end: 63 }),
+          frames: this.anims.generateFrameNumbers('player', { start: 96, end: 103 }),
           frameRate: 8,
           repeat: -1
         });
