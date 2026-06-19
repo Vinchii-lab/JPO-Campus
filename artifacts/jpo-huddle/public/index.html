@@ -50,6 +50,13 @@
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(zoom);
         this.cameras.main.centerOn(1200, 744);
+
+        // Mouse-wheel zoom: scroll up = zoom in, scroll down = zoom out
+        this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
+          const cam = this.cameras.main;
+          const next = Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 1, 4);
+          cam.setZoom(next);
+        });
       }
 
       update() {}
