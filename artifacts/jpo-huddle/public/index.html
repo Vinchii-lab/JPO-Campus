@@ -28,7 +28,7 @@
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
         this.load.spritesheet("adam", "/assets/Adam_16x16.png", {
-          frameWidth: 16, frameHeight: 16,
+          frameWidth: 16, frameHeight: 32,
         });
       }
 
@@ -44,23 +44,28 @@
         map.createLayer("Furniture", tilesets).setScale(3);
 
         // ── Animations ───────────────────────────────────────────────
+        // Spritesheet: 384×224px, frameWidth:16, frameHeight:32
+        // → 24 cols × 7 frame-rows.  Each row is one animation direction.
+        // Idle (frame-row 0): only cols 0-3 have pixels; cols 4-23 are empty.
+        // Walk rows (frame-rows 1-4): all 24 cols are populated → use cols 0-7.
         this.anims.create({ key: "idle",
-          frames: [{ key: "adam", frame: 0 }], frameRate: 1, repeat: -1 });
+          frames: this.anims.generateFrameNumbers("adam", { start: 0, end: 3 }),
+          frameRate: 4, repeat: -1 });
 
         this.anims.create({ key: "walk_down",
-          frames: this.anims.generateFrameNumbers("adam", { start: 24, end: 47 }),
+          frames: this.anims.generateFrameNumbers("adam", { start: 24, end: 31 }),
           frameRate: 8, repeat: -1 });
 
         this.anims.create({ key: "walk_up",
-          frames: this.anims.generateFrameNumbers("adam", { start: 48, end: 71 }),
+          frames: this.anims.generateFrameNumbers("adam", { start: 48, end: 55 }),
           frameRate: 8, repeat: -1 });
 
         this.anims.create({ key: "walk_left",
-          frames: this.anims.generateFrameNumbers("adam", { start: 72, end: 95 }),
+          frames: this.anims.generateFrameNumbers("adam", { start: 72, end: 79 }),
           frameRate: 8, repeat: -1 });
 
         this.anims.create({ key: "walk_right",
-          frames: this.anims.generateFrameNumbers("adam", { start: 96, end: 119 }),
+          frames: this.anims.generateFrameNumbers("adam", { start: 96, end: 103 }),
           frameRate: 8, repeat: -1 });
 
         // ── Player ───────────────────────────────────────────────────
@@ -81,7 +86,9 @@
         // ── Camera ───────────────────────────────────────────────────
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        // Snap camera immediately to player, then enable smooth follow
+        this.cameras.main.centerOn(this.player.x, this.player.y);
+        this.cameras.main.startFollow(this.player, false, 0.1, 0.1);
 
         // Mouse-wheel zoom: scroll up = zoom in, scroll down = zoom out
         this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
