@@ -1,26 +1,41 @@
 ---
 name: JPO Huddle Phaser sprite & collision
-description: Non-obvious facts about the Adam player spritesheet, Phaser arcade body sizing, and TilemapLayer rendering order in the JPO Huddle office game.
+description: Non-obvious facts about the Adam player spritesheet, Phaser arcade body sizing, TilemapLayer rendering order, and multi-texture animation in the JPO Huddle office game.
 ---
 
-# Adam player spritesheet
-- `public/assets/Adam_16x16.png` is **16×32 per frame**, NOT 16×16 (the filename misleads — the character spans two tiles tall). Each 32px frame holds one full character; frames are cleanly aligned, no misalignment.
-- **So a "cut character" is NOT a spritesheet/frameHeight problem** — look at TilemapLayer insertion order (see below).
+# Adam player spritesheet layout
+- `Adam_16x16.png` is **16×32 per frame** (not 16×16). Each 32px frame holds one full character.
+- Animation frame indices (confirmed working):
+  - idle: frame 0
+  - walk_down: frames 24–31 (row 1 of sheet)
+  - walk_up: frames 48–55 (row 2)
+  - walk_left: originally row 3 (frames 72+), but ROW 3 AND 4 have alternating near-zero pixel frames (every odd col = 0–1px visible) causing flickering. Fix: skip odd frames, use only [72,74,76,78].
+  - walk_right: row 4 frames are 6 source-rows HIGHER in the frame than all other animations → character floats 18 world-px up. Fix: use walk_left frames + setFlipX(true).
+- `Adam_run_16x16.png` is a single-row 24-frame run sheet (all frames solid, no alternating empties). The sprite **faces RIGHT**. Use frames 0–7 for walk_left (setFlipX(true)) and walk_right (setFlipX(false)).
 
-# Phaser arcade body sizing gotcha
-- Arcade `body.setSize` dimensions ARE multiplied by the sprite's scale for world collision.
-- **Why:** at `setScale(3)`, a `16×32` body becomes 48×96 = two 48px tiles tall. A 2-tile-tall body silently cannot fit through 1-tile horizontal doorways, so the player is blocked from rooms even though the art looks fine and walls look open.
-- **How to apply:** keep body ≤ 36×36 source (< 1 tile = 48 world px). Use `setSize(12,12)` with no offset — Phaser auto-centers with `origin(0.5, 0.5)`.
+# Multi-texture animation — CRITICAL
+- Phaser 3.80.1 does NOT reliably auto-switch textures between animations when different animation keys use different texture keys (`'player'` vs `'player_run'`). Symptoms: sprite stays on wrong texture after direction change, twitching, frozen frame.
+- **Fix: always explicitly call `player.setTexture(key, 0)` BEFORE `player.play(animKey)`** whenever the texture needs to change. Check `player.texture.key` first to avoid unnecessary resets.
+  ```js
+  if (tex !== 'player_run') player.setTexture('player_run', 0);
+  player.play('walk_left');
+  ```
 
-# TilemapLayer render ordering — CRITICAL
-- **`TilemapLayer.setDepth()` does NOT work reliably relative to Phaser Physics sprites in Phaser 3.80.1 WebGL renderer.** The character's lower body was being painted over by wall/floor tiles despite having depth 100.
-- **Fix: use insertion order only.** Create objects in this sequence:
+# Phaser arcade body sizing
+- `body.setSize(w, h)` uses SOURCE pixels; world size = source × scale.
+- At `setScale(3)`, a 16×32 body = 48×96 world px — too tall for 1-tile doorways (48px). Keep body ≤ 12×12 source (36×36 world). Use `setSize(12,12)` with no offset; Phaser auto-centers when origin is (0.5, 0.5).
+
+# TilemapLayer render ordering
+- `TilemapLayer.setDepth()` does NOT work reliably vs sprites in Phaser 3.80.1 WebGL renderer. Use **insertion order** instead:
   1. Floor layer
   2. Wall layer
-  3. **Player sprite** ← player always renders in front of floor+walls
-  4. Furniture layer ← furniture renders in front of player (optional depth illusion)
-- Remove all `setDepth` calls from TilemapLayers. Never rely on depth to lift a sprite above a tile layer.
+  3. Player sprite (always in front of floors/walls)
+  4. Furniture layer (in front of player for depth illusion)
+- Remove all `setDepth` calls from TilemapLayers.
+
+# Phaser screenshot tool vs user browser
+- The screenshot tool uses **Canvas** renderer; the user's browser uses **WebGL**. Fixes that appear to work in screenshots may still fail in the user's WebGL session. Always rely on user feedback for WebGL-specific rendering bugs.
 
 # Office.tmj map
-- Some rooms are **sealed**: the Wall layer fully encloses them with no doorway gap even though floor is painted underneath (looks like an open "space"). No code/collision change can open them — a gap must be added in the Wall layer in Tiled.
-- Spawn point: tile (22, 17) = world (1080, 840) — center of the starting room (cols 18–25, rows 15–20).
+- Some rooms are sealed (Wall layer has no doorway gap). Must be fixed in Tiled — add a gap tile in the Wall layer.
+- Spawn point: tile (22, 17) = world (1080, 840) — center of starting room (cols 18–25, rows 15–20).
