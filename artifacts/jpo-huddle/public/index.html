@@ -101,6 +101,12 @@
         this.player.play("idle");
         this.lastDir = null;
 
+        // ── Temp debug label (remove once animations confirmed) ──────
+        this.debugText = this.add.text(16, 16, 'dir: idle', {
+          fontSize: '20px', fill: '#ffffff',
+          backgroundColor: '#000000', padding: { x: 4, y: 2 }
+        }).setScrollFactor(0).setDepth(9999);
+
         // ── Furniture layer on top (inserted AFTER player) ───────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
         furnitureLayer.setScale(3);
@@ -189,6 +195,7 @@
           else if (dir === 'up')    { player.setFlipX(false); player.play('walk_up'); }
           else if (dir === 'down')  { player.setFlipX(false); player.play('walk_down'); }
           else                      { player.setFlipX(false); player.play('idle'); }
+          this.debugText.setText('dir: ' + dir + ' | anim: ' + (player.anims.currentAnim?.key ?? 'none') + ' | flip: ' + player.flipX);
         }
       }
     }
