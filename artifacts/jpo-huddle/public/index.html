@@ -90,15 +90,18 @@
         });
 
         // ── Player ───────────────────────────────────────────────────
-        console.log('player frame 0 height:', this.textures.get('player').frames[0].realHeight);
         this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
-        this.player.setDepth(10);
-        this.player.setOrigin(0.5, 0.5);
-        this.player.setBodySize(16, 32, true);
+        this.player.setDepth(10);                 // always render above the map (no clipping by walls)
+        this.player.setOrigin(0.5, 1);            // anchor at the feet
+        // Feet-sized collision body so the character fits through 1-tile doorways.
+        // Frame is 16×32; the body covers just the lower legs/feet (×3 scale → 36px, < 48px tile).
+        this.player.body.setSize(12, 12);
+        this.player.body.setOffset(2, 19);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
 
+        this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);
         this.physics.add.collider(this.player, wallLayer);
 
@@ -110,6 +113,8 @@
           left:  Phaser.Input.Keyboard.KeyCodes.A,
           right: Phaser.Input.Keyboard.KeyCodes.D,
         });
+        this.keyE   = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.sitting = false;
 
         // ── Camera ───────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -131,6 +136,25 @@
         const down  = cursors.down.isDown  || wasd.down.isDown;
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
+
+        // ── Sit / stand on chairs (press E) ──────────────────────────
+        if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+          if (this.sitting) {
+            this.sitting = false;
+          } else {
+            const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y);
+            if (tile) {
+              // snap feet onto the chair tile (tiles are 48px in world space)
+              player.setPosition(tile.x * 48 + 24, tile.y * 48 + 48);
+              this.sitting = true;
+            }
+          }
+        }
+        if (this.sitting) {
+          player.setVelocity(0, 0);
+          if (player.anims.currentAnim?.key !== "idle") player.play("idle");
+          return;
+        }
 
         player.setVelocity(0, 0);
 

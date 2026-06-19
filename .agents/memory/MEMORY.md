@@ -1,0 +1,1 @@
+- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — Adam sheet is 16×32 not 16×16; arcade body size is scaled (oversized body blocks doorways); some Office.tmj rooms are sealed.
