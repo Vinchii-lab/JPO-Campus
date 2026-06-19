@@ -15,11 +15,11 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 
 # Multi-texture animation — CRITICAL
 - Phaser 3.80.1 does NOT reliably auto-switch textures between animations when different animation keys use different texture keys (`'player'` vs `'player_run'`). Symptoms: sprite stays on wrong texture after direction change, twitching, frozen frame.
-- **Fix: always explicitly call `player.setTexture(key, 0)` BEFORE `player.play(animKey)`** whenever the texture needs to change. Check `player.texture.key` first to avoid unnecessary resets.
-  ```js
-  if (tex !== 'player_run') player.setTexture('player_run', 0);
-  player.play('walk_left');
-  ```
+- **Fix: use a single texture for ALL animations.** Use row 3 even frames `[72,74,76,78]` from `'player'` for both walk_left and walk_right (no `player_run` sheet), and setFlipX(true) to mirror for right. This eliminates all cross-texture switching.
+
+# Animation switching — `play(key, true)` vs manual `anim !==` guard — CRITICAL
+- `player.anims.currentAnim?.key` can be `null` or return the OLD key for one or more frames during transitions. If you guard with `if (anim !== "walk_down") player.play(...)`, the guard passes every frame while `currentAnim` is stale → animation restarts from frame 0 every tick → constant twitching / frozen on frame 0.
+- **Fix: use Phaser's built-in `ignoreIfPlaying` flag.** Call `player.play("walk_left", true)` — the second arg `true` tells Phaser to skip the call if the same animation is already playing, using its own internal state (not `currentAnim?.key`). This is reliable across all direction transitions.
 
 # Phaser arcade body sizing
 - `body.setSize(w, h)` uses SOURCE pixels; world size = source × scale.

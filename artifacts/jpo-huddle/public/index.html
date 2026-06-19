@@ -175,22 +175,24 @@
 
         // All animations use the same 'player' texture — no cross-texture switching needed.
         // walk_left row faces LEFT natively; walk_right mirrors it with setFlipX(true).
-        const anim = player.anims.currentAnim?.key;
+        // Use play(key, true) — the second arg is ignoreIfPlaying, which lets Phaser
+        // track "already playing" internally rather than relying on currentAnim?.key,
+        // which can be null/stale for a frame during transitions and cause endless restarts.
         if (left) {
           player.setFlipX(false);
-          if (anim !== "walk_left")  player.play("walk_left");
+          player.play("walk_left", true);
         } else if (right) {
           player.setFlipX(true);
-          if (anim !== "walk_right") player.play("walk_right");
+          player.play("walk_right", true);
         } else if (up) {
           player.setFlipX(false);
-          if (anim !== "walk_up")    player.play("walk_up");
+          player.play("walk_up", true);
         } else if (down) {
           player.setFlipX(false);
-          if (anim !== "walk_down")  player.play("walk_down");
+          player.play("walk_down", true);
         } else if (player.body.velocity.x === 0 && player.body.velocity.y === 0) {
           player.setFlipX(false);
-          if (anim !== "idle")       player.play("idle");
+          player.play("idle", true);
         }
       }
     }
