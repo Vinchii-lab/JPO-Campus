@@ -27,10 +27,11 @@
         this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
-        this.load.spritesheet('player', '/assets/Adam_16x16.png', {
-          frameWidth: 16,
-          frameHeight: 32
-        });
+        this.load.spritesheet(
+          'player',
+          '/assets/Adam_16x16.png?nocache=' + Date.now(),
+          { frameWidth: 16, frameHeight: 32 }
+        );
       }
 
       create() {
@@ -89,6 +90,7 @@
         });
 
         // ── Player ───────────────────────────────────────────────────
+        console.log('player frame 0 height:', this.textures.get('player').frames[0].realHeight);
         this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
         this.player.setDepth(10);
