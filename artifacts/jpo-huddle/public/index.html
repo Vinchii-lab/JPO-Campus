@@ -40,9 +40,17 @@
         const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
         const tilesets = [tsRoom, tsInter];
 
-        map.createLayer("Floor",     tilesets).setScale(3);
-        map.createLayer("Wall",      tilesets).setScale(3);
-        map.createLayer("Furniture", tilesets).setScale(3);
+        const floorLayer = map.createLayer("Floor", tilesets);
+        floorLayer.setScale(3);
+        floorLayer.setPosition(0, 0);
+
+        const wallLayer = map.createLayer("Wall", tilesets);
+        wallLayer.setScale(3);
+        wallLayer.setPosition(0, 0);
+
+        const furnitureLayer = map.createLayer("Furniture", tilesets);
+        furnitureLayer.setScale(3);
+        furnitureLayer.setPosition(0, 0);
 
         // ── Animations ───────────────────────────────────────────────
         this.anims.create({
@@ -88,6 +96,9 @@
         this.player.setBodySize(16, 32, true);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
+
+        wallLayer.setCollisionByExclusion([-1]);
+        this.physics.add.collider(this.player, wallLayer);
 
         // ── Input ────────────────────────────────────────────────────
         this.cursors = this.input.keyboard.createCursorKeys();
