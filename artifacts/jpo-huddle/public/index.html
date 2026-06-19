@@ -31,13 +31,13 @@
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
         this.load.spritesheet(
-          'player',
-          '/assets/Adam_16x16.png?nocache=' + Date.now(),
+          'player_run',
+          '/assets/Adam_run_16x16.png',
           { frameWidth: 16, frameHeight: 32 }
         );
         this.load.spritesheet(
-          'player_run',
-          '/assets/Adam_run_16x16.png',
+          'player_idle',
+          '/assets/Adam_idle_anim_16x16.png',
           { frameWidth: 16, frameHeight: 32 }
         );
       }
@@ -63,41 +63,41 @@
         wallLayer.setPosition(0, 0);
 
         // ── Animations ───────────────────────────────────────────────
+        // All walk anims use player_run — one texture, zero switching, zero twitching.
+        // Adam is a side-profile sprite; left/right direction is handled via flipX.
         this.anims.create({
           key: 'idle',
-          frames: this.anims.generateFrameNumbers('player', { start: 0, end: 0 }),
-          frameRate: 1,
+          frames: this.anims.generateFrameNumbers('player_idle', { start: 0, end: 5 }),
+          frameRate: 6,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_down',
-          frames: this.anims.generateFrameNumbers('player', { start: 24, end: 31 }),
-          frameRate: 8,
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_up',
-          frames: this.anims.generateFrameNumbers('player', { start: 48, end: 55 }),
-          frameRate: 8,
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_left',
-          // Adam_run_16x16: 24-frame left-facing run cycle, all frames solid
           frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
           frameRate: 10,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_right',
-          // Same run frames; sprite is flipped in update() for right direction
           frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
           frameRate: 10,
           repeat: -1
         });
 
         // ── Player (inserted AFTER floor+wall, BEFORE furniture) ─────
-        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player");
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player_run");
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
         // 12×12 source px = 36×36 world px — fits through a 1-tile (48px) doorway.
