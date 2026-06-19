@@ -47,20 +47,15 @@
         const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
         const tilesets = [tsRoom, tsInter];
 
+        // Render order = insertion order (TilemapLayer ignores setDepth relative to sprites).
+        // floor → wall → PLAYER → furniture  so player is always in front of walls/floor.
         const floorLayer = map.createLayer("Floor", tilesets);
         floorLayer.setScale(3);
         floorLayer.setPosition(0, 0);
-        floorLayer.setDepth(0);
 
         const wallLayer = map.createLayer("Wall", tilesets);
         wallLayer.setScale(3);
         wallLayer.setPosition(0, 0);
-        wallLayer.setDepth(1);
-
-        const furnitureLayer = map.createLayer("Furniture", tilesets);
-        furnitureLayer.setScale(3);
-        furnitureLayer.setPosition(0, 0);
-        furnitureLayer.setDepth(2);
 
         // ── Animations ───────────────────────────────────────────────
         this.anims.create({
@@ -69,28 +64,24 @@
           frameRate: 1,
           repeat: -1
         });
-
         this.anims.create({
           key: 'walk_down',
           frames: this.anims.generateFrameNumbers('player', { start: 24, end: 31 }),
           frameRate: 8,
           repeat: -1
         });
-
         this.anims.create({
           key: 'walk_up',
           frames: this.anims.generateFrameNumbers('player', { start: 48, end: 55 }),
           frameRate: 8,
           repeat: -1
         });
-
         this.anims.create({
           key: 'walk_left',
           frames: this.anims.generateFrameNumbers('player', { start: 72, end: 79 }),
           frameRate: 8,
           repeat: -1
         });
-
         this.anims.create({
           key: 'walk_right',
           frames: this.anims.generateFrameNumbers('player', { start: 96, end: 103 }),
@@ -98,15 +89,19 @@
           repeat: -1
         });
 
-        // ── Player ───────────────────────────────────────────────────
+        // ── Player (inserted AFTER floor+wall, BEFORE furniture) ─────
         this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player");
         this.player.setScale(3);
-        this.player.setDepth(100);                // always render above all map layers
-        this.player.setOrigin(0.5, 0.5);          // anchor at sprite center (standard)
-        // 12×12 source = 36×36 world (fits through 1-tile doorways). center=true auto-positions body.
+        this.player.setOrigin(0.5, 0.5);
+        // 12×12 source px = 36×36 world px — fits through a 1-tile (48px) doorway.
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
+
+        // ── Furniture layer on top (inserted AFTER player) ───────────
+        const furnitureLayer = map.createLayer("Furniture", tilesets);
+        furnitureLayer.setScale(3);
+        furnitureLayer.setPosition(0, 0);
 
         this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);
@@ -198,7 +193,7 @@
       height: window.innerHeight,
       backgroundColor: "#f0ece4",
       pixelArt: true,
-      physics: { default: "arcade", arcade: { debug: true } },
+      physics: { default: "arcade", arcade: { debug: false } },
       scene: OfficeScene,
     });
   </script>
