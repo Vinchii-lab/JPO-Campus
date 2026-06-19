@@ -35,6 +35,11 @@
           '/assets/Adam_16x16.png?nocache=' + Date.now(),
           { frameWidth: 16, frameHeight: 32 }
         );
+        this.load.spritesheet(
+          'player_run',
+          '/assets/Adam_run_16x16.png',
+          { frameWidth: 16, frameHeight: 32 }
+        );
       }
 
       create() {
@@ -78,16 +83,16 @@
         });
         this.anims.create({
           key: 'walk_left',
-          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
-          frameRate: 8,
+          // Adam_run_16x16: 24-frame left-facing run cycle, all frames solid
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_right',
-          // Row 4 frames float 18 world-px high due to sprite offset — reuse walk_left
-          // frames and flip the sprite instead for correct alignment.
-          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
-          frameRate: 8,
+          // Same run frames; sprite is flipped in update() for right direction
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
 
