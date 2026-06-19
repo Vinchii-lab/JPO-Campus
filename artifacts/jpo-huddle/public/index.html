@@ -47,14 +47,17 @@
         const floorLayer = map.createLayer("Floor", tilesets);
         floorLayer.setScale(3);
         floorLayer.setPosition(0, 0);
+        floorLayer.setDepth(0);
 
         const wallLayer = map.createLayer("Wall", tilesets);
         wallLayer.setScale(3);
         wallLayer.setPosition(0, 0);
+        wallLayer.setDepth(1);
 
         const furnitureLayer = map.createLayer("Furniture", tilesets);
         furnitureLayer.setScale(3);
         furnitureLayer.setPosition(0, 0);
+        furnitureLayer.setDepth(2);
 
         // ── Animations ───────────────────────────────────────────────
         this.anims.create({
@@ -95,12 +98,13 @@
         // ── Player ───────────────────────────────────────────────────
         this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
-        this.player.setDepth(10);                 // always render above the map (no clipping by walls)
-        this.player.setOrigin(0.5, 1);            // anchor at the feet
-        // Feet-sized collision body so the character fits through 1-tile doorways.
-        // Frame is 16×32; the body covers just the lower legs/feet (×3 scale → 36px, < 48px tile).
+        this.player.setDepth(100);                // always render above all map layers
+        this.player.setOrigin(0.5, 0.5);          // anchor at sprite center (standard)
+        // Feet-sized collision body — 12×12 source = 36×36 world at scale 3, fits through 1-tile gaps.
+        // offset is in WORLD pixels. With origin(0.5,0.5): displayOriginY=48.
+        // body.y = player.y - 48 + 60 = player.y+12; body bottom = player.y+48 = sprite bottom = feet.
         this.player.body.setSize(12, 12);
-        this.player.body.setOffset(2, 19);
+        this.player.body.setOffset(6, 60);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
 
@@ -148,7 +152,7 @@
             const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y);
             if (tile) {
               // snap feet onto the chair tile (tiles are 48px in world space)
-              player.setPosition(tile.x * 48 + 24, tile.y * 48 + 48);
+              player.setPosition(tile.x * 48 + 24, tile.y * 48 + 24);
               this.sitting = true;
             }
           }
