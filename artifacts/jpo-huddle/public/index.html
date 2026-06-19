@@ -91,7 +91,13 @@
           repeat: -1
         });
 
-        // ── Player (inserted AFTER floor+wall, BEFORE furniture) ─────
+        // ── Furniture layer BEFORE player so structural tiles don't cut the sprite ──
+        const furnitureLayer = map.createLayer("Furniture", tilesets);
+        furnitureLayer.setScale(3);
+        furnitureLayer.setPosition(0, 0);
+        this.furnitureLayer = furnitureLayer;
+
+        // ── Player (last in display list = always on top of all tile layers) ────
         this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player");
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
@@ -101,18 +107,11 @@
         this.player.play("idle");
         this.lastDir = null;
 
-        // ── Temp debug label (remove once animations confirmed) ──────
+        // ── Temp debug label ─────────────────────────────────────────
         this.debugText = this.add.text(16, 16, 'dir: idle', {
           fontSize: '20px', fill: '#ffffff',
           backgroundColor: '#000000', padding: { x: 4, y: 2 }
         }).setScrollFactor(0).setDepth(9999);
-
-        // ── Furniture layer on top (inserted AFTER player) ───────────
-        const furnitureLayer = map.createLayer("Furniture", tilesets);
-        furnitureLayer.setScale(3);
-        furnitureLayer.setPosition(0, 0);
-
-        this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);
         this.physics.add.collider(this.player, wallLayer);
 
