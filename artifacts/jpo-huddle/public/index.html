@@ -35,6 +35,11 @@
           '/assets/Adam_16x16.png?nocache=' + Date.now(),
           { frameWidth: 16, frameHeight: 32 }
         );
+        this.load.spritesheet(
+          'player_run',
+          '/assets/Adam_run_16x16.png',
+          { frameWidth: 16, frameHeight: 32 }
+        );
       }
 
       create() {
@@ -78,26 +83,20 @@
         });
         this.anims.create({
           key: 'walk_left',
-          // Row 3 of Adam_16x16 faces left; even frames only (odd frames are near-empty)
-          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
-          frameRate: 8,
+          // Adam_run_16x16: 24-frame left-facing run cycle, all frames solid
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_right',
-          // Same row-3 frames; setFlipX(true) in update mirrors them to face right
-          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
-          frameRate: 8,
+          // Same run frames; sprite is flipped in update() for right direction
+          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
+          frameRate: 10,
           repeat: -1
         });
 
-        // ── Furniture layer BEFORE player so structural tiles don't cut the sprite ──
-        const furnitureLayer = map.createLayer("Furniture", tilesets);
-        furnitureLayer.setScale(3);
-        furnitureLayer.setPosition(0, 0);
-        this.furnitureLayer = furnitureLayer;
-
-        // ── Player (last in display list = always on top of all tile layers) ────
+        // ── Player (inserted AFTER floor+wall, BEFORE furniture) ─────
         this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player");
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
@@ -105,13 +104,13 @@
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
-        this.lastDir = null;
 
-        // ── Temp debug label ─────────────────────────────────────────
-        this.debugText = this.add.text(16, 16, 'dir: idle', {
-          fontSize: '20px', fill: '#ffffff',
-          backgroundColor: '#000000', padding: { x: 4, y: 2 }
-        }).setScrollFactor(0).setDepth(9999);
+        // ── Furniture layer on top (inserted AFTER player) ───────────
+        const furnitureLayer = map.createLayer("Furniture", tilesets);
+        furnitureLayer.setScale(3);
+        furnitureLayer.setPosition(0, 0);
+
+        this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);
         this.physics.add.collider(this.player, wallLayer);
 
@@ -179,22 +178,23 @@
           player.body.velocity.normalize().scale(SPEED);
         }
 
-        // Direction state tracked in plain JS — never read Phaser's currentAnim.
-        // play() is only called when direction actually changes, so no mid-frame restarts.
-        let dir = 'idle';
-        if      (left)  dir = 'left';
-        else if (right) dir = 'right';
-        else if (up)    dir = 'up';
-        else if (down)  dir = 'down';
-
-        if (dir !== this.lastDir) {
-          this.lastDir = dir;
-          if      (dir === 'left')  { player.setFlipX(false); player.play('walk_left'); }
-          else if (dir === 'right') { player.setFlipX(true);  player.play('walk_right'); }
-          else if (dir === 'up')    { player.setFlipX(false); player.play('walk_up'); }
-          else if (dir === 'down')  { player.setFlipX(false); player.play('walk_down'); }
-          else                      { player.setFlipX(false); player.play('idle'); }
-          this.debugText.setText('dir: ' + dir + ' | anim: ' + (player.anims.currentAnim?.key ?? 'none') + ' | flip: ' + player.flipX);
+        // Animation — only switch when the direction actually changes
+        const anim = player.anims.currentAnim?.key;
+        if (left) {
+          player.setFlipX(false);
+          if (anim !== "walk_left")  player.play("walk_left");
+        } else if (right) {
+          player.setFlipX(true);   // mirror walk_left frames for correct alignment
+          if (anim !== "walk_right") player.play("walk_right");
+        } else if (up) {
+          player.setFlipX(false);
+          if (anim !== "walk_up")    player.play("walk_up");
+        } else if (down) {
+          player.setFlipX(false);
+          if (anim !== "walk_down")  player.play("walk_down");
+        } else if (player.body.velocity.x === 0 && player.body.velocity.y === 0) {
+          player.setFlipX(false);
+          if (anim !== "idle")       player.play("idle");
         }
       }
     }
