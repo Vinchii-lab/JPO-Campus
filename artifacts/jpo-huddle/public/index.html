@@ -84,7 +84,9 @@
         this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
         this.player.setDepth(10);
+        this.player.setOrigin(0.5, 0.5);
         this.player.setBodySize(16, 32, true);
+        this.player.setCollideWorldBounds(true);
         this.player.play("idle");
 
         // ── Input ────────────────────────────────────────────────────
@@ -97,6 +99,7 @@
         });
 
         // ── Camera ───────────────────────────────────────────────────
+        this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
         this.cameras.main.startFollow(this.player);
