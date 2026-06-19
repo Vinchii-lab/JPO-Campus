@@ -181,10 +181,10 @@
         // Animation — only switch when the direction actually changes
         const anim = player.anims.currentAnim?.key;
         if (left) {
-          player.setFlipX(false);
+          player.setFlipX(true);   // run sheet faces right → flip to face left
           if (anim !== "walk_left")  player.play("walk_left");
         } else if (right) {
-          player.setFlipX(true);   // mirror walk_left frames for correct alignment
+          player.setFlipX(false);  // run sheet already faces right
           if (anim !== "walk_right") player.play("walk_right");
         } else if (up) {
           player.setFlipX(false);
