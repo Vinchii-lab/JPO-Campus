@@ -137,6 +137,15 @@
           const next = Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 0.5, 4);
           cam.setZoom(next);
         });
+
+        // ── Debug HUD (top-left, fixed to screen) ────────────────────
+        this.debugText = this.add.text(12, 12, '', {
+          fontSize: '13px',
+          fontFamily: 'monospace',
+          color: '#ffffff',
+          backgroundColor: '#00000099',
+          padding: { x: 6, y: 4 },
+        }).setScrollFactor(0).setDepth(999);
       }
 
       update() {
@@ -196,6 +205,16 @@
           player.setFlipX(false);
           if (anim !== "idle")       player.play("idle");
         }
+
+        // Debug HUD
+        const curAnim  = player.anims.currentAnim?.key ?? 'none';
+        const curFrame = player.anims.currentFrame?.index ?? 0;
+        const flipX    = player.flipX;
+        this.debugText.setText(
+          `anim:  ${curAnim} (frame ${curFrame})\n` +
+          `flipX: ${flipX}\n` +
+          `pos:   ${Math.round(player.x)}, ${Math.round(player.y)}`
+        );
       }
     }
 
