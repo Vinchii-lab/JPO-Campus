@@ -84,6 +84,7 @@
         this.player = this.physics.add.sprite(WORLD_W / 2, WORLD_H / 2, "player");
         this.player.setScale(3);
         this.player.setDepth(10);
+        this.player.setBodySize(16, 32, true);
         this.player.play("idle");
 
         // ── Input ────────────────────────────────────────────────────
@@ -98,9 +99,7 @@
         // ── Camera ───────────────────────────────────────────────────
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
-        // Snap camera immediately to player, then enable smooth follow
-        this.cameras.main.centerOn(this.player.x, this.player.y);
-        this.cameras.main.startFollow(this.player, false, 0.1, 0.1);
+        this.cameras.main.startFollow(this.player);
 
         // Mouse-wheel zoom: scroll up = zoom in, scroll down = zoom out
         this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
