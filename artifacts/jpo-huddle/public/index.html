@@ -35,11 +35,6 @@
           '/assets/Adam_16x16.png?nocache=' + Date.now(),
           { frameWidth: 16, frameHeight: 32 }
         );
-        this.load.spritesheet(
-          'player_run',
-          '/assets/Adam_run_16x16.png',
-          { frameWidth: 16, frameHeight: 32 }
-        );
       }
 
       create() {
@@ -83,16 +78,16 @@
         });
         this.anims.create({
           key: 'walk_left',
-          // Adam_run_16x16: 24-frame left-facing run cycle, all frames solid
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
+          // Row 3 of Adam_16x16 faces left; even frames only (odd frames are near-empty)
+          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
+          frameRate: 8,
           repeat: -1
         });
         this.anims.create({
           key: 'walk_right',
-          // Same run frames; sprite is flipped in update() for right direction
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
+          // Same row-3 frames; setFlipX(true) in update mirrors them to face right
+          frames: this.anims.generateFrameNumbers('player', { frames: [72, 74, 76, 78] }),
+          frameRate: 8,
           repeat: -1
         });
 
@@ -178,29 +173,23 @@
           player.body.velocity.normalize().scale(SPEED);
         }
 
-        // Phaser 3 doesn't reliably switch texture keys between animations —
-        // explicitly set the texture BEFORE playing to keep things in sync.
+        // All animations use the same 'player' texture — no cross-texture switching needed.
+        // walk_left row faces LEFT natively; walk_right mirrors it with setFlipX(true).
         const anim = player.anims.currentAnim?.key;
-        const tex  = player.texture.key;
         if (left) {
-          player.setFlipX(true);
-          if (tex !== 'player_run') player.setTexture('player_run', 0);
+          player.setFlipX(false);
           if (anim !== "walk_left")  player.play("walk_left");
         } else if (right) {
-          player.setFlipX(false);
-          if (tex !== 'player_run') player.setTexture('player_run', 0);
+          player.setFlipX(true);
           if (anim !== "walk_right") player.play("walk_right");
         } else if (up) {
           player.setFlipX(false);
-          if (tex !== 'player') player.setTexture('player', 0);
           if (anim !== "walk_up")    player.play("walk_up");
         } else if (down) {
           player.setFlipX(false);
-          if (tex !== 'player') player.setTexture('player', 0);
           if (anim !== "walk_down")  player.play("walk_down");
         } else if (player.body.velocity.x === 0 && player.body.velocity.y === 0) {
           player.setFlipX(false);
-          if (tex !== 'player') player.setTexture('player', 0);
           if (anim !== "idle")       player.play("idle");
         }
       }
