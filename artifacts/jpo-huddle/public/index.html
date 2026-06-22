@@ -35,11 +35,6 @@
           '/assets/Adam_run_16x16.png',
           { frameWidth: 16, frameHeight: 32 }
         );
-        this.load.spritesheet(
-          'player_idle',
-          '/assets/Adam_idle_anim_16x16.png',
-          { frameWidth: 16, frameHeight: 32 }
-        );
       }
 
       create() {
@@ -63,8 +58,8 @@
         wallLayer.setPosition(0, 0);
 
         // ── Animations ───────────────────────────────────────────────
-        // All walk anims use player_run — one texture, zero switching, zero twitching.
-        // Adam is a side-profile sprite; left/right direction is handled via flipX.
+        // Single walk animation for all directions — flipX handles left vs right.
+        // Using one key avoids play() restarts (and the resulting stutter) on direction change.
         this.anims.create({
           key: 'idle',
           frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 0 }),
@@ -72,25 +67,7 @@
           repeat: -1
         });
         this.anims.create({
-          key: 'walk_down',
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
-          repeat: -1
-        });
-        this.anims.create({
-          key: 'walk_up',
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
-          repeat: -1
-        });
-        this.anims.create({
-          key: 'walk_left',
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
-          repeat: -1
-        });
-        this.anims.create({
-          key: 'walk_right',
+          key: 'walk',
           frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
           frameRate: 10,
           repeat: -1
@@ -104,6 +81,7 @@
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
+        this.player.setFlipX(false);
 
         // ── Furniture layer on top (inserted AFTER player) ───────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
@@ -171,6 +149,7 @@
         }
         if (this.sitting) {
           player.setVelocity(0, 0);
+          player.setFlipX(this.lastFlipX);
           if (player.anims.currentAnim?.key !== "idle") player.play("idle");
           return;
         }
@@ -188,25 +167,17 @@
           player.body.velocity.normalize().scale(SPEED);
         }
 
-        // Animation — only switch when the direction actually changes
-        const anim = player.anims.currentAnim?.key;
-        if (left) {
-          this.lastFlipX = true;
-          player.setFlipX(true);   // flip right-facing sprite to face left
-          if (anim !== "walk_left")  player.play("walk_left");
-        } else if (right) {
-          this.lastFlipX = false;
-          player.setFlipX(false);  // right-facing sprite stays right
-          if (anim !== "walk_right") player.play("walk_right");
-        } else if (up) {
+        // Animation — one walk key for all directions; flipX handles facing
+        const anim    = player.anims.currentAnim?.key;
+        const moving  = left || right || up || down;
+        if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
+        if (right) { this.lastFlipX = false; player.setFlipX(false); }
+        if ((up || down) && !left && !right) player.setFlipX(this.lastFlipX);
+        if (moving) {
+          if (anim !== "walk") player.play("walk");
+        } else {
           player.setFlipX(this.lastFlipX);
-          if (anim !== "walk_up")    player.play("walk_up");
-        } else if (down) {
-          player.setFlipX(this.lastFlipX);
-          if (anim !== "walk_down")  player.play("walk_down");
-        } else if (!left && !right && !up && !down) {
-          player.setFlipX(this.lastFlipX); // hold last horizontal facing on idle
-          if (anim !== "idle")       player.play("idle");
+          if (anim !== "idle") player.play("idle");
         }
 
         // Debug HUD
