@@ -122,8 +122,9 @@
           left:  Phaser.Input.Keyboard.KeyCodes.A,
           right: Phaser.Input.Keyboard.KeyCodes.D,
         });
-        this.keyE   = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-        this.sitting = false;
+        this.keyE     = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.sitting  = false;
+        this.lastFlipX = false; // tracks last horizontal facing; false = right, true = left
 
         // ── Camera ───────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -190,19 +191,21 @@
         // Animation — only switch when the direction actually changes
         const anim = player.anims.currentAnim?.key;
         if (left) {
+          this.lastFlipX = true;
           player.setFlipX(true);   // flip right-facing sprite to face left
           if (anim !== "walk_left")  player.play("walk_left");
         } else if (right) {
+          this.lastFlipX = false;
           player.setFlipX(false);  // right-facing sprite stays right
           if (anim !== "walk_right") player.play("walk_right");
         } else if (up) {
-          player.setFlipX(false);
+          player.setFlipX(this.lastFlipX);
           if (anim !== "walk_up")    player.play("walk_up");
         } else if (down) {
-          player.setFlipX(false);
+          player.setFlipX(this.lastFlipX);
           if (anim !== "walk_down")  player.play("walk_down");
         } else if (!left && !right && !up && !down) {
-          player.setFlipX(false);
+          player.setFlipX(this.lastFlipX); // hold last horizontal facing on idle
           if (anim !== "idle")       player.play("idle");
         }
 
