@@ -31,14 +31,15 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   // ── Registration ─────────────────────────────────────────────────────
-  socket.on("register", ({ firstName, lastName, email, character }) => {
-    const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
-    const ln   = (lastName  || "").trim().slice(0, 20);
-    const em   = (email     || "").trim().slice(0, 80);
-    const char = ["adam","alex","amelia","bob"].includes(character) ? character : "adam";
-    const name = ln ? `${fn} ${ln}` : fn;
+  socket.on("register", ({ firstName, lastName, email, character, tint }) => {
+    const fn        = (firstName || "").trim().slice(0, 20) || "Guest";
+    const ln        = (lastName  || "").trim().slice(0, 20);
+    const em        = (email     || "").trim().slice(0, 80);
+    const char      = ["adam","alex","amelia","bob"].includes(character) ? character : "adam";
+    const validTint = (typeof tint === "number" && tint >= 0 && tint <= 0xffffff) ? tint : null;
+    const name      = ln ? `${fn} ${ln}` : fn;
 
-    pending[socket.id] = { firstName: fn, lastName: ln, email: em, character: char, name };
+    pending[socket.id] = { firstName: fn, lastName: ln, email: em, character: char, name, tint: validTint };
     socket.emit("registrationPending");
 
     _notifyAdmins();
@@ -68,13 +69,14 @@ io.on("connection", (socket) => {
       flipX: false, anim: "idle",
       name: reg.name,
       character: reg.character,
+      tint: reg.tint ?? null,
       coins: 50,
       cosmetics: [],
     };
 
     // Tell the approved player
     io.to(targetId).emit("approved", {
-      name: reg.name, character: reg.character, coins: 50,
+      name: reg.name, character: reg.character, tint: reg.tint ?? null, coins: 50,
     });
     // Give them the current room snapshot (includes themselves)
     io.to(targetId).emit("currentPlayers", players);
