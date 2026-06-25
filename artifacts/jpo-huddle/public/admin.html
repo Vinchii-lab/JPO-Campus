@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JPO Huddle — Admin</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: monospace; background: #1a1a2e; color: #eee; min-height: 100vh; }
+
+    header {
+      background: #111; padding: 16px 28px;
+      display: flex; align-items: center; gap: 12px;
+      border-bottom: 2px solid #6c63ff;
+    }
+    header h1 { font-size: 18px; letter-spacing: 1px; }
+    header span { font-size: 12px; color: #888; }
+
+    #auth-screen {
+      display: flex; align-items: center; justify-content: center;
+      height: 100vh;
+    }
+    #auth-card {
+      background: #23233a; border-radius: 14px; padding: 36px 40px;
+      text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,0.5); min-width: 300px;
+    }
+    #auth-card h2 { font-size: 20px; margin-bottom: 20px; }
+    #auth-card input {
+      width: 100%; padding: 10px 14px; font-size: 15px; font-family: monospace;
+      border: 2px solid #444; border-radius: 8px; background: #1a1a2e;
+      color: #eee; outline: none; margin-bottom: 14px;
+    }
+    #auth-card input:focus { border-color: #6c63ff; }
+    #auth-card button {
+      width: 100%; padding: 11px; background: #6c63ff; color: #fff;
+      border: none; border-radius: 8px; font-size: 15px; font-family: monospace;
+      cursor: pointer; font-weight: bold;
+    }
+    #auth-card button:hover { background: #574fd6; }
+    #auth-error { color: #e74c3c; font-size: 12px; min-height: 18px; margin-bottom: 10px; }
+
+    #admin-screen { display: none; padding: 28px; }
+
+    .panel {
+      background: #23233a; border-radius: 12px; padding: 24px;
+      margin-bottom: 24px;
+    }
+    .panel h2 { font-size: 16px; margin-bottom: 16px; color: #ccc; letter-spacing: 0.5px; }
+
+    .badge {
+      display: inline-block; background: #6c63ff; color: #fff;
+      border-radius: 12px; padding: 1px 8px; font-size: 11px; margin-left: 8px;
+    }
+    .badge.green { background: #27ae60; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 12px; color: #888; border-bottom: 1px solid #333; font-weight: normal; }
+    td { padding: 10px 12px; border-bottom: 1px solid #2a2a3e; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+
+    .char-icon { font-size: 11px; background: #333; padding: 2px 6px; border-radius: 4px; }
+
+    .btn { padding: 5px 14px; border: none; border-radius: 6px; cursor: pointer; font-family: monospace; font-size: 12px; transition: background 0.15s; }
+    .btn-approve { background: #27ae60; color: #fff; }
+    .btn-approve:hover { background: #219a52; }
+    .btn-reject  { background: #e74c3c; color: #fff; margin-left: 6px; }
+    .btn-reject:hover  { background: #c0392b; }
+
+    .empty-row td { color: #555; text-align: center; padding: 20px; }
+
+    .online-dot { display: inline-block; width: 8px; height: 8px; background: #27ae60; border-radius: 50%; margin-right: 6px; }
+    .cosmetic-tag { font-size: 11px; background: #3a3a5e; padding: 1px 6px; border-radius: 4px; margin-right: 3px; }
+  </style>
+</head>
+<body>
+
+  <!-- Auth screen -->
+  <div id="auth-screen">
+    <div id="auth-card">
+      <h2>🏢 Admin Panel</h2>
+      <input id="pwd-input" type="password" placeholder="Admin password" autocomplete="current-password" />
+      <div id="auth-error"></div>
+      <button onclick="doAuth()">Sign in</button>
+    </div>
+  </div>
+
+  <!-- Admin screen (shown after auth) -->
+  <div id="admin-screen">
+    <header style="margin: -28px -28px 24px; border-radius: 0;">
+      <h1>🏢 JPO Huddle</h1>
+      <span>Admin Panel</span>
+      <span style="margin-left:auto;color:#4caf50;font-size:12px;" id="conn-status">● connected</span>
+    </header>
+
+    <!-- Pending registrations -->
+    <div class="panel">
+      <h2>Pending Registrations <span class="badge" id="pending-count">0</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Character</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pending-tbody">
+          <tr class="empty-row"><td colspan="4">No pending registrations</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Active players -->
+    <div class="panel">
+      <h2>Active Players <span class="badge green" id="player-count">0</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Coins</th>
+            <th>Cosmetics</th>
+          </tr>
+        </thead>
+        <tbody id="player-tbody">
+          <tr class="empty-row"><td colspan="3">No players online</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+
+    socket.on('disconnect', () => {
+      document.getElementById('conn-status').textContent = '● disconnected';
+      document.getElementById('conn-status').style.color = '#e74c3c';
+    });
+    socket.on('connect', () => {
+      document.getElementById('conn-status').textContent = '● connected';
+      document.getElementById('conn-status').style.color = '#4caf50';
+    });
+
+    function doAuth() {
+      const pwd = document.getElementById('pwd-input').value;
+      socket.emit('adminAuth', { password: pwd });
+    }
+    document.getElementById('pwd-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doAuth();
+    });
+
+    socket.on('adminAuthOk', () => {
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('admin-screen').style.display = 'block';
+    });
+    socket.on('adminAuthFail', () => {
+      document.getElementById('auth-error').textContent = 'Incorrect password.';
+    });
+
+    socket.on('pendingList', (list) => {
+      document.getElementById('pending-count').textContent = list.length;
+      const tbody = document.getElementById('pending-tbody');
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No pending registrations</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(p => `
+        <tr>
+          <td>${esc(p.name)}</td>
+          <td>${esc(p.email)}</td>
+          <td><span class="char-icon">${esc(p.character)}</span></td>
+          <td>
+            <button class="btn btn-approve" onclick="approve('${esc(p.id)}')">✓ Approve</button>
+            <button class="btn btn-reject"  onclick="reject('${esc(p.id)}')">✗ Reject</button>
+          </td>
+        </tr>
+      `).join('');
+    });
+
+    socket.on('playerList', (list) => {
+      document.getElementById('player-count').textContent = list.length;
+      const tbody = document.getElementById('player-tbody');
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="3">No players online</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(p => `
+        <tr>
+          <td><span class="online-dot"></span>${esc(p.name)}</td>
+          <td>💰 ${p.coins}</td>
+          <td>${(p.cosmetics||[]).map(c => `<span class="cosmetic-tag">${esc(c)}</span>`).join('') || '—'}</td>
+        </tr>
+      `).join('');
+    });
+
+    function approve(id) { socket.emit('approvePlayer', id); }
+    function reject(id)  { socket.emit('rejectPlayer',  id); }
+
+    function esc(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>

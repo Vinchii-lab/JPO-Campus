@@ -4,50 +4,49 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
   <title>JPO Huddle</title>
   <link rel="icon" href="data:,">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #1a1a2e; overflow: hidden; }
 
+    /* ── Overlay (registration / pending / rejected) ── */
     #join-overlay {
       position: fixed; inset: 0; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.72);
       transition: opacity 0.25s;
     }
     #join-overlay.hidden { opacity: 0; pointer-events: none; }
 
-    #join-card {
+    .join-card {
       background: #fff; border-radius: 16px; padding: 36px 40px;
       font-family: monospace; color: #222;
       text-align: center;
       box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-      min-width: 320px;
+      min-width: 340px; max-width: 420px; width: 100%;
     }
-    #join-card h2 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
-    #join-card p  { font-size: 13px; color: #888; margin-bottom: 24px; }
+    .join-card h2 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
+    .join-card p  { font-size: 13px; color: #888; margin-bottom: 20px; }
+    .join-card.hidden { display: none; }
 
-    #name-input {
-      width: 100%; padding: 10px 14px;
-      font-size: 16px; font-family: monospace;
-      border: 2px solid #ddd; border-radius: 8px;
-      outline: none; margin-bottom: 16px;
-      transition: border-color 0.15s;
+    .form-row {
+      display: flex; gap: 10px; margin-bottom: 12px;
     }
-    #name-input:focus { border-color: #6c63ff; }
-
-    #join-btn {
-      width: 100%; padding: 11px;
-      background: #6c63ff; color: #fff;
-      border: none; border-radius: 8px;
+    .form-field {
+      flex: 1; display: flex; flex-direction: column; text-align: left;
+    }
+    .form-field label {
+      font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .form-field input {
+      width: 100%; padding: 9px 12px;
       font-size: 15px; font-family: monospace;
-      cursor: pointer; font-weight: bold;
-      transition: background 0.15s;
+      border: 2px solid #ddd; border-radius: 8px;
+      outline: none; transition: border-color 0.15s;
     }
-    #join-btn:hover { background: #574fd6; }
+    .form-field input:focus { border-color: #6c63ff; }
 
     .char-picker {
       display: flex; gap: 10px; justify-content: center;
@@ -56,7 +55,7 @@
     .char-opt {
       cursor: pointer; border: 3px solid transparent;
       border-radius: 8px; padding: 4px;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, background 0.15s;
       background: #f5f5f5;
     }
     .char-opt:hover { border-color: #aaa; }
@@ -64,50 +63,187 @@
     .char-opt canvas { display: block; image-rendering: pixelated; }
     .char-opt span { display: block; font-size: 10px; color: #555; margin-top: 2px; text-align: center; }
 
+    .join-btn {
+      width: 100%; padding: 11px;
+      background: #6c63ff; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 15px; font-family: monospace;
+      cursor: pointer; font-weight: bold;
+      transition: background 0.15s; margin-top: 4px;
+    }
+    .join-btn:hover { background: #574fd6; }
+    .join-btn:disabled { background: #aaa; cursor: default; }
+
+    .error-msg {
+      color: #e74c3c; font-size: 12px; margin-bottom: 10px; min-height: 16px;
+    }
+
+    /* ── Pending screen ── */
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #eee; border-top-color: #6c63ff;
+      border-radius: 50%; animation: spin 0.9s linear infinite;
+      margin: 24px auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* ── Chat bar ── */
     #chat-bar {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
       z-index: 200; display: none; align-items: center; gap: 10px;
       background: rgba(0,0,0,0.82); border-radius: 10px;
-      padding: 10px 16px; backdrop-filter: blur(4px);
+      padding: 10px 18px; backdrop-filter: blur(4px);
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
     #chat-bar.open { display: flex; }
     #chat-input {
-      width: 340px; background: transparent; border: none;
+      width: 360px; background: transparent; border: none;
       border-bottom: 1px solid rgba(255,255,255,0.25);
-      color: #fff; font-size: 14px; font-family: monospace; outline: none;
+      color: #fff; font-size: 15px; font-family: monospace; outline: none;
       padding: 2px 0;
     }
     #chat-input::placeholder { color: rgba(255,255,255,0.35); }
     #chat-hint {
       position: fixed; bottom: 10px; right: 14px; z-index: 99;
-      font-size: 11px; font-family: monospace;
+      font-size: 12px; font-family: monospace;
       color: rgba(255,255,255,0.25); pointer-events: none;
     }
+
+    /* ── Coin HUD ── */
+    #coin-hud {
+      position: fixed; top: 14px; right: 14px; z-index: 300;
+      display: none; align-items: center; gap: 8px;
+      background: rgba(0,0,0,0.72); border-radius: 8px;
+      padding: 7px 14px; font-family: monospace; color: #fff; font-size: 15px;
+    }
+    #coin-hud.visible { display: flex; }
+    #shop-btn {
+      padding: 3px 10px; font-size: 12px; font-family: monospace;
+      background: #6c63ff; color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    #shop-btn:hover { background: #574fd6; }
+
+    /* ── Shop modal ── */
+    #shop-modal {
+      position: fixed; inset: 0; z-index: 8000;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+    }
+    #shop-modal.open { display: flex; }
+    #shop-card {
+      background: #fff; border-radius: 16px; padding: 32px 36px;
+      font-family: monospace; color: #222; min-width: 300px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    }
+    #shop-card h3 { font-size: 20px; margin-bottom: 6px; }
+    #shop-balance { font-size: 14px; color: #666; margin-bottom: 20px; }
+    .shop-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 0; border-bottom: 1px solid #eee;
+    }
+    .shop-item-icon { font-size: 28px; }
+    .shop-item-info { flex: 1; }
+    .shop-item-name { font-size: 15px; font-weight: bold; }
+    .shop-item-cost { font-size: 12px; color: #888; }
+    .buy-btn {
+      padding: 6px 14px; background: #6c63ff; color: #fff;
+      border: none; border-radius: 6px; cursor: pointer;
+      font-family: monospace; font-size: 13px;
+      transition: background 0.15s;
+    }
+    .buy-btn:hover { background: #574fd6; }
+    .buy-btn.owned { background: #27ae60; cursor: default; }
+    #shop-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #e74c3c; }
+    #shop-close-btn {
+      width: 100%; margin-top: 16px; padding: 9px;
+      background: #f0f0f0; border: none; border-radius: 8px;
+      font-family: monospace; font-size: 14px; cursor: pointer;
+    }
+    #shop-close-btn:hover { background: #e0e0e0; }
   </style>
 </head>
 <body>
-  <div id="join-overlay">
-    <div id="join-card">
-      <h2>🏢 JPO Huddle</h2>
-      <p>Pick a character and enter your name</p>
 
-      <div class="char-picker" id="char-picker">
-        <!-- filled by JS once sprites load -->
+  <!-- ── Registration / Pending / Rejected overlay ── -->
+  <div id="join-overlay">
+    <!-- Step 1: Registration form -->
+    <div class="join-card" id="card-register">
+      <h2>🏢 JPO Huddle</h2>
+      <p>Register to join the virtual office</p>
+
+      <div class="form-row">
+        <div class="form-field">
+          <label>First Name</label>
+          <input id="inp-first" type="text" placeholder="Jane" maxlength="20" autocomplete="given-name" />
+        </div>
+        <div class="form-field">
+          <label>Last Name</label>
+          <input id="inp-last" type="text" placeholder="Smith" maxlength="20" autocomplete="family-name" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label>Email</label>
+          <input id="inp-email" type="email" placeholder="jane@company.com" maxlength="80" autocomplete="email" />
+        </div>
       </div>
 
-      <input id="name-input" type="text" placeholder="Your name…" maxlength="24" autocomplete="off" />
-      <button id="join-btn">Enter office →</button>
+      <p style="font-size:12px;color:#555;margin-bottom:12px;margin-top:4px;">Choose your character</p>
+      <div class="char-picker" id="char-picker"></div>
+
+      <div class="error-msg" id="reg-error"></div>
+      <button class="join-btn" id="register-btn">Request Access →</button>
+    </div>
+
+    <!-- Step 2: Pending approval -->
+    <div class="join-card hidden" id="card-pending">
+      <h2>🏢 JPO Huddle</h2>
+      <p>Registration submitted!</p>
+      <div class="spinner"></div>
+      <p style="font-size:14px;color:#444;margin-bottom:8px;">Waiting for admin approval…</p>
+      <p style="font-size:12px;color:#999;">You'll be let in automatically once approved.</p>
+    </div>
+
+    <!-- Step 3: Rejected -->
+    <div class="join-card hidden" id="card-rejected">
+      <h2>🏢 JPO Huddle</h2>
+      <div style="font-size:40px;margin:20px 0;">🚫</div>
+      <p style="font-size:15px;color:#e74c3c;margin-bottom:12px;">Your request was not approved.</p>
+      <p style="font-size:12px;color:#999;">Please contact your admin for access.</p>
     </div>
   </div>
 
-  <!-- Chat bar (shown on T key) -->
+  <!-- ── Chat bar ── -->
   <div id="chat-bar">
-    <span style="color:#888;font-size:13px">💬</span>
+    <span style="color:#888;font-size:14px">💬</span>
     <input id="chat-input" type="text" placeholder="Say something… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
   </div>
   <div id="chat-hint">[T] chat</div>
+
+  <!-- ── Coin HUD ── -->
+  <div id="coin-hud">
+    💰 <span id="coin-count">0</span>
+    <button id="shop-btn" onclick="openShop()">Shop</button>
+  </div>
+
+  <!-- ── Shop modal ── -->
+  <div id="shop-modal">
+    <div id="shop-card">
+      <h3>🛒 Shop</h3>
+      <div id="shop-balance">💰 Coins: <span id="shop-coin-display">0</span></div>
+      <div class="shop-item">
+        <div class="shop-item-icon">👑</div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Crown</div>
+          <div class="shop-item-cost">30 coins — wears above your head</div>
+        </div>
+        <button class="buy-btn" id="buy-crown" onclick="buyItem('crown')">Buy</button>
+      </div>
+      <div id="shop-msg"></div>
+      <button id="shop-close-btn" onclick="closeShop()">Close</button>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -126,22 +262,27 @@
       bob:    '/assets/Bob_run_16x16.png',
     };
 
-    let _playerName = '';
-    let _playerChar = 'adam';
+    let _playerName  = '';
+    let _playerChar  = 'adam';
+    let _playerCoins = 0;
+    let _ownedItems  = [];
 
-    // ── Build character picker via mini canvases ───────────────────────
+    // Global ref to Phaser keyboard — set once create() runs
+    let _phaserKbd = null;
+
+    // If 'approved' arrives before Phaser's create() is ready, queue it
+    let _approvedQueue = null;
+
+    // ── Character picker ──────────────────────────────────────────────
     const picker = document.getElementById('char-picker');
-    let pickerReady = 0;
-
     CHARACTERS.forEach((char, idx) => {
       const wrap = document.createElement('div');
       wrap.className = 'char-opt' + (idx === 0 ? ' selected' : '');
       wrap.dataset.char = char;
 
-      const cv  = document.createElement('canvas');
-      cv.width  = 48; cv.height = 96;
-      cv.style.width  = '48px';
-      cv.style.height = '96px';
+      const cv = document.createElement('canvas');
+      cv.width = 48; cv.height = 96;
+      cv.style.cssText = 'width:48px;height:96px';
 
       const img = new Image();
       img.src = CHAR_FILES[char];
@@ -149,7 +290,6 @@
         const ctx = cv.getContext('2d');
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 48, 96);
-        pickerReady++;
       };
 
       const label = document.createElement('span');
@@ -165,26 +305,123 @@
       picker.appendChild(wrap);
     });
 
-    // ── Join form submit ───────────────────────────────────────────────
-    function doJoin() {
-      const raw = document.getElementById('name-input').value.trim();
-      _playerName = raw || 'Guest';
-      socket.emit('playerInit', { name: _playerName, character: _playerChar });
+    // ── Registration ─────────────────────────────────────────────────
+    // Prevent Phaser from stealing keystrokes in text inputs by stopping
+    // propagation before the event bubbles up to window (where Phaser listens).
+    function stopKeys(e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') tryRegister();
+    }
+    document.getElementById('inp-first').addEventListener('keydown', stopKeys);
+    document.getElementById('inp-last').addEventListener('keydown',  stopKeys);
+    document.getElementById('inp-email').addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter') tryRegister();
+    });
 
+    // Also disable Phaser capture when any text input gains focus
+    ['inp-first','inp-last','inp-email'].forEach(id => {
+      document.getElementById(id).addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      document.getElementById(id).addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+
+    function tryRegister() {
+      const first = document.getElementById('inp-first').value.trim();
+      const last  = document.getElementById('inp-last').value.trim();
+      const email = document.getElementById('inp-email').value.trim();
+      const errEl = document.getElementById('reg-error');
+
+      if (!first)                 { errEl.textContent = 'First name is required.'; return; }
+      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      errEl.textContent = '';
+
+      document.getElementById('register-btn').disabled = true;
+      socket.emit('register', { firstName: first, lastName: last, email, character: _playerChar });
+    }
+
+    document.getElementById('register-btn').addEventListener('click', tryRegister);
+
+    // ── Socket: registration lifecycle ────────────────────────────────
+    socket.on('registrationPending', () => {
+      document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-pending').classList.remove('hidden');
+    });
+
+    socket.on('rejected', () => {
+      document.getElementById('card-pending').classList.add('hidden');
+      document.getElementById('card-rejected').classList.remove('hidden');
+    });
+
+    socket.on('approved', (data) => {
+      _playerName  = data.name;
+      _playerChar  = data.character;
+      _playerCoins = data.coins;
+
+      // Hide overlay
       const overlay = document.getElementById('join-overlay');
       overlay.classList.add('hidden');
       setTimeout(() => overlay.remove(), 300);
 
-      const canvas = document.querySelector('canvas');
-      if (canvas) canvas.focus();
-    }
+      // Show HUD
+      document.getElementById('coin-hud').classList.add('visible');
+      document.getElementById('coin-count').textContent = _playerCoins;
 
-    document.getElementById('join-btn').addEventListener('click', doJoin);
-    document.getElementById('name-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter') doJoin();
+      // Enter game
+      const scene = window._gameScene;
+      if (scene) scene._onApproved(data);
+      else _approvedQueue = data;
+
+      document.querySelector('canvas')?.focus();
     });
 
-    // ── Chat bar logic ─────────────────────────────────────────────────
+    socket.on('coinUpdate', ({ coins }) => {
+      _playerCoins = coins;
+      document.getElementById('coin-count').textContent = coins;
+      document.getElementById('shop-coin-display').textContent = coins;
+    });
+
+    socket.on('shopSuccess', ({ item }) => {
+      _ownedItems.push(item);
+      _refreshShopUI();
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${item.charAt(0).toUpperCase()+item.slice(1)} equipped!`;
+      // Tell Phaser to add crown to local player
+      window._gameScene?._setLocalCrown(true);
+    });
+
+    socket.on('shopError', (msg) => {
+      document.getElementById('shop-msg').style.color = '#e74c3c';
+      document.getElementById('shop-msg').textContent = msg;
+    });
+
+    socket.on('playerCosmeticUpdate', ({ id, cosmetics }) => {
+      window._gameScene?._updatePlayerCosmetics(id, cosmetics);
+    });
+
+    // ── Shop helpers ─────────────────────────────────────────────────
+    function openShop() {
+      _refreshShopUI();
+      document.getElementById('shop-msg').textContent = '';
+      document.getElementById('shop-modal').classList.add('open');
+    }
+    function closeShop() {
+      document.getElementById('shop-modal').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    function buyItem(item) {
+      socket.emit('buyCosmetic', { item });
+    }
+    function _refreshShopUI() {
+      document.getElementById('shop-coin-display').textContent = _playerCoins;
+      const crownBtn = document.getElementById('buy-crown');
+      if (_ownedItems.includes('crown')) {
+        crownBtn.textContent = '✓ Owned';
+        crownBtn.classList.add('owned');
+        crownBtn.onclick = null;
+      }
+    }
+
+    // ── Chat bar ─────────────────────────────────────────────────────
     let _chatOpen = false;
     const chatBar   = document.getElementById('chat-bar');
     const chatInput = document.getElementById('chat-input');
@@ -194,7 +431,6 @@
       _chatOpen = true;
       chatBar.classList.add('open');
       chatInput.value = '';
-      // small delay so the T keydown doesn't type into the input
       setTimeout(() => chatInput.focus(), 30);
     }
     function closeChat() {
@@ -208,7 +444,6 @@
       closeChat();
     }
 
-    // T key opens chat (only when not already in an input)
     document.addEventListener('keydown', e => {
       if ((e.key === 't' || e.key === 'T') && !_chatOpen
           && document.activeElement.tagName !== 'INPUT') {
@@ -219,47 +454,41 @@
     chatInput.addEventListener('keydown', e => {
       if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendChat(); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChat(); }
-      e.stopPropagation(); // prevent Phaser stealing keys while typing
+      e.stopPropagation();
     });
 
-    // ── Phaser scene ───────────────────────────────────────────────────
+    // ── Phaser scene ─────────────────────────────────────────────────
     class OfficeScene extends Phaser.Scene {
-      constructor() { super("OfficeScene"); }
+      constructor() { super('OfficeScene'); }
 
       preload() {
-        this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
-        this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
-        this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
+        this.load.image('roombuilder', '/assets/Room_Builder_free_16x16.png');
+        this.load.image('interiors',   '/assets/Interiors_free_16x16.png');
+        this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
-          this.load.spritesheet(
-            `run_${char}`,
-            CHAR_FILES[char],
-            { frameWidth: 16, frameHeight: 32 }
-          );
+          this.load.spritesheet(`run_${char}`, CHAR_FILES[char],
+            { frameWidth: 16, frameHeight: 32 });
         });
 
-        // Sit sprites (Adam only — others fall back to idle)
-        this.load.spritesheet('adam_sit', '/assets/Adam_sit_16x16.png', { frameWidth: 16, frameHeight: 32 });
+        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 16, frameHeight: 32 });
         this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
       }
 
       create() {
-        const SPAWN_X = 22 * 48 + 24;
-        const SPAWN_Y = 17 * 48 + 24;
+        // Expose keyboard plugin globally for focus/blur management
+        _phaserKbd = this.input.keyboard;
 
-        // ── Tilemap ────────────────────────────────────────────────────
-        const map     = this.make.tilemap({ key: "map" });
-        const tsRoom  = map.addTilesetImage("Room_Builder",         "roombuilder");
-        const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
+        // ── Tilemap ──────────────────────────────────────────────────
+        const map     = this.make.tilemap({ key: 'map' });
+        const tsRoom  = map.addTilesetImage('Room_Builder',         'roombuilder');
+        const tsInter = map.addTilesetImage('Interiors_free_16x16', 'interiors');
         const tilesets = [tsRoom, tsInter];
 
-        const floorLayer = map.createLayer("Floor", tilesets);
-        floorLayer.setScale(3);
-        const wallLayer = map.createLayer("Wall", tilesets);
-        wallLayer.setScale(3);
+        const floorLayer = map.createLayer('Floor', tilesets).setScale(3);
+        const wallLayer  = map.createLayer('Wall',  tilesets).setScale(3);
 
-        // ── Animations (one set per character) ────────────────────────
+        // ── Animations (one set per character) ───────────────────────
         CHARACTERS.forEach(char => {
           this.anims.create({
             key: `idle_${char}`,
@@ -273,7 +502,6 @@
           });
         });
 
-        // Adam-only interaction animations
         this.anims.create({
           key: 'sit_adam',
           frames: this.anims.generateFrameNumbers('adam_sit', { start: 0, end: 5 }),
@@ -285,26 +513,24 @@
           frameRate: 8, repeat: -1,
         });
 
-        // ── Furniture (before players → players always on top) ─────────
-        const furnitureLayer = map.createLayer("Furniture", tilesets);
-        furnitureLayer.setScale(3);
-        this.furnitureLayer = furnitureLayer;
+        // ── Furniture layer ──────────────────────────────────────────
+        const furnitureLayer = map.createLayer('Furniture', tilesets).setScale(3);
+        this.furnitureLayer  = furnitureLayer;
+        this.wallLayer       = wallLayer;
 
         wallLayer.setCollisionByExclusion([-1]);
 
-        // ── Computer screen glows (pulsing overlays over known desk monitors) ──
-        // Desk tiles confirmed at cols 12,14,16 × rows 17,19 in the starting office
+        // ── Computer screen glows ────────────────────────────────────
         const deskMonitors = [
           [12,17],[14,17],[16,17],
           [12,19],[14,19],[16,19],
         ];
         deskMonitors.forEach(([col, row], i) => {
           const wx = col * 48 + 24;
-          const wy = row * 48 + 8; // upper portion of tile = monitor area
+          const wy = row * 48 + 8;
           const g = this.add.graphics();
           g.fillStyle(0x44aaff, 0.5);
           g.fillRoundedRect(wx - 14, wy - 7, 28, 14, 3);
-          // inner bright spot
           g.fillStyle(0x88ccff, 0.6);
           g.fillRoundedRect(wx - 8, wy - 4, 16, 8, 2);
           this.tweens.add({
@@ -316,91 +542,62 @@
           });
         });
 
-        // ── "Press E" proximity hint ──────────────────────────────────
+        // ── "Press E" hint ───────────────────────────────────────────
         this.eHint = this.add.text(0, 0, '[ E ] Sit', {
-          fontSize: '10px', fontFamily: 'monospace',
+          fontSize: '11px', fontFamily: 'monospace',
           color: '#fff', backgroundColor: '#222222cc',
           padding: { x: 5, y: 3 },
         }).setOrigin(0.5, 1).setVisible(false).setDepth(500);
 
-        // ── Other players registry ─────────────────────────────────────
+        // ── Other players registry ───────────────────────────────────
         this.otherPlayers = {};
+        this.player       = null;
+        this.localNameTag = null;
+        this.localCrown   = null;
+        this.localBubble  = null;
+        this.sitting      = false;
+        this.lastFlipX    = false;
+        this._sendTimer   = 0;
+        this._pendingPlayers = null; // buffer if approved arrives late
 
-        // ── Local player ───────────────────────────────────────────────
-        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, `run_${_playerChar}`);
-        this.player.setScale(3);
-        this.player.setOrigin(0.5, 0.5);
-        this.player.body.setSize(12, 12);
-        this.player.setCollideWorldBounds(true);
-        this.player.play(`idle_${_playerChar}`);
-        this.player.setFlipX(false);
-        this.physics.add.collider(this.player, wallLayer);
-
-        // Local name tag (shown above local player in world space)
-        this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName || '');
-
-        // ── Input ──────────────────────────────────────────────────────
-        this.cursors   = this.input.keyboard.createCursorKeys();
-        this.wasd      = this.input.keyboard.addKeys({
-          up:    Phaser.Input.Keyboard.KeyCodes.W,
-          down:  Phaser.Input.Keyboard.KeyCodes.S,
-          left:  Phaser.Input.Keyboard.KeyCodes.A,
-          right: Phaser.Input.Keyboard.KeyCodes.D,
-        });
-        this.keyE      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-        this.sitting   = false;
-        this.lastFlipX = false;
-        this._sendTimer = 0;
-
-        this.input.keyboard.addCapture([
-          Phaser.Input.Keyboard.KeyCodes.UP,
-          Phaser.Input.Keyboard.KeyCodes.DOWN,
-          Phaser.Input.Keyboard.KeyCodes.LEFT,
-          Phaser.Input.Keyboard.KeyCodes.RIGHT,
-          Phaser.Input.Keyboard.KeyCodes.W,
-          Phaser.Input.Keyboard.KeyCodes.A,
-          Phaser.Input.Keyboard.KeyCodes.S,
-          Phaser.Input.Keyboard.KeyCodes.D,
-          Phaser.Input.Keyboard.KeyCodes.E,
-          Phaser.Input.Keyboard.KeyCodes.SPACE,
-        ]);
-
-        // ── Camera ─────────────────────────────────────────────────────
+        // ── Camera / world bounds ────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
-        this.cameras.main.startFollow(this.player);
 
-        this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
+        this.input.on('wheel', (_ptr, _objs, _dx, dy) => {
           const cam  = this.cameras.main;
           const next = Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 0.5, 4);
           cam.setZoom(next);
         });
 
-        // ── Debug HUD ──────────────────────────────────────────────────
+        // ── Debug HUD ────────────────────────────────────────────────
         this.debugText = this.add.text(12, 12, '', {
           fontSize: '13px', fontFamily: 'monospace',
           color: '#ffffff', backgroundColor: '#00000099',
           padding: { x: 6, y: 4 },
         }).setScrollFactor(0).setDepth(999);
 
-        // ── Socket listeners ───────────────────────────────────────────
-        socket.on("currentPlayers", (allPlayers) => {
-          Object.entries(allPlayers).forEach(([id, data]) => {
-            if (id !== socket.id) this._addOtherPlayer(id, data);
-          });
+        // ── Socket listeners (set up now so no events are missed) ────
+        socket.on('currentPlayers', (allPlayers) => {
+          if (!this.player) {
+            this._pendingPlayers = allPlayers;
+          } else {
+            Object.entries(allPlayers).forEach(([id, data]) => {
+              if (id !== socket.id) this._addOtherPlayer(id, data);
+            });
+          }
         });
 
-        socket.on("playerJoined", (data) => {
+        socket.on('playerJoined', (data) => {
           if (data.id !== socket.id) this._addOtherPlayer(data.id, data);
         });
 
-        socket.on("playerMoved", (data) => {
+        socket.on('playerMoved', (data) => {
           const entry = this.otherPlayers[data.id];
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
           entry.sprite.setFlipX(data.flipX);
-          // 'sit' → use character sit anim if available, else idle
           let animKey;
           if (data.anim === 'sit') {
             animKey = entry.character === 'adam' ? 'sit_adam' : `idle_${entry.character}`;
@@ -408,22 +605,24 @@
             animKey = `${data.anim}_${entry.character}`;
           }
           if (entry.sprite.anims.currentAnim?.key !== animKey) entry.sprite.play(animKey);
-          entry.nameTag.setPosition(data.x, data.y - 34);
+          entry.nameTag.setPosition(data.x, data.y - 40);
+          if (entry.crown) entry.crown.setPosition(data.x, data.y - 68);
+          if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y - 85);
         });
 
-        socket.on("playerLeft", (id) => {
+        socket.on('playerLeft', (id) => {
           const entry = this.otherPlayers[id];
           if (entry) {
             entry.sprite.destroy();
             entry.nameTag.destroy();
+            if (entry.crown)      entry.crown.destroy();
             if (entry.chatBubble) entry.chatBubble.destroy();
             delete this.otherPlayers[id];
           }
         });
 
-        socket.on("chatMessage", ({ id, message }) => {
+        socket.on('chatMessage', ({ id, message }) => {
           if (id === socket.id) {
-            // Local player's own message
             this._showChatBubble(this.player, message, true);
           } else {
             const entry = this.otherPlayers[id];
@@ -433,37 +632,117 @@
             }
           }
         });
+
+        // Expose scene globally; drain queue if approved already came in
+        window._gameScene = this;
+        if (_approvedQueue) {
+          this._onApproved(_approvedQueue);
+          _approvedQueue = null;
+        }
       }
 
+      // Called once the server approves the player
+      _onApproved(data) {
+        const SPAWN_X = 22 * 48 + 24;
+        const SPAWN_Y = 17 * 48 + 24;
+
+        // ── Player sprite ────────────────────────────────────────────
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, `run_${_playerChar}`);
+        this.player.setScale(3).setOrigin(0.5, 0.5);
+        this.player.body.setSize(12, 12);
+        this.player.setCollideWorldBounds(true);
+        this.player.play(`idle_${_playerChar}`);
+        this.physics.add.collider(this.player, this.wallLayer);
+
+        // ── Name tag & optional crown ────────────────────────────────
+        this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
+
+        // ── Input ────────────────────────────────────────────────────
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd    = this.input.keyboard.addKeys({
+          up:    Phaser.Input.Keyboard.KeyCodes.W,
+          down:  Phaser.Input.Keyboard.KeyCodes.S,
+          left:  Phaser.Input.Keyboard.KeyCodes.A,
+          right: Phaser.Input.Keyboard.KeyCodes.D,
+        });
+        this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+
+        // Only capture keys that would otherwise do bad things (scroll page, etc.)
+        this.input.keyboard.addCapture([
+          Phaser.Input.Keyboard.KeyCodes.UP,
+          Phaser.Input.Keyboard.KeyCodes.DOWN,
+          Phaser.Input.Keyboard.KeyCodes.LEFT,
+          Phaser.Input.Keyboard.KeyCodes.RIGHT,
+          Phaser.Input.Keyboard.KeyCodes.SPACE,
+        ]);
+
+        // ── Camera ───────────────────────────────────────────────────
+        this.cameras.main.startFollow(this.player);
+
+        // ── Drain buffered players ───────────────────────────────────
+        if (this._pendingPlayers) {
+          Object.entries(this._pendingPlayers).forEach(([id, pdata]) => {
+            if (id !== socket.id) this._addOtherPlayer(id, pdata);
+          });
+          this._pendingPlayers = null;
+        }
+      }
+
+      // ── Crown management ─────────────────────────────────────────────
+      _setLocalCrown(show) {
+        if (this.localCrown) { this.localCrown.destroy(); this.localCrown = null; }
+        if (show && this.player) {
+          this.localCrown = this.add.text(
+            this.player.x, this.player.y - 68, '👑',
+            { fontSize: '18px', resolution: 2 }
+          ).setOrigin(0.5, 1).setDepth(1001);
+        }
+      }
+
+      _updatePlayerCosmetics(id, cosmetics) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        const hasCrown = cosmetics.includes('crown');
+        if (hasCrown && !entry.crown) {
+          entry.crown = this.add.text(
+            entry.sprite.x, entry.sprite.y - 68, '👑',
+            { fontSize: '18px', resolution: 2 }
+          ).setOrigin(0.5, 1).setDepth(1001);
+        } else if (!hasCrown && entry.crown) {
+          entry.crown.destroy();
+          entry.crown = null;
+        }
+      }
+
+      // ── Helpers ──────────────────────────────────────────────────────
       _makeNameTag(x, y, name) {
-        return this.add.text(x, y - 34, name, {
-          fontSize: '11px',
+        return this.add.text(x, y - 40, name, {
+          fontSize: '14px',
           fontFamily: 'monospace',
           color: '#ffffff',
           backgroundColor: '#000000bb',
-          padding: { x: 4, y: 2 },
+          padding: { x: 5, y: 3 },
           resolution: 2,
-        }).setOrigin(0.5, 1);
+        }).setOrigin(0.5, 1).setDepth(990);
       }
 
       _showChatBubble(sprite, message, isLocal) {
-        // Destroy existing local bubble
         if (isLocal && this.localBubble) {
           this.localBubble.destroy();
           this.localBubble = null;
         }
 
-        const bubble = this.add.text(sprite.x, sprite.y - 68, message, {
-          fontSize: '11px',
+        const yOffset = isLocal ? (this.localCrown ? -95 : -78) : -85;
+        const bubble = this.add.text(sprite.x, sprite.y + yOffset, message, {
+          fontSize: '14px',
           fontFamily: 'monospace',
           color: '#111111',
           backgroundColor: '#ffffffee',
-          padding: { x: 9, y: 6 },
-          wordWrap: { width: 200 },
+          padding: { x: 10, y: 7 },
+          wordWrap: { width: 220 },
           resolution: 2,
-        }).setOrigin(0.5, 1).setDepth(1000);
+        }).setOrigin(0.5, 1).setDepth(1002);
 
-        // Fade out after 3.8s
         this.tweens.add({
           targets: bubble,
           alpha: 0,
@@ -480,37 +759,44 @@
       }
 
       _addOtherPlayer(id, data) {
-        const char   = data.character || 'adam';
-        const texKey = `run_${char}`;
-        const sprite = this.add.sprite(data.x, data.y, texKey);
-        sprite.setScale(3);
-        sprite.setOrigin(0.5, 0.5);
+        const char    = data.character || 'adam';
+        const sprite  = this.add.sprite(data.x, data.y, `run_${char}`);
+        sprite.setScale(3).setOrigin(0.5, 0.5);
         sprite.play(`${data.anim || 'idle'}_${char}`);
         sprite.setFlipX(data.flipX ?? false);
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
-        this.otherPlayers[id] = { sprite, nameTag, character: char };
+        let crown = null;
+        if (data.cosmetics?.includes('crown')) {
+          crown = this.add.text(data.x, data.y - 68, '👑',
+            { fontSize: '18px', resolution: 2 }
+          ).setOrigin(0.5, 1).setDepth(1001);
+        }
+
+        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble: null, character: char };
       }
 
       update(time, delta) {
-        const { cursors, wasd, player } = this;
+        if (!this.player) return;
 
+        const { cursors, wasd, player } = this;
         const idleKey = `idle_${_playerChar}`;
         const walkKey = `walk_${_playerChar}`;
 
-        // ── Keep local chat bubble above player ───────────────────────
+        // ── Keep local overlays above player ─────────────────────────
+        if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y - 40);
+        if (this.localCrown)   this.localCrown.setPosition(player.x, player.y - 68);
         if (this.localBubble) {
-          this.localBubble.setPosition(player.x, player.y - 68);
+          const yOff = this.localCrown ? -95 : -78;
+          this.localBubble.setPosition(player.x, player.y + yOff);
         }
 
-        // ── Freeze movement while chat is open ────────────────────────
+        // ── Freeze while chat is open ─────────────────────────────────
         if (_chatOpen) {
           player.setVelocity(0, 0);
           if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
-          player.setFlipX(this.lastFlipX);
           this.eHint.setVisible(false);
-          this.localNameTag.setPosition(player.x, player.y - 34);
           return;
         }
 
@@ -519,7 +805,7 @@
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
 
-        // ── Proximity: show "Press E" hint when near furniture ────────
+        // ── Proximity: "Press E" hint ─────────────────────────────────
         const ptx = Math.floor(player.x / 48);
         const pty = Math.floor(player.y / 48);
         let nearFurniture = false;
@@ -532,9 +818,9 @@
           }
         }
         this.eHint.setVisible(nearFurniture);
-        if (nearFurniture) this.eHint.setPosition(player.x, player.y - 52);
+        if (nearFurniture) this.eHint.setPosition(player.x, player.y - 58);
 
-        // ── Sit / stand ────────────────────────────────────────────────
+        // ── Sit / stand ───────────────────────────────────────────────
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
@@ -555,7 +841,6 @@
           player.setFlipX(this.lastFlipX);
           if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
         } else {
-          // ── Movement ──────────────────────────────────────────────────
           player.setVelocity(0, 0);
           if (left)       player.setVelocityX(-SPEED);
           else if (right) player.setVelocityX( SPEED);
@@ -565,51 +850,43 @@
             player.body.velocity.normalize().scale(SPEED);
           }
 
-          // ── Animation ─────────────────────────────────────────────────
           const moving = left || right || up || down;
           if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
           if (right) { this.lastFlipX = false; player.setFlipX(false); }
-          if ((up || down) && !left && !right) player.setFlipX(this.lastFlipX);
-          if (moving) {
-            if (player.anims.currentAnim?.key !== walkKey) player.play(walkKey);
-          } else {
-            player.setFlipX(this.lastFlipX);
-            if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
-          }
+
+          const targetAnim = moving ? walkKey : idleKey;
+          if (player.anims.currentAnim?.key !== targetAnim) player.play(targetAnim);
         }
 
-        // ── Local name tag follows player ─────────────────────────────
-        this.localNameTag.setPosition(player.x, player.y - 34);
-
-        // ── Broadcast at 20 Hz ────────────────────────────────────────
+        // ── Network broadcast ─────────────────────────────────────────
         this._sendTimer += delta;
         if (this._sendTimer >= 50) {
           this._sendTimer = 0;
-          socket.emit("playerMove", {
-            x:     Math.round(player.x),
-            y:     Math.round(player.y),
-            flipX: this.lastFlipX,
-            anim:  this.sitting ? 'sit' : (left || right || up || down ? 'walk' : 'idle'),
+          const animState = this.sitting ? 'sit' : (player.anims.currentAnim?.key.startsWith('walk') ? 'walk' : 'idle');
+          socket.emit('playerMove', {
+            x: player.x, y: player.y,
+            flipX: player.flipX,
+            anim: animState,
           });
         }
 
         // ── Debug HUD ─────────────────────────────────────────────────
-        const peers = Object.keys(this.otherPlayers).length;
-        this.debugText.setText(
-          `pos:     ${Math.round(player.x)}, ${Math.round(player.y)}\n` +
-          `players: ${peers + 1} online`
-        );
+        const count = Object.keys(this.otherPlayers).length + 1;
+        this.debugText.setText(`pos:     ${Math.round(player.x)}, ${Math.round(player.y)}\nplayers: ${count} online`);
       }
     }
 
-    const game = new Phaser.Game({
-      type: Phaser.AUTO,
+    new Phaser.Game({
+      type:   Phaser.AUTO,
       width:  window.innerWidth,
       height: window.innerHeight,
-      backgroundColor: "#1a1a2e",
-      pixelArt: true,
-      physics: { default: "arcade", arcade: { debug: false } },
-      scene: OfficeScene,
+      backgroundColor: '#1a1a2e',
+      physics: { default: 'arcade', arcade: { debug: false } },
+      scene:  OfficeScene,
+      scale: {
+        mode:       Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
     });
   </script>
 </body>
