@@ -22,6 +22,16 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 # lastFlipX pattern
 - Store `this.lastFlipX = false` (init in create). Update only on left/right key presses.
 - Apply on up/down/idle so character holds last horizontal direction when stopped or moving vertically.
+- **Down-only convention:** set `lastFlipX = false` (face right = toward camera) when `down && !left && !right`. Do NOT update flipX on up-only — inherit lastFlipX.
+
+# player.texture.key drifts during sit animation
+- Palette-swapped animations (e.g. `sit_pl_adam_h1_sk0_sh2_p3`) reference frames from a *different* texture than the run sheet. Phaser switches `sprite.texture` when playing them.
+- **Never use `player.texture.key` to derive walk/idle/sit animation keys** — it returns the sit texture key after the sit anim plays, and `walk_<sit_tex>` / `idle_<sit_tex>` do not exist → `anims.exists()` guard silently blocks `play()` → character freezes on sit frame.
+- **Fix:** store `this.playerTexKey = texKey` in `_onApproved`. Use `this.playerTexKey` everywhere in `update()`. On E stand-up, call `player.setTexture(this.playerTexKey)` immediately before the next `update()` tick.
+
+# playerMoved animation keys must use texKey not character name
+- Other players' sprites use palette-swapped textures (e.g. `pl_adam_h1_sk0_sh2_p3`). Building animation keys from `entry.character` (`walk_adam`) references frames from the base `run_adam` texture — Phaser switches the sprite's texture on every frame → visible color flash.
+- **Fix:** store `entry.texKey` in `otherPlayers[]` and use it when building animation keys in the `playerMoved` handler.
 
 # Idle trigger — key-state NOT velocity
 - Use `!left && !right && !up && !down`, NOT `velocity.x === 0 && velocity.y === 0`.

@@ -1071,9 +1071,9 @@
           entry.sprite.setPosition(data.x, data.y);
           entry.sprite.setFlipX(data.flipX);
           const ak = data.anim === 'sit'
-            ? (entry.character === 'adam' ? 'sit_adam' : `idle_${entry.character}`)
-            : `${data.anim}_${entry.character}`;
-          if (entry.sprite.anims.currentAnim?.key !== ak) entry.sprite.play(ak);
+            ? (this.anims.exists(`sit_${entry.texKey}`) ? `sit_${entry.texKey}` : `idle_${entry.texKey}`)
+            : `${data.anim}_${entry.texKey}`;
+          if (entry.sprite.anims.currentAnim?.key !== ak && this.anims.exists(ak)) entry.sprite.play(ak);
           entry.nameTag.setPosition(data.x, data.y-40);
           if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
@@ -1155,6 +1155,7 @@
         const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
 
         const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
         this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
         this.player.body.setSize(12,12);
@@ -1262,8 +1263,8 @@
 
         const { cursors, wasd, player } = this;
 
-        // Derive anim keys from the local player's current texture
-        const texKey  = player.texture.key;
+        // Use stored run-sheet key — player.texture.key drifts when sit anim plays
+        const texKey  = this.playerTexKey;
         const idleKey = `idle_${texKey}`;
         const walkKey = `walk_${texKey}`;
         const sitKey  = _playerChar === 'adam' ? `sit_${texKey}` : idleKey;
@@ -1302,6 +1303,7 @@
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
+            player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
           } else if (nearFurniture) {
             const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y)
               || this.furnitureLayer.getTileAt(ptx, pty-1);
@@ -1323,8 +1325,9 @@
           else if (down)  player.setVelocityY( SPEED);
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(SPEED);
 
-          if (left)  { this.lastFlipX=true;  player.setFlipX(true);  }
-          if (right) { this.lastFlipX=false; player.setFlipX(false); }
+          if (left)                { this.lastFlipX=true;  player.setFlipX(true);  }
+          else if (right)          { this.lastFlipX=false; player.setFlipX(false); }
+          else if (down && !up)    { this.lastFlipX=false; player.setFlipX(false); } // face toward camera when walking down
 
           const targetAnim = (left||right||up||down) ? walkKey : idleKey;
           if (player.anims.currentAnim?.key !== targetAnim && this.anims.exists(targetAnim)) player.play(targetAnim);
