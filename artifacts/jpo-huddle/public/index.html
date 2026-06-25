@@ -132,12 +132,13 @@
           Phaser.Input.Keyboard.KeyCodes.SPACE,
         ]);
 
-        // Dismiss the click-to-play overlay on first pointer down
+        // Dismiss overlay via plain DOM click (Phaser never sees clicks on the HTML div)
         const overlay = document.getElementById('focus-overlay');
-        this.input.once('pointerdown', () => {
+        overlay.addEventListener('click', () => {
           overlay.classList.add('hidden');
           setTimeout(() => overlay.remove(), 300);
-        });
+          this.game.canvas.focus();
+        }, { once: true });
 
         // ── Camera ───────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
