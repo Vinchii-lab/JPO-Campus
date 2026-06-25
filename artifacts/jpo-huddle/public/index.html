@@ -19,56 +19,108 @@
     #join-overlay.hidden { opacity: 0; pointer-events: none; }
 
     .join-card {
-      background: #fff; border-radius: 16px; padding: 32px 38px;
+      background: #fff; border-radius: 16px; padding: 28px 32px;
       font-family: monospace; color: #222; text-align: center;
       box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-      min-width: 360px; max-width: 460px; width: 100%;
+      min-width: 340px; max-width: 440px; width: 100%;
     }
-    .join-card h2 { font-size: 22px; margin-bottom: 5px; letter-spacing: 1px; }
-    .join-card > p  { font-size: 13px; color: #888; margin-bottom: 18px; }
+    .join-card h2 { font-size: 20px; margin-bottom: 4px; letter-spacing: 1px; }
+    .join-card > p { font-size: 13px; color: #888; margin-bottom: 16px; }
     .join-card.hidden { display: none; }
 
-    .form-row { display: flex; gap: 10px; margin-bottom: 11px; }
+    .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
     .form-field { flex: 1; display: flex; flex-direction: column; text-align: left; }
     .form-field label { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
     .form-field input {
-      width: 100%; padding: 9px 12px; font-size: 15px; font-family: monospace;
+      width: 100%; padding: 8px 11px; font-size: 14px; font-family: monospace;
       border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.15s;
     }
     .form-field input:focus { border-color: #6c63ff; }
 
-    /* ── Character + tint builder ── */
-    .builder-section { margin-bottom: 14px; }
-    .builder-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-    .char-picker { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
-    .char-opt {
-      cursor: pointer; border: 3px solid transparent; border-radius: 8px; padding: 4px;
-      transition: border-color 0.15s, background 0.15s; background: #f5f5f5;
-    }
-    .char-opt:hover { border-color: #aaa; }
-    .char-opt.selected { border-color: #6c63ff; background: #ede9ff; }
-    .char-opt canvas { display: block; image-rendering: pixelated; }
-    .char-opt span { display: block; font-size: 10px; color: #555; margin-top: 2px; text-align: center; }
+    /* ── Builder steps ── */
+    #builder-section { display: none; }
+    #builder-section.active { display: block; }
 
-    .tint-picker { display: flex; gap: 7px; justify-content: center; flex-wrap: wrap; margin-bottom: 6px; }
-    .tint-opt {
+    .step-indicator {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0; margin-bottom: 14px; font-size: 11px; font-family: monospace;
+    }
+    .step-dot {
+      padding: 4px 10px; border-radius: 20px; cursor: default;
+      color: #bbb; background: #f0f0f0; transition: background 0.15s, color 0.15s;
+    }
+    .step-dot.active { background: #6c63ff; color: #fff; }
+    .step-dot.done   { background: #d8d4ff; color: #6c63ff; }
+    .step-arrow { color: #ccc; padding: 0 3px; font-size: 13px; }
+
+    .builder-body { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+    .preview-col {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+    #preview-canvas { image-rendering: pixelated; display: block; border-radius: 8px; background: #f5f5f5; }
+    .preview-label { font-size: 10px; color: #999; }
+
+    .options-col { flex: 1; text-align: left; }
+    .opt-section-label {
+      font-size: 11px; color: #888; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 7px;
+    }
+
+    /* Hair style picker */
+    .hair-style-row { display: flex; gap: 6px; margin-bottom: 12px; }
+    .hair-opt {
+      cursor: pointer; border: 3px solid transparent; border-radius: 8px; padding: 3px;
+      background: #f5f5f5; transition: border-color 0.12s, background 0.12s;
+    }
+    .hair-opt:hover { border-color: #aaa; }
+    .hair-opt.selected { border-color: #6c63ff; background: #ede9ff; }
+    .hair-opt canvas { display: block; image-rendering: pixelated; }
+    .hair-opt span { display: block; font-size: 9px; color: #666; text-align: center; margin-top: 2px; }
+
+    /* Color grids */
+    .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .cswatch {
       width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
       border: 3px solid transparent; transition: transform 0.1s, border-color 0.12s;
+      flex-shrink: 0;
     }
-    .tint-opt:hover { transform: scale(1.18); }
-    .tint-opt.selected { border-color: #333 !important; }
-    .tint-none { background: #f0f0f0; border: 3px solid #ccc !important; }
+    .cswatch:hover { transform: scale(1.18); }
+    .cswatch.selected { border-color: #333 !important; transform: scale(1.1); }
+    .cswatch.c-none { background: #f0f0f0; border: 3px solid #ccc !important; }
+    .sswatch {
+      width: 26px; height: 20px; border-radius: 6px; cursor: pointer;
+      border: 3px solid transparent; transition: transform 0.1s, border-color 0.12s;
+      flex-shrink: 0;
+    }
+    .sswatch:hover { transform: scale(1.12); }
+    .sswatch.selected { border-color: #333 !important; }
+    .sswatch.c-none { background: #f0f0f0; border: 3px solid #ccc !important; }
+
+    /* Step nav */
+    .step-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .nav-btn {
+      padding: 9px 18px; font-family: monospace; font-size: 13px;
+      border: 2px solid #ddd; border-radius: 8px; cursor: pointer; background: #fff; color: #444;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .nav-btn:hover { background: #f5f5f5; border-color: #bbb; }
+    .nav-btn.primary {
+      background: #6c63ff; color: #fff; border-color: #6c63ff;
+    }
+    .nav-btn.primary:hover { background: #574fd6; border-color: #574fd6; }
+    .nav-btn:disabled { opacity: 0.4; cursor: default; }
 
     .join-btn {
-      width: 100%; padding: 11px; background: #6c63ff; color: #fff;
-      border: none; border-radius: 8px; font-size: 15px; font-family: monospace;
-      cursor: pointer; font-weight: bold; transition: background 0.15s; margin-top: 6px;
+      width: 100%; padding: 10px; background: #6c63ff; color: #fff;
+      border: none; border-radius: 8px; font-size: 14px; font-family: monospace;
+      cursor: pointer; font-weight: bold; transition: background 0.15s; margin-top: 8px;
     }
     .join-btn:hover { background: #574fd6; }
     .join-btn:disabled { background: #aaa; cursor: default; }
-    .error-msg { color: #e74c3c; font-size: 12px; margin-bottom: 8px; min-height: 16px; }
+    .error-msg { color: #e74c3c; font-size: 12px; margin-bottom: 6px; min-height: 16px; }
 
-    /* ── Pending/Rejected screens ── */
+    /* ── Pending/Rejected ── */
     .spinner {
       width: 40px; height: 40px; border: 4px solid #eee; border-top-color: #6c63ff;
       border-radius: 50%; animation: spin 0.9s linear infinite; margin: 22px auto 18px;
@@ -228,38 +280,91 @@
 
   <!-- ── Registration overlay ── -->
   <div id="join-overlay">
-    <!-- Step 1: Register -->
     <div class="join-card" id="card-register">
       <h2>🏢 JPO Huddle</h2>
-      <p>Register to join the virtual office</p>
 
-      <div class="form-row">
-        <div class="form-field">
-          <label>First Name</label>
-          <input id="inp-first" type="text" placeholder="Jane" maxlength="20" autocomplete="given-name" />
+      <!-- ═══ Step 0: Personal info ═══ -->
+      <div id="info-section">
+        <p>Register to join the virtual office</p>
+        <div class="form-row">
+          <div class="form-field">
+            <label>First Name</label>
+            <input id="inp-first" type="text" placeholder="Jane" maxlength="20" autocomplete="given-name" />
+          </div>
+          <div class="form-field">
+            <label>Last Name</label>
+            <input id="inp-last" type="text" placeholder="Smith" maxlength="20" autocomplete="family-name" />
+          </div>
         </div>
-        <div class="form-field">
-          <label>Last Name</label>
-          <input id="inp-last" type="text" placeholder="Smith" maxlength="20" autocomplete="family-name" />
+        <div class="form-row">
+          <div class="form-field">
+            <label>Email</label>
+            <input id="inp-email" type="email" placeholder="jane@company.com" maxlength="80" autocomplete="email" />
+          </div>
         </div>
-      </div>
-      <div class="form-row">
-        <div class="form-field">
-          <label>Email</label>
-          <input id="inp-email" type="email" placeholder="jane@company.com" maxlength="80" autocomplete="email" />
-        </div>
-      </div>
-
-      <!-- Character builder: portraits + color tints -->
-      <div class="builder-section">
-        <div class="builder-label">Choose your character</div>
-        <div class="char-picker" id="char-picker"></div>
-        <div class="builder-label">Hair / clothing color</div>
-        <div class="tint-picker" id="tint-picker"></div>
+        <div class="error-msg" id="reg-error"></div>
+        <button class="join-btn" id="next-to-builder-btn">Build your character →</button>
       </div>
 
-      <div class="error-msg" id="reg-error"></div>
-      <button class="join-btn" id="register-btn">Request Access →</button>
+      <!-- ═══ Steps 1-4: Character builder ═══ -->
+      <div id="builder-section">
+        <!-- Progress dots -->
+        <div class="step-indicator">
+          <div class="step-dot active" id="sd-1">Hair</div>
+          <div class="step-arrow">›</div>
+          <div class="step-dot" id="sd-2">Skin</div>
+          <div class="step-arrow">›</div>
+          <div class="step-dot" id="sd-3">Shirt</div>
+          <div class="step-arrow">›</div>
+          <div class="step-dot" id="sd-4">Pants</div>
+        </div>
+
+        <!-- Preview + options side by side -->
+        <div class="builder-body">
+          <!-- Live preview -->
+          <div class="preview-col">
+            <canvas id="preview-canvas" width="80" height="160"></canvas>
+            <div class="preview-label">Preview</div>
+          </div>
+
+          <!-- Step content (right column) -->
+          <div class="options-col">
+
+            <!-- Step 1: Hair -->
+            <div id="bstep-1">
+              <div class="opt-section-label">Hair Style</div>
+              <div class="hair-style-row" id="hair-style-picker"></div>
+              <div class="opt-section-label">Hair Color</div>
+              <div class="swatch-row" id="hair-color-picker"></div>
+            </div>
+
+            <!-- Step 2: Skin -->
+            <div id="bstep-2" style="display:none">
+              <div class="opt-section-label">Skin Tone</div>
+              <div class="swatch-row" id="skin-tone-picker"></div>
+            </div>
+
+            <!-- Step 3: Shirt -->
+            <div id="bstep-3" style="display:none">
+              <div class="opt-section-label">Shirt Color</div>
+              <div class="swatch-row" id="shirt-color-picker"></div>
+            </div>
+
+            <!-- Step 4: Pants -->
+            <div id="bstep-4" style="display:none">
+              <div class="opt-section-label">Pants Color</div>
+              <div class="swatch-row" id="pants-color-picker"></div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Nav -->
+        <div class="step-nav">
+          <button class="nav-btn" id="btn-back">← Back</button>
+          <button class="nav-btn primary" id="btn-next">Next →</button>
+        </div>
+      </div>
     </div>
 
     <!-- Step 2: Pending -->
@@ -368,35 +473,63 @@
       bob:    '/assets/Bob_run_16x16.png',
     };
 
-    // Palette: index 0 = no swap, 1-8 = color swaps
-    const TINT_PALETTE = [
-      { label: 'Default', css: null       },
-      { label: 'Red',     css: '#e84040'  },
-      { label: 'Orange',  css: '#f08030'  },
-      { label: 'Yellow',  css: '#e8c820'  },
-      { label: 'Lime',    css: '#50bb30'  },
-      { label: 'Teal',    css: '#20bba8'  },
-      { label: 'Blue',    css: '#3880f0'  },
-      { label: 'Purple',  css: '#9840f0'  },
-      { label: 'Pink',    css: '#e840a0'  },
+    // Hair colors — earthy tones appropriate for hair
+    const HAIR_COLORS = [
+      { label: 'Original',  css: null       },
+      { label: 'Black',     css: '#1c1008'  },
+      { label: 'Dark Brown',css: '#4a2410'  },
+      { label: 'Brown',     css: '#7a4020'  },
+      { label: 'Auburn',    css: '#9c3820'  },
+      { label: 'Ginger',    css: '#c05018'  },
+      { label: 'Blonde',    css: '#c8982c'  },
+      { label: 'Platinum',  css: '#ddd0a0'  },
+      { label: 'White',     css: '#ece8e0'  },
     ];
 
-    let _playerName    = '';
-    let _playerChar    = 'adam';
-    let _playerTintIdx = 0;    // index into TINT_PALETTE (0 = original colors)
-    let _playerCoins   = 0;
-    let _ownedItems    = [];
+    // Skin tones
+    const SKIN_TONES = [
+      { label: 'Original', css: null       },
+      { label: 'Fair',     css: '#fde0c0'  },
+      { label: 'Light',    css: '#f5b87a'  },
+      { label: 'Medium',   css: '#d4895c'  },
+      { label: 'Tan',      css: '#b06438'  },
+      { label: 'Brown',    css: '#7a3c1c'  },
+      { label: 'Dark',     css: '#4a2010'  },
+    ];
 
+    // Clothing colors — vivid palette
+    const CLOTH_COLORS = [
+      { label: 'Original', css: null       },
+      { label: 'Red',      css: '#e84040'  },
+      { label: 'Orange',   css: '#f08030'  },
+      { label: 'Yellow',   css: '#e8c820'  },
+      { label: 'Green',    css: '#50bb30'  },
+      { label: 'Teal',     css: '#20bba8'  },
+      { label: 'Blue',     css: '#3880f0'  },
+      { label: 'Purple',   css: '#9840f0'  },
+      { label: 'Pink',     css: '#e840a0'  },
+    ];
+
+    // Player appearance state
+    let _playerName     = '';
+    let _playerChar     = 'adam';
+    let _playerHairIdx  = 0;
+    let _playerSkinIdx  = 0;
+    let _playerShirtIdx = 0;
+    let _playerPantsIdx = 0;
+    let _playerCoins    = 0;
+    let _ownedItems     = [];
+
+    let _builderStep   = 0;
     let _phaserKbd     = null;
     let _approvedQueue = null;
 
-    // Per-character: loaded HTMLImageElement + detected swap source color + preview canvas
-    const _charImages    = {};
-    const _charCanvases  = {};
-    const _charSrcColors = {};   // { r, g, b } of dominant swappable color per char
+    // Per-character loaded images + detected zone colors
+    const _charImages     = {};
+    const _charZoneColors = {};   // { hair, skin, shirt, pants } each {r,g,b} or null
 
     // ────────────────────────────────────────────────────────────────────
-    // Palette-swap helpers (used for both preview canvases and Phaser textures)
+    // Palette-swap helpers
     // ────────────────────────────────────────────────────────────────────
 
     function _hexCssToRGB(css) {
@@ -404,29 +537,58 @@
       return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
     }
 
-    // Find the most common non-outline, non-skin pixel color in a single sprite frame.
-    // Returns {r,g,b} or null if detection fails.
-    function _detectSwapColor(data) {
-      const buckets = {};
-      let best = null, bestCount = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-        if (a < 128) continue;
-        const lum = 0.299*r + 0.587*g + 0.114*b;
-        if (lum < 45 || lum > 215) continue;           // skip outlines & near-white
-        if (r > 155 && r > g + 25 && r > b + 35) continue; // skip skin-like (reddish-warm)
-        // Bucket by rounding to nearest 28 in each channel
-        const bk = `${Math.round(r/28)*28},${Math.round(g/28)*28},${Math.round(b/28)*28}`;
-        if (!buckets[bk]) buckets[bk] = { count: 0, r: 0, g: 0, b: 0 };
-        buckets[bk].count++; buckets[bk].r += r; buckets[bk].g += g; buckets[bk].b += b;
-        if (buckets[bk].count > bestCount) { bestCount = buckets[bk].count; best = buckets[bk]; }
+    // Detect hair/skin/shirt/pants zone colors from the first 16×32 frame.
+    // Uses spatial zones for shirt/pants and color heuristics for skin.
+    function _detectZoneColors(img) {
+      const fw = 16, fh = 32;
+      const tmp = document.createElement('canvas');
+      tmp.width = fw; tmp.height = fh;
+      const ctx = tmp.getContext('2d');
+      ctx.drawImage(img, 0, 0, fw, fh, 0, 0, fw, fh);
+      const d = ctx.getImageData(0, 0, fw, fh).data;
+
+      const hB = {}, skB = {}, shB = {}, pB = {};
+
+      for (let y = 0; y < fh; y++) {
+        for (let x = 0; x < fw; x++) {
+          const i = (y * fw + x) * 4;
+          const r = d[i], g = d[i+1], b = d[i+2], a = d[i+3];
+          if (a < 128) continue;
+          const lum = 0.299*r + 0.587*g + 0.114*b;
+          if (lum < 40 || lum > 218) continue;  // skip near-black outline & near-white
+          const bk = `${Math.round(r/24)*24},${Math.round(g/24)*24},${Math.round(b/24)*24}`;
+
+          // Skin heuristic: warm reddish-pink with non-negligible G and B
+          const isSkin = r > 148 && r > g + 20 && r > b + 28 && g > 80 && b > 50;
+
+          if (isSkin) {
+            if (!skB[bk]) skB[bk] = { count:0, r:0, g:0, b:0 };
+            skB[bk].count++; skB[bk].r += r; skB[bk].g += g; skB[bk].b += b;
+          } else {
+            const yf = y / fh;
+            const target = yf < 0.38 ? hB : yf < 0.68 ? shB : pB;
+            if (!target[bk]) target[bk] = { count:0, r:0, g:0, b:0 };
+            target[bk].count++; target[bk].r += r; target[bk].g += g; target[bk].b += b;
+          }
+        }
       }
-      if (!best || bestCount < 4) return null;
-      return { r: Math.round(best.r/best.count), g: Math.round(best.g/best.count), b: Math.round(best.b/best.count) };
+
+      function topBucket(buckets) {
+        let best = null, bc = 0;
+        for (const k in buckets) if (buckets[k].count > bc) { bc = buckets[k].count; best = buckets[k]; }
+        if (!best || bc < 3) return null;
+        return { r: Math.round(best.r/bc), g: Math.round(best.g/bc), b: Math.round(best.b/bc) };
+      }
+
+      return {
+        hair:  topBucket(hB),
+        skin:  topBucket(skB),
+        shirt: topBucket(shB),
+        pants: topBucket(pB),
+      };
     }
 
-    // Swap pixels within `threshold` Euclidean distance of source color → target color.
-    // Preserves relative luminance so shading/shadows look natural.
+    // Swap pixels within threshold Euclidean distance of source → target, preserving luminance.
     function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold) {
       const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
       const t2 = threshold * threshold;
@@ -441,138 +603,194 @@
       }
     }
 
-    // Build a palette-swapped copy of srcImg (HTMLImageElement) as a new canvas.
-    // srcColor = {r,g,b}, targetCSS = '#rrggbb'. Returns canvas or null.
-    function _buildSwappedCanvas(srcImg, srcColor, targetCSS) {
-      const [tr, tg, tb] = _hexCssToRGB(targetCSS);
-      const cv = document.createElement('canvas');
-      cv.width = srcImg.width; cv.height = srcImg.height;
-      const cx = cv.getContext('2d');
-      cx.drawImage(srcImg, 0, 0);
-      const id = cx.getImageData(0, 0, cv.width, cv.height);
-      _swapColorsData(id.data, srcColor.r, srcColor.g, srcColor.b, tr, tg, tb, 55);
-      cx.putImageData(id, 0, 0);
-      return cv;
+    // Apply all four zone swaps to an ImageData in-place. Order: skin → hair → shirt → pants.
+    // Using smaller thresholds for skin (tighter cluster) to avoid bleed.
+    function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx) {
+      if (skinIdx && zones?.skin && SKIN_TONES[skinIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(SKIN_TONES[skinIdx].css);
+        _swapColorsData(pixels, zones.skin.r, zones.skin.g, zones.skin.b, r, g, b, 42);
+      }
+      if (hairIdx && zones?.hair && HAIR_COLORS[hairIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(HAIR_COLORS[hairIdx].css);
+        _swapColorsData(pixels, zones.hair.r, zones.hair.g, zones.hair.b, r, g, b, 55);
+      }
+      if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(CLOTH_COLORS[shirtIdx].css);
+        _swapColorsData(pixels, zones.shirt.r, zones.shirt.g, zones.shirt.b, r, g, b, 55);
+      }
+      if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(CLOTH_COLORS[pantsIdx].css);
+        _swapColorsData(pixels, zones.pants.r, zones.pants.g, zones.pants.b, r, g, b, 55);
+      }
     }
 
-    // ── Character picker (DOM) ─────────────────────────────────────────
-    const picker = document.getElementById('char-picker');
-    CHARACTERS.forEach((char, idx) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'char-opt' + (idx === 0 ? ' selected' : '');
-      wrap.dataset.char = char;
+    // Redraw the 80×160 preview canvas with current appearance choices.
+    function _redrawPreview() {
+      const cv = document.getElementById('preview-canvas');
+      if (!cv) return;
+      const img = _charImages[_playerChar];
+      if (!img) return;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, 80, 160);
+      ctx.imageSmoothingEnabled = false;
 
-      const cv = document.createElement('canvas');
-      cv.width = 48; cv.height = 96;
-      cv.style.cssText = 'width:48px;height:96px';
-      _charCanvases[char] = cv;
+      const zones = _charZoneColors[_playerChar];
+      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_playerShirtIdx && !_playerPantsIdx;
 
+      if (noSwap || !zones) {
+        ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 80, 160);
+        return;
+      }
+
+      const tmp = document.createElement('canvas');
+      tmp.width = 16; tmp.height = 32;
+      const tc = tmp.getContext('2d');
+      tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
+      const id = tc.getImageData(0, 0, 16, 32);
+      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+      tc.putImageData(id, 0, 0);
+      ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
+    }
+
+    // ── Load character images + detect zones ──────────────────────────
+    CHARACTERS.forEach(char => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.src = CHAR_FILES[char];
       img.onload = () => {
         _charImages[char] = img;
-        // Detect swap color from the first frame (16×32)
-        const tmp = document.createElement('canvas');
-        tmp.width = 16; tmp.height = 32;
-        const tc = tmp.getContext('2d');
-        tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
-        _charSrcColors[char] = _detectSwapColor(tc.getImageData(0, 0, 16, 32).data);
-        _redrawPreviews();
+        _charZoneColors[char] = _detectZoneColors(img);
+        _redrawPreview();
+        // Refresh hair style canvas if on builder
+        const cv = document.getElementById(`hair-cv-${char}`);
+        if (cv) _drawHairStyleCanvas(cv, char);
       };
+    });
+
+    function _drawHairStyleCanvas(cv, char) {
+      const img = _charImages[char];
+      if (!img) return;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, 16, 32, 0, 0, cv.width, cv.height);
+    }
+
+    // ── Build hair style picker (DOM) ──────────────────────────────────
+    const hairStylePicker = document.getElementById('hair-style-picker');
+    CHARACTERS.forEach((char, idx) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'hair-opt' + (idx === 0 ? ' selected' : '');
+      wrap.dataset.char = char;
+
+      const cv = document.createElement('canvas');
+      cv.id = `hair-cv-${char}`;
+      cv.width = 36; cv.height = 72;
+      cv.style.cssText = 'width:36px;height:72px';
+      _drawHairStyleCanvas(cv, char);
 
       const lbl = document.createElement('span');
       lbl.textContent = char.charAt(0).toUpperCase() + char.slice(1);
 
-      wrap.appendChild(cv);
-      wrap.appendChild(lbl);
+      wrap.appendChild(cv); wrap.appendChild(lbl);
       wrap.addEventListener('click', () => {
-        document.querySelectorAll('.char-opt').forEach(el => el.classList.remove('selected'));
+        document.querySelectorAll('.hair-opt').forEach(el => el.classList.remove('selected'));
         wrap.classList.add('selected');
         _playerChar = char;
-        _redrawPreviews();
+        _redrawPreview();
       });
-      picker.appendChild(wrap);
+      hairStylePicker.appendChild(wrap);
     });
 
-    // ── Tint/swatch picker (DOM) ───────────────────────────────────────
-    const tintPicker = document.getElementById('tint-picker');
-    TINT_PALETTE.forEach((t, idx) => {
-      const dot = document.createElement('div');
-      dot.className = 'tint-opt' + (idx === 0 ? ' selected tint-none' : '');
-      dot.title = t.label;
-      if (t.css) dot.style.background = t.css;
-
-      dot.addEventListener('click', () => {
-        document.querySelectorAll('.tint-opt').forEach(el => el.classList.remove('selected'));
-        dot.classList.add('selected');
-        _playerTintIdx = idx;
-        _redrawPreviews();
-      });
-      tintPicker.appendChild(dot);
-    });
-
-    // Re-draw all four character preview canvases using palette swap (not color wash).
-    function _redrawPreviews() {
-      CHARACTERS.forEach(char => {
-        const cv  = _charCanvases[char];
-        const img = _charImages[char];
-        if (!cv || !img) return;
-        const ctx = cv.getContext('2d');
-        ctx.clearRect(0, 0, 48, 96);
-        ctx.imageSmoothingEnabled = false;
-
-        const src = _charSrcColors[char];
-        const t   = TINT_PALETTE[_playerTintIdx];
-
-        if (!_playerTintIdx || !src || !t.css) {
-          // No swap: draw first frame directly, scaled up
-          ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 48, 96);
-          return;
-        }
-
-        // Draw first frame to 16×32 tmp canvas, swap hair/clothing pixels, scale to preview
-        const tmp = document.createElement('canvas');
-        tmp.width = 16; tmp.height = 32;
-        const tc = tmp.getContext('2d');
-        tc.imageSmoothingEnabled = false;
-        tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
-        const id = tc.getImageData(0, 0, 16, 32);
-        const [tr, tg, tb] = _hexCssToRGB(t.css);
-        _swapColorsData(id.data, src.r, src.g, src.b, tr, tg, tb, 55);
-        tc.putImageData(id, 0, 0);
-        ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 48, 96);
+    // ── Build swatch pickers ───────────────────────────────────────────
+    function _buildSwatchRow(containerId, palette, getIdx, setIdx, isRound) {
+      const row = document.getElementById(containerId);
+      palette.forEach((item, idx) => {
+        const sw = document.createElement('div');
+        sw.className = (isRound ? 'cswatch' : 'sswatch') + (idx === 0 ? ' selected c-none' : '');
+        sw.title = item.label;
+        if (item.css) sw.style.background = item.css;
+        sw.addEventListener('click', () => {
+          row.querySelectorAll(isRound ? '.cswatch' : '.sswatch').forEach(el => el.classList.remove('selected'));
+          sw.classList.add('selected');
+          setIdx(idx);
+          _redrawPreview();
+        });
+        row.appendChild(sw);
       });
     }
 
-    // ── Registration ──────────────────────────────────────────────────
+    _buildSwatchRow('hair-color-picker', HAIR_COLORS, ()=>_playerHairIdx, v=>{ _playerHairIdx=v; }, true);
+    _buildSwatchRow('skin-tone-picker',  SKIN_TONES,  ()=>_playerSkinIdx,  v=>{ _playerSkinIdx=v;  }, false);
+    _buildSwatchRow('shirt-color-picker',CLOTH_COLORS,()=>_playerShirtIdx, v=>{ _playerShirtIdx=v; }, true);
+    _buildSwatchRow('pants-color-picker',CLOTH_COLORS,()=>_playerPantsIdx, v=>{ _playerPantsIdx=v; }, true);
+
+    // ── Step navigation ────────────────────────────────────────────────
+    function goToStep(n) {
+      _builderStep = n;
+      [1,2,3,4].forEach(i => {
+        document.getElementById(`bstep-${i}`).style.display = (i === n) ? '' : 'none';
+        const dot = document.getElementById(`sd-${i}`);
+        dot.classList.toggle('active', i === n);
+        dot.classList.toggle('done',   i < n);
+      });
+      const backBtn = document.getElementById('btn-back');
+      const nextBtn = document.getElementById('btn-next');
+      backBtn.style.visibility = n > 1 ? 'visible' : 'hidden';
+      if (n < 4) {
+        nextBtn.textContent = 'Next →';
+        nextBtn.onclick = () => goToStep(n + 1);
+      } else {
+        nextBtn.textContent = 'Request Access →';
+        nextBtn.onclick = tryRegister;
+      }
+      backBtn.onclick = () => goToStep(n - 1 < 1 ? 1 : n - 1);
+      _redrawPreview();
+    }
+
+    function goToBuilder() {
+      const first = document.getElementById('inp-first').value.trim();
+      const email = document.getElementById('inp-email').value.trim();
+      const errEl = document.getElementById('reg-error');
+      if (!first) { errEl.textContent = 'First name is required.'; return; }
+      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      errEl.textContent = '';
+      document.getElementById('info-section').style.display = 'none';
+      document.getElementById('builder-section').classList.add('active');
+      goToStep(1);
+    }
+
+    // ── Personal info inputs ───────────────────────────────────────────
     function _stopAndEnter(e) {
       e.stopPropagation();
-      if (e.key === 'Enter') tryRegister();
+      if (e.key === 'Enter') goToBuilder();
     }
     document.getElementById('inp-first').addEventListener('keydown', _stopAndEnter);
     document.getElementById('inp-last').addEventListener('keydown',  _stopAndEnter);
     document.getElementById('inp-email').addEventListener('keydown', _stopAndEnter);
+    document.getElementById('next-to-builder-btn').addEventListener('click', goToBuilder);
 
     ['inp-first','inp-last','inp-email'].forEach(id => {
       document.getElementById(id).addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
       document.getElementById(id).addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
     });
 
+    // ── Registration submit ────────────────────────────────────────────
     function tryRegister() {
       const first = document.getElementById('inp-first').value.trim();
       const last  = document.getElementById('inp-last').value.trim();
       const email = document.getElementById('inp-email').value.trim();
-      const errEl = document.getElementById('reg-error');
 
-      if (!first)                         { errEl.textContent = 'First name is required.'; return; }
-      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
-      errEl.textContent = '';
-
-      document.getElementById('register-btn').disabled = true;
-      socket.emit('register', { firstName: first, lastName: last, email, character: _playerChar, tintIdx: _playerTintIdx });
+      document.getElementById('btn-next').disabled = true;
+      socket.emit('register', {
+        firstName: first, lastName: last, email,
+        character: _playerChar,
+        hairIdx:   _playerHairIdx,
+        skinIdx:   _playerSkinIdx,
+        shirtIdx:  _playerShirtIdx,
+        pantsIdx:  _playerPantsIdx,
+      });
     }
-    document.getElementById('register-btn').addEventListener('click', tryRegister);
 
     // ── Registration lifecycle ────────────────────────────────────────
     socket.on('registrationPending', () => {
@@ -588,8 +806,11 @@
     socket.on('approved', (data) => {
       _playerName    = data.name;
       _playerChar    = data.character;
-      _playerTintIdx = data.tintIdx ?? 0;
-      _playerCoins   = data.coins;
+      _playerHairIdx  = data.hairIdx  ?? 0;
+      _playerSkinIdx  = data.skinIdx  ?? 0;
+      _playerShirtIdx = data.shirtIdx ?? 0;
+      _playerPantsIdx = data.pantsIdx ?? 0;
+      _playerCoins    = data.coins;
 
       const overlay = document.getElementById('join-overlay');
       overlay.classList.add('hidden');
@@ -688,8 +909,7 @@
 
     document.addEventListener('keydown', e => {
       if (e.key === 'F8') {
-        e.preventDefault();
-        e.stopImmediatePropagation();
+        e.preventDefault(); e.stopImmediatePropagation();
         if (_ownerPanelOpen) { closeOwnerPanel(); return; }
         if (!_adminAuthed)   { openOwnerPwd();    return; }
         openOwnerPanel();
@@ -723,32 +943,20 @@
     document.getElementById('owner-pwd-input').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
     document.getElementById('owner-pwd-input').addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
 
-    function openOwnerPanel() {
-      _ownerPanelOpen = true;
-      document.getElementById('owner-panel').classList.add('open');
-    }
+    function openOwnerPanel() { _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); }
     function closeOwnerPanel() {
       _ownerPanelOpen = false;
       document.getElementById('owner-panel').classList.remove('open');
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('adminAuthOk', () => {
-      _adminAuthed = true;
-      closeOwnerPwd();
-      openOwnerPanel();
-    });
-    socket.on('adminAuthFail', () => {
-      document.getElementById('owner-pwd-error').textContent = 'Incorrect password.';
-    });
+    socket.on('adminAuthOk', () => { _adminAuthed = true; closeOwnerPwd(); openOwnerPanel(); });
+    socket.on('adminAuthFail', () => { document.getElementById('owner-pwd-error').textContent = 'Incorrect password.'; });
 
     socket.on('pendingList', (list) => {
       document.getElementById('op-pending-count').textContent = list.length;
       const tbody = document.getElementById('op-pending-tbody');
-      if (!list.length) {
-        tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>';
-        return;
-      }
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
           <td>${esc(p.name)}</td>
@@ -758,29 +966,23 @@
             <button class="o-btn o-btn-approve" onclick="ownerApprove('${esc(p.id)}')">✓</button>
             <button class="o-btn o-btn-reject"  onclick="ownerReject('${esc(p.id)}')">✗</button>
           </td>
-        </tr>
-      `).join('');
+        </tr>`).join('');
     });
 
     socket.on('playerList', (list) => {
       document.getElementById('op-player-count').textContent = list.length;
       const tbody = document.getElementById('op-player-tbody');
-      if (!list.length) {
-        tbody.innerHTML = '<tr><td class="owner-empty" colspan="3">No players online</td></tr>';
-        return;
-      }
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="3">No players online</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
           <td><span class="online-dot"></span>${esc(p.name)}</td>
           <td>💰 ${p.coins}</td>
           <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
-        </tr>
-      `).join('');
+        </tr>`).join('');
     });
 
     function ownerApprove(id) { socket.emit('approvePlayer', id); }
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
-
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -813,26 +1015,21 @@
         map.createLayer('Floor', tilesets).setScale(3);
         const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
 
-        // Base animations (no tint)
+        // Base animations
         CHARACTERS.forEach(char => {
-          this.anims.create({ key: `idle_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`, {start:0,end:0}), frameRate:1,  repeat:-1 });
-          this.anims.create({ key: `walk_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`, {start:0,end:7}), frameRate:10, repeat:-1 });
+          this.anims.create({ key: `idle_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`,{start:0,end:0}), frameRate:1,  repeat:-1 });
+          this.anims.create({ key: `walk_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`,{start:0,end:7}), frameRate:10, repeat:-1 });
         });
-        this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',   {start:0,end:5}), frameRate:8, repeat:-1 });
-        this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone', {start:0,end:8}), frameRate:8, repeat:-1 });
-
-        // Build palette-swapped texture variants for all tint indices 1-8
-        this._buildSwappedTextures();
+        this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',  {start:0,end:5}), frameRate:8, repeat:-1 });
+        this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
 
         const furnitureLayer = map.createLayer('Furniture', tilesets).setScale(3);
-        this.furnitureLayer  = furnitureLayer;
-        this.wallLayer       = wallLayer;
+        this.furnitureLayer = furnitureLayer;
+        this.wallLayer      = wallLayer;
         wallLayer.setCollisionByExclusion([-1]);
 
-        // Computer glows
         [[12,17],[14,17],[16,17],[12,19],[14,19],[16,19]].forEach(([col,row],i) => {
-          const wx = col*48+24, wy = row*48+8;
-          const g = this.add.graphics();
+          const wx=col*48+24, wy=row*48+8; const g=this.add.graphics();
           g.fillStyle(0x44aaff,0.5); g.fillRoundedRect(wx-14,wy-7,28,14,3);
           g.fillStyle(0x88ccff,0.6); g.fillRoundedRect(wx-8, wy-4,16, 8,2);
           this.tweens.add({targets:g,alpha:{from:0.4,to:0.9},duration:1100+i*180,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
@@ -859,7 +1056,6 @@
 
         this.debugText = this.add.text(12,12,'',{fontSize:'13px',fontFamily:'monospace',color:'#fff',backgroundColor:'#00000099',padding:{x:6,y:4}}).setScrollFactor(0).setDepth(999);
 
-        // ── Socket listeners ──────────────────────────────────────────
         socket.on('currentPlayers', (allPlayers) => {
           if (!this.player) { this._pendingPlayers = allPlayers; return; }
           Object.entries(allPlayers).forEach(([id,data]) => { if (id!==socket.id) this._addOtherPlayer(id,data); });
@@ -874,16 +1070,10 @@
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
           entry.sprite.setFlipX(data.flipX);
-          const tIdx = entry.tintIdx || 0;
-          let animKey;
-          if (data.anim === 'sit') {
-            animKey = entry.character === 'adam'
-              ? this._animKey('sit', 'adam', tIdx)
-              : this._animKey('idle', entry.character, tIdx);
-          } else {
-            animKey = this._animKey(data.anim, entry.character, tIdx);
-          }
-          if (entry.sprite.anims.currentAnim?.key !== animKey) entry.sprite.play(animKey);
+          const ak = data.anim === 'sit'
+            ? (entry.character === 'adam' ? 'sit_adam' : `idle_${entry.character}`)
+            : `${data.anim}_${entry.character}`;
+          if (entry.sprite.anims.currentAnim?.key !== ak) entry.sprite.play(ak);
           entry.nameTag.setPosition(data.x, data.y-40);
           if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
@@ -915,63 +1105,61 @@
         if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
       }
 
-      // ── Build palette-swapped Phaser textures for all char × tint combos ──
-      _buildSwappedTextures() {
-        CHARACTERS.forEach(char => {
-          const srcImg = this.textures.get(`run_${char}`).source[0].image;
+      // Build (or retrieve cached) palette-swapped sprite sheet texture for a player.
+      // Returns texture key string.
+      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx) {
+        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+        if (this.textures.exists(key)) return key;
 
-          // Detect swap color from first frame
-          const tmp = document.createElement('canvas');
-          tmp.width = 16; tmp.height = 32;
-          const tc = tmp.getContext('2d');
-          tc.drawImage(srcImg, 0, 0, 16, 32, 0, 0, 16, 32);
-          const srcColor = _detectSwapColor(tc.getImageData(0, 0, 16, 32).data);
-          if (!srcColor) return;
+        const srcImg = this.textures.get(`run_${char}`).source[0].image;
+        const sw = srcImg.width, sh = srcImg.height;
+        const cv = document.createElement('canvas');
+        cv.width = sw; cv.height = sh;
+        const cx = cv.getContext('2d');
+        cx.drawImage(srcImg, 0, 0);
 
-          TINT_PALETTE.forEach((t, idx) => {
-            if (idx === 0 || !t.css) return;
-            const swapCv = _buildSwappedCanvas(srcImg, srcColor, t.css);
-            const key = `run_${char}_${idx}`;
-            this.textures.addSpriteSheet(key, swapCv, { frameWidth: 16, frameHeight: 32 });
-            this.anims.create({ key: `idle_${char}_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:0}), frameRate:1,  repeat:-1 });
-            this.anims.create({ key: `walk_${char}_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:7}), frameRate:10, repeat:-1 });
-          });
+        const zones = _charZoneColors[char];
+        if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+          const id = cx.getImageData(0, 0, sw, sh);
+          _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx);
+          cx.putImageData(id, 0, 0);
+        }
 
-          // Also swap adam's sit sprite using the same source color
-          if (char === 'adam') {
-            const sitImg = this.textures.get('adam_sit').source[0].image;
-            TINT_PALETTE.forEach((t, idx) => {
-              if (idx === 0 || !t.css) return;
-              const swapCv = _buildSwappedCanvas(sitImg, srcColor, t.css);
-              const key = `adam_sit_${idx}`;
-              this.textures.addSpriteSheet(key, swapCv, { frameWidth: 16, frameHeight: 32 });
-              this.anims.create({ key: `sit_adam_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:5}), frameRate:8, repeat:-1 });
-            });
+        this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
+        this.anims.create({ key: `idle_${key}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:0}), frameRate:1,  repeat:-1 });
+        this.anims.create({ key: `walk_${key}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:7}), frameRate:10, repeat:-1 });
+
+        // Also build a sit variant for adam
+        if (char === 'adam') {
+          const sitKey = `pl_sit_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+          if (!this.textures.exists(sitKey)) {
+            const sitSrc = this.textures.get('adam_sit').source[0].image;
+            const sc = document.createElement('canvas');
+            sc.width = sitSrc.width; sc.height = sitSrc.height;
+            const scx = sc.getContext('2d');
+            scx.drawImage(sitSrc, 0, 0);
+            if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+              const sid = scx.getImageData(0, 0, sc.width, sc.height);
+              _applySwaps(sid.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx);
+              scx.putImageData(sid, 0, 0);
+            }
+            this.textures.addSpriteSheet(sitKey, sc, { frameWidth: 16, frameHeight: 32 });
+            this.anims.create({ key: `sit_${key}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
           }
-        });
-      }
+        }
 
-      // Safe texture/anim key lookup — falls back to base key if variant not found
-      _texKey(char, tIdx) {
-        if (!tIdx) return `run_${char}`;
-        const k = `run_${char}_${tIdx}`;
-        return this.textures.exists(k) ? k : `run_${char}`;
-      }
-      _animKey(verb, char, tIdx) {
-        if (!tIdx) return `${verb}_${char}`;
-        const k = `${verb}_${char}_${tIdx}`;
-        return this.anims.exists(k) ? k : `${verb}_${char}`;
+        return key;
       }
 
       _onApproved(data) {
         const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
 
-        const texKey = this._texKey(_playerChar, _playerTintIdx);
-        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
+        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
         this.player.body.setSize(12,12);
         this.player.setCollideWorldBounds(true);
-        this.player.play(this._animKey('idle', _playerChar, _playerTintIdx));
+        this.player.play(`idle_${texKey}`);
         this.physics.add.collider(this.player, this.wallLayer);
 
         this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
@@ -1037,18 +1225,25 @@
         }).setOrigin(0.5,1).setDepth(1002);
         this.tweens.add({
           targets:bubble, alpha:0, delay:3800, duration:500,
-          onComplete:()=>{ bubble.destroy(); if (isLocal && this.localBubble===bubble) this.localBubble=null; },
+          onComplete:()=>{ bubble.destroy(); if(isLocal&&this.localBubble===bubble) this.localBubble=null; },
         });
         if (isLocal) this.localBubble = bubble;
         return bubble;
       }
 
       _addOtherPlayer(id, data) {
-        const char  = data.character || 'adam';
-        const tIdx  = data.tintIdx   || 0;
-        const sprite = this.add.sprite(data.x, data.y, this._texKey(char, tIdx));
+        const char    = data.character || 'adam';
+        const hairIdx  = data.hairIdx   || 0;
+        const skinIdx  = data.skinIdx   || 0;
+        const shirtIdx = data.shirtIdx  || 0;
+        const pantsIdx = data.pantsIdx  || 0;
+
+        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx);
+        const sprite = this.add.sprite(data.x, data.y, texKey);
         sprite.setScale(3).setOrigin(0.5,0.5);
-        sprite.play(this._animKey(data.anim || 'idle', char, tIdx));
+        const animVerb = (data.anim === 'sit' && char !== 'adam') ? 'idle' : (data.anim || 'idle');
+        const playKey  = (data.anim === 'sit' && char === 'adam') ? 'sit_adam' : `${animVerb}_${texKey}`;
+        sprite.play(playKey);
         sprite.setFlipX(data.flipX ?? false);
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
@@ -1059,15 +1254,19 @@
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
 
-        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble: null, character: char, tintIdx: tIdx };
+        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey };
       }
 
       update(time, delta) {
         if (!this.player) return;
 
         const { cursors, wasd, player } = this;
-        const idleKey = this._animKey('idle', _playerChar, _playerTintIdx);
-        const walkKey = this._animKey('walk', _playerChar, _playerTintIdx);
+
+        // Derive anim keys from the local player's current texture
+        const texKey  = player.texture.key;
+        const idleKey = `idle_${texKey}`;
+        const walkKey = `walk_${texKey}`;
+        const sitKey  = _playerChar === 'adam' ? `sit_${texKey}` : idleKey;
 
         if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
@@ -1075,7 +1274,8 @@
 
         if (_chatOpen || _ownerPanelOpen) {
           player.setVelocity(0,0);
-          if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
+          const curKey = player.anims.currentAnim?.key;
+          if (curKey !== idleKey && this.anims.exists(idleKey)) player.play(idleKey);
           this.eHint.setVisible(false);
           return;
         }
@@ -1109,14 +1309,12 @@
           }
         }
 
-        const sitKey = _playerChar === 'adam'
-          ? this._animKey('sit', 'adam', _playerTintIdx)
-          : idleKey;
-
         if (this.sitting) {
           player.setVelocity(0,0);
           player.setFlipX(this.lastFlipX);
-          if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
+          const sitExists = this.anims.exists(sitKey);
+          const playSit = sitExists ? sitKey : idleKey;
+          if (player.anims.currentAnim?.key !== playSit) player.play(playSit);
         } else {
           player.setVelocity(0,0);
           if (left)       player.setVelocityX(-SPEED);
@@ -1129,14 +1327,14 @@
           if (right) { this.lastFlipX=false; player.setFlipX(false); }
 
           const targetAnim = (left||right||up||down) ? walkKey : idleKey;
-          if (player.anims.currentAnim?.key !== targetAnim) player.play(targetAnim);
+          if (player.anims.currentAnim?.key !== targetAnim && this.anims.exists(targetAnim)) player.play(targetAnim);
         }
 
         this._sendTimer += delta;
         if (this._sendTimer >= 50) {
           this._sendTimer = 0;
           const animState = this.sitting ? 'sit'
-            : (player.anims.currentAnim?.key.startsWith('walk') ? 'walk' : 'idle');
+            : (player.anims.currentAnim?.key.includes('walk') ? 'walk' : 'idle');
           socket.emit('playerMove', {x:player.x, y:player.y, flipX:player.flipX, anim:animState});
         }
 
