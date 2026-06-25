@@ -17,10 +17,9 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
     const socket = io();
-    socket.on("connect", () => console.log("Connected to JPO Campus"));
 
-    const WORLD_W = 2400;   // 50 tiles * 16px * 3x
-    const WORLD_H = 1728;   // 36 tiles * 16px * 3x
+    const WORLD_W = 2400;
+    const WORLD_H = 1728;
     const SPEED   = 150;
 
     class OfficeScene extends Phaser.Scene {
@@ -39,27 +38,22 @@
 
       create() {
         // ── Tilemap ──────────────────────────────────────────────────
-        // Spawn tile (22,17) = world (1080,840) — center of start room (cols 18-25, rows 15-20)
-        const SPAWN_X = 22 * 48 + 24;   // 1080
-        const SPAWN_Y = 17 * 48 + 24;   // 840
+        const SPAWN_X = 22 * 48 + 24;
+        const SPAWN_Y = 17 * 48 + 24;
         const map     = this.make.tilemap({ key: "map" });
         const tsRoom  = map.addTilesetImage("Room_Builder",         "roombuilder");
         const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
         const tilesets = [tsRoom, tsInter];
 
-        // Render order = insertion order (TilemapLayer ignores setDepth relative to sprites).
-        // floor → wall → PLAYER → furniture  so player is always in front of walls/floor.
+        // Render order = insertion order.
+        // floor → wall → other players → local player → furniture
         const floorLayer = map.createLayer("Floor", tilesets);
         floorLayer.setScale(3);
-        floorLayer.setPosition(0, 0);
 
         const wallLayer = map.createLayer("Wall", tilesets);
         wallLayer.setScale(3);
-        wallLayer.setPosition(0, 0);
 
         // ── Animations ───────────────────────────────────────────────
-        // Single walk animation for all directions — flipX handles left vs right.
-        // Using one key avoids play() restarts (and the resulting stutter) on direction change.
         this.anims.create({
           key: 'idle',
           frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 0 }),
@@ -73,36 +67,38 @@
           repeat: -1
         });
 
-        // ── Player (inserted AFTER floor+wall, BEFORE furniture) ─────
+        // ── Other-player sprites (group, added before local player) ──
+        this.otherPlayers = {};
+
+        // ── Local player ─────────────────────────────────────────────
         this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player_run");
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
-        // 12×12 source px = 36×36 world px — fits through a 1-tile (48px) doorway.
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
         this.player.setFlipX(false);
 
-        // ── Furniture layer on top (inserted AFTER player) ───────────
+        // ── Furniture layer on top ───────────────────────────────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
         furnitureLayer.setScale(3);
-        furnitureLayer.setPosition(0, 0);
 
         this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);
         this.physics.add.collider(this.player, wallLayer);
 
         // ── Input ────────────────────────────────────────────────────
-        this.cursors = this.input.keyboard.createCursorKeys();
-        this.wasd    = this.input.keyboard.addKeys({
+        this.cursors   = this.input.keyboard.createCursorKeys();
+        this.wasd      = this.input.keyboard.addKeys({
           up:    Phaser.Input.Keyboard.KeyCodes.W,
           down:  Phaser.Input.Keyboard.KeyCodes.S,
           left:  Phaser.Input.Keyboard.KeyCodes.A,
           right: Phaser.Input.Keyboard.KeyCodes.D,
         });
-        this.keyE     = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-        this.sitting  = false;
-        this.lastFlipX = false; // tracks last horizontal facing; false = right, true = left
+        this.keyE      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.sitting   = false;
+        this.lastFlipX = false;
+        this._sendTimer = 0;
 
         // ── Camera ───────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -110,14 +106,13 @@
         this.cameras.main.setZoom(1);
         this.cameras.main.startFollow(this.player);
 
-        // Mouse-wheel zoom: scroll up = zoom in, scroll down = zoom out
         this.input.on("wheel", (_ptr, _objs, _dx, dy) => {
           const cam  = this.cameras.main;
           const next = Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 0.5, 4);
           cam.setZoom(next);
         });
 
-        // ── Debug HUD (top-left, fixed to screen) ────────────────────
+        // ── Debug HUD ────────────────────────────────────────────────
         this.debugText = this.add.text(12, 12, '', {
           fontSize: '13px',
           fontFamily: 'monospace',
@@ -125,23 +120,58 @@
           backgroundColor: '#00000099',
           padding: { x: 6, y: 4 },
         }).setScrollFactor(0).setDepth(999);
+
+        // ── Multiplayer socket listeners ─────────────────────────────
+        socket.on("connect", () => console.log("Connected to JPO Campus"));
+
+        socket.on("currentPlayers", (allPlayers) => {
+          Object.entries(allPlayers).forEach(([id, data]) => {
+            if (id !== socket.id) this._addOtherPlayer(id, data);
+          });
+        });
+
+        socket.on("playerJoined", (data) => {
+          if (data.id !== socket.id) this._addOtherPlayer(data.id, data);
+        });
+
+        socket.on("playerMoved", (data) => {
+          const s = this.otherPlayers[data.id];
+          if (!s) return;
+          s.setPosition(data.x, data.y);
+          s.setFlipX(data.flipX);
+          if (s.anims.currentAnim?.key !== data.anim) s.play(data.anim);
+        });
+
+        socket.on("playerLeft", (id) => {
+          const s = this.otherPlayers[id];
+          if (s) { s.destroy(); delete this.otherPlayers[id]; }
+        });
       }
 
-      update() {
+      _addOtherPlayer(id, data) {
+        const s = this.add.sprite(data.x, data.y, "player_run");
+        s.setScale(3);
+        s.setOrigin(0.5, 0.5);
+        s.setTint(0xaaddff);  // light blue tint to distinguish from local player
+        s.play(data.anim || "idle");
+        s.setFlipX(data.flipX ?? false);
+        this.otherPlayers[id] = s;
+      }
+
+      update(time, delta) {
         const { cursors, wasd, player } = this;
         const up    = cursors.up.isDown    || wasd.up.isDown;
         const down  = cursors.down.isDown  || wasd.down.isDown;
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
 
-        // ── Sit / stand on chairs (press E) ──────────────────────────
+        // ── Sit / stand ───────────────────────────────────────────────
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
           } else {
             const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y);
             if (tile) {
-              // snap feet onto the chair tile (tiles are 48px in world space)
               player.setPosition(tile.x * 48 + 24, tile.y * 48 + 24);
               this.sitting = true;
             }
@@ -151,43 +181,52 @@
           player.setVelocity(0, 0);
           player.setFlipX(this.lastFlipX);
           if (player.anims.currentAnim?.key !== "idle") player.play("idle");
-          return;
-        }
-
-        player.setVelocity(0, 0);
-
-        if (left)       { player.setVelocityX(-SPEED); }
-        else if (right) { player.setVelocityX( SPEED); }
-
-        if (up)         { player.setVelocityY(-SPEED); }
-        else if (down)  { player.setVelocityY( SPEED); }
-
-        // Diagonal: normalise so speed is consistent
-        if ((left || right) && (up || down)) {
-          player.body.velocity.normalize().scale(SPEED);
-        }
-
-        // Animation — one walk key for all directions; flipX handles facing
-        const anim    = player.anims.currentAnim?.key;
-        const moving  = left || right || up || down;
-        if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
-        if (right) { this.lastFlipX = false; player.setFlipX(false); }
-        if ((up || down) && !left && !right) player.setFlipX(this.lastFlipX);
-        if (moving) {
-          if (anim !== "walk") player.play("walk");
         } else {
-          player.setFlipX(this.lastFlipX);
-          if (anim !== "idle") player.play("idle");
+          // ── Movement ─────────────────────────────────────────────────
+          player.setVelocity(0, 0);
+          if (left)       player.setVelocityX(-SPEED);
+          else if (right) player.setVelocityX( SPEED);
+          if (up)         player.setVelocityY(-SPEED);
+          else if (down)  player.setVelocityY( SPEED);
+          if ((left || right) && (up || down)) {
+            player.body.velocity.normalize().scale(SPEED);
+          }
+
+          // ── Animation ────────────────────────────────────────────────
+          const anim   = player.anims.currentAnim?.key;
+          const moving = left || right || up || down;
+          if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
+          if (right) { this.lastFlipX = false; player.setFlipX(false); }
+          if ((up || down) && !left && !right) player.setFlipX(this.lastFlipX);
+          if (moving) {
+            if (anim !== "walk") player.play("walk");
+          } else {
+            player.setFlipX(this.lastFlipX);
+            if (anim !== "idle") player.play("idle");
+          }
         }
 
-        // Debug HUD
+        // ── Send position to server at 20 Hz ─────────────────────────
+        this._sendTimer += delta;
+        if (this._sendTimer >= 50) {
+          this._sendTimer = 0;
+          socket.emit("playerMove", {
+            x:     Math.round(player.x),
+            y:     Math.round(player.y),
+            flipX: this.lastFlipX,
+            anim:  player.anims.currentAnim?.key ?? "idle",
+          });
+        }
+
+        // ── Debug HUD ────────────────────────────────────────────────
         const curAnim  = player.anims.currentAnim?.key ?? 'none';
         const curFrame = player.anims.currentFrame?.index ?? 0;
-        const flipX    = player.flipX;
+        const peers    = Object.keys(this.otherPlayers).length;
         this.debugText.setText(
-          `anim:  ${curAnim} (frame ${curFrame})\n` +
-          `flipX: ${flipX}\n` +
-          `pos:   ${Math.round(player.x)}, ${Math.round(player.y)}`
+          `anim:    ${curAnim} (frame ${curFrame})\n` +
+          `flipX:   ${player.flipX}\n` +
+          `pos:     ${Math.round(player.x)}, ${Math.round(player.y)}\n` +
+          `players: ${peers + 1} online`
         );
       }
     }
