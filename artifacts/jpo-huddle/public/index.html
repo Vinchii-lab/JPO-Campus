@@ -85,10 +85,14 @@
           repeat: -1
         });
 
-        // ── Other-player sprites (group, added before local player) ──
+        // ── Furniture layer (before players so characters render on top) ──
+        const furnitureLayer = map.createLayer("Furniture", tilesets);
+        furnitureLayer.setScale(3);
+
+        // ── Other-player sprites ──────────────────────────────────────
         this.otherPlayers = {};
 
-        // ── Local player ─────────────────────────────────────────────
+        // ── Local player (last = always on top of all tile layers) ───
         this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player_run");
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
@@ -96,10 +100,6 @@
         this.player.setCollideWorldBounds(true);
         this.player.play("idle");
         this.player.setFlipX(false);
-
-        // ── Furniture layer on top ───────────────────────────────────
-        const furnitureLayer = map.createLayer("Furniture", tilesets);
-        furnitureLayer.setScale(3);
 
         this.furnitureLayer = furnitureLayer;
         wallLayer.setCollisionByExclusion([-1]);

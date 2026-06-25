@@ -37,8 +37,10 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 - **Fix: use insertion order only.** Create objects in this sequence:
   1. Floor layer
   2. Wall layer
-  3. **Player sprite** ← always renders in front of floor+walls
-  4. Furniture layer ← renders in front of player
+  3. Furniture layer
+  4. **Other-player sprites** ← runtime-added, always end up on top
+  5. **Local player sprite** ← last = always on top of everything
+- Player must be created AFTER furniture so it renders above it. Earlier attempts put player before furniture (making player ghosted/invisible behind desks).
 - Remove all `setDepth` calls from TilemapLayers. Never rely on depth to lift a sprite above a tile layer.
 
 # Office.tmj map
