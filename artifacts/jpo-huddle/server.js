@@ -15,13 +15,21 @@ app.use(express.static(path.join(__dirname, "public")));
 const players = {};
 
 io.on("connection", (socket) => {
-  console.log("Player connected:", socket.id);
+  console.log("Socket connected:", socket.id);
 
-  socket.emit("currentPlayers", players);
-
-  players[socket.id] = { x: 1080, y: 840, flipX: false, anim: "idle" };
-
-  socket.broadcast.emit("playerJoined", { id: socket.id, ...players[socket.id] });
+  socket.on("playerInit", ({ name, character }) => {
+    const safeName = (name || "Guest").trim().slice(0, 24) || "Guest";
+    players[socket.id] = {
+      x: 1080, y: 840,
+      flipX: false,
+      anim: "idle",
+      name: safeName,
+      character,
+    };
+    socket.emit("currentPlayers", players);
+    socket.broadcast.emit("playerJoined", { id: socket.id, ...players[socket.id] });
+    console.log(`${safeName} (${character}) joined`);
+  });
 
   socket.on("playerMove", (data) => {
     if (!players[socket.id]) return;
@@ -33,7 +41,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("Player disconnected:", socket.id);
+    if (!players[socket.id]) return;
+    console.log(`${players[socket.id].name} left`);
     delete players[socket.id];
     io.emit("playerLeft", socket.id);
   });

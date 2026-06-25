@@ -10,27 +10,76 @@
   <link rel="icon" href="data:,">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #f0ece4; overflow: hidden; }
-    #focus-overlay {
+    body { background: #1a1a2e; overflow: hidden; }
+
+    #join-overlay {
       position: fixed; inset: 0; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.45);
-      cursor: pointer;
+      background: rgba(0,0,0,0.7);
       transition: opacity 0.25s;
     }
-    #focus-overlay.hidden { opacity: 0; pointer-events: none; }
-    #focus-overlay div {
-      background: #fff; border-radius: 12px; padding: 24px 36px;
-      font-family: monospace; font-size: 18px; color: #333;
-      text-align: center; line-height: 1.6;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    #join-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    #join-card {
+      background: #fff; border-radius: 16px; padding: 36px 40px;
+      font-family: monospace; color: #222;
+      text-align: center;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+      min-width: 320px;
     }
+    #join-card h2 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
+    #join-card p  { font-size: 13px; color: #888; margin-bottom: 24px; }
+
+    #name-input {
+      width: 100%; padding: 10px 14px;
+      font-size: 16px; font-family: monospace;
+      border: 2px solid #ddd; border-radius: 8px;
+      outline: none; margin-bottom: 16px;
+      transition: border-color 0.15s;
+    }
+    #name-input:focus { border-color: #6c63ff; }
+
+    #join-btn {
+      width: 100%; padding: 11px;
+      background: #6c63ff; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 15px; font-family: monospace;
+      cursor: pointer; font-weight: bold;
+      transition: background 0.15s;
+    }
+    #join-btn:hover { background: #574fd6; }
+
+    .char-picker {
+      display: flex; gap: 10px; justify-content: center;
+      margin-bottom: 20px;
+    }
+    .char-opt {
+      cursor: pointer; border: 3px solid transparent;
+      border-radius: 8px; padding: 4px;
+      transition: border-color 0.15s;
+      background: #f5f5f5;
+    }
+    .char-opt:hover { border-color: #aaa; }
+    .char-opt.selected { border-color: #6c63ff; background: #ede9ff; }
+    .char-opt canvas { display: block; image-rendering: pixelated; }
+    .char-opt span { display: block; font-size: 10px; color: #555; margin-top: 2px; text-align: center; }
   </style>
 </head>
 <body>
-  <div id="focus-overlay">
-    <div>🖱️ Click anywhere to play<br><small style="font-size:13px;color:#888">WASD or arrow keys to move</small></div>
+  <div id="join-overlay">
+    <div id="join-card">
+      <h2>🏢 JPO Huddle</h2>
+      <p>Pick a character and enter your name</p>
+
+      <div class="char-picker" id="char-picker">
+        <!-- filled by JS once sprites load -->
+      </div>
+
+      <input id="name-input" type="text" placeholder="Your name…" maxlength="24" autocomplete="off" />
+      <button id="join-btn">Enter office →</button>
+    </div>
   </div>
+
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
@@ -40,6 +89,73 @@
     const WORLD_H = 1728;
     const SPEED   = 150;
 
+    const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
+    const CHAR_FILES  = {
+      adam:   '/assets/Adam_run_16x16.png',
+      alex:   '/assets/Alex_run_16x16.png',
+      amelia: '/assets/Amelia_run_16x16.png',
+      bob:    '/assets/Bob_run_16x16.png',
+    };
+
+    let _playerName = '';
+    let _playerChar = 'adam';
+
+    // ── Build character picker via mini canvases ───────────────────────
+    const picker = document.getElementById('char-picker');
+    let pickerReady = 0;
+
+    CHARACTERS.forEach((char, idx) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'char-opt' + (idx === 0 ? ' selected' : '');
+      wrap.dataset.char = char;
+
+      const cv  = document.createElement('canvas');
+      cv.width  = 48; cv.height = 96;
+      cv.style.width  = '48px';
+      cv.style.height = '96px';
+
+      const img = new Image();
+      img.src = CHAR_FILES[char];
+      img.onload = () => {
+        const ctx = cv.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 48, 96);
+        pickerReady++;
+      };
+
+      const label = document.createElement('span');
+      label.textContent = char.charAt(0).toUpperCase() + char.slice(1);
+
+      wrap.appendChild(cv);
+      wrap.appendChild(label);
+      wrap.addEventListener('click', () => {
+        document.querySelectorAll('.char-opt').forEach(el => el.classList.remove('selected'));
+        wrap.classList.add('selected');
+        _playerChar = char;
+      });
+      picker.appendChild(wrap);
+    });
+
+    // ── Join form submit ───────────────────────────────────────────────
+    function doJoin() {
+      const raw = document.getElementById('name-input').value.trim();
+      _playerName = raw || 'Guest';
+      socket.emit('playerInit', { name: _playerName, character: _playerChar });
+
+      const overlay = document.getElementById('join-overlay');
+      overlay.classList.add('hidden');
+      setTimeout(() => overlay.remove(), 300);
+
+      const canvas = document.querySelector('canvas');
+      if (canvas) canvas.focus();
+    }
+
+    document.getElementById('join-btn').addEventListener('click', doJoin);
+    document.getElementById('name-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doJoin();
+    });
+
+    // ── Phaser scene ───────────────────────────────────────────────────
     class OfficeScene extends Phaser.Scene {
       constructor() { super("OfficeScene"); }
 
@@ -47,65 +163,69 @@
         this.load.image("roombuilder", "/assets/Room_Builder_free_16x16.png");
         this.load.image("interiors",   "/assets/Interiors_free_16x16.png");
         this.load.tilemapTiledJSON("map", "/assets/Office.tmj");
-        this.load.spritesheet(
-          'player_run',
-          '/assets/Adam_run_16x16.png',
-          { frameWidth: 16, frameHeight: 32 }
-        );
+
+        CHARACTERS.forEach(char => {
+          this.load.spritesheet(
+            `run_${char}`,
+            CHAR_FILES[char],
+            { frameWidth: 16, frameHeight: 32 }
+          );
+        });
       }
 
       create() {
-        // ── Tilemap ──────────────────────────────────────────────────
         const SPAWN_X = 22 * 48 + 24;
         const SPAWN_Y = 17 * 48 + 24;
+
+        // ── Tilemap ────────────────────────────────────────────────────
         const map     = this.make.tilemap({ key: "map" });
         const tsRoom  = map.addTilesetImage("Room_Builder",         "roombuilder");
         const tsInter = map.addTilesetImage("Interiors_free_16x16", "interiors");
         const tilesets = [tsRoom, tsInter];
 
-        // Render order = insertion order.
-        // floor → wall → other players → local player → furniture
         const floorLayer = map.createLayer("Floor", tilesets);
         floorLayer.setScale(3);
-
         const wallLayer = map.createLayer("Wall", tilesets);
         wallLayer.setScale(3);
 
-        // ── Animations ───────────────────────────────────────────────
-        this.anims.create({
-          key: 'idle',
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 0 }),
-          frameRate: 1,
-          repeat: -1
-        });
-        this.anims.create({
-          key: 'walk',
-          frames: this.anims.generateFrameNumbers('player_run', { start: 0, end: 7 }),
-          frameRate: 10,
-          repeat: -1
+        // ── Animations (one set per character) ────────────────────────
+        CHARACTERS.forEach(char => {
+          this.anims.create({
+            key: `idle_${char}`,
+            frames: this.anims.generateFrameNumbers(`run_${char}`, { start: 0, end: 0 }),
+            frameRate: 1, repeat: -1,
+          });
+          this.anims.create({
+            key: `walk_${char}`,
+            frames: this.anims.generateFrameNumbers(`run_${char}`, { start: 0, end: 7 }),
+            frameRate: 10, repeat: -1,
+          });
         });
 
-        // ── Furniture layer (before players so characters render on top) ──
+        // ── Furniture (before players → players always on top) ─────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
         furnitureLayer.setScale(3);
+        this.furnitureLayer = furnitureLayer;
 
-        // ── Other-player sprites ──────────────────────────────────────
+        wallLayer.setCollisionByExclusion([-1]);
+
+        // ── Other players registry ─────────────────────────────────────
         this.otherPlayers = {};
 
-        // ── Local player (last = always on top of all tile layers) ───
-        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, "player_run");
+        // ── Local player ───────────────────────────────────────────────
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, `run_${_playerChar}`);
         this.player.setScale(3);
         this.player.setOrigin(0.5, 0.5);
         this.player.body.setSize(12, 12);
         this.player.setCollideWorldBounds(true);
-        this.player.play("idle");
+        this.player.play(`idle_${_playerChar}`);
         this.player.setFlipX(false);
-
-        this.furnitureLayer = furnitureLayer;
-        wallLayer.setCollisionByExclusion([-1]);
         this.physics.add.collider(this.player, wallLayer);
 
-        // ── Input ────────────────────────────────────────────────────
+        // Local name tag (shown above local player in world space)
+        this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName || '');
+
+        // ── Input ──────────────────────────────────────────────────────
         this.cursors   = this.input.keyboard.createCursorKeys();
         this.wasd      = this.input.keyboard.addKeys({
           up:    Phaser.Input.Keyboard.KeyCodes.W,
@@ -118,7 +238,6 @@
         this.lastFlipX = false;
         this._sendTimer = 0;
 
-        // Capture arrow keys + WASD so the browser never steals them for scrolling
         this.input.keyboard.addCapture([
           Phaser.Input.Keyboard.KeyCodes.UP,
           Phaser.Input.Keyboard.KeyCodes.DOWN,
@@ -132,15 +251,7 @@
           Phaser.Input.Keyboard.KeyCodes.SPACE,
         ]);
 
-        // Dismiss overlay via plain DOM click (Phaser never sees clicks on the HTML div)
-        const overlay = document.getElementById('focus-overlay');
-        overlay.addEventListener('click', () => {
-          overlay.classList.add('hidden');
-          setTimeout(() => overlay.remove(), 300);
-          this.game.canvas.focus();
-        }, { once: true });
-
-        // ── Camera ───────────────────────────────────────────────────
+        // ── Camera ─────────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
         this.cameras.main.setZoom(1);
@@ -152,18 +263,14 @@
           cam.setZoom(next);
         });
 
-        // ── Debug HUD ────────────────────────────────────────────────
+        // ── Debug HUD ──────────────────────────────────────────────────
         this.debugText = this.add.text(12, 12, '', {
-          fontSize: '13px',
-          fontFamily: 'monospace',
-          color: '#ffffff',
-          backgroundColor: '#00000099',
+          fontSize: '13px', fontFamily: 'monospace',
+          color: '#ffffff', backgroundColor: '#00000099',
           padding: { x: 6, y: 4 },
         }).setScrollFactor(0).setDepth(999);
 
-        // ── Multiplayer socket listeners ─────────────────────────────
-        socket.on("connect", () => console.log("Connected to JPO Campus"));
-
+        // ── Socket listeners ───────────────────────────────────────────
         socket.on("currentPlayers", (allPlayers) => {
           Object.entries(allPlayers).forEach(([id, data]) => {
             if (id !== socket.id) this._addOtherPlayer(id, data);
@@ -175,27 +282,48 @@
         });
 
         socket.on("playerMoved", (data) => {
-          const s = this.otherPlayers[data.id];
-          if (!s) return;
-          s.setPosition(data.x, data.y);
-          s.setFlipX(data.flipX);
-          if (s.anims.currentAnim?.key !== data.anim) s.play(data.anim);
+          const entry = this.otherPlayers[data.id];
+          if (!entry) return;
+          entry.sprite.setPosition(data.x, data.y);
+          entry.sprite.setFlipX(data.flipX);
+          const animKey = `${data.anim}_${entry.character}`;
+          if (entry.sprite.anims.currentAnim?.key !== animKey) entry.sprite.play(animKey);
+          entry.nameTag.setPosition(data.x, data.y - 34);
         });
 
         socket.on("playerLeft", (id) => {
-          const s = this.otherPlayers[id];
-          if (s) { s.destroy(); delete this.otherPlayers[id]; }
+          const entry = this.otherPlayers[id];
+          if (entry) {
+            entry.sprite.destroy();
+            entry.nameTag.destroy();
+            delete this.otherPlayers[id];
+          }
         });
       }
 
+      _makeNameTag(x, y, name) {
+        return this.add.text(x, y - 34, name, {
+          fontSize: '11px',
+          fontFamily: 'monospace',
+          color: '#ffffff',
+          backgroundColor: '#000000bb',
+          padding: { x: 4, y: 2 },
+          resolution: 2,
+        }).setOrigin(0.5, 1);
+      }
+
       _addOtherPlayer(id, data) {
-        const s = this.add.sprite(data.x, data.y, "player_run");
-        s.setScale(3);
-        s.setOrigin(0.5, 0.5);
-        s.setTint(0xaaddff);  // light blue tint to distinguish from local player
-        s.play(data.anim || "idle");
-        s.setFlipX(data.flipX ?? false);
-        this.otherPlayers[id] = s;
+        const char   = data.character || 'adam';
+        const texKey = `run_${char}`;
+        const sprite = this.add.sprite(data.x, data.y, texKey);
+        sprite.setScale(3);
+        sprite.setOrigin(0.5, 0.5);
+        sprite.play(`${data.anim || 'idle'}_${char}`);
+        sprite.setFlipX(data.flipX ?? false);
+
+        const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
+
+        this.otherPlayers[id] = { sprite, nameTag, character: char };
       }
 
       update(time, delta) {
@@ -205,7 +333,10 @@
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
 
-        // ── Sit / stand ───────────────────────────────────────────────
+        const idleKey = `idle_${_playerChar}`;
+        const walkKey = `walk_${_playerChar}`;
+
+        // ── Sit / stand ────────────────────────────────────────────────
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
@@ -217,12 +348,13 @@
             }
           }
         }
+
         if (this.sitting) {
           player.setVelocity(0, 0);
           player.setFlipX(this.lastFlipX);
-          if (player.anims.currentAnim?.key !== "idle") player.play("idle");
+          if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
         } else {
-          // ── Movement ─────────────────────────────────────────────────
+          // ── Movement ──────────────────────────────────────────────────
           player.setVelocity(0, 0);
           if (left)       player.setVelocityX(-SPEED);
           else if (right) player.setVelocityX( SPEED);
@@ -232,21 +364,23 @@
             player.body.velocity.normalize().scale(SPEED);
           }
 
-          // ── Animation ────────────────────────────────────────────────
-          const anim   = player.anims.currentAnim?.key;
+          // ── Animation ─────────────────────────────────────────────────
           const moving = left || right || up || down;
           if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
           if (right) { this.lastFlipX = false; player.setFlipX(false); }
           if ((up || down) && !left && !right) player.setFlipX(this.lastFlipX);
           if (moving) {
-            if (anim !== "walk") player.play("walk");
+            if (player.anims.currentAnim?.key !== walkKey) player.play(walkKey);
           } else {
             player.setFlipX(this.lastFlipX);
-            if (anim !== "idle") player.play("idle");
+            if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
           }
         }
 
-        // ── Send position to server at 20 Hz ─────────────────────────
+        // ── Local name tag follows player ─────────────────────────────
+        this.localNameTag.setPosition(player.x, player.y - 34);
+
+        // ── Broadcast at 20 Hz ────────────────────────────────────────
         this._sendTimer += delta;
         if (this._sendTimer >= 50) {
           this._sendTimer = 0;
@@ -254,17 +388,13 @@
             x:     Math.round(player.x),
             y:     Math.round(player.y),
             flipX: this.lastFlipX,
-            anim:  player.anims.currentAnim?.key ?? "idle",
+            anim:  this.sitting ? 'idle' : (left || right || up || down ? 'walk' : 'idle'),
           });
         }
 
-        // ── Debug HUD ────────────────────────────────────────────────
-        const curAnim  = player.anims.currentAnim?.key ?? 'none';
-        const curFrame = player.anims.currentFrame?.index ?? 0;
-        const peers    = Object.keys(this.otherPlayers).length;
+        // ── Debug HUD ─────────────────────────────────────────────────
+        const peers = Object.keys(this.otherPlayers).length;
         this.debugText.setText(
-          `anim:    ${curAnim} (frame ${curFrame})\n` +
-          `flipX:   ${player.flipX}\n` +
           `pos:     ${Math.round(player.x)}, ${Math.round(player.y)}\n` +
           `players: ${peers + 1} online`
         );
@@ -275,7 +405,7 @@
       type: Phaser.AUTO,
       width:  window.innerWidth,
       height: window.innerHeight,
-      backgroundColor: "#f0ece4",
+      backgroundColor: "#1a1a2e",
       pixelArt: true,
       physics: { default: "arcade", arcade: { debug: false } },
       scene: OfficeScene,
