@@ -254,7 +254,7 @@
       <div class="builder-section">
         <div class="builder-label">Choose your character</div>
         <div class="char-picker" id="char-picker"></div>
-        <div class="builder-label">Color variant</div>
+        <div class="builder-label">Hair / clothing color</div>
         <div class="tint-picker" id="tint-picker"></div>
       </div>
 
@@ -329,7 +329,6 @@
         <h2>⚙️ Owner Settings</h2>
         <button id="owner-close" onclick="closeOwnerPanel()">✕</button>
       </div>
-
       <div class="owner-section">
         <h3>Pending Registrations <span class="owner-badge" id="op-pending-count">0</span></h3>
         <table class="owner-table">
@@ -339,7 +338,6 @@
           </tbody>
         </table>
       </div>
-
       <div class="owner-section">
         <h3>Online Players <span class="owner-badge green" id="op-player-count">0</span></h3>
         <table class="owner-table">
@@ -370,33 +368,94 @@
       bob:    '/assets/Bob_run_16x16.png',
     };
 
-    // Color tint palette (null = no tint)
+    // Palette: index 0 = no swap, 1-8 = color swaps
     const TINT_PALETTE = [
-      { label: 'None',   value: null,     css: null       },
-      { label: 'Red',    value: 0xff4444, css: '#ff4444'  },
-      { label: 'Orange', value: 0xff8c42, css: '#ff8c42'  },
-      { label: 'Yellow', value: 0xffd700, css: '#ffd700'  },
-      { label: 'Lime',   value: 0x66cc33, css: '#66cc33'  },
-      { label: 'Teal',   value: 0x22ccbb, css: '#22ccbb'  },
-      { label: 'Blue',   value: 0x4488ff, css: '#4488ff'  },
-      { label: 'Purple', value: 0xaa44ff, css: '#aa44ff'  },
-      { label: 'Pink',   value: 0xff44aa, css: '#ff44aa'  },
+      { label: 'Default', css: null       },
+      { label: 'Red',     css: '#e84040'  },
+      { label: 'Orange',  css: '#f08030'  },
+      { label: 'Yellow',  css: '#e8c820'  },
+      { label: 'Lime',    css: '#50bb30'  },
+      { label: 'Teal',    css: '#20bba8'  },
+      { label: 'Blue',    css: '#3880f0'  },
+      { label: 'Purple',  css: '#9840f0'  },
+      { label: 'Pink',    css: '#e840a0'  },
     ];
 
-    let _playerName  = '';
-    let _playerChar  = 'adam';
-    let _playerTint  = null;   // numeric Phaser tint (null = none)
-    let _playerCoins = 0;
-    let _ownedItems  = [];
+    let _playerName    = '';
+    let _playerChar    = 'adam';
+    let _playerTintIdx = 0;    // index into TINT_PALETTE (0 = original colors)
+    let _playerCoins   = 0;
+    let _ownedItems    = [];
 
-    let _phaserKbd   = null;
+    let _phaserKbd     = null;
     let _approvedQueue = null;
 
-    // Stored images and canvases for live tint preview
-    const _charImages   = {};
-    const _charCanvases = {};
+    // Per-character: loaded HTMLImageElement + detected swap source color + preview canvas
+    const _charImages    = {};
+    const _charCanvases  = {};
+    const _charSrcColors = {};   // { r, g, b } of dominant swappable color per char
 
-    // ── Character picker ───────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
+    // Palette-swap helpers (used for both preview canvases and Phaser textures)
+    // ────────────────────────────────────────────────────────────────────
+
+    function _hexCssToRGB(css) {
+      const n = parseInt(css.slice(1), 16);
+      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    }
+
+    // Find the most common non-outline, non-skin pixel color in a single sprite frame.
+    // Returns {r,g,b} or null if detection fails.
+    function _detectSwapColor(data) {
+      const buckets = {};
+      let best = null, bestCount = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+        if (a < 128) continue;
+        const lum = 0.299*r + 0.587*g + 0.114*b;
+        if (lum < 45 || lum > 215) continue;           // skip outlines & near-white
+        if (r > 155 && r > g + 25 && r > b + 35) continue; // skip skin-like (reddish-warm)
+        // Bucket by rounding to nearest 28 in each channel
+        const bk = `${Math.round(r/28)*28},${Math.round(g/28)*28},${Math.round(b/28)*28}`;
+        if (!buckets[bk]) buckets[bk] = { count: 0, r: 0, g: 0, b: 0 };
+        buckets[bk].count++; buckets[bk].r += r; buckets[bk].g += g; buckets[bk].b += b;
+        if (buckets[bk].count > bestCount) { bestCount = buckets[bk].count; best = buckets[bk]; }
+      }
+      if (!best || bestCount < 4) return null;
+      return { r: Math.round(best.r/best.count), g: Math.round(best.g/best.count), b: Math.round(best.b/best.count) };
+    }
+
+    // Swap pixels within `threshold` Euclidean distance of source color → target color.
+    // Preserves relative luminance so shading/shadows look natural.
+    function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold) {
+      const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
+      const t2 = threshold * threshold;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i+3] < 128) continue;
+        const dr = pixels[i]-sr, dg = pixels[i+1]-sg, db = pixels[i+2]-sb;
+        if (dr*dr + dg*dg + db*db > t2) continue;
+        const lum = (0.299*pixels[i] + 0.587*pixels[i+1] + 0.114*pixels[i+2]) / srcLum;
+        pixels[i]   = Math.min(255, Math.round(tr * lum));
+        pixels[i+1] = Math.min(255, Math.round(tg * lum));
+        pixels[i+2] = Math.min(255, Math.round(tb * lum));
+      }
+    }
+
+    // Build a palette-swapped copy of srcImg (HTMLImageElement) as a new canvas.
+    // srcColor = {r,g,b}, targetCSS = '#rrggbb'. Returns canvas or null.
+    function _buildSwappedCanvas(srcImg, srcColor, targetCSS) {
+      const [tr, tg, tb] = _hexCssToRGB(targetCSS);
+      const cv = document.createElement('canvas');
+      cv.width = srcImg.width; cv.height = srcImg.height;
+      const cx = cv.getContext('2d');
+      cx.drawImage(srcImg, 0, 0);
+      const id = cx.getImageData(0, 0, cv.width, cv.height);
+      _swapColorsData(id.data, srcColor.r, srcColor.g, srcColor.b, tr, tg, tb, 55);
+      cx.putImageData(id, 0, 0);
+      return cv;
+    }
+
+    // ── Character picker (DOM) ─────────────────────────────────────────
     const picker = document.getElementById('char-picker');
     CHARACTERS.forEach((char, idx) => {
       const wrap = document.createElement('div');
@@ -409,50 +468,52 @@
       _charCanvases[char] = cv;
 
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.src = CHAR_FILES[char];
       img.onload = () => {
         _charImages[char] = img;
+        // Detect swap color from the first frame (16×32)
+        const tmp = document.createElement('canvas');
+        tmp.width = 16; tmp.height = 32;
+        const tc = tmp.getContext('2d');
+        tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
+        _charSrcColors[char] = _detectSwapColor(tc.getImageData(0, 0, 16, 32).data);
         _redrawPreviews();
       };
 
-      const label = document.createElement('span');
-      label.textContent = char.charAt(0).toUpperCase() + char.slice(1);
+      const lbl = document.createElement('span');
+      lbl.textContent = char.charAt(0).toUpperCase() + char.slice(1);
 
       wrap.appendChild(cv);
-      wrap.appendChild(label);
+      wrap.appendChild(lbl);
       wrap.addEventListener('click', () => {
         document.querySelectorAll('.char-opt').forEach(el => el.classList.remove('selected'));
         wrap.classList.add('selected');
         _playerChar = char;
+        _redrawPreviews();
       });
       picker.appendChild(wrap);
     });
 
-    // ── Tint picker ────────────────────────────────────────────────────
+    // ── Tint/swatch picker (DOM) ───────────────────────────────────────
     const tintPicker = document.getElementById('tint-picker');
     TINT_PALETTE.forEach((t, idx) => {
       const dot = document.createElement('div');
       dot.className = 'tint-opt' + (idx === 0 ? ' selected tint-none' : '');
       dot.title = t.label;
       if (t.css) dot.style.background = t.css;
-      else       dot.classList.add('tint-none');
 
       dot.addEventListener('click', () => {
         document.querySelectorAll('.tint-opt').forEach(el => el.classList.remove('selected'));
         dot.classList.add('selected');
-        _playerTint = t.value;
+        _playerTintIdx = idx;
         _redrawPreviews();
       });
       tintPicker.appendChild(dot);
     });
 
-    function _tintToCSS(tint) {
-      if (!tint) return null;
-      return '#' + tint.toString(16).padStart(6, '0');
-    }
-
+    // Re-draw all four character preview canvases using palette swap (not color wash).
     function _redrawPreviews() {
-      const css = _tintToCSS(_playerTint);
       CHARACTERS.forEach(char => {
         const cv  = _charCanvases[char];
         const img = _charImages[char];
@@ -460,15 +521,27 @@
         const ctx = cv.getContext('2d');
         ctx.clearRect(0, 0, 48, 96);
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 48, 96);
-        if (css) {
-          ctx.globalCompositeOperation = 'source-atop';
-          ctx.globalAlpha = 0.52;
-          ctx.fillStyle = css;
-          ctx.fillRect(0, 0, 48, 96);
-          ctx.globalAlpha = 1;
-          ctx.globalCompositeOperation = 'source-over';
+
+        const src = _charSrcColors[char];
+        const t   = TINT_PALETTE[_playerTintIdx];
+
+        if (!_playerTintIdx || !src || !t.css) {
+          // No swap: draw first frame directly, scaled up
+          ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 48, 96);
+          return;
         }
+
+        // Draw first frame to 16×32 tmp canvas, swap hair/clothing pixels, scale to preview
+        const tmp = document.createElement('canvas');
+        tmp.width = 16; tmp.height = 32;
+        const tc = tmp.getContext('2d');
+        tc.imageSmoothingEnabled = false;
+        tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
+        const id = tc.getImageData(0, 0, 16, 32);
+        const [tr, tg, tb] = _hexCssToRGB(t.css);
+        _swapColorsData(id.data, src.r, src.g, src.b, tr, tg, tb, 55);
+        tc.putImageData(id, 0, 0);
+        ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 48, 96);
       });
     }
 
@@ -492,12 +565,12 @@
       const email = document.getElementById('inp-email').value.trim();
       const errEl = document.getElementById('reg-error');
 
-      if (!first)                      { errEl.textContent = 'First name is required.'; return; }
+      if (!first)                         { errEl.textContent = 'First name is required.'; return; }
       if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
       errEl.textContent = '';
 
       document.getElementById('register-btn').disabled = true;
-      socket.emit('register', { firstName: first, lastName: last, email, character: _playerChar, tint: _playerTint });
+      socket.emit('register', { firstName: first, lastName: last, email, character: _playerChar, tintIdx: _playerTintIdx });
     }
     document.getElementById('register-btn').addEventListener('click', tryRegister);
 
@@ -513,10 +586,10 @@
     });
 
     socket.on('approved', (data) => {
-      _playerName  = data.name;
-      _playerChar  = data.character;
-      _playerTint  = data.tint ?? null;
-      _playerCoins = data.coins;
+      _playerName    = data.name;
+      _playerChar    = data.character;
+      _playerTintIdx = data.tintIdx ?? 0;
+      _playerCoins   = data.coins;
 
       const overlay = document.getElementById('join-overlay');
       overlay.classList.add('hidden');
@@ -610,10 +683,9 @@
     });
 
     // ── F8 Owner panel ────────────────────────────────────────────────
-    let _adminAuthed  = false;
+    let _adminAuthed    = false;
     let _ownerPanelOpen = false;
 
-    // Listen for F8 globally
     document.addEventListener('keydown', e => {
       if (e.key === 'F8') {
         e.preventDefault();
@@ -641,8 +713,7 @@
       document.querySelector('canvas')?.focus();
     }
     function submitOwnerPwd() {
-      const pwd = document.getElementById('owner-pwd-input').value;
-      socket.emit('adminAuth', { password: pwd });
+      socket.emit('adminAuth', { password: document.getElementById('owner-pwd-input').value });
     }
     document.getElementById('owner-pwd-input').addEventListener('keydown', e => {
       e.stopPropagation();
@@ -662,7 +733,6 @@
       document.querySelector('canvas')?.focus();
     }
 
-    // Admin socket events (shared with admin.html logic)
     socket.on('adminAuthOk', () => {
       _adminAuthed = true;
       closeOwnerPwd();
@@ -725,8 +795,7 @@
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
-          this.load.spritesheet(`run_${char}`, CHAR_FILES[char],
-            { frameWidth: 16, frameHeight: 32 });
+          this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
         });
 
         this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 16, frameHeight: 32 });
@@ -736,48 +805,40 @@
       create() {
         _phaserKbd = this.input.keyboard;
 
-        const map     = this.make.tilemap({ key: 'map' });
-        const tsRoom  = map.addTilesetImage('Room_Builder',         'roombuilder');
-        const tsInter = map.addTilesetImage('Interiors_free_16x16', 'interiors');
+        const map      = this.make.tilemap({ key: 'map' });
+        const tsRoom   = map.addTilesetImage('Room_Builder',         'roombuilder');
+        const tsInter  = map.addTilesetImage('Interiors_free_16x16', 'interiors');
         const tilesets = [tsRoom, tsInter];
 
-        map.createLayer('Floor',     tilesets).setScale(3);
+        map.createLayer('Floor', tilesets).setScale(3);
         const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
 
+        // Base animations (no tint)
         CHARACTERS.forEach(char => {
-          this.anims.create({
-            key: `idle_${char}`,
-            frames: this.anims.generateFrameNumbers(`run_${char}`, { start: 0, end: 0 }),
-            frameRate: 1, repeat: -1,
-          });
-          this.anims.create({
-            key: `walk_${char}`,
-            frames: this.anims.generateFrameNumbers(`run_${char}`, { start: 0, end: 7 }),
-            frameRate: 10, repeat: -1,
-          });
+          this.anims.create({ key: `idle_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`, {start:0,end:0}), frameRate:1,  repeat:-1 });
+          this.anims.create({ key: `walk_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`, {start:0,end:7}), frameRate:10, repeat:-1 });
         });
+        this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',   {start:0,end:5}), frameRate:8, repeat:-1 });
+        this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone', {start:0,end:8}), frameRate:8, repeat:-1 });
 
-        this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',   { start: 0, end: 5 }), frameRate: 8, repeat: -1 });
-        this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone', { start: 0, end: 8 }), frameRate: 8, repeat: -1 });
+        // Build palette-swapped texture variants for all tint indices 1-8
+        this._buildSwappedTextures();
 
         const furnitureLayer = map.createLayer('Furniture', tilesets).setScale(3);
         this.furnitureLayer  = furnitureLayer;
         this.wallLayer       = wallLayer;
         wallLayer.setCollisionByExclusion([-1]);
 
-        // Computer screen glows
-        [[12,17],[14,17],[16,17],[12,19],[14,19],[16,19]].forEach(([col, row], i) => {
-          const wx = col * 48 + 24, wy = row * 48 + 8;
+        // Computer glows
+        [[12,17],[14,17],[16,17],[12,19],[14,19],[16,19]].forEach(([col,row],i) => {
+          const wx = col*48+24, wy = row*48+8;
           const g = this.add.graphics();
-          g.fillStyle(0x44aaff, 0.5); g.fillRoundedRect(wx-14, wy-7, 28, 14, 3);
-          g.fillStyle(0x88ccff, 0.6); g.fillRoundedRect(wx-8,  wy-4, 16,  8, 2);
-          this.tweens.add({ targets: g, alpha: { from: 0.4, to: 0.9 }, duration: 1100+i*180, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          g.fillStyle(0x44aaff,0.5); g.fillRoundedRect(wx-14,wy-7,28,14,3);
+          g.fillStyle(0x88ccff,0.6); g.fillRoundedRect(wx-8, wy-4,16, 8,2);
+          this.tweens.add({targets:g,alpha:{from:0.4,to:0.9},duration:1100+i*180,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
         });
 
-        this.eHint = this.add.text(0, 0, '[ E ] Sit', {
-          fontSize: '11px', fontFamily: 'monospace', color: '#fff',
-          backgroundColor: '#222222cc', padding: { x: 5, y: 3 },
-        }).setOrigin(0.5, 1).setVisible(false).setDepth(500);
+        this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
 
         this.otherPlayers    = {};
         this.player          = null;
@@ -789,24 +850,19 @@
         this._sendTimer      = 0;
         this._pendingPlayers = null;
 
-        this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
-        this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H).setZoom(1);
-        this.input.on('wheel', (_p, _o, _dx, dy) => {
-          const cam = this.cameras.main;
-          cam.setZoom(Phaser.Math.Clamp(cam.zoom + (dy < 0 ? 0.1 : -0.1), 0.5, 4));
+        this.physics.world.setBounds(0,0,WORLD_W,WORLD_H);
+        this.cameras.main.setBounds(0,0,WORLD_W,WORLD_H).setZoom(1);
+        this.input.on('wheel',(_p,_o,_dx,dy)=>{
+          const cam=this.cameras.main;
+          cam.setZoom(Phaser.Math.Clamp(cam.zoom+(dy<0?0.1:-0.1),0.5,4));
         });
 
-        this.debugText = this.add.text(12, 12, '', {
-          fontSize: '13px', fontFamily: 'monospace', color: '#fff',
-          backgroundColor: '#00000099', padding: { x: 6, y: 4 },
-        }).setScrollFactor(0).setDepth(999);
+        this.debugText = this.add.text(12,12,'',{fontSize:'13px',fontFamily:'monospace',color:'#fff',backgroundColor:'#00000099',padding:{x:6,y:4}}).setScrollFactor(0).setDepth(999);
 
         // ── Socket listeners ──────────────────────────────────────────
         socket.on('currentPlayers', (allPlayers) => {
           if (!this.player) { this._pendingPlayers = allPlayers; return; }
-          Object.entries(allPlayers).forEach(([id, data]) => {
-            if (id !== socket.id) this._addOtherPlayer(id, data);
-          });
+          Object.entries(allPlayers).forEach(([id,data]) => { if (id!==socket.id) this._addOtherPlayer(id,data); });
         });
 
         socket.on('playerJoined', (data) => {
@@ -818,13 +874,19 @@
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
           entry.sprite.setFlipX(data.flipX);
-          let animKey = data.anim === 'sit'
-            ? (entry.character === 'adam' ? 'sit_adam' : `idle_${entry.character}`)
-            : `${data.anim}_${entry.character}`;
+          const tIdx = entry.tintIdx || 0;
+          let animKey;
+          if (data.anim === 'sit') {
+            animKey = entry.character === 'adam'
+              ? this._animKey('sit', 'adam', tIdx)
+              : this._animKey('idle', entry.character, tIdx);
+          } else {
+            animKey = this._animKey(data.anim, entry.character, tIdx);
+          }
           if (entry.sprite.anims.currentAnim?.key !== animKey) entry.sprite.play(animKey);
-          entry.nameTag.setPosition(data.x, data.y - 40);
-          if (entry.crown)      entry.crown.setPosition(data.x, data.y - 68);
-          if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y - 85);
+          entry.nameTag.setPosition(data.x, data.y-40);
+          if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
+          if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
         });
 
         socket.on('playerLeft', (id) => {
@@ -837,7 +899,7 @@
           }
         });
 
-        socket.on('chatMessage', ({ id, message }) => {
+        socket.on('chatMessage', ({id,message}) => {
           if (id === socket.id) {
             this._showChatBubble(this.player, message, true);
           } else {
@@ -853,16 +915,63 @@
         if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
       }
 
-      _onApproved(data) {
-        const SPAWN_X = 22 * 48 + 24;
-        const SPAWN_Y = 17 * 48 + 24;
+      // ── Build palette-swapped Phaser textures for all char × tint combos ──
+      _buildSwappedTextures() {
+        CHARACTERS.forEach(char => {
+          const srcImg = this.textures.get(`run_${char}`).source[0].image;
 
-        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, `run_${_playerChar}`);
-        this.player.setScale(3).setOrigin(0.5, 0.5);
-        this.player.body.setSize(12, 12);
+          // Detect swap color from first frame
+          const tmp = document.createElement('canvas');
+          tmp.width = 16; tmp.height = 32;
+          const tc = tmp.getContext('2d');
+          tc.drawImage(srcImg, 0, 0, 16, 32, 0, 0, 16, 32);
+          const srcColor = _detectSwapColor(tc.getImageData(0, 0, 16, 32).data);
+          if (!srcColor) return;
+
+          TINT_PALETTE.forEach((t, idx) => {
+            if (idx === 0 || !t.css) return;
+            const swapCv = _buildSwappedCanvas(srcImg, srcColor, t.css);
+            const key = `run_${char}_${idx}`;
+            this.textures.addSpriteSheet(key, swapCv, { frameWidth: 16, frameHeight: 32 });
+            this.anims.create({ key: `idle_${char}_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:0}), frameRate:1,  repeat:-1 });
+            this.anims.create({ key: `walk_${char}_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:7}), frameRate:10, repeat:-1 });
+          });
+
+          // Also swap adam's sit sprite using the same source color
+          if (char === 'adam') {
+            const sitImg = this.textures.get('adam_sit').source[0].image;
+            TINT_PALETTE.forEach((t, idx) => {
+              if (idx === 0 || !t.css) return;
+              const swapCv = _buildSwappedCanvas(sitImg, srcColor, t.css);
+              const key = `adam_sit_${idx}`;
+              this.textures.addSpriteSheet(key, swapCv, { frameWidth: 16, frameHeight: 32 });
+              this.anims.create({ key: `sit_adam_${idx}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:5}), frameRate:8, repeat:-1 });
+            });
+          }
+        });
+      }
+
+      // Safe texture/anim key lookup — falls back to base key if variant not found
+      _texKey(char, tIdx) {
+        if (!tIdx) return `run_${char}`;
+        const k = `run_${char}_${tIdx}`;
+        return this.textures.exists(k) ? k : `run_${char}`;
+      }
+      _animKey(verb, char, tIdx) {
+        if (!tIdx) return `${verb}_${char}`;
+        const k = `${verb}_${char}_${tIdx}`;
+        return this.anims.exists(k) ? k : `${verb}_${char}`;
+      }
+
+      _onApproved(data) {
+        const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
+
+        const texKey = this._texKey(_playerChar, _playerTintIdx);
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
+        this.player.setScale(3).setOrigin(0.5,0.5);
+        this.player.body.setSize(12,12);
         this.player.setCollideWorldBounds(true);
-        this.player.play(`idle_${_playerChar}`);
-        if (_playerTint) this.player.setTint(_playerTint);
+        this.player.play(this._animKey('idle', _playerChar, _playerTintIdx));
         this.physics.add.collider(this.player, this.wallLayer);
 
         this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
@@ -884,7 +993,7 @@
         this.cameras.main.startFollow(this.player);
 
         if (this._pendingPlayers) {
-          Object.entries(this._pendingPlayers).forEach(([id, pdata]) => {
+          Object.entries(this._pendingPlayers).forEach(([id,pdata]) => {
             if (id !== socket.id) this._addOtherPlayer(id, pdata);
           });
           this._pendingPlayers = null;
@@ -894,8 +1003,8 @@
       _setLocalCrown(show) {
         if (this.localCrown) { this.localCrown.destroy(); this.localCrown = null; }
         if (show && this.player) {
-          this.localCrown = this.add.text(this.player.x, this.player.y - 68, '👑',
-            { fontSize: '18px', resolution: 2 }).setOrigin(0.5, 1).setDepth(1001);
+          this.localCrown = this.add.text(this.player.x, this.player.y-68, '👑',
+            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
       }
 
@@ -904,70 +1013,68 @@
         if (!entry) return;
         const hasCrown = cosmetics.includes('crown');
         if (hasCrown && !entry.crown) {
-          entry.crown = this.add.text(entry.sprite.x, entry.sprite.y - 68, '👑',
-            { fontSize: '18px', resolution: 2 }).setOrigin(0.5, 1).setDepth(1001);
+          entry.crown = this.add.text(entry.sprite.x, entry.sprite.y-68, '👑',
+            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         } else if (!hasCrown && entry.crown) {
           entry.crown.destroy(); entry.crown = null;
         }
       }
 
       _makeNameTag(x, y, name) {
-        return this.add.text(x, y - 40, name, {
-          fontSize: '14px', fontFamily: 'monospace', color: '#fff',
-          backgroundColor: '#000000bb', padding: { x: 5, y: 3 }, resolution: 2,
-        }).setOrigin(0.5, 1).setDepth(990);
+        return this.add.text(x, y-40, name, {
+          fontSize:'14px', fontFamily:'monospace', color:'#fff',
+          backgroundColor:'#000000bb', padding:{x:5,y:3}, resolution:2,
+        }).setOrigin(0.5,1).setDepth(990);
       }
 
       _showChatBubble(sprite, message, isLocal) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
         const yOff  = isLocal ? (this.localCrown ? -95 : -78) : -85;
-        const bubble = this.add.text(sprite.x, sprite.y + yOff, message, {
-          fontSize: '14px', fontFamily: 'monospace', color: '#111',
-          backgroundColor: '#ffffffee', padding: { x: 10, y: 7 },
-          wordWrap: { width: 220 }, resolution: 2,
-        }).setOrigin(0.5, 1).setDepth(1002);
+        const bubble = this.add.text(sprite.x, sprite.y+yOff, message, {
+          fontSize:'14px', fontFamily:'monospace', color:'#111',
+          backgroundColor:'#ffffffee', padding:{x:10,y:7},
+          wordWrap:{width:220}, resolution:2,
+        }).setOrigin(0.5,1).setDepth(1002);
         this.tweens.add({
-          targets: bubble, alpha: 0, delay: 3800, duration: 500,
-          onComplete: () => { bubble.destroy(); if (isLocal && this.localBubble === bubble) this.localBubble = null; },
+          targets:bubble, alpha:0, delay:3800, duration:500,
+          onComplete:()=>{ bubble.destroy(); if (isLocal && this.localBubble===bubble) this.localBubble=null; },
         });
         if (isLocal) this.localBubble = bubble;
         return bubble;
       }
 
       _addOtherPlayer(id, data) {
-        const char   = data.character || 'adam';
-        const sprite = this.add.sprite(data.x, data.y, `run_${char}`);
-        sprite.setScale(3).setOrigin(0.5, 0.5);
-        sprite.play(`${data.anim || 'idle'}_${char}`);
+        const char  = data.character || 'adam';
+        const tIdx  = data.tintIdx   || 0;
+        const sprite = this.add.sprite(data.x, data.y, this._texKey(char, tIdx));
+        sprite.setScale(3).setOrigin(0.5,0.5);
+        sprite.play(this._animKey(data.anim || 'idle', char, tIdx));
         sprite.setFlipX(data.flipX ?? false);
-        if (data.tint) sprite.setTint(data.tint);
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
         let crown = null;
         if (data.cosmetics?.includes('crown')) {
-          crown = this.add.text(data.x, data.y - 68, '👑',
-            { fontSize: '18px', resolution: 2 }).setOrigin(0.5, 1).setDepth(1001);
+          crown = this.add.text(data.x, data.y-68, '👑',
+            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
 
-        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble: null, character: char };
+        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble: null, character: char, tintIdx: tIdx };
       }
 
       update(time, delta) {
         if (!this.player) return;
 
         const { cursors, wasd, player } = this;
-        const idleKey = `idle_${_playerChar}`;
-        const walkKey = `walk_${_playerChar}`;
+        const idleKey = this._animKey('idle', _playerChar, _playerTintIdx);
+        const walkKey = this._animKey('walk', _playerChar, _playerTintIdx);
 
-        if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y - 40);
-        if (this.localCrown)   this.localCrown.setPosition(player.x, player.y - 68);
-        if (this.localBubble) {
-          this.localBubble.setPosition(player.x, player.y + (this.localCrown ? -95 : -78));
-        }
+        if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
+        if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
+        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCrown?-95:-78));
 
         if (_chatOpen || _ownerPanelOpen) {
-          player.setVelocity(0, 0);
+          player.setVelocity(0,0);
           if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
           this.eHint.setVisible(false);
           return;
@@ -978,19 +1085,19 @@
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
 
-        const ptx = Math.floor(player.x / 48);
-        const pty = Math.floor(player.y / 48);
+        const ptx = Math.floor(player.x/48);
+        const pty = Math.floor(player.y/48);
         let nearFurniture = false;
         if (!this.sitting) {
-          outer: for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-              const t = this.furnitureLayer.getTileAt(ptx+dx, pty+dy);
-              if (t && t.index > 0) { nearFurniture = true; break outer; }
+          outer: for (let dx=-1;dx<=1;dx++) {
+            for (let dy=-1;dy<=1;dy++) {
+              const t = this.furnitureLayer.getTileAt(ptx+dx,pty+dy);
+              if (t && t.index>0) { nearFurniture=true; break outer; }
             }
           }
         }
         this.eHint.setVisible(nearFurniture);
-        if (nearFurniture) this.eHint.setPosition(player.x, player.y - 58);
+        if (nearFurniture) this.eHint.setPosition(player.x, player.y-58);
 
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
@@ -998,28 +1105,30 @@
           } else if (nearFurniture) {
             const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y)
               || this.furnitureLayer.getTileAt(ptx, pty-1);
-            if (tile) { player.setPosition(tile.getCenterX(), tile.getCenterY()); this.sitting = true; }
+            if (tile) { player.setPosition(tile.getCenterX(), tile.getCenterY()); this.sitting=true; }
           }
         }
 
-        const sitKey = _playerChar === 'adam' ? 'sit_adam' : idleKey;
+        const sitKey = _playerChar === 'adam'
+          ? this._animKey('sit', 'adam', _playerTintIdx)
+          : idleKey;
 
         if (this.sitting) {
-          player.setVelocity(0, 0);
+          player.setVelocity(0,0);
           player.setFlipX(this.lastFlipX);
           if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
         } else {
-          player.setVelocity(0, 0);
+          player.setVelocity(0,0);
           if (left)       player.setVelocityX(-SPEED);
           else if (right) player.setVelocityX( SPEED);
           if (up)         player.setVelocityY(-SPEED);
           else if (down)  player.setVelocityY( SPEED);
-          if ((left || right) && (up || down)) player.body.velocity.normalize().scale(SPEED);
+          if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(SPEED);
 
-          if (left)  { this.lastFlipX = true;  player.setFlipX(true);  }
-          if (right) { this.lastFlipX = false; player.setFlipX(false); }
+          if (left)  { this.lastFlipX=true;  player.setFlipX(true);  }
+          if (right) { this.lastFlipX=false; player.setFlipX(false); }
 
-          const targetAnim = (left || right || up || down) ? walkKey : idleKey;
+          const targetAnim = (left||right||up||down) ? walkKey : idleKey;
           if (player.anims.currentAnim?.key !== targetAnim) player.play(targetAnim);
         }
 
@@ -1028,7 +1137,7 @@
           this._sendTimer = 0;
           const animState = this.sitting ? 'sit'
             : (player.anims.currentAnim?.key.startsWith('walk') ? 'walk' : 'idle');
-          socket.emit('playerMove', { x: player.x, y: player.y, flipX: player.flipX, anim: animState });
+          socket.emit('playerMove', {x:player.x, y:player.y, flipX:player.flipX, anim:animState});
         }
 
         const count = Object.keys(this.otherPlayers).length + 1;
