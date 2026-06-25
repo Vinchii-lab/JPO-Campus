@@ -63,6 +63,28 @@
     .char-opt.selected { border-color: #6c63ff; background: #ede9ff; }
     .char-opt canvas { display: block; image-rendering: pixelated; }
     .char-opt span { display: block; font-size: 10px; color: #555; margin-top: 2px; text-align: center; }
+
+    /* ── Chat bar ── */
+    #chat-bar {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 200; display: none; align-items: center; gap: 10px;
+      background: rgba(0,0,0,0.82); border-radius: 10px;
+      padding: 10px 16px; backdrop-filter: blur(4px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    #chat-bar.open { display: flex; }
+    #chat-input {
+      width: 340px; background: transparent; border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.25);
+      color: #fff; font-size: 14px; font-family: monospace; outline: none;
+      padding: 2px 0;
+    }
+    #chat-input::placeholder { color: rgba(255,255,255,0.35); }
+    #chat-hint {
+      position: fixed; bottom: 10px; right: 14px; z-index: 99;
+      font-size: 11px; font-family: monospace;
+      color: rgba(255,255,255,0.25); pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -79,6 +101,13 @@
       <button id="join-btn">Enter office →</button>
     </div>
   </div>
+
+  <!-- Chat bar (shown on T key) -->
+  <div id="chat-bar">
+    <span style="color:#888;font-size:13px">💬</span>
+    <input id="chat-input" type="text" placeholder="Say something… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
+  </div>
+  <div id="chat-hint">[T] chat</div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -153,6 +182,44 @@
     document.getElementById('join-btn').addEventListener('click', doJoin);
     document.getElementById('name-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') doJoin();
+    });
+
+    // ── Chat bar logic ─────────────────────────────────────────────────
+    let _chatOpen = false;
+    const chatBar   = document.getElementById('chat-bar');
+    const chatInput = document.getElementById('chat-input');
+
+    function openChat() {
+      if (_chatOpen) return;
+      _chatOpen = true;
+      chatBar.classList.add('open');
+      chatInput.value = '';
+      // small delay so the T keydown doesn't type into the input
+      setTimeout(() => chatInput.focus(), 30);
+    }
+    function closeChat() {
+      _chatOpen = false;
+      chatBar.classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    function sendChat() {
+      const msg = chatInput.value.trim();
+      if (msg) socket.emit('chatMessage', { message: msg });
+      closeChat();
+    }
+
+    // T key opens chat (only when not already in an input)
+    document.addEventListener('keydown', e => {
+      if ((e.key === 't' || e.key === 'T') && !_chatOpen
+          && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        openChat();
+      }
+    });
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendChat(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChat(); }
+      e.stopPropagation(); // prevent Phaser stealing keys while typing
     });
 
     // ── Phaser scene ───────────────────────────────────────────────────
@@ -349,7 +416,21 @@
           if (entry) {
             entry.sprite.destroy();
             entry.nameTag.destroy();
+            if (entry.chatBubble) entry.chatBubble.destroy();
             delete this.otherPlayers[id];
+          }
+        });
+
+        socket.on("chatMessage", ({ id, message }) => {
+          if (id === socket.id) {
+            // Local player's own message
+            this._showChatBubble(this.player, message, true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showChatBubble(entry.sprite, message, false);
+            }
           }
         });
       }
@@ -363,6 +444,39 @@
           padding: { x: 4, y: 2 },
           resolution: 2,
         }).setOrigin(0.5, 1);
+      }
+
+      _showChatBubble(sprite, message, isLocal) {
+        // Destroy existing local bubble
+        if (isLocal && this.localBubble) {
+          this.localBubble.destroy();
+          this.localBubble = null;
+        }
+
+        const bubble = this.add.text(sprite.x, sprite.y - 68, message, {
+          fontSize: '11px',
+          fontFamily: 'monospace',
+          color: '#111111',
+          backgroundColor: '#ffffffee',
+          padding: { x: 9, y: 6 },
+          wordWrap: { width: 200 },
+          resolution: 2,
+        }).setOrigin(0.5, 1).setDepth(1000);
+
+        // Fade out after 3.8s
+        this.tweens.add({
+          targets: bubble,
+          alpha: 0,
+          delay: 3800,
+          duration: 500,
+          onComplete: () => {
+            bubble.destroy();
+            if (isLocal && this.localBubble === bubble) this.localBubble = null;
+          },
+        });
+
+        if (isLocal) this.localBubble = bubble;
+        return bubble;
       }
 
       _addOtherPlayer(id, data) {
@@ -381,13 +495,29 @@
 
       update(time, delta) {
         const { cursors, wasd, player } = this;
+
+        const idleKey = `idle_${_playerChar}`;
+        const walkKey = `walk_${_playerChar}`;
+
+        // ── Keep local chat bubble above player ───────────────────────
+        if (this.localBubble) {
+          this.localBubble.setPosition(player.x, player.y - 68);
+        }
+
+        // ── Freeze movement while chat is open ────────────────────────
+        if (_chatOpen) {
+          player.setVelocity(0, 0);
+          if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
+          player.setFlipX(this.lastFlipX);
+          this.eHint.setVisible(false);
+          this.localNameTag.setPosition(player.x, player.y - 34);
+          return;
+        }
+
         const up    = cursors.up.isDown    || wasd.up.isDown;
         const down  = cursors.down.isDown  || wasd.down.isDown;
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
-
-        const idleKey = `idle_${_playerChar}`;
-        const walkKey = `walk_${_playerChar}`;
 
         // ── Proximity: show "Press E" hint when near furniture ────────
         const ptx = Math.floor(player.x / 48);

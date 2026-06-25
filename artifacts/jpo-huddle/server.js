@@ -40,6 +40,13 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("playerMoved", { id: socket.id, ...players[socket.id] });
   });
 
+  socket.on("chatMessage", ({ message }) => {
+    if (!players[socket.id]) return;
+    const text = (message || "").trim().slice(0, 120);
+    if (!text) return;
+    io.emit("chatMessage", { id: socket.id, name: players[socket.id].name, message: text });
+  });
+
   socket.on("disconnect", () => {
     if (!players[socket.id]) return;
     console.log(`${players[socket.id].name} left`);
