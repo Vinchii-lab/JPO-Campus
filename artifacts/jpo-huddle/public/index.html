@@ -11,9 +11,26 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #f0ece4; overflow: hidden; }
+    #focus-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.45);
+      cursor: pointer;
+      transition: opacity 0.25s;
+    }
+    #focus-overlay.hidden { opacity: 0; pointer-events: none; }
+    #focus-overlay div {
+      background: #fff; border-radius: 12px; padding: 24px 36px;
+      font-family: monospace; font-size: 18px; color: #333;
+      text-align: center; line-height: 1.6;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
   </style>
 </head>
 <body>
+  <div id="focus-overlay">
+    <div>🖱️ Click anywhere to play<br><small style="font-size:13px;color:#888">WASD or arrow keys to move</small></div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
@@ -100,6 +117,27 @@
         this.sitting   = false;
         this.lastFlipX = false;
         this._sendTimer = 0;
+
+        // Capture arrow keys + WASD so the browser never steals them for scrolling
+        this.input.keyboard.addCapture([
+          Phaser.Input.Keyboard.KeyCodes.UP,
+          Phaser.Input.Keyboard.KeyCodes.DOWN,
+          Phaser.Input.Keyboard.KeyCodes.LEFT,
+          Phaser.Input.Keyboard.KeyCodes.RIGHT,
+          Phaser.Input.Keyboard.KeyCodes.W,
+          Phaser.Input.Keyboard.KeyCodes.A,
+          Phaser.Input.Keyboard.KeyCodes.S,
+          Phaser.Input.Keyboard.KeyCodes.D,
+          Phaser.Input.Keyboard.KeyCodes.E,
+          Phaser.Input.Keyboard.KeyCodes.SPACE,
+        ]);
+
+        // Dismiss the click-to-play overlay on first pointer down
+        const overlay = document.getElementById('focus-overlay');
+        this.input.once('pointerdown', () => {
+          overlay.classList.add('hidden');
+          setTimeout(() => overlay.remove(), 300);
+        });
 
         // ── Camera ───────────────────────────────────────────────────
         this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
