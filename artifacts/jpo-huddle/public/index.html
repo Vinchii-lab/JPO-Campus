@@ -171,6 +171,10 @@
             { frameWidth: 16, frameHeight: 32 }
           );
         });
+
+        // Sit sprites (Adam only — others fall back to idle)
+        this.load.spritesheet('adam_sit', '/assets/Adam_sit_16x16.png', { frameWidth: 16, frameHeight: 32 });
+        this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
       }
 
       create() {
@@ -202,12 +206,55 @@
           });
         });
 
+        // Adam-only interaction animations
+        this.anims.create({
+          key: 'sit_adam',
+          frames: this.anims.generateFrameNumbers('adam_sit', { start: 0, end: 5 }),
+          frameRate: 8, repeat: -1,
+        });
+        this.anims.create({
+          key: 'phone_adam',
+          frames: this.anims.generateFrameNumbers('adam_phone', { start: 0, end: 8 }),
+          frameRate: 8, repeat: -1,
+        });
+
         // ── Furniture (before players → players always on top) ─────────
         const furnitureLayer = map.createLayer("Furniture", tilesets);
         furnitureLayer.setScale(3);
         this.furnitureLayer = furnitureLayer;
 
         wallLayer.setCollisionByExclusion([-1]);
+
+        // ── Computer screen glows (pulsing overlays over known desk monitors) ──
+        // Desk tiles confirmed at cols 12,14,16 × rows 17,19 in the starting office
+        const deskMonitors = [
+          [12,17],[14,17],[16,17],
+          [12,19],[14,19],[16,19],
+        ];
+        deskMonitors.forEach(([col, row], i) => {
+          const wx = col * 48 + 24;
+          const wy = row * 48 + 8; // upper portion of tile = monitor area
+          const g = this.add.graphics();
+          g.fillStyle(0x44aaff, 0.5);
+          g.fillRoundedRect(wx - 14, wy - 7, 28, 14, 3);
+          // inner bright spot
+          g.fillStyle(0x88ccff, 0.6);
+          g.fillRoundedRect(wx - 8, wy - 4, 16, 8, 2);
+          this.tweens.add({
+            targets: g,
+            alpha: { from: 0.4, to: 0.9 },
+            duration: 1100 + i * 180,
+            yoyo: true, repeat: -1,
+            ease: 'Sine.easeInOut',
+          });
+        });
+
+        // ── "Press E" proximity hint ──────────────────────────────────
+        this.eHint = this.add.text(0, 0, '[ E ] Sit', {
+          fontSize: '10px', fontFamily: 'monospace',
+          color: '#fff', backgroundColor: '#222222cc',
+          padding: { x: 5, y: 3 },
+        }).setOrigin(0.5, 1).setVisible(false).setDepth(500);
 
         // ── Other players registry ─────────────────────────────────────
         this.otherPlayers = {};
@@ -286,7 +333,13 @@
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
           entry.sprite.setFlipX(data.flipX);
-          const animKey = `${data.anim}_${entry.character}`;
+          // 'sit' → use character sit anim if available, else idle
+          let animKey;
+          if (data.anim === 'sit') {
+            animKey = entry.character === 'adam' ? 'sit_adam' : `idle_${entry.character}`;
+          } else {
+            animKey = `${data.anim}_${entry.character}`;
+          }
           if (entry.sprite.anims.currentAnim?.key !== animKey) entry.sprite.play(animKey);
           entry.nameTag.setPosition(data.x, data.y - 34);
         });
@@ -336,23 +389,41 @@
         const idleKey = `idle_${_playerChar}`;
         const walkKey = `walk_${_playerChar}`;
 
+        // ── Proximity: show "Press E" hint when near furniture ────────
+        const ptx = Math.floor(player.x / 48);
+        const pty = Math.floor(player.y / 48);
+        let nearFurniture = false;
+        if (!this.sitting) {
+          outer: for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              const t = this.furnitureLayer.getTileAt(ptx + dx, pty + dy);
+              if (t && t.index > 0) { nearFurniture = true; break outer; }
+            }
+          }
+        }
+        this.eHint.setVisible(nearFurniture);
+        if (nearFurniture) this.eHint.setPosition(player.x, player.y - 52);
+
         // ── Sit / stand ────────────────────────────────────────────────
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
-          } else {
-            const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y);
+          } else if (nearFurniture) {
+            const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y)
+              || this.furnitureLayer.getTileAt(ptx, pty - 1);
             if (tile) {
-              player.setPosition(tile.x * 48 + 24, tile.y * 48 + 24);
+              player.setPosition(tile.getCenterX(), tile.getCenterY());
               this.sitting = true;
             }
           }
         }
 
+        const sitKey = _playerChar === 'adam' ? 'sit_adam' : idleKey;
+
         if (this.sitting) {
           player.setVelocity(0, 0);
           player.setFlipX(this.lastFlipX);
-          if (player.anims.currentAnim?.key !== idleKey) player.play(idleKey);
+          if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
         } else {
           // ── Movement ──────────────────────────────────────────────────
           player.setVelocity(0, 0);
@@ -388,7 +459,7 @@
             x:     Math.round(player.x),
             y:     Math.round(player.y),
             flipX: this.lastFlipX,
-            anim:  this.sitting ? 'idle' : (left || right || up || down ? 'walk' : 'idle'),
+            anim:  this.sitting ? 'sit' : (left || right || up || down ? 'walk' : 'idle'),
           });
         }
 
