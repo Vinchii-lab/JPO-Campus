@@ -54,7 +54,7 @@ Shirt `t=15` for Alex/Amelia stops the flowing-hair shade `(149,115,80)` at dist
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 149,157,88    | 80 | —    | **16** | yMax=16 (NOT 17!): skin pixel (187,163,134) at y=16 is dist=60 < t=80 |
+| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23: covers hat+visible shirt side; shirt zone overwrites y=17..22 when shirt selected |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
 | adam   | shirt | 93,96,67      | 40 | 17   | 23   | body only; cut at y=17 |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
