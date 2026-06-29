@@ -383,6 +383,15 @@
       <p style="font-size:15px;color:#e74c3c;margin-bottom:12px;">Your request was not approved.</p>
       <p style="font-size:12px;color:#999;">Please contact your admin for access.</p>
     </div>
+
+    <!-- Step 4: Kicked / reset -->
+    <div class="join-card hidden" id="card-kicked">
+      <h2>🏢 JPO Huddle</h2>
+      <div style="font-size:40px;margin:20px 0;">🔄</div>
+      <p style="font-size:15px;color:#f39c12;margin-bottom:12px;">Your character was reset by the admin.</p>
+      <p style="font-size:12px;color:#999;margin-bottom:20px;">Re-register to pick new colors.</p>
+      <button class="join-btn" onclick="location.reload()" style="padding:10px 28px;font-size:14px;">Re-register</button>
+    </div>
   </div>
 
   <!-- ── Chat bar ── -->
@@ -794,6 +803,16 @@
       document.getElementById('card-rejected').classList.remove('hidden');
     });
 
+    socket.on('kicked', () => {
+      // Hide all overlay cards and show the kicked card
+      ['card-register','card-pending','card-rejected'].forEach(id => {
+        document.getElementById(id)?.classList.add('hidden');
+      });
+      document.getElementById('card-kicked').classList.remove('hidden');
+      // Also hide the game overlay (join overlay) in case they were in-game
+      document.getElementById('join-overlay').style.display = 'flex';
+    });
+
     socket.on('approved', (data) => {
       _playerName    = data.name;
       _playerChar    = data.character;
@@ -963,17 +982,19 @@
     socket.on('playerList', (list) => {
       document.getElementById('op-player-count').textContent = list.length;
       const tbody = document.getElementById('op-player-tbody');
-      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="3">No players online</td></tr>'; return; }
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No players online</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
           <td><span class="online-dot"></span>${esc(p.name)}</td>
           <td>💰 ${p.coins}</td>
           <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
+          <td><button class="o-btn o-btn-reject" title="Reset player (lets them re-register)" onclick="ownerKick('${esc(p.id)}')">⟳</button></td>
         </tr>`).join('');
     });
 
     function ownerApprove(id) { socket.emit('approvePlayer', id); }
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
+    function ownerKick(id)    { socket.emit('kickPlayer',    id); }
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }

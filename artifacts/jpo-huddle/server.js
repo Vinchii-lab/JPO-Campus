@@ -108,6 +108,17 @@ io.on("connection", (socket) => {
     console.log(`Rejected: ${reg?.name}`);
   });
 
+  socket.on("kickPlayer", (targetId) => {
+    if (!admins.has(socket.id)) return;
+    const p = players[targetId];
+    if (!p) return;
+    delete players[targetId];
+    io.to(targetId).emit("kicked");
+    socket.broadcast.emit("playerLeft", { id: targetId });
+    _notifyAdmins();
+    console.log(`Kicked: ${p.name}`);
+  });
+
   // ── Game events ──────────────────────────────────────────────────────
   socket.on("playerMove", (data) => {
     if (!players[socket.id]) return;
