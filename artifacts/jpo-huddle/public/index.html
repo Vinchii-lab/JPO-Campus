@@ -325,6 +325,7 @@
           <div class="preview-col">
             <canvas id="preview-canvas" width="80" height="160"></canvas>
             <div class="preview-label">Preview</div>
+            <div id="color-summary" style="margin-top:8px;font-size:11px;color:#666;line-height:1.6;min-width:80px;text-align:left;"></div>
           </div>
 
           <!-- Step content (right column) -->
@@ -575,7 +576,7 @@
       amelia: {
         hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20},  // shirtYMax:20 — when shirt selected hair covers y=11..19; shirt gets y=20..23
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:185,g:93, b:114, t:50, yMin:20, yMax:24},  // source=(185,93,114) catches plaid pixels (181,121,114)✓ (170,94,86)✓ but NOT hair (138,101,82) dist²=3297>2500; Y-separated from pants (yMax:24 vs yMin:24)
+        shirt: {r:185,g:93, b:114, t:50, yMin:20, yMax:24, xMin:8},  // source=(185,93,114) catches plaid pixels (181,121,114)✓ (170,94,86)✓ but NOT hair (138,101,82) dist²=3297>2500; xMin:8 excludes left side (x=0..7) where flowing hair overlaps
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
@@ -591,19 +592,28 @@
     }
 
     // Swap pixels within threshold Euclidean distance of source → target, preserving luminance.
-    // fw = image width in pixels (used to compute row index for yMin/yMax clamping).
+    // fw = image width in pixels (used to compute row/col index for Y/X-range clamping).
     // yMin/yMax are row indices within the frame (0-based, yMax exclusive); omit to swap all rows.
-    function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax) {
+    // xMin/xMax are column indices (0-based, xMax exclusive); omit to swap all columns.
+    function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax, xMin, xMax) {
       const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
       const t2 = threshold * threshold;
       const rowBytes = (fw || 0) * 4;
       const useY = rowBytes > 0 && (yMin !== undefined || yMax !== undefined);
+      const useX = rowBytes > 0 && (xMin !== undefined || xMax !== undefined);
       for (let i = 0; i < pixels.length; i += 4) {
         if (pixels[i+3] < 128) continue;
-        if (useY) {
+        if (useY || useX) {
           const y = Math.floor(i / rowBytes);
-          if (yMin !== undefined && y < yMin) continue;
-          if (yMax !== undefined && y >= yMax) continue;
+          if (useY) {
+            if (yMin !== undefined && y < yMin) continue;
+            if (yMax !== undefined && y >= yMax) continue;
+          }
+          if (useX) {
+            const x = (i >> 2) % fw;
+            if (xMin !== undefined && x < xMin) continue;
+            if (xMax !== undefined && x >= xMax) continue;
+          }
         }
         const dr = pixels[i]-sr, dg = pixels[i+1]-sg, db = pixels[i+2]-sb;
         if (dr*dr + dg*dg + db*db > t2) continue;
@@ -617,14 +627,28 @@
     // Apply all four zone swaps to an ImageData in-place. Order: skin → hair → shirt → pants.
     // fw = image width in pixels, forwarded to _swapColorsData for Y-range masking.
     function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw) {
-      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax); }
-      if (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   { const [r,g,b]=_hexCssToRGB(HAIR_COLORS[hairIdx].css); const hairYMax=(shirtIdx&&zones.hair.shirtYMax!=null)?zones.hair.shirtYMax:zones.hair.yMax; _swapColorsData(pixels,zones.hair.r, zones.hair.g, zones.hair.b, r,g,b,zones.hair.t ??44,fw,zones.hair.yMin, hairYMax); }
-      if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax); }
+      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax); }
+      if (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   { const [r,g,b]=_hexCssToRGB(HAIR_COLORS[hairIdx].css); const hairYMax=(shirtIdx&&zones.hair.shirtYMax!=null)?zones.hair.shirtYMax:zones.hair.yMax; _swapColorsData(pixels,zones.hair.r, zones.hair.g, zones.hair.b, r,g,b,zones.hair.t ??44,fw,zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax); }
+      if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax,zones.shirt.xMin,zones.shirt.xMax); }
       if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
         const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[pantsIdx].css);
-        _swapColorsData(pixels,zones.pants.r,zones.pants.g,zones.pants.b,r,g,b,zones.pants.t??50,fw,zones.pants.yMin,zones.pants.yMax);
-        if (zones.shoe) _swapColorsData(pixels,zones.shoe.r,zones.shoe.g,zones.shoe.b,r,g,b,zones.shoe.t??40,fw,zones.shoe.yMin,zones.shoe.yMax);
+        _swapColorsData(pixels,zones.pants.r,zones.pants.g,zones.pants.b,r,g,b,zones.pants.t??50,fw,zones.pants.yMin,zones.pants.yMax,zones.pants.xMin,zones.pants.xMax);
+        if (zones.shoe) _swapColorsData(pixels,zones.shoe.r,zones.shoe.g,zones.shoe.b,r,g,b,zones.shoe.t??40,fw,zones.shoe.yMin,zones.shoe.yMax,zones.shoe.xMin,zones.shoe.xMax);
       }
+    }
+
+    // Update the small color-summary strip below the preview canvas.
+    function _updateColorSummary() {
+      const el = document.getElementById('color-summary');
+      if (!el) return;
+      function dot(css) {
+        return css ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${css};border:1px solid #ccc;vertical-align:middle;margin-right:3px;"></span>` : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:3px;background:#f5f5f5;"></span>`;
+      }
+      const hc = _playerHairIdx  ? HAIR_COLORS[_playerHairIdx]?.css  : null;
+      const sc = _playerSkinIdx  ? SKIN_TONES[_playerSkinIdx]?.css   : null;
+      const tc = _playerShirtIdx ? CLOTH_COLORS[_playerShirtIdx]?.css : null;
+      const pc = _playerPantsIdx ? CLOTH_COLORS[_playerPantsIdx]?.css : null;
+      el.innerHTML = `${dot(hc)}Hair<br>${dot(sc)}Skin<br>${dot(tc)}Shirt<br>${dot(pc)}Pants`;
     }
 
     // Redraw the 80×160 preview canvas with current appearance choices.
@@ -642,6 +666,7 @@
 
       if (noSwap || !zones) {
         ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 80, 160);
+        _updateColorSummary();
         return;
       }
 
@@ -653,6 +678,7 @@
       _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16);
       tc.putImageData(id, 0, 0);
       ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
+      _updateColorSummary();
     }
 
     // ── Load character images + detect zones ──────────────────────────
