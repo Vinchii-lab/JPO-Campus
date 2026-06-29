@@ -16,13 +16,25 @@ Hair and shirt share the same color family for all characters. The ONLY reliable
 2. **Spatial zone cuts** — Characters start at y≈9–10 (rows 0–8 are transparent). A naive 38% cut at y≈12 only captures 2–3 visible rows.
 3. **Color-only threshold** — For Alex/Amelia the shirt body color (138,101,82) is also present in the head area. No threshold separates them without Y masking.
 
-# The collar-row rule (hard-won)
+# The collar-row and threshold rules (hard-won)
 
-**All four characters use hair = y<17, shirt = y>=17.** The collar row y=16 must be inside the HAIR zone for every character.
+**Alex/Amelia**: hair yMax=16 (y=11..15), shirt yMin=16 (y=16..23), shirt **t=15**.
+**Adam/Bob**: hair yMax=17 (y<17), shirt yMin=17 (y=17+), shirt t=40.
 
-Why: Row y=16 spans the full character width. If it's in the shirt zone, picking a shirt color turns the full-width collar vivid yellow directly below the hair — visually merging with the sandy-gold hair above it. The user sees the entire top as yellow and perceives "shirt changed hair."
+Why collar is in the SHIRT zone for Alex/Amelia (yMin=16):
+- Putting collar in HAIR zone (yMax=17 for hair) left the collar at its original dark-brown when no hair was selected → visible dark ring between golden hair and shirt body ("fucked up").
+- Collar in SHIRT zone (yMin=16) turns collar the shirt color — clear visual that the shirt starts there.
 
-Adam/Bob already had yMax=17 for hair (correct). Alex/Amelia previously had yMax=16 for hair (bug): the collar ended up in the shirt zone.
+Why shirt threshold is 15 (not 40) for Alex/Amelia:
+- Amelia has long flowing hair whose pixels are (149,115,80) at dist=18 from shirt source (138,101,82). With t=40, these flowing-hair pixels turned shirt-color, making the entire back/body area the shirt color.
+- With t=15, only (138,101,82) and (141,112,81) (dist≤11.4) are caught. (149,115,80) at dist=18 > 15 → NOT caught → flowing hair stays original.
+- For Alex, this also applies at y=18-19 where a few (149,115,80) hair pixels appear in the body zone.
+
+Known limitation: yellow shirt on Alex/Amelia — the vivid yellow collar adjacent to sandy-golden hair can look similar. No fix without sprite changes.
+
+Attempts that failed:
+- yMax=17 for hair (collar in hair zone): created dark band when no hair selected.
+- t=40 with yMin=17: excluded collar (dark gap) AND caught flowing hair (too much orange for Amelia).
 
 # `_swapColorsData` signature
 
@@ -44,11 +56,11 @@ _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax)
 | adam   | shoe  | 93,96,67      | 40 | 26   | —    | same olive as shirt; swapped to pants color |
 | alex   | hair  | 138,101,82    | 65 | 11   | 16   | t=65 to also catch bright (186,141,94) hair |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
-| alex   | shirt | 138,101,82    | 40 | 16   | 24   | same source, body zone only; cut at y=16 |
+| alex   | shirt | 138,101,82    | **15** | 16 | 24 | t=15 stops (149,115,80) flowing-hair at dist=18>15 |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
 | amelia | hair  | 138,101,82    | 65 | 11   | 16   | |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
-| amelia | shirt | 138,101,82    | 40 | 16   | 24   | |
+| amelia | shirt | 138,101,82    | **15** | 16 | 24 | same; stops flowing-hair from turning shirt color |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
 | bob    | hair  | 113,107,110   | 25 | —    | 17   | tight t=25: shirt (93,88,95) is only dist=23 away |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |

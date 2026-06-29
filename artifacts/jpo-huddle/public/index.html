@@ -555,15 +555,15 @@
         shoe:  {r:93, g:96, b:67,  t:40, yMin:26},
       },
       alex:   {
-        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:17},  // yMax:17 — collar row y=16 in hair zone
+        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:16},  // yMax:16 — collar (y=16) in shirt zone
         skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:138,g:101,b:82, t:40, yMin:17, yMax:24},  // yMin:17 — shirt body only, below collar
+        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},  // t=15 catches (138/141) not (149) lighter pixels; yMin:16 includes collar
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
       },
       amelia: {
-        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:17},  // yMax:17 — collar row y=16 in hair zone
+        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:16},  // yMax:16 — collar (y=16) in shirt zone
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:138,g:101,b:82, t:40, yMin:17, yMax:24},  // yMin:17 — shirt body only, below collar
+        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},  // t=15 excludes (149,115,80) flowing-hair pixels (dist=18>15)
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
