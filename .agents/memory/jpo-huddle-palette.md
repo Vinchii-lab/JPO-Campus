@@ -16,6 +16,14 @@ Hair and shirt share the same color family for all characters. The ONLY reliable
 2. **Spatial zone cuts** — Characters start at y≈9–10 (rows 0–8 are transparent). A naive 38% cut at y≈12 only captures 2–3 visible rows.
 3. **Color-only threshold** — For Alex/Amelia the shirt body color (138,101,82) is also present in the head area. No threshold separates them without Y masking.
 
+# The collar-row rule (hard-won)
+
+**All four characters use hair = y<17, shirt = y>=17.** The collar row y=16 must be inside the HAIR zone for every character.
+
+Why: Row y=16 spans the full character width. If it's in the shirt zone, picking a shirt color turns the full-width collar vivid yellow directly below the hair — visually merging with the sandy-gold hair above it. The user sees the entire top as yellow and perceives "shirt changed hair."
+
+Adam/Bob already had yMax=17 for hair (correct). Alex/Amelia previously had yMax=16 for hair (bug): the collar ended up in the shirt zone.
+
 # `_swapColorsData` signature
 
 ```js
