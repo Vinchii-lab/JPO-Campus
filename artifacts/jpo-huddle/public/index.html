@@ -560,7 +560,7 @@
     //           hair zone (y<17); Y-masking keeps it separate from the shirt zone (y≥17).
     const CHAR_ZONE_COLORS = {
       adam:   {
-        hair:  {r:110,g:118,b:78, t:80, yMax:23, shirtYMax:18}, // yMax=23 when hat only (full olive); shirtYMax=18 when shirt also selected (gives shirt zone y=18..22)
+        hair:  {r:110,g:118,b:78, t:80, yMax:23, shirtYMax:17}, // yMax=23 hat-only (full olive); shirtYMax:17 → hat covers y<17, shirt zone y≥17 — no overlap row
         skin:  {r:255,g:203,b:176,t:50},
         shirt: {r:93, g:96, b:67,  t:40, yMin:17, yMax:23},
         pants: {r:159,g:116,b:168,t:50, yMin:23},
