@@ -14,12 +14,12 @@ For characters where the hair zone extends into the shirt zone (Adam, Amelia), t
 - **Hat only selected**: hair uses full `yMax` → whole region changes together
 - **Shirt also selected**: hair shrinks to `shirtYMax` → shirt zone gets its pixels back
 
-| char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin |
-|--------|----------------------|---------------------------|------------|
-| adam   | 23                   | 18                        | 17         |
-| amelia | 24                   | **20**                    | **20**     |
-| alex   | 17                   | (none needed)             | **19**     |
-| bob    | 17                   | (none needed)             | 17         |
+| char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin | shirt t |
+|--------|----------------------|---------------------------|------------|---------|
+| adam   | 23                   | **17**                    | 17         | **11**  |
+| amelia | 24                   | **20**                    | **20**     | 20      |
+| alex   | 17                   | (none needed)             | **19**     | 20      |
+| bob    | 17                   | (none needed)             | 17         | 40      |
 
 # Why auto-detection fails
 
