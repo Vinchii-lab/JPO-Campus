@@ -17,7 +17,7 @@ For characters where the hair zone extends into the shirt zone (Adam, Amelia), t
 | char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin | shirt t |
 |--------|----------------------|---------------------------|------------|---------|
 | adam   | 23                   | **17**                    | 17         | **11**  |
-| amelia | 24                   | **20**                    | **20**     | 20      |
+| amelia | 24                   | **20**                    | **20**     | **50**  |
 | alex   | 17                   | (none needed)             | **19**     | 20      |
 | bob    | 17                   | (none needed)             | 17         | 40      |
 
@@ -47,34 +47,48 @@ Alex and Amelia's hair and shirt share the EXACT SAME source color (138,101,82).
 **Fix applied (verified pixel-by-pixel with Pillow dump):**
 - Alex shirt `yMin=19` — y=17..18 are still at head-height visually; excluding them stops the bleed.
 - Amelia shirt `yMin=20`, hair `shirtYMax=20` — y=17..19 have hair strands at head-height on the right side.
-- Shirt `t=20` for both (was 15) — catches (149,115,80) d=18 pixels at y=19+/20+ for better shirt-body coverage.
+- Shirt `t=20` for Alex (catches (149,115,80) d=18 pixels at y=19+ for better shirt-body coverage).
 
-**Trade-off:** The visible shirt area is a narrower strip (left-side shirt back at y=19–23 / y=20–23). This is correct and intentional — better to show less shirt than to paint the hair.
+# Amelia's flowing hair — special shirt source solution
+
+Amelia's HAIR source (138,101,82) also fills x=2..7, y=20..23 (the shirt zone). Using hair source as shirt source caused ALL flowing-hair pixels in the shirt zone to turn shirt color — the classic "bleed into hair" complaint.
+
+**Root cause confirmed by pixel dump:**
+- Left side (x=0..7), y=20..23: `(138,101,82)` flowing hair pixels → would turn shirt color
+- Right/center side, y=20..23: plaid pixels `(181,121,114)`, `(170,94,86)`, `(191,139,120)` — these are shirt fabric
+
+**The fix: change Amelia's shirt source to `(185,93,114)` (same as pants source) with t=50:**
+- dist² from `(138,101,82)` to `(185,93,114)` = 3297 > t²=2500 → flowing hair NOT caught ✓
+- dist² from `(181,121,114)` = 800 < 2500 → plaid caught ✓
+- dist² from `(170,94,86)` = 1010 < 2500 → plaid caught ✓
+- Y zones keep shirt and pants separate even though they share source: shirt `yMax:24` vs pants `yMin:24`
+
+**Why shirtYMax=20 stays relevant:** When BOTH hat and shirt selected, hair still shrinks to y=11..19 so the hat color doesn't double-process the shirt zone.
 
 # Amelia's flowing hair rule
 
 Amelia's hair flows from y=11 all the way to y=23. Use `yMax=24` to cover the full visible flowing hair.
 
 - When BOTH hat and shirt selected: hair covers y=11..19 (shirtYMax=20), shirt covers y=20..23. Clean.
-- When ONLY shirt selected (hairIdx=0): hair zone skipped; shirt catches y=20..23 brownish pixels only.
+- When ONLY shirt selected (hairIdx=0): hair zone skipped; new shirt source catches PLAID pixels only (not hair).
 - When ONLY hat selected: hair covers y=11..23 (full yMax=24). Flowing hair fully recolored ✓
 
 # Hardcoded zone table (CHAR_ZONE_COLORS in index.html)
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=18 when shirt selected |
+| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=17 when shirt selected |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
-| adam   | shirt | 93,96,67      | 40 | 17   | 23   | body only; cut at y=17 |
+| adam   | shirt | 93,96,67      | **11** | 17 | 23 | t=11 (t²=121) — only pure (93,96,67) caught; collar (95,105,74) dist²=134 excluded |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
-| adam   | shoe  | 93,96,67      | 40 | 26   | —    | same olive as shirt; swapped to pants color |
+| adam   | shoe  | 93,96,67      | 11 | 26   | —    | same olive as shirt; swapped to pants color |
 | alex   | hair  | 138,101,82    | 65 | 11   | **17** | yMax=17: hair zone covers y=11..16 incl. collar |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
 | alex   | shirt | 138,101,82    | **20** | **19** | 24 | yMin=19: skips y=17..18 which are at head-height |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
 | amelia | hair  | 138,101,82    | 65 | 11   | **24** | yMax=24: full flowing hair; shirtYMax=20 |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
-| amelia | shirt | 138,101,82    | **20** | **20** | 24 | yMin=20: skips y=17..19 which have hair strands at head-height |
+| amelia | shirt | **185,93,114** | **50** | **20** | 24 | PLAID source — NOT hair source; same as pants source but Y-separated |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
 | bob    | hair  | 113,107,110   | **35** | — | 17   | t=35: catches (93,88,95) at dist=31; Y-mask separates from shirt |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |
@@ -122,3 +136,4 @@ Use this to find the first Y row where brownish pixels (d<20) are ONLY on the le
 - Use MID-RANGE hair color as source (not brightest, not darkest) so outlines are within catch radius.
 - Outlines being caught is CORRECT — luminance scaling turns them into dark hair-colored outlines.
 - Do NOT use heuristic auto-detection.
+- If hair and shirt share the same source color (common for characters with flowing hair), use the PANTS SOURCE as the shirt source instead — the plaid/fabric pixels of the shirt often match the pants fabric color, and Y masking (yMax vs yMin at the same boundary) keeps them fully separate.

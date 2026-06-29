@@ -575,7 +575,7 @@
       amelia: {
         hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20},  // shirtYMax:20 — when shirt selected hair covers y=11..19; shirt gets y=20..23
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:138,g:101,b:82, t:20, yMin:20, yMax:24},  // yMin:20 clears y=17..19 collar/hair-strand rows from shirt zone
+        shirt: {r:185,g:93, b:114, t:50, yMin:20, yMax:24},  // source=(185,93,114) catches plaid pixels (181,121,114)✓ (170,94,86)✓ but NOT hair (138,101,82) dist²=3297>2500; Y-separated from pants (yMax:24 vs yMin:24)
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
