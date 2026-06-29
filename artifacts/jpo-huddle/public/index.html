@@ -314,9 +314,7 @@
           <div class="step-arrow">›</div>
           <div class="step-dot" id="sd-2">Skin</div>
           <div class="step-arrow">›</div>
-          <div class="step-dot" id="sd-3">Shirt</div>
-          <div class="step-arrow">›</div>
-          <div class="step-dot" id="sd-4">Pants</div>
+          <div class="step-dot" id="sd-3">Clothes</div>
         </div>
 
         <!-- Preview + options side by side -->
@@ -345,16 +343,10 @@
               <div class="swatch-row" id="skin-tone-picker"></div>
             </div>
 
-            <!-- Step 3: Shirt -->
+            <!-- Step 3: Clothes -->
             <div id="bstep-3" style="display:none">
-              <div class="opt-section-label">Shirt Color</div>
-              <div class="swatch-row" id="shirt-color-picker"></div>
-            </div>
-
-            <!-- Step 4: Pants -->
-            <div id="bstep-4" style="display:none">
-              <div class="opt-section-label">Pants Color</div>
-              <div class="swatch-row" id="pants-color-picker"></div>
+              <div class="opt-section-label">Clothes Color</div>
+              <div class="swatch-row" id="clothes-color-picker"></div>
             </div>
 
           </div>
@@ -525,8 +517,7 @@
     let _playerChar     = 'adam';
     let _playerHairIdx  = 0;
     let _playerSkinIdx  = 0;
-    let _playerShirtIdx = 0;
-    let _playerPantsIdx = 0;
+    let _playerClothesIdx = 0;
     let _playerCoins    = 0;
     let _ownedItems     = [];
 
@@ -644,11 +635,10 @@
       function dot(css) {
         return css ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${css};border:1px solid #ccc;vertical-align:middle;margin-right:3px;"></span>` : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:3px;background:#f5f5f5;"></span>`;
       }
-      const hc = _playerHairIdx  ? HAIR_COLORS[_playerHairIdx]?.css  : null;
-      const sc = _playerSkinIdx  ? SKIN_TONES[_playerSkinIdx]?.css   : null;
-      const tc = _playerShirtIdx ? CLOTH_COLORS[_playerShirtIdx]?.css : null;
-      const pc = _playerPantsIdx ? CLOTH_COLORS[_playerPantsIdx]?.css : null;
-      el.innerHTML = `${dot(hc)}Hair<br>${dot(sc)}Skin<br>${dot(tc)}Shirt<br>${dot(pc)}Pants`;
+      const hc = _playerHairIdx    ? HAIR_COLORS[_playerHairIdx]?.css    : null;
+      const sc = _playerSkinIdx    ? SKIN_TONES[_playerSkinIdx]?.css     : null;
+      const cc = _playerClothesIdx ? CLOTH_COLORS[_playerClothesIdx]?.css : null;
+      el.innerHTML = `${dot(hc)}Hair<br>${dot(sc)}Skin<br>${dot(cc)}Clothes`;
     }
 
     // Redraw the 80×160 preview canvas with current appearance choices.
@@ -662,7 +652,7 @@
       ctx.imageSmoothingEnabled = false;
 
       const zones = _charZoneColors[_playerChar];
-      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_playerShirtIdx && !_playerPantsIdx;
+      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_playerClothesIdx;
 
       if (noSwap || !zones) {
         ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 80, 160);
@@ -675,7 +665,7 @@
       const tc = tmp.getContext('2d');
       tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
       const id = tc.getImageData(0, 0, 16, 32);
-      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16);
+      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerClothesIdx, _playerClothesIdx, 16);
       tc.putImageData(id, 0, 0);
       ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
       _updateColorSummary();
@@ -749,15 +739,14 @@
       });
     }
 
-    _buildSwatchRow('hair-color-picker', HAIR_COLORS, ()=>_playerHairIdx, v=>{ _playerHairIdx=v; }, true);
-    _buildSwatchRow('skin-tone-picker',  SKIN_TONES,  ()=>_playerSkinIdx,  v=>{ _playerSkinIdx=v;  }, false);
-    _buildSwatchRow('shirt-color-picker',CLOTH_COLORS,()=>_playerShirtIdx, v=>{ _playerShirtIdx=v; }, true);
-    _buildSwatchRow('pants-color-picker',CLOTH_COLORS,()=>_playerPantsIdx, v=>{ _playerPantsIdx=v; }, true);
+    _buildSwatchRow('hair-color-picker',   HAIR_COLORS, ()=>_playerHairIdx,    v=>{ _playerHairIdx=v;    }, true);
+    _buildSwatchRow('skin-tone-picker',    SKIN_TONES,  ()=>_playerSkinIdx,    v=>{ _playerSkinIdx=v;    }, false);
+    _buildSwatchRow('clothes-color-picker',CLOTH_COLORS,()=>_playerClothesIdx, v=>{ _playerClothesIdx=v; }, true);
 
     // ── Step navigation ────────────────────────────────────────────────
     function goToStep(n) {
       _builderStep = n;
-      [1,2,3,4].forEach(i => {
+      [1,2,3].forEach(i => {
         document.getElementById(`bstep-${i}`).style.display = (i === n) ? '' : 'none';
         const dot = document.getElementById(`sd-${i}`);
         dot.classList.toggle('active', i === n);
@@ -766,7 +755,7 @@
       const backBtn = document.getElementById('btn-back');
       const nextBtn = document.getElementById('btn-next');
       backBtn.style.visibility = n > 1 ? 'visible' : 'hidden';
-      if (n < 4) {
+      if (n < 3) {
         nextBtn.textContent = 'Next →';
         nextBtn.onclick = () => goToStep(n + 1);
       } else {
@@ -813,11 +802,10 @@
       document.getElementById('btn-next').disabled = true;
       socket.emit('register', {
         firstName: first, lastName: last, email,
-        character: _playerChar,
-        hairIdx:   _playerHairIdx,
-        skinIdx:   _playerSkinIdx,
-        shirtIdx:  _playerShirtIdx,
-        pantsIdx:  _playerPantsIdx,
+        character:   _playerChar,
+        hairIdx:     _playerHairIdx,
+        skinIdx:     _playerSkinIdx,
+        clothesIdx:  _playerClothesIdx,
       });
     }
 
@@ -845,10 +833,9 @@
     socket.on('approved', (data) => {
       _playerName    = data.name;
       _playerChar    = data.character;
-      _playerHairIdx  = data.hairIdx  ?? 0;
-      _playerSkinIdx  = data.skinIdx  ?? 0;
-      _playerShirtIdx = data.shirtIdx ?? 0;
-      _playerPantsIdx = data.pantsIdx ?? 0;
+      _playerHairIdx    = data.hairIdx    ?? 0;
+      _playerSkinIdx    = data.skinIdx    ?? 0;
+      _playerClothesIdx = data.clothesIdx ?? 0;
       _playerCoins    = data.coins;
 
       const overlay = document.getElementById('join-overlay');
@@ -1148,8 +1135,8 @@
 
       // Build (or retrieve cached) palette-swapped sprite sheet texture for a player.
       // Returns texture key string.
-      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx) {
-        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+      _buildPlayerTex(char, hairIdx, skinIdx, clothesIdx) {
+        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_cl${clothesIdx}`;
         if (this.textures.exists(key)) return key;
 
         const srcImg = this.textures.get(`run_${char}`).source[0].image;
@@ -1160,9 +1147,9 @@
         cx.drawImage(srcImg, 0, 0);
 
         const zones = _charZoneColors[char];
-        if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+        if (zones && (hairIdx || skinIdx || clothesIdx)) {
           const id = cx.getImageData(0, 0, sw, sh);
-          _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw);
+          _applySwaps(id.data, zones, hairIdx, skinIdx, clothesIdx, clothesIdx, sw);
           cx.putImageData(id, 0, 0);
         }
 
@@ -1172,16 +1159,16 @@
 
         // Also build a sit variant for adam
         if (char === 'adam') {
-          const sitKey = `pl_sit_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+          const sitKey = `pl_sit_${char}_h${hairIdx}_sk${skinIdx}_cl${clothesIdx}`;
           if (!this.textures.exists(sitKey)) {
             const sitSrc = this.textures.get('adam_sit').source[0].image;
             const sc = document.createElement('canvas');
             sc.width = sitSrc.width; sc.height = sitSrc.height;
             const scx = sc.getContext('2d');
             scx.drawImage(sitSrc, 0, 0);
-            if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+            if (zones && (hairIdx || skinIdx || clothesIdx)) {
               const sid = scx.getImageData(0, 0, sc.width, sc.height);
-              _applySwaps(sid.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width);
+              _applySwaps(sid.data, zones, hairIdx, skinIdx, clothesIdx, clothesIdx, sc.width);
               scx.putImageData(sid, 0, 0);
             }
             this.textures.addSpriteSheet(sitKey, sc, { frameWidth: 16, frameHeight: 32 });
@@ -1195,7 +1182,7 @@
       _onApproved(data) {
         const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
 
-        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerClothesIdx);
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
         this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
@@ -1274,13 +1261,12 @@
       }
 
       _addOtherPlayer(id, data) {
-        const char    = data.character || 'adam';
-        const hairIdx  = data.hairIdx   || 0;
-        const skinIdx  = data.skinIdx   || 0;
-        const shirtIdx = data.shirtIdx  || 0;
-        const pantsIdx = data.pantsIdx  || 0;
+        const char        = data.character  || 'adam';
+        const hairIdx     = data.hairIdx    || 0;
+        const skinIdx     = data.skinIdx    || 0;
+        const clothesIdx  = data.clothesIdx || 0;
 
-        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx);
+        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, clothesIdx);
         const sprite = this.add.sprite(data.x, data.y, texKey);
         sprite.setScale(3).setOrigin(0.5,0.5);
         const animVerb = (data.anim === 'sit' && char !== 'adam') ? 'idle' : (data.anim || 'idle');

@@ -29,7 +29,7 @@ app.get('/', (req, res, next) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
-const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, shirtIdx, pantsIdx }
+const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, clothesIdx }
 const players = {};   // socketId → full player state
 const admins  = new Set();
 
@@ -51,7 +51,7 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   // ── Registration ─────────────────────────────────────────────────────
-  socket.on("register", ({ firstName, lastName, email, character, hairIdx, skinIdx, shirtIdx, pantsIdx }) => {
+  socket.on("register", ({ firstName, lastName, email, character, hairIdx, skinIdx, clothesIdx }) => {
     const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
     const ln   = (lastName  || "").trim().slice(0, 20);
     const em   = (email     || "").trim().slice(0, 80);
@@ -60,10 +60,9 @@ io.on("connection", (socket) => {
 
     pending[socket.id] = {
       firstName: fn, lastName: ln, email: em, character: char, name,
-      hairIdx:  clampIdx(hairIdx,  8),
-      skinIdx:  clampIdx(skinIdx,  6),
-      shirtIdx: clampIdx(shirtIdx, 8),
-      pantsIdx: clampIdx(pantsIdx, 8),
+      hairIdx:    clampIdx(hairIdx,    8),
+      skinIdx:    clampIdx(skinIdx,    6),
+      clothesIdx: clampIdx(clothesIdx, 8),
     };
     socket.emit("registrationPending");
     _notifyAdmins();
@@ -87,20 +86,18 @@ io.on("connection", (socket) => {
 
     players[targetId] = {
       x: 1080, y: 840, flipX: false, anim: "idle",
-      name:      reg.name,
-      character: reg.character,
-      hairIdx:   reg.hairIdx,
-      skinIdx:   reg.skinIdx,
-      shirtIdx:  reg.shirtIdx,
-      pantsIdx:  reg.pantsIdx,
+      name:       reg.name,
+      character:  reg.character,
+      hairIdx:    reg.hairIdx,
+      skinIdx:    reg.skinIdx,
+      clothesIdx: reg.clothesIdx,
       coins: 50,
       cosmetics: [],
     };
 
     io.to(targetId).emit("approved", {
       name: reg.name, character: reg.character,
-      hairIdx:  reg.hairIdx,  skinIdx:  reg.skinIdx,
-      shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
+      hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, clothesIdx: reg.clothesIdx,
       coins: 50,
     });
     io.to(targetId).emit("currentPlayers", players);

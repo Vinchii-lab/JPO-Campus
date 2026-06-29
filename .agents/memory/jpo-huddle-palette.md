@@ -73,6 +73,10 @@ Amelia's hair flows from y=11 all the way to y=23. Use `yMax=24` to cover the fu
 - When ONLY shirt selected (hairIdx=0): hair zone skipped; new shirt source catches PLAID pixels only (not hair).
 - When ONLY hat selected: hair covers y=11..23 (full yMax=24). Flowing hair fully recolored ✓
 
+# Data model: clothesIdx (not shirtIdx/pantsIdx)
+
+The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a single `clothesIdx` value. The client emits `clothesIdx`, the server stores `clothesIdx`, and `_applySwaps` receives it as both `shirtIdx` and `pantsIdx` internally. Zone configs (shirt/pants entries in CHAR_ZONE_COLORS) are unchanged — the same value just gets applied to both.
+
 # Hardcoded zone table (CHAR_ZONE_COLORS in index.html)
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
