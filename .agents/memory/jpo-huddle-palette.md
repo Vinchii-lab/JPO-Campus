@@ -5,11 +5,21 @@ description: Hardcoded per-character hair/skin/shirt/pants zone colors with Y-ra
 
 # Core principle: hard Y cut between hair and shirt
 
-Hair and shirt share the same color family for all characters. The ONLY reliable way to separate them is a hard Y-row boundary — hair owns y < cutY, shirt owns y >= cutY. Do NOT rely on color distance alone.
+Hair and shirt share the same color family for all characters. The ONLY reliable way to separate them is a hard Y-row boundary. Do NOT rely on color distance alone.
 
-- Adam / Bob: cut at **y=17** (head is slightly taller)
-- Alex: cut at **y=17** (hair yMax=17 includes collar row at y=16)
-- Amelia: hair yMax=24 (covers entire flowing hair down the back)
+## `shirtYMax` — dynamic hair zone shrink when shirt is selected
+
+For characters where the hair zone extends into the shirt zone (Adam, Amelia), the hair zone config has a `shirtYMax` field. `_applySwaps` uses it when `shirtIdx > 0`: `hairYMax = shirtIdx && zone.hair.shirtYMax != null ? shirtYMax : yMax`.
+
+- **Hat only selected**: hair uses full `yMax` → whole olive region changes together (looks complete)
+- **Shirt also selected**: hair shrinks to `shirtYMax` → shirt zone gets its pixels back
+
+| char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin |
+|--------|----------------------|---------------------------|------------|
+| adam   | 23                   | 18                        | 17         |
+| amelia | 24                   | 16                        | 16         |
+| alex   | 17                   | (none needed)             | 16         |
+| bob    | 17                   | (none needed)             | 17         |
 
 # Why auto-detection fails
 
@@ -54,7 +64,7 @@ Shirt `t=15` for Alex/Amelia stops the flowing-hair shade `(149,115,80)` at dist
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23: covers hat+visible shirt side; shirt zone overwrites y=17..22 when shirt selected |
+| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=18 when shirt selected (gives shirt y=18..22) |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
 | adam   | shirt | 93,96,67      | 40 | 17   | 23   | body only; cut at y=17 |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
