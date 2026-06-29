@@ -6,6 +6,7 @@ import path from "path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "jpo-admin";
+const BUILD_STAMP = Date.now();
 
 const app        = express();
 const httpServer = createServer(app);
@@ -19,6 +20,13 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Redirect bare "/" to "/?v=<startup timestamp>" so the browser never serves a cached copy
+app.get('/', (req, res, next) => {
+  if (!req.query.v) return res.redirect(302, `/?v=${BUILD_STAMP}`);
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, shirtIdx, pantsIdx }
