@@ -567,15 +567,15 @@
         shoe:  {r:93, g:96, b:67,  t:40, yMin:26},
       },
       alex:   {
-        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:16},  // source=(186,141,94): outlines (86,89,114) are dist=114, never caught
+        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:17},  // yMax=17: includes collar row (y=16) in hair zone
         skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},
+        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},  // y=16 overlaps hair zone; hair runs first so collar follows hair color
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
       },
       amelia: {
-        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:16},  // source=(186,141,94): outlines (86,89,114) are dist=114, never caught
+        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24},  // yMax=24: covers full flowing hair down the back
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},
+        shirt: {r:138,g:101,b:82, t:15, yMin:16, yMax:24},  // hair runs first; shirt swap finds nothing in y=16..23 when hair selected
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {

@@ -8,7 +8,8 @@ description: Hardcoded per-character hair/skin/shirt/pants zone colors with Y-ra
 Hair and shirt share the same color family for all characters. The ONLY reliable way to separate them is a hard Y-row boundary — hair owns y < cutY, shirt owns y >= cutY. Do NOT rely on color distance alone.
 
 - Adam / Bob: cut at **y=17** (head is slightly taller)
-- Alex / Amelia: cut at **y=16**
+- Alex: cut at **y=17** (hair yMax=17 includes collar row at y=16)
+- Amelia: hair yMax=24 (covers entire flowing hair down the back)
 
 # Why auto-detection fails
 
@@ -16,55 +17,57 @@ Hair and shirt share the same color family for all characters. The ONLY reliable
 2. **Spatial zone cuts** — Characters start at y≈9–10 (rows 0–8 are transparent). A naive 38% cut at y≈12 only captures 2–3 visible rows.
 3. **Color-only threshold** — For Alex/Amelia the shirt body color (138,101,82) is also present in the head area. No threshold separates them without Y masking.
 
-# Hair source selection rationale (CRITICAL)
+# Hair source selection: use the MID-RANGE hair color (138,101,82)
 
-**Alex/Amelia**: Use `(186,141,94)` as hair source — NOT `(138,101,82)`.
-- Old source (138,101,82): outline color (86,89,114) is only dist=62 away → caught at t=65 → outlines turn hair color (bad)
-- New source (186,141,94): outlines (86,89,114) are dist=114 away → never caught at t=65 ✓
-- All four hair shades (186→149→141→138) are within dist=64 of the new source → all caught ✓
+Use `(138,101,82)` as the hair source for Alex/Amelia — NOT `(186,141,94)`.
 
-**Adam**: Use `yMax=16` NOT `yMax=17`.
-- Source (149,157,88) with t=80 catches skin pixel (187,163,134) at y=16 (dist≈60 < 80)
-- Lowering yMax to 16 excludes that row entirely → no skin leak ✓
-- Loses 8 hair pixels at bottom row — acceptable trade-off
+**Why the bright highlight source (186,141,94) is WRONG:**
+- Outlines (86,89,114) are dist=114 away → NOT caught → outlines stay blue-purple → hair looks thin/incomplete.
+- With source (138,101,82), outlines (86,89,114) are dist=62 → caught at t=65 → luminance-scaled to a correctly-dark shade of the chosen hair color → outlines look like natural dark hair outlines ✓
 
-**Bob**: Use `t=35` NOT `t=25`.
-- Old t=25: only (113,107,110) caught = 15 pixels (very sparse, hair barely visible)
-- New t=35: also catches (93,88,95) at dist=31 = 56 pixels total ✓
-- (93,88,95) is Bob's shirt source BUT Y-masking keeps hair (y<17) and shirt (y≥17) separate ✓
+**Why outlines SHOULD be caught:**
+- At pixel-art scale, including the outline pixels makes the hair look full and complete.
+- Luminance scaling preserves the darkness: dark outlines → dark hair-colored outlines. This is visually correct.
+- NOT catching outlines makes the hair look like a thin unbordered blob.
 
-# The collar-row and shirt threshold rules
+# The collar-row rule (Alex)
 
-**Alex/Amelia**: hair yMax=16 (y=11..15), shirt yMin=16 (y=16..23), shirt **t=15**.
-**Adam/Bob**: hair yMax=16/17 (see above), shirt yMin=17 (y=17+), shirt t=40.
+Alex's collar at y=16 is brownish (same as hair), not shirt. Include it in the HAIR zone (yMax=17).
 
-Why collar is in the SHIRT zone for Alex/Amelia (shirt yMin=16):
-- Putting collar in HAIR zone left a dark ring between golden hair and shirt body ("fucked up").
-- Collar in SHIRT zone turns collar the shirt color — clean visual.
+- With **only hair selected**: y=11..16 → hair color. Collar matches hair ✓
+- With **only shirt selected**: y=16..23 shirt zone catches (138,101,82) at y=16 → collar turns shirt color ✓ (hair zone skipped since hairIdx=0)
+- With **both selected**: y=11..16 → hair color first; shirt zone at y=16 finds already-swapped pixels (not brownish anymore) → shirt doesn't override collar → collar stays hair color ✓
 
-Why shirt threshold is 15 for Alex/Amelia:
-- Amelia's flowing hair pixels (149,115,80) are dist=18 from shirt source (138,101,82).
-- t=15: only (138,101,82) and (141,112,81) (dist≤11.4) caught. Flowing hair stays original.
-- t≥18: (149,115,80) caught → flowing hair turns shirt color (bad).
+# Amelia's flowing hair rule
+
+Amelia's hair flows from y=11 all the way to y=23. Use `yMax=24` to cover the full visible flowing hair.
+
+- The shirt zone (yMin=16, yMax=24) overlaps. Since hair swap runs first, shirt has no effect on y=16..23 when hair is selected.
+- If ONLY shirt is selected (hairIdx=0): hair swap skipped → shirt catches y=16..23 brownish pixels → shirt color shows ✓
+- 6 skin pixels (181,121,114) at y=17..22 are dist=57 from source → caught at t=65 → turn hair color → makes hair look more solid (no skin gaps between hair strands). Acceptable trade-off.
+
+# The shirt threshold rule
+
+Shirt `t=15` for Alex/Amelia stops the flowing-hair shade `(149,115,80)` at dist=18 > 15 from being caught in the shirt zone when no hair selected. Do NOT raise shirt t above 15 for these characters.
 
 # Hardcoded zone table (CHAR_ZONE_COLORS in index.html)
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 149,157,88    | 80 | —    | **16** | yMax=16 (not 17!) avoids skin pixel at y=16 |
+| adam   | hair  | 149,157,88    | 80 | —    | **16** | yMax=16 (NOT 17!): skin pixel (187,163,134) at y=16 is dist=60 < t=80 |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
 | adam   | shirt | 93,96,67      | 40 | 17   | 23   | body only; cut at y=17 |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
 | adam   | shoe  | 93,96,67      | 40 | 26   | —    | same olive as shirt; swapped to pants color |
-| alex   | hair  | **186,141,94** | 65 | 11   | 16   | source is BRIGHT HIGHLIGHT, not (138,101,82)! |
+| alex   | hair  | 138,101,82    | 65 | 11   | **17** | yMax=17: includes collar row at y=16 in hair zone |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
-| alex   | shirt | 138,101,82    | 15 | 16   | 24   | t=15 stops (149,115,80) flowing-hair at dist=18>15 |
+| alex   | shirt | 138,101,82    | 15 | 16   | 24   | overlaps hair at y=16; hair runs first so collar follows hair |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
-| amelia | hair  | **186,141,94** | 65 | 11   | 16   | source is BRIGHT HIGHLIGHT, not (138,101,82)! |
+| amelia | hair  | 138,101,82    | 65 | 11   | **24** | yMax=24: covers FULL flowing hair to bottom of body zone |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
-| amelia | shirt | 138,101,82    | 15 | 16   | 24   | same; stops flowing-hair from turning shirt color |
+| amelia | shirt | 138,101,82    | 15 | 16   | 24   | mostly overridden by hair zone; only active when no hair selected |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
-| bob    | hair  | 113,107,110   | **35** | — | 17   | t=35 (not 25!) to also catch (93,88,95) at dist=31 |
+| bob    | hair  | 113,107,110   | **35** | — | 17   | t=35: catches (93,88,95) at dist=31 for 56px total; Y-mask separates from shirt |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |
 | bob    | shirt | 93,88,95      | 40 | 17   | 23   | body only; cut at y=17 |
 | bob    | pants | 194,184,213   | 50 | 23   | —    | |
@@ -75,7 +78,7 @@ Adam's shoes (y=28–31) are the exact same olive-green (93,96,67) as his shirt.
 
 # Swap order
 
-`_applySwaps` runs: skin → hair → shirt → pants (+shoe). Hair runs before shirt so any boundary pixels get assigned to hair first; shirt then skips already-swapped pixels.
+`_applySwaps` runs: skin → hair → shirt → pants (+shoe for Adam). Hair runs before shirt; this is critical for collar/flowing-hair overlap zones.
 
 # `_swapColorsData` signature
 
@@ -97,6 +100,7 @@ for y in range(9, 32):
     vis = [(x,(r,g,b)) for x,(r,g,b,a) in row if a>128 and not (r<92 and g<92 and b<92)]
     if vis: print(f"  y={y}: {vis}")
 ```
-Find the cut-Y by looking at where head pixels end and shirt body begins.
-Use brightest hair pixel as source (not darkest) to keep outlines out of the catch radius.
-Do NOT use heuristic auto-detection.
+- Find cut-Y where head pixels end and shirt body begins.
+- Use MID-RANGE hair color as source (not brightest, not darkest) so outlines are within catch radius.
+- Outlines being caught is CORRECT — luminance scaling turns them into dark hair-colored outlines.
+- Do NOT use heuristic auto-detection.
