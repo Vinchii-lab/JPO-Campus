@@ -11,14 +11,14 @@ Hair and shirt share the same color family for all characters. The ONLY reliable
 
 For characters where the hair zone extends into the shirt zone (Adam, Amelia), the hair zone config has a `shirtYMax` field. `_applySwaps` uses it when `shirtIdx > 0`: `hairYMax = shirtIdx && zone.hair.shirtYMax != null ? shirtYMax : yMax`.
 
-- **Hat only selected**: hair uses full `yMax` → whole olive region changes together (looks complete)
+- **Hat only selected**: hair uses full `yMax` → whole region changes together
 - **Shirt also selected**: hair shrinks to `shirtYMax` → shirt zone gets its pixels back
 
 | char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin |
 |--------|----------------------|---------------------------|------------|
 | adam   | 23                   | 18                        | 17         |
-| amelia | 24                   | 16                        | 16         |
-| alex   | 17                   | (none needed)             | 16         |
+| amelia | 24                   | **20**                    | **20**     |
+| alex   | 17                   | (none needed)             | **19**     |
 | bob    | 17                   | (none needed)             | 17         |
 
 # Why auto-detection fails
@@ -40,44 +40,43 @@ Use `(138,101,82)` as the hair source for Alex/Amelia — NOT `(186,141,94)`.
 - Luminance scaling preserves the darkness: dark outlines → dark hair-colored outlines. This is visually correct.
 - NOT catching outlines makes the hair look like a thin unbordered blob.
 
-# The collar-row rule (Alex)
+# The collar-row bleed problem (Alex / Amelia)
 
-Alex's collar at y=16 is brownish (same as hair), not shirt. Include it in the HAIR zone (yMax=17).
+Alex and Amelia's hair and shirt share the EXACT SAME source color (138,101,82). Their hair strands extend physically into y=17..19 (Alex) and y=17..20 (Amelia) — the same rows as the shirt body. Setting shirt yMin too low causes those hair-height pixels to turn shirt color, which the user sees as "shirt bleeding into hair."
 
-- With **only hair selected**: y=11..16 → hair color. Collar matches hair ✓
-- With **only shirt selected**: y=16..23 shirt zone catches (138,101,82) at y=16 → collar turns shirt color ✓ (hair zone skipped since hairIdx=0)
-- With **both selected**: y=11..16 → hair color first; shirt zone at y=16 finds already-swapped pixels (not brownish anymore) → shirt doesn't override collar → collar stays hair color ✓
+**Fix applied (verified pixel-by-pixel with Pillow dump):**
+- Alex shirt `yMin=19` — y=17..18 are still at head-height visually; excluding them stops the bleed.
+- Amelia shirt `yMin=20`, hair `shirtYMax=20` — y=17..19 have hair strands at head-height on the right side.
+- Shirt `t=20` for both (was 15) — catches (149,115,80) d=18 pixels at y=19+/20+ for better shirt-body coverage.
+
+**Trade-off:** The visible shirt area is a narrower strip (left-side shirt back at y=19–23 / y=20–23). This is correct and intentional — better to show less shirt than to paint the hair.
 
 # Amelia's flowing hair rule
 
 Amelia's hair flows from y=11 all the way to y=23. Use `yMax=24` to cover the full visible flowing hair.
 
-- The shirt zone (yMin=16, yMax=24) overlaps. Since hair swap runs first, shirt has no effect on y=16..23 when hair is selected.
-- If ONLY shirt is selected (hairIdx=0): hair swap skipped → shirt catches y=16..23 brownish pixels → shirt color shows ✓
-- 6 skin pixels (181,121,114) at y=17..22 are dist=57 from source → caught at t=65 → turn hair color → makes hair look more solid (no skin gaps between hair strands). Acceptable trade-off.
-
-# The shirt threshold rule
-
-Shirt `t=15` for Alex/Amelia stops the flowing-hair shade `(149,115,80)` at dist=18 > 15 from being caught in the shirt zone when no hair selected. Do NOT raise shirt t above 15 for these characters.
+- When BOTH hat and shirt selected: hair covers y=11..19 (shirtYMax=20), shirt covers y=20..23. Clean.
+- When ONLY shirt selected (hairIdx=0): hair zone skipped; shirt catches y=20..23 brownish pixels only.
+- When ONLY hat selected: hair covers y=11..23 (full yMax=24). Flowing hair fully recolored ✓
 
 # Hardcoded zone table (CHAR_ZONE_COLORS in index.html)
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=18 when shirt selected (gives shirt y=18..22) |
+| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=18 when shirt selected |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
 | adam   | shirt | 93,96,67      | 40 | 17   | 23   | body only; cut at y=17 |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
 | adam   | shoe  | 93,96,67      | 40 | 26   | —    | same olive as shirt; swapped to pants color |
-| alex   | hair  | 138,101,82    | 65 | 11   | **17** | yMax=17: includes collar row at y=16 in hair zone |
+| alex   | hair  | 138,101,82    | 65 | 11   | **17** | yMax=17: hair zone covers y=11..16 incl. collar |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
-| alex   | shirt | 138,101,82    | 15 | 16   | 24   | overlaps hair at y=16; hair runs first so collar follows hair |
+| alex   | shirt | 138,101,82    | **20** | **19** | 24 | yMin=19: skips y=17..18 which are at head-height |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
-| amelia | hair  | 138,101,82    | 65 | 11   | **24** | yMax=24: covers FULL flowing hair to bottom of body zone |
+| amelia | hair  | 138,101,82    | 65 | 11   | **24** | yMax=24: full flowing hair; shirtYMax=20 |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
-| amelia | shirt | 138,101,82    | 15 | 16   | 24   | mostly overridden by hair zone; only active when no hair selected |
+| amelia | shirt | 138,101,82    | **20** | **20** | 24 | yMin=20: skips y=17..19 which have hair strands at head-height |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
-| bob    | hair  | 113,107,110   | **35** | — | 17   | t=35: catches (93,88,95) at dist=31 for 56px total; Y-mask separates from shirt |
+| bob    | hair  | 113,107,110   | **35** | — | 17   | t=35: catches (93,88,95) at dist=31; Y-mask separates from shirt |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |
 | bob    | shirt | 93,88,95      | 40 | 17   | 23   | body only; cut at y=17 |
 | bob    | pants | 194,184,213   | 50 | 23   | —    | |
@@ -99,17 +98,26 @@ _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax)
 - `yMax` is **exclusive** (y < yMax)
 - Pass `fw=16` from `_redrawPreview`, `fw=sw` from run-sheet builder, `fw=sc.width` from sit-sheet builder
 
-# Adding new characters
+# Pixel-dump recipe for tuning
 
-Dump frame-0 pixels with Python/Pillow to identify zone colors:
 ```python
 from PIL import Image
 img = Image.open("Char_run_16x16.png").convert("RGBA")
-for y in range(9, 32):
-    row = [(x, img.getpixel((x, y))) for x in range(16)]
-    vis = [(x,(r,g,b)) for x,(r,g,b,a) in row if a>128 and not (r<92 and g<92 and b<92)]
-    if vis: print(f"  y={y}: {vis}")
+SR,SG,SB=138,101,82
+for y in range(14,24):
+    row=[]
+    for x in range(16):
+        r,g,b,a=img.getpixel((x,y))
+        if a<128: continue
+        dr,dg,db=r-SR,g-SG,b-SB
+        dist=(dr*dr+dg*dg+db*db)**0.5
+        if dist<80: row.append(f"x{x}:d={dist:.0f}")
+    if row: print(f"  y={y}: {' '.join(row)}")
 ```
+Use this to find the first Y row where brownish pixels (d<20) are ONLY on the left-back side of the sprite (x<8), not on the right/front head area. That Y is the correct `shirt yMin`.
+
+# Adding new characters
+
 - Find cut-Y where head pixels end and shirt body begins.
 - Use MID-RANGE hair color as source (not brightest, not darkest) so outlines are within catch radius.
 - Outlines being caught is CORRECT — luminance scaling turns them into dark hair-colored outlines.

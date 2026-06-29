@@ -569,13 +569,13 @@
       alex:   {
         hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:17},  // yMax=17: includes collar row (y=16) in hair zone
         skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:138,g:101,b:82, t:15, yMin:17, yMax:24},  // yMin:17 keeps collar (y=16) in hair zone only; shirt body starts at y=17
+        shirt: {r:138,g:101,b:82, t:20, yMin:19, yMax:24},  // yMin:19 clears collar rows y=17..18 (same height as hair strands)
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
       },
       amelia: {
-        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:17},  // yMax=24: covers full flowing hair; shirtYMax=17 when shirt selected (hair gets y=11..16, shirt gets y=17..23)
+        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20},  // shirtYMax:20 — when shirt selected hair covers y=11..19; shirt gets y=20..23
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:138,g:101,b:82, t:15, yMin:17, yMax:24},  // yMin:17 keeps collar (y=16) in hair zone; shirt body starts at y=17
+        shirt: {r:138,g:101,b:82, t:20, yMin:20, yMax:24},  // yMin:20 clears y=17..19 collar/hair-strand rows from shirt zone
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
