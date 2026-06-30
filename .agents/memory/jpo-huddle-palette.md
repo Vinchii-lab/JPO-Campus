@@ -27,20 +27,17 @@ For characters where the hair zone extends into the shirt zone (Adam, Amelia), t
 2. **Spatial zone cuts** — Characters start at y≈9–10 (rows 0–8 are transparent). A naive 38% cut at y≈12 only captures 2–3 visible rows.
 3. **Color-only threshold** — For Alex/Amelia the shirt body color (138,101,82) is also present in the head area. No threshold separates them without Y masking.
 
-# Hair source selection: use the BRIGHT-HIGHLIGHT source (186,141,94) for Alex/Amelia
+# Hair source selection: character-specific rules
 
-Use `(186,141,94)` as the hair source for Alex/Amelia — NOT `(138,101,82)`.
+**Alex**: use bright-highlight `(186,141,94)` with t=65.
+- Alex skin (255,203,176) is dist=124 → completely safe.
+- Alex shirt source stays (138,101,82) — different from hair source, no cross-contamination.
+- Outlines (86,89,114) at dist=114 > 65 → stay dark ✓
 
-**Why the bright highlight source is CORRECT:**
-- Outlines (86,89,114) are dist=114 away → NOT caught → outlines stay dark/original → hair looks clean at pixel-art scale ✓
-- Alex shirt source stays at `(138,101,82)` — now DIFFERENT from hair source, eliminating any cross-contamination risk
-- With source (186,141,94), luminance scaling is accurate: dark targets produce truly dark output (no over-brightening of dim pixels)
-- Pixel coverage: (186,141,94) catches ~82 px for Alex, ~95 px for Amelia — slightly BETTER than (138,101,82)
-
-**Why (138,101,82) was changed away from:**
-- It shared the exact same value as Alex's shirt source → conceptually confusing, risk of cross-zone bleeding
-- Outlines (86,89,114) at dist=62 < t=65 were being caught → luminance-scaled outlines were sometimes washing out hair clarity
-- Now ONLY plaid/fabric pixels at y=19..23 are caught by Alex's shirt source (138,101,82) ✓
+**Amelia**: use mid-range `(138,101,82)` with t=65. Do NOT use (186,141,94) here.
+- Amelia skin (191,139,120) is dist=**26.5** from (186,141,94) → face pixels at y=18..21 get HAIR colored if you use the bright source. Bug confirmed by pixel dump.
+- Amelia skin (191,139,120) is dist=**75.5** from (138,101,82) → safely outside t=65 ✓
+- With (138,101,82), outlines (86,89,114) at dist=62 < 65 are caught — luminance-scaled to dark hair outlines, which looks correct at pixel-art scale ✓
 
 # The xMin sheet-coordinate bug — FIXED
 
@@ -85,11 +82,11 @@ The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a 
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
 | alex   | shirt | 138,101,82    | **20** | **17** | 24 | yMin=17 covers collar rows; when hair selected, hair wins y=17..18 first |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
-| amelia | hair  | **186,141,94** | 65 | 11 | **24** | yMax=24: full flowing hair; shirtYMax=20; flowXMax=8 |
+| amelia | hair  | **138,101,82** | 65 | 11 | **24** | mid-range source — NOT 186,141,94 (Amelia skin dist=26, face gets colored); yMax=24; shirtYMax=20; flowXMax=8 |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
 | amelia | shirt | **185,93,114** | **50** | **20** | 24 | PLAID source — NOT hair source; xMin:8 + frameW=16 fix stops per-frame bleed |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
-| bob    | hair  | 113,107,110   | **35** | — | 17   | t=35: catches (93,88,95) at dist=31; Y-mask separates from shirt |
+| bob    | hair  | 113,107,110   | **50** | — | 17   | t=50: catches edge-fill (85,81,87) at dist=45 → no toupee; (70,70,94) outlines at dist=59 stay dark; shirt yMin=17 so no Y-overlap |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |
 | bob    | shirt | 93,88,95      | 40 | 17   | 23   | body only; cut at y=17 |
 | bob    | pants | 194,184,213   | 50 | 23   | —    | |
