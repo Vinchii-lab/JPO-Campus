@@ -559,7 +559,7 @@
         shoe:  {r:93, g:96, b:67,  t:11, yMin:26},
       },
       alex:   {
-        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:19},  // bright-highlight source — outlines (86,89,114) are dist=114 away, never caught; yMax:19 covers collar rows y=17..18 so hair color fills to shirt boundary
+        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:17},  // bright-highlight source — outlines (86,89,114) dist=114>65, not caught; yMax:17 keeps hair zone above shirt body rows y=17..18
         skin:  {r:255,g:203,b:176,t:50},
         shirt: {r:138,g:101,b:82, t:20, yMin:17, yMax:24},  // yMin:17 covers collar rows — when no hair selected these turn clothes-color; when hair selected, hair runs first and wins those rows
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
@@ -571,7 +571,7 @@
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
-        hair:  {r:113,g:107,b:110,t:50, yMax:17},           // t=50: catches edge-fill (85,81,87) at dist=45 → no toupee; (70,70,94) outlines at dist=59 stay dark; shirt starts at yMin=17 so no Y-overlap risk
+        hair:  {r:113,g:107,b:110,t:60, yMax:17},           // t=60: catches (70,70,94) top-head outline at dist=59 → fills hair silhouette edge; (85,81,87) edge-fill at dist=45 also caught; shirt at yMin=17 so no Y-overlap
         skin:  {r:255,g:203,b:176,t:50},
         shirt: {r:93, g:88, b:95,  t:40, yMin:17, yMax:23},
         pants: {r:194,g:184,b:213,t:50, yMin:23},

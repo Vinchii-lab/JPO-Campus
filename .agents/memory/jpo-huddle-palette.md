@@ -78,7 +78,7 @@ The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a 
 | adam   | shirt | 93,96,67      | **11** | 17 | 23 | t=11 (t²=121) — only pure (93,96,67) caught; collar (95,105,74) dist²=134 excluded |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
 | adam   | shoe  | 93,96,67      | 11 | 26   | —    | same olive as shirt; swapped to pants color |
-| alex   | hair  | **186,141,94** | 65 | 11 | **19** | bright-highlight source; outlines dist=114>65, not caught; yMax=19 covers collar rows |
+| alex   | hair  | **186,141,94** | 65 | 11 | **17** | bright-highlight source; outlines dist=114>65; yMax=17 stops at shirt body (y=17..18 brownish rows must NOT be hair zone — they're shirt) |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | |
 | alex   | shirt | 138,101,82    | **20** | **17** | 24 | yMin=17 covers collar rows; when hair selected, hair wins y=17..18 first |
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
@@ -86,7 +86,7 @@ The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a 
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
 | amelia | shirt | **185,93,114** | **50** | **20** | 24 | PLAID source — NOT hair source; xMin:8 + frameW=16 fix stops per-frame bleed |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
-| bob    | hair  | 113,107,110   | **50** | — | 17   | t=50: catches edge-fill (85,81,87) at dist=45 → no toupee; (70,70,94) outlines at dist=59 stay dark; shirt yMin=17 so no Y-overlap |
+| bob    | hair  | 113,107,110   | **60** | — | 17   | t=60: catches (70,70,94) top-head outline at dist=59 → full silhouette; (85,81,87) edge-fill dist=45 also caught; (58,58,80) dist=79 stays dark |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |
 | bob    | shirt | 93,88,95      | 40 | 17   | 23   | body only; cut at y=17 |
 | bob    | pants | 194,184,213   | 50 | 23   | —    | |
