@@ -6,7 +6,7 @@ import path from "path";
 import { readFileSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "jpo-admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
 const BUILD_STAMP = Date.now();
 
 const app        = express();
@@ -93,7 +93,7 @@ io.on("connection", (socket) => {
 
   // ── Admin auth ───────────────────────────────────────────────────────
   socket.on("adminAuth", ({ password }) => {
-    if (password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
+    if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
     admins.add(socket.id);
     socket.emit("adminAuthOk");
     socket.emit("pendingList", _pendingList());

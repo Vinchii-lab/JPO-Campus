@@ -556,8 +556,11 @@
 
     // Furniture tile GIDs that are announcement boards (wall-mounted chalk/white boards).
     const BOARD_GIDS = new Set([959,960,975,976,991,992,963,964,979,980,995,996,1042,1043,1005,1006,1007,1008,1009,1010,1011]);
-    // Furniture tile GIDs that are plants/greenery — solid, but not something you sit at.
-    const PLANT_GIDS = new Set([1106,1109,1110,1122,1123,1272,1273,1274,1288,1289,1290]);
+    // Furniture tile GIDs that are ACTUAL chairs you can sit on (identified from the Interiors
+    // tileset): 453/523 office chairs, 510/472/474 conference chairs, 750/751 wooden chairs.
+    // Everything else on the Furniture layer (desks, cabinets, tables, plants, sofas) is solid
+    // but NOT sit-interactable.
+    const CHAIR_GIDS = new Set([453,523,510,472,474,750,751]);
 
     const CHAR_FILES  = {
       adam:   '/assets/Adam_run_16x16.png',
@@ -1564,16 +1567,18 @@
         const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
         const gidAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
         // First interactable neighbour in priority order (facing first) wins, and
-        // its OWN type decides the action — so facing a desk always sits even if a
-        // board sits off to the side, and vice-versa.
+        // its OWN type decides the action — a board reads, a chair sits. Non-chair
+        // furniture (desks/tables/cabinets/plants) is skipped so the scan keeps
+        // looking for a genuine chair or board in the other directions.
         let interact = null;   // { type:'board'|'sit', dir }
         if (!this.sitting) {
           for (const d of [this.lastDir,'up','down','left','right']) {
             const v = DIRVEC[d]; if (!v) continue;
             const g = gidAt(ptx+v[0], pty+v[1]);
             if (!g) continue;
-            if (BOARD_GIDS.has(g))       { interact = { type:'board', dir:d }; break; }
-            else if (!PLANT_GIDS.has(g)) { interact = { type:'sit',   dir:d }; break; }
+            if (BOARD_GIDS.has(g))      { interact = { type:'board', dir:d }; break; }
+            else if (CHAIR_GIDS.has(g)) { interact = { type:'sit',   dir:d }; break; }
+            // any other furniture (desk/table/cabinet/plant) is solid but not interactable
           }
         }
 
@@ -1586,13 +1591,18 @@
           if (this.sitting) {
             this.sitting = false;
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
+            if (this._preSitPos) { player.setPosition(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
+            player.body.enable = true;              // re-enable collision once standing on a walkable tile
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel();
           } else if (interact?.type === 'sit') {
-            this.lastDir = interact.dir;
+            const v = DIRVEC[interact.dir];
+            this.lastDir = interact.dir;            // face the chair (matches how the chairs are placed)
+            this._preSitPos = { x: player.x, y: player.y };   // where to stand back up
             player.setVelocity(0,0);
-            player.setPosition(ptx*48+24, pty*48+24);   // tidy up onto tile centre
+            player.setPosition((ptx+v[0])*48+24, (pty+v[1])*48+24);   // snap ONTO the chair tile
+            player.body.enable = false;             // chair tile is solid — disable body so we rest on it
             this.sitting = true;
           }
         }
