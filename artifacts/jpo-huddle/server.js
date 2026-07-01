@@ -3,6 +3,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { fileURLToPath } from "url";
 import path from "path";
+import { readFileSync } from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "jpo-admin";
@@ -21,10 +22,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Redirect bare "/" to "/?v=<startup timestamp>" so the browser never serves a cached copy
-app.get('/', (req, res, next) => {
-  if (!req.query.v) return res.redirect(302, `/?v=${BUILD_STAMP}`);
-  next();
+// Serve index.html directly so it's never served from static-file cache.
+// Each server restart produces a new BUILD_STAMP injected into the page,
+// guaranteeing the browser fetches a fresh copy every time.
+app.get('/', (_req, res) => {
+  const html = readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+    .replace('</head>', `<meta name="build-stamp" content="${BUILD_STAMP}">\n</head>`);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('ETag', `"${BUILD_STAMP}"`);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
 });
 
 app.use(express.static(path.join(__dirname, "public")));
