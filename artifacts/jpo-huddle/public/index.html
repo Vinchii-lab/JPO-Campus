@@ -554,6 +554,11 @@
     const WORLD_W = 3024;  // 63 tiles * 16px * 3 scale
     const WORLD_H = 1728;  // 36 tiles * 16px * 3 scale
     const SPEED   = 150;
+    // World-px from the sprite origin (center) down to its arcade body center. The
+    // body is setSize(12,10).setOffset(2,20) on a 16x32 frame at scale 3, so the
+    // feet-body sits 27px below the sprite center. Used for tile lookups and to snap
+    // a sitter so their body lands on the seat tile.
+    const BODY_DY = 27;
 
     const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
     // 24-frame directional run sheets: RIGHT 0-5, UP(back) 6-11, LEFT 12-17, DOWN(front) 18-23
@@ -564,21 +569,45 @@
     // colorful cork bulletin boards (682-685 / 698-701 / 714-717) and green
     // chalkboards (1042/1043 top, 1058/1059 base). Desks & monitors are NOT boards.
     const BOARD_GIDS = new Set([682,683,684,685,698,699,700,701,714,715,716,717,1013,1014,1029,1030,1042,1043,1058,1059]);
-    // Furniture tile GIDs you can SIT on (identified from the Interiors tileset):
-    //   chairs  — 453/523 office, 510/472/474 conference, 750/751 wooden
-    //   sofas   — 1583/1584/1599/1600 purple 2-seat, 1548-1550/1564-1566/1580-1582/1596-1597 gray sectional
-    //   benches — 1210/1211/1226/1227 wooden waiting benches, 1679/1680/1695/1696/1711/1712 wooden settle
-    // Everything else on the Furniture layer (desks, cabinets, tables, plants, shelves) is solid but not sittable.
-    const CHAIR_GIDS = new Set([
-      453, 523, 510, 472, 474, 750, 751,                          // chairs
+    // The office chairs in the "classroom" rows live on the WALL layer as a backrest
+    // tile (453/523) stacked directly above a SEAT tile (469/539). You sit on the
+    // seat, which faces AWAY from the backrest (i.e. DOWN). The backrests are never
+    // sat on, so only the seat GIDs are listed here.
+    const WALL_SEATS = new Set([469, 539]);
+    // Sittable tiles on the FURNITURE layer: wooden chairs 750/751 (flank a shared
+    // desk, so they face toward it), conference chairs 510/472/474, and the sofas /
+    // benches. Any GID without a fixed facing below falls back to the approach
+    // direction so you end up facing the furniture you sat at.
+    const FURN_SEATS = new Set([
+      510, 472, 474, 750, 751,                                    // chairs
       1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
       1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
       1210, 1211, 1226, 1227,                                     // wooden waiting benches
       1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
     ]);
+    // Fixed sit-facing for seats whose orientation is baked into the tile art.
+    const SEAT_FACING = { 469:'down', 539:'down', 750:'right', 751:'left' };
 
-    // Desk workstations — you sit down "at" these to work (blue & green cubicle desks).
-    const DESK_GIDS = new Set([959, 960, 975, 976, 991, 992, 963, 964, 979, 980, 995, 996]);
+    // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
+    // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
+    // tiles seats you in that baked-in chair. Each family maps its 6 GIDs to their
+    // position in the 2x3 block, plus the block-relative chair cell and its facing
+    // (blue chair is left-middle facing right; green is right-middle facing left).
+    const DESK_FAMILIES = [
+      { facing:'right', chair:[0,1], gids:{ 959:[0,0], 960:[1,0], 975:[0,1], 976:[1,1], 991:[0,2], 992:[1,2] } },
+      { facing:'left',  chair:[1,1], gids:{ 963:[0,0], 964:[1,0], 979:[0,1], 980:[1,1], 995:[0,2], 996:[1,2] } },
+    ];
+    // Given the faced furniture GID at tile (c,r), return the seat cell (col,row) of
+    // that desk's baked-in chair plus its facing, or null if it isn't a manager desk.
+    const deskChairAt = (gid, c, r) => {
+      for (const fam of DESK_FAMILIES) {
+        const bp = fam.gids[gid];
+        if (!bp) continue;
+        const oc = c - bp[0], or = r - bp[1];       // block origin (top-left cell)
+        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: fam.facing };
+      }
+      return null;
+    };
 
     const CHAR_FILES  = {
       adam:   '/assets/Adam_run_16x16.png',
@@ -1490,7 +1519,7 @@
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
         this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
-        this.player.body.setSize(12,12);
+        this.player.body.setSize(12, 10).setOffset(2, 20);   // feet-centered body (fits 48px aisles, matches BODY_DY)
         this.player.setCollideWorldBounds(true);
         this.player.play(`idle_${texKey}`);
         this.physics.add.collider(this.player, this.wallLayer);
@@ -1632,58 +1661,62 @@
         const left  = cursors.left.isDown  || wasd.left.isDown;
         const right = cursors.right.isDown || wasd.right.isDown;
 
-        const ptx = Math.floor(player.x/48);
-        const pty = Math.floor(player.y/48);
+        // Tile we're standing on, measured from the arcade body (feet), not the
+        // sprite origin (chest) — otherwise the E-scan probes one row too high.
+        const ptx = Math.floor(player.x / 48);
+        const pty = Math.floor((player.y + BODY_DY) / 48);
 
-        // Look at the 4 adjacent furniture tiles: boards can be read, other solid
-        // furniture (desks/chairs) can be sat at. Prefer whatever we're facing.
+        // Scan the 4 adjacent tiles (facing first). Boards read; chairs and manager
+        // desks sit. Chairs live on BOTH layers: seat tiles 469/539 on the wall
+        // layer, and 750/751/sofas on the furniture layer — so we probe both.
         const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
-        const gidAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
-        // First interactable neighbour in priority order (facing first) wins, and
-        // its OWN type decides the action — a board reads, a chair sits. Non-chair
-        // furniture (desks/tables/cabinets/plants) is skipped so the scan keeps
-        // looking for a genuine chair or board in the other directions.
-        let interact = null;   // { type:'board'|'sit', dir }
+        const furnAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
+        const wallAt = (c,r) => { const t = this.wallLayer.getTileAt(c,r);      return (t && t.index>0) ? t.index : 0; };
+        // First interactable neighbour in priority order (facing first) wins. Its
+        // OWN type decides the action; plain solid furniture/walls are skipped so
+        // the scan keeps looking for a genuine seat or board in the other directions.
+        let interact = null;   // { type:'board'|'sit', dir, seat? }
         if (!this.sitting) {
           for (const d of [this.lastDir,'up','down','left','right']) {
             const v = DIRVEC[d]; if (!v) continue;
-            const g = gidAt(ptx+v[0], pty+v[1]);
-            if (!g) continue;
-            if (BOARD_GIDS.has(g))      { interact = { type:'board', dir:d }; break; }
-            else if (CHAIR_GIDS.has(g)) { interact = { type:'sit',   dir:d }; break; }
-            else if (DESK_GIDS.has(g))  { interact = { type:'desk',  dir:d }; break; }
-            // any other furniture (table/cabinet/plant) is solid but not interactable
+            const nc = ptx+v[0], nr = pty+v[1];
+            const fg = furnAt(nc,nr), wg = wallAt(nc,nr);
+            if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d }; break; }
+            const desk = deskChairAt(fg, nc, nr);
+            if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
+            if (WALL_SEATS.has(wg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[wg] || d } }; break; }
+            if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
+            // any other solid furniture/wall is not interactable
           }
         }
 
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
-        else if (interact?.type === 'desk')  this.eHint.setText('[ E ] Sit at desk').setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
 
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
-            if (this._preSitPos) { player.setPosition(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
-            player.body.enable = true;              // re-enable collision once standing on a walkable tile
+            // body.reset re-syncs the body + its prev position (plain setPosition can
+            // leave the body stale for a tick); _preSitPos is the walkable tile we
+            // stood on before sitting, so re-enabling collision there is safe.
+            if (this._preSitPos) { player.body.reset(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
+            player.body.enable = true;
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel();
           } else if (interact?.type === 'sit') {
-            const v = DIRVEC[interact.dir];
-            this.lastDir = interact.dir;            // face the chair (matches how the chairs are placed)
-            this._preSitPos = { x: player.x, y: player.y };   // where to stand back up
+            const s = interact.seat;
+            this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on
             player.setVelocity(0,0);
-            player.setPosition((ptx+v[0])*48+24, (pty+v[1])*48+24);   // snap ONTO the chair tile
-            player.body.enable = false;             // chair tile is solid — disable body so we rest on it
+            // Snap so the body (feet) lands on the seat tile centre; the sprite
+            // origin sits BODY_DY above it, so the character rests IN the chair.
+            player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
+            player.body.enable = false;             // seat tile is solid — disable body so we rest on it
+            this.lastDir = s.facing;                // face the way the chair is oriented
             this.sitting = true;
-          } else if (interact?.type === 'desk') {
-            this.lastDir = interact.dir;            // face the desk we're working at
-            this._preSitPos = null;                 // desks have no seat tile — sit in place, no snap
-            player.setVelocity(0,0);
-            this.sitting = true;                    // body stays enabled: already on a walkable tile
           }
         }
 
