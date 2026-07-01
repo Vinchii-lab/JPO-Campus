@@ -558,11 +558,18 @@
 
     // Furniture tile GIDs that are announcement boards (wall-mounted chalk/white boards).
     const BOARD_GIDS = new Set([959,960,975,976,991,992,963,964,979,980,995,996,1042,1043,1005,1006,1007,1008,1009,1010,1011]);
-    // Furniture tile GIDs that are ACTUAL chairs you can sit on (identified from the Interiors
-    // tileset): 453/523 office chairs, 510/472/474 conference chairs, 750/751 wooden chairs.
-    // Everything else on the Furniture layer (desks, cabinets, tables, plants, sofas) is solid
-    // but NOT sit-interactable.
-    const CHAIR_GIDS = new Set([453,523,510,472,474,750,751]);
+    // Furniture tile GIDs you can SIT on (identified from the Interiors tileset):
+    //   chairs  — 453/523 office, 510/472/474 conference, 750/751 wooden
+    //   sofas   — 1583/1584/1599/1600 purple 2-seat, 1548-1550/1564-1566/1580-1582/1596-1597 gray sectional
+    //   benches — 1210/1211/1226/1227 wooden waiting benches, 1679/1680/1695/1696/1711/1712 wooden settle
+    // Everything else on the Furniture layer (desks, cabinets, tables, plants, shelves) is solid but not sittable.
+    const CHAIR_GIDS = new Set([
+      453, 523, 510, 472, 474, 750, 751,                          // chairs
+      1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
+      1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
+      1210, 1211, 1226, 1227,                                     // wooden waiting benches
+      1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
+    ]);
 
     const CHAR_FILES  = {
       adam:   '/assets/Adam_run_16x16.png',
