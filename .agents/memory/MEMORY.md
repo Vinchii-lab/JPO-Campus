@@ -1,2 +1,2 @@
-- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — all 4 chars use 384×224 directional sheet; identical frame layout; no flipX; registration flow simplified.
-- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — historical only; palette-swap system has been removed.
+- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — Adam sheet is 16×32 not 16×16; arcade body size is scaled (oversized body blocks doorways); some Office.tmj rooms are sealed.
+- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — Auto-detection via pixel heuristic fails; hardcoded CHAR_ZONE_COLORS per character is the correct approach.
