@@ -101,7 +101,7 @@ io.on("connection", (socket) => {
     delete pending[targetId];
 
     players[targetId] = {
-      x: 1080, y: 840, flipX: false, anim: "idle",
+      x: 1080, y: 840, dir: "down", anim: "idle",
       name:       reg.name,
       character:  reg.character,
       hairIdx:    reg.hairIdx,
@@ -151,7 +151,7 @@ io.on("connection", (socket) => {
   // ── Game events ──────────────────────────────────────────────────────
   socket.on("playerMove", (data) => {
     if (!players[socket.id]) return;
-    Object.assign(players[socket.id], { x: data.x, y: data.y, flipX: data.flipX, anim: data.anim });
+    Object.assign(players[socket.id], { x: data.x, y: data.y, dir: data.dir, anim: data.anim });
     socket.broadcast.emit("playerMoved", { id: socket.id, ...players[socket.id] });
   });
 

@@ -7,22 +7,20 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 - `public/assets/Adam_16x16.png` is **16×32 per frame**, NOT 16×16 (the filename misleads — the character spans two tiles tall). Each 32px frame holds one full character; frames are cleanly aligned, no misalignment.
 - **So a "cut character" is NOT a spritesheet/frameHeight problem** — look at TilemapLayer insertion order (see below).
 
-# Adam sprite pack — side-scrolling only, right-facing
-- All three sheets (Adam_16x16.png, Adam_run_16x16.png, Adam_idle_anim_16x16.png) are **side-profile only**. There are no front-facing (walk_down) or back-facing (walk_up) frames anywhere.
-- **Adam_run_16x16.png is right-facing by default** (flipX:false = faces right, flipX:true = faces left).
-- **Do NOT mix textures across animations** — switching between Adam_16x16 and Adam_run mid-movement causes one-frame texture flicker ("twitching") that is nearly impossible to eliminate otherwise.
-- **Use Adam_run exclusively** for all player animations. Drop Adam_16x16 from preload entirely.
+# Run sheets are 4-directional (24 frames) — NOT side-only (supersedes old flipX approach)
+- Every `*_run_16x16.png` (Adam, Alex, Amelia, Bob) is 384×32 = **24 frames = 4 directions × 6**: RIGHT 0–5, UP (back-of-head, no face) 6–11, LEFT 12–17, DOWN (front, full face) 18–23.
+- **Why the old "side-profile only, flipX for left" belief was wrong:** confirmed by counting skin-colored pixels in the face band per frame — UP rows ≈0 face skin, DOWN rows have the most (centered), and the two side rows mirror each other. Dedicated LEFT and RIGHT rows both exist.
+- **How to apply:** never flip a side frame for the opposite side and never flip to fake up/down — use the real rows. Keep `setFlipX(false)` everywhere; there is no `lastFlipX` anymore.
+- **Front frame 18 is the "portrait":** character-builder preview + hair-style thumbnails must draw source x=288 (frame 18) so every character shows its face. Drawing frame 0 (side view) makes long-haired characters (Amelia) look faceless/"broken".
 
-# Final working animation setup
-- Load only `player_run` (Adam_run_16x16.png, 24 frames, 16×32).
-- Create exactly **two** animations: `idle` (frame 0, static, 1fps) and `walk` (frames 0–7, 10fps).
-- **One walk key for ALL directions** — separate walk_left/walk_right/walk_up/walk_down keys that use identical frames cause `play()` restarts on every direction change, producing visible stutter. One key = zero restarts.
-- Direction via `setFlipX`: left → `true`, right → `false`. Up/down/idle inherit `this.lastFlipX`.
+# Directional animation setup (current)
+- Per texture key `k`, `_createDirAnims(k)` builds `idle_${k}` (single frame = DIR_START.down = 18) + `walk_${k}_${dir}` for right/up/left/down. Idempotent (guarded by anims.exists). Called for base `run_${char}` and per-player `pl_...` textures.
+- update() picks facing from input (vertical sets dir, then horizontal overrides so diagonals show a side view), plays `walk_${texKey}_${dir}`; when not moving, `anims.stop()` + `setFrame(DIR_START[lastDir])` to hold last facing. Track `this.lastDir` (default 'down') and `this._moving`.
+- **Network protocol carries `dir`, not flipX:** emit `{x,y,dir,anim}`. Validate incoming dir with `DIR_START[data.dir] !== undefined ? data.dir : 'down'` — note `DIR_START.right === 0`, so test `!== undefined`, never truthiness (a `data.dir || 'down'` fallback silently drops a valid 'right').
+- Chat/owner-panel idle must preserve facing (`setFrame(DIR_START[lastDir])`, skip if sitting) and still emit a throttled idle/sit update, or remote clients keep seeing your last walk animation while you type.
 
-# lastFlipX pattern
-- Store `this.lastFlipX = false` (init in create). Update only on left/right key presses.
-- Apply on up/down/idle so character holds last horizontal direction when stopped or moving vertically.
-- **Down-only convention:** set `lastFlipX = false` (face right = toward camera) when `down && !left && !right`. Do NOT update flipX on up-only — inherit lastFlipX.
+# Sit animation key
+- Sit uses anim `sit_${texKey}` (frames come from the swapped `pl_sit_...` texture, but the anim is keyed off the run texKey). Remote joiners in `_addOtherPlayer` must play `sit_${texKey}`, never base `sit_adam`, or the sitting player renders un-customized until a later move event corrects it.
 
 # player.texture.key drifts during sit animation
 - Palette-swapped animations (e.g. `sit_pl_adam_h1_sk0_sh2_p3`) reference frames from a *different* texture than the run sheet. Phaser switches `sprite.texture` when playing them.
