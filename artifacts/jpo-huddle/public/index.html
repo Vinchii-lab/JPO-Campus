@@ -512,9 +512,9 @@
       <div class="owner-section">
         <h3>Online Players <span class="owner-badge green" id="op-player-count">0</span></h3>
         <table class="owner-table">
-          <thead><tr><th>Name</th><th>Coins</th><th>Items</th></tr></thead>
+          <thead><tr><th>Name</th><th>Coins</th><th>Items</th><th>Post</th><th></th></tr></thead>
           <tbody id="op-player-tbody">
-            <tr><td class="owner-empty" colspan="3">No players online</td></tr>
+            <tr><td class="owner-empty" colspan="5">No players online</td></tr>
           </tbody>
         </table>
       </div>
@@ -536,6 +536,10 @@
       </div>
       <div id="board-list" class="board-list">
         <div class="board-empty">No announcements yet.</div>
+      </div>
+      <div id="board-compose" style="display:none; padding: 0 22px 20px;">
+        <textarea id="board-ann-input" class="op-ann-input" rows="2" maxlength="280" placeholder="Post an announcement to the office boards…"></textarea>
+        <button class="o-btn o-btn-approve" onclick="postAnnouncementFromBoard()">Post announcement</button>
       </div>
     </div>
   </div>
@@ -572,6 +576,9 @@
       1210, 1211, 1226, 1227,                                     // wooden waiting benches
       1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
     ]);
+
+    // Desk workstations — you sit down "at" these to work (blue & green cubicle desks).
+    const DESK_GIDS = new Set([959, 960, 975, 976, 991, 992, 963, 964, 979, 980, 995, 996]);
 
     const CHAR_FILES  = {
       adam:   '/assets/Adam_run_16x16.png',
@@ -1167,6 +1174,7 @@
     // ── Announcement boards ───────────────────────────────────────────
     let _boardPanelOpen = false;
     let _announcements  = [];
+    let _canPostAnnouncements = false;
 
     function escHtml(str) { const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
     function annTimeAgo(ts) {
@@ -1180,6 +1188,7 @@
       _boardPanelOpen = true;
       document.getElementById('board-panel').classList.add('open');
       renderBoard();
+      updateBoardCompose();
     }
     function closeBoardPanel() {
       _boardPanelOpen = false;
@@ -1216,21 +1225,35 @@
       socket.emit('postAnnouncement', { text });
       inp.value = '';
     }
+    function updateBoardCompose() {
+      const box = document.getElementById('board-compose');
+      if (box) box.style.display = _canPostAnnouncements ? 'block' : 'none';
+    }
+    function postAnnouncementFromBoard() {
+      const inp = document.getElementById('board-ann-input');
+      const text = inp.value.trim();
+      if (!text) return;
+      socket.emit('postAnnouncement', { text });
+      inp.value = '';
+    }
     function deleteAnnouncement(id) { socket.emit('deleteAnnouncement', { id }); }
 
     socket.on('announcements',       list => { _announcements = list || []; renderBoard(); });
     socket.on('announcementsUpdate', list => { _announcements = list || []; renderBoard(); });
+    socket.on('announcerStatus', ({ canPost }) => { _canPostAnnouncements = !!canPost; updateBoardCompose(); });
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && _boardPanelOpen) { e.preventDefault(); closeBoardPanel(); }
     });
 
     (() => {
-      const inp = document.getElementById('op-ann-input');
-      if (!inp) return;
-      inp.addEventListener('keydown', e => { e.stopPropagation(); });
-      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
-      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+      ['op-ann-input', 'board-ann-input'].forEach(id => {
+        const inp = document.getElementById(id);
+        if (!inp) return;
+        inp.addEventListener('keydown', e => { e.stopPropagation(); });
+        inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+        inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+      });
     })();
 
     socket.on('pendingList', (list) => {
@@ -1252,12 +1275,13 @@
     socket.on('playerList', (list) => {
       document.getElementById('op-player-count').textContent = list.length;
       const tbody = document.getElementById('op-player-tbody');
-      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No players online</td></tr>'; return; }
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="5">No players online</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
           <td><span class="online-dot"></span>${esc(p.name)}</td>
           <td>💰 ${p.coins}</td>
           <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
+          <td><button class="o-btn ${p.isAnnouncer ? 'o-btn-approve' : 'o-btn-reject'}" ${p.email ? '' : 'disabled'} title="${p.isAnnouncer ? 'Can post announcements — click to revoke' : 'Allow this person to post announcements'}" onclick="ownerToggleAnnouncer('${esc(p.id)}', ${p.isAnnouncer ? 'false' : 'true'})">📢</button></td>
           <td><button class="o-btn o-btn-reject" title="Reset player (lets them re-register)" onclick="ownerKick('${esc(p.id)}')">⟳</button></td>
         </tr>`).join('');
     });
@@ -1265,6 +1289,7 @@
     function ownerApprove(id) { socket.emit('approvePlayer', id); }
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
     function ownerKick(id)    { socket.emit('kickPlayer',    id); }
+    function ownerToggleAnnouncer(id, canPost) { socket.emit('setAnnouncer', { targetId: id, canPost }); }
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -1626,13 +1651,15 @@
             if (!g) continue;
             if (BOARD_GIDS.has(g))      { interact = { type:'board', dir:d }; break; }
             else if (CHAIR_GIDS.has(g)) { interact = { type:'sit',   dir:d }; break; }
-            // any other furniture (desk/table/cabinet/plant) is solid but not interactable
+            else if (DESK_GIDS.has(g))  { interact = { type:'desk',  dir:d }; break; }
+            // any other furniture (table/cabinet/plant) is solid but not interactable
           }
         }
 
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'desk')  this.eHint.setText('[ E ] Sit at desk').setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
 
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
@@ -1652,6 +1679,11 @@
             player.setPosition((ptx+v[0])*48+24, (pty+v[1])*48+24);   // snap ONTO the chair tile
             player.body.enable = false;             // chair tile is solid — disable body so we rest on it
             this.sitting = true;
+          } else if (interact?.type === 'desk') {
+            this.lastDir = interact.dir;            // face the desk we're working at
+            this._preSitPos = null;                 // desks have no seat tile — sit in place, no snap
+            player.setVelocity(0,0);
+            this.sitting = true;                    // body stays enabled: already on a walkable tile
           }
         }
 

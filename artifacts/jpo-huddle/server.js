@@ -51,6 +51,7 @@ const admins  = new Set();
 
 const announcements = [];   // newest-first: { id, name, text, ts }
 let announcementSeq = 0;
+const announcers = new Set();   // emails an admin has designated as allowed to post announcements
 
 const SHOP = { crown: 30 };
 
@@ -114,6 +115,7 @@ io.on("connection", (socket) => {
     players[targetId] = {
       x: 1080, y: 840, dir: "down", anim: "idle",
       name:       reg.name,
+      email:      reg.email,
       character:  reg.character,
       hairIdx:  reg.hairIdx,
       skinIdx:  reg.skinIdx,
@@ -129,6 +131,7 @@ io.on("connection", (socket) => {
       coins: 50,
     });
     io.to(targetId).emit("currentPlayers", players);
+    io.to(targetId).emit("announcerStatus", { canPost: !!reg.email && announcers.has(reg.email) });
 
     for (const pid in players) {
       if (pid !== targetId) {
@@ -160,6 +163,18 @@ io.on("connection", (socket) => {
     console.log(`Kicked: ${p.name}`);
   });
 
+  // Admin designates (or revokes) a player as an announcer — keyed by email so it
+  // survives that person reconnecting during this server session.
+  socket.on("setAnnouncer", ({ targetId, canPost }) => {
+    if (!admins.has(socket.id)) return;
+    const p = players[targetId];
+    if (!p || !p.email) return;
+    if (canPost) announcers.add(p.email); else announcers.delete(p.email);
+    io.to(targetId).emit("announcerStatus", { canPost: !!canPost });
+    _notifyAdmins();
+    console.log(`Announcer ${canPost ? "granted" : "revoked"}: ${p.name}`);
+  });
+
   // ── Game events ──────────────────────────────────────────────────────
   socket.on("playerMove", (data) => {
     if (!players[socket.id]) return;
@@ -176,10 +191,12 @@ io.on("connection", (socket) => {
 
   // ── Announcements (admin-only posting, broadcast to everyone) ─────────
   socket.on("postAnnouncement", ({ text }) => {
-    if (!admins.has(socket.id)) return;
+    const p = players[socket.id];
+    const canPost = admins.has(socket.id) || !!(p && p.email && announcers.has(p.email));
+    if (!canPost) return;
     const clean = (text || "").trim().slice(0, 280);
     if (!clean) return;
-    const name = players[socket.id]?.name || "Admin";
+    const name = p?.name || "Admin";
     announcements.unshift({ id: `a${++announcementSeq}`, name, text: clean, ts: Date.now() });
     if (announcements.length > 50) announcements.length = 50;
     io.emit("announcementsUpdate", announcements);
@@ -236,7 +253,10 @@ function _pendingList() {
 }
 
 function _playerList() {
-  return Object.entries(players).map(([id, p]) => ({ id, name: p.name, coins: p.coins, cosmetics: p.cosmetics }));
+  return Object.entries(players).map(([id, p]) => ({
+    id, name: p.name, coins: p.coins, cosmetics: p.cosmetics,
+    email: p.email || "", isAnnouncer: !!(p.email && announcers.has(p.email)),
+  }));
 }
 
 const port = process.env.PORT || 3000;
