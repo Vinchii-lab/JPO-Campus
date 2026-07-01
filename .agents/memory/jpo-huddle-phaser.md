@@ -1,59 +1,66 @@
 ---
 name: JPO Huddle Phaser sprite & collision
-description: Non-obvious facts about the Adam player spritesheet, Phaser arcade body sizing, TilemapLayer rendering order, and animation system in the JPO Huddle office game.
+description: Non-obvious facts about character spritesheets, animation keys, collision, and rendering in the JPO Huddle office game.
 ---
 
-# Adam player spritesheet
-- `public/assets/Adam_16x16.png` is **16×32 per frame**, NOT 16×16 (the filename misleads — the character spans two tiles tall). Each 32px frame holds one full character; frames are cleanly aligned, no misalignment.
-- **So a "cut character" is NOT a spritesheet/frameHeight problem** — look at TilemapLayer insertion order (see below).
+# Sprite sheet layout — per character
 
-# Adam sprite pack — side-scrolling only, right-facing
-- All three sheets (Adam_16x16.png, Adam_run_16x16.png, Adam_idle_anim_16x16.png) are **side-profile only**. There are no front-facing (walk_down) or back-facing (walk_up) frames anywhere.
-- **Adam_run_16x16.png is right-facing by default** (flipX:false = faces right, flipX:true = faces left).
-- **Do NOT mix textures across animations** — switching between Adam_16x16 and Adam_run mid-movement causes one-frame texture flicker ("twitching") that is nearly impossible to eliminate otherwise.
-- **Use Adam_run exclusively** for all player animations. Drop Adam_16x16 from preload entirely.
+| Character | File | Dimensions | Frames |
+|-----------|------|-----------|--------|
+| adam | Adam_16x16.png | 384×224 | 24 cols × 7 rows = 168 frames |
+| alex | Alex_run_16x16.png | 384×32 | 24 cols × 1 row = 24 frames |
+| amelia | Amelia_run_16x16.png | 384×32 | 24 cols × 1 row = 24 frames |
+| bob | Bob_run_16x16.png | 384×32 | 24 cols × 1 row = 24 frames |
 
-# Final working animation setup
-- Load only `player_run` (Adam_run_16x16.png, 24 frames, 16×32).
-- Create exactly **two** animations: `idle` (frame 0, static, 1fps) and `walk` (frames 0–7, 10fps).
-- **One walk key for ALL directions** — separate walk_left/walk_right/walk_up/walk_down keys that use identical frames cause `play()` restarts on every direction change, producing visible stutter. One key = zero restarts.
-- Direction via `setFlipX`: left → `true`, right → `false`. Up/down/idle inherit `this.lastFlipX`.
+- All frames are **16×32** (not 16×16 — the filename is misleading).
+- Adam has the **full LPC-style directional sheet**; Alex/Amelia/Bob have only a single run-cycle row.
 
-# lastFlipX pattern
-- Store `this.lastFlipX = false` (init in create). Update only on left/right key presses.
-- Apply on up/down/idle so character holds last horizontal direction when stopped or moving vertically.
-- **Down-only convention:** set `lastFlipX = false` (face right = toward camera) when `down && !left && !right`. Do NOT update flipX on up-only — inherit lastFlipX.
+# Animation keys and frame spec (CHAR_ANIM_SPEC)
 
-# player.texture.key drifts during sit animation
-- Palette-swapped animations (e.g. `sit_pl_adam_h1_sk0_sh2_p3`) reference frames from a *different* texture than the run sheet. Phaser switches `sprite.texture` when playing them.
-- **Never use `player.texture.key` to derive walk/idle/sit animation keys** — it returns the sit texture key after the sit anim plays, and `walk_<sit_tex>` / `idle_<sit_tex>` do not exist → `anims.exists()` guard silently blocks `play()` → character freezes on sit frame.
-- **Fix:** store `this.playerTexKey = texKey` in `_onApproved`. Use `this.playerTexKey` everywhere in `update()`. On E stand-up, call `player.setTexture(this.playerTexKey)` immediately before the next `update()` tick.
+Phaser texture key is the character name (`adam`, `alex`, `amelia`, `bob`).
+Animation keys: `${char}_idle`, `${char}_walk_down`, `${char}_walk_up`, `${char}_walk_left`, `${char}_walk_right`.
+Adam-specific: `sit_adam` (adam_sit sheet, frames 0–5), `phone_adam` (adam_phone, frames 0–8).
 
-# playerMoved animation keys must use texKey not character name
-- Other players' sprites use palette-swapped textures (e.g. `pl_adam_h1_sk0_sh2_p3`). Building animation keys from `entry.character` (`walk_adam`) references frames from the base `run_adam` texture — Phaser switches the sprite's texture on every frame → visible color flash.
-- **Fix:** store `entry.texKey` in `otherPlayers[]` and use it when building animation keys in the `playerMoved` handler.
+Adam frame ranges (full sheet):
+- idle: 0–3, walk_down: 0–7, walk_up: 48–55, walk_left: 72–79, walk_right: 96–103
 
-# Idle trigger — key-state NOT velocity
-- Use `!left && !right && !up && !down`, NOT `velocity.x === 0 && velocity.y === 0`.
-- Velocity check fires during wall collisions even while keys are held → rapid idle↔walk flicker.
+Alex/Amelia/Bob frame ranges (single-row fallback — all walk dirs use 0–7):
+- idle: 0–3, walk_down/up/left/right: all 0–7
 
-# Phaser arcade body sizing gotcha
-- Arcade `body.setSize` dimensions ARE multiplied by the sprite's scale for world collision.
-- **Why:** at `setScale(3)`, a `16×32` body becomes 48×96 = two 48px tiles tall. A 2-tile-tall body silently cannot fit through 1-tile horizontal doorways.
-- **How to apply:** keep body ≤ 36×36 source (< 1 tile = 48 world px). Use `setSize(12,12)` with no offset — Phaser auto-centers with `origin(0.5, 0.5)`.
+**Why:** Alex/Amelia/Bob sheets only have 24 frames; frames 48–103 don't exist and generate Phaser warnings. CHAR_ANIM_SPEC holds the correct ranges per character.
+
+# Directional movement — NO flipX
+
+Characters have proper left/right walk animations, so `setFlipX` is NOT used.
+- left → `${char}_walk_left`, right → `${char}_walk_right`
+- up → `${char}_walk_up`, down → `${char}_walk_down`
+- stopped → `${char}_idle`
+
+Animation state sent in `playerMove` emit: `idle`, `sit`, `walk_down`, `walk_up`, `walk_left`, `walk_right`.
+
+# Character assignment
+
+- Player character is randomly assigned on page load: `CHARACTERS[Math.floor(Math.random()*CHARACTERS.length)]`
+- Server confirms character in `approved` event; `_playerChar` is updated then.
+
+# Phaser arcade body sizing
+
+- At `setScale(3)`, a `16×32` body becomes 48×96 = too tall for 1-tile doorways.
+- Keep body ≤ 36×36 source. Use `body.setSize(12,12)` with no offset.
 
 # TilemapLayer render ordering — CRITICAL
-- **`TilemapLayer.setDepth()` does NOT work reliably relative to Phaser Physics sprites in Phaser 3.80.1 WebGL renderer.**
-- **Fix: use insertion order only.** Create objects in this sequence:
-  1. Floor layer
-  2. Wall layer
-  3. Furniture layer
-  4. **Other-player sprites** ← runtime-added, always end up on top
-  5. **Local player sprite** ← last = always on top of everything
-- Player must be created AFTER furniture so it renders above it. Earlier attempts put player before furniture (making player ghosted/invisible behind desks).
-- Remove all `setDepth` calls from TilemapLayers. Never rely on depth to lift a sprite above a tile layer.
+
+- `setDepth()` does NOT work reliably relative to Physics sprites in Phaser 3.80.1.
+- Use **insertion order only**: Floor → Wall → Furniture → other-player sprites → local player.
+- Player must be created AFTER furniture to render above desks.
 
 # Office.tmj map
-- Some rooms are **sealed**: the Wall layer fully encloses them with no doorway gap even though floor is painted underneath. No code/collision change can open them — a gap must be added in the Wall layer in Tiled.
-- Spawn point: tile (22, 17) = world (1080, 840) — center of the starting room (cols 18–25, rows 15–20).
+
+- Some rooms are sealed (no doorway gap in Wall layer). Must be fixed in Tiled, not code.
+- Spawn point: tile (22, 17) = world (1080, 840).
 - World size: 2400×1728 (50×36 tiles × 48px).
+
+# Registration flow
+
+- No character builder. Name + email → "Request Access →" → pending → admin approves → office.
+- No palette swap system. Characters display their native sprite colors.

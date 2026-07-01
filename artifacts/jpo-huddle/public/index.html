@@ -37,79 +37,6 @@
     }
     .form-field input:focus { border-color: #6c63ff; }
 
-    /* ── Builder steps ── */
-    #builder-section { display: none; }
-    #builder-section.active { display: block; }
-
-    .step-indicator {
-      display: flex; align-items: center; justify-content: center;
-      gap: 0; margin-bottom: 14px; font-size: 11px; font-family: monospace;
-    }
-    .step-dot {
-      padding: 4px 10px; border-radius: 20px; cursor: default;
-      color: #bbb; background: #f0f0f0; transition: background 0.15s, color 0.15s;
-    }
-    .step-dot.active { background: #6c63ff; color: #fff; }
-    .step-dot.done   { background: #d8d4ff; color: #6c63ff; }
-    .step-arrow { color: #ccc; padding: 0 3px; font-size: 13px; }
-
-    .builder-body { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
-    .preview-col {
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      flex-shrink: 0;
-    }
-    #preview-canvas { image-rendering: pixelated; display: block; border-radius: 8px; background: #f5f5f5; }
-    .preview-label { font-size: 10px; color: #999; }
-
-    .options-col { flex: 1; text-align: left; }
-    .opt-section-label {
-      font-size: 11px; color: #888; text-transform: uppercase;
-      letter-spacing: 0.5px; margin-bottom: 7px;
-    }
-
-    /* Hair style picker */
-    .hair-style-row { display: flex; gap: 6px; margin-bottom: 12px; }
-    .hair-opt {
-      cursor: pointer; border: 3px solid transparent; border-radius: 8px; padding: 3px;
-      background: #f5f5f5; transition: border-color 0.12s, background 0.12s;
-    }
-    .hair-opt:hover { border-color: #aaa; }
-    .hair-opt.selected { border-color: #6c63ff; background: #ede9ff; }
-    .hair-opt canvas { display: block; image-rendering: pixelated; }
-    .hair-opt span { display: block; font-size: 9px; color: #666; text-align: center; margin-top: 2px; }
-
-    /* Color grids */
-    .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-    .cswatch {
-      width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
-      border: 3px solid transparent; transition: transform 0.1s, border-color 0.12s;
-      flex-shrink: 0;
-    }
-    .cswatch:hover { transform: scale(1.18); }
-    .cswatch.selected { border-color: #333 !important; transform: scale(1.1); }
-    .cswatch.c-none { background: #f0f0f0; border: 3px solid #ccc !important; }
-    .sswatch {
-      width: 26px; height: 20px; border-radius: 6px; cursor: pointer;
-      border: 3px solid transparent; transition: transform 0.1s, border-color 0.12s;
-      flex-shrink: 0;
-    }
-    .sswatch:hover { transform: scale(1.12); }
-    .sswatch.selected { border-color: #333 !important; }
-    .sswatch.c-none { background: #f0f0f0; border: 3px solid #ccc !important; }
-
-    /* Step nav */
-    .step-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .nav-btn {
-      padding: 9px 18px; font-family: monospace; font-size: 13px;
-      border: 2px solid #ddd; border-radius: 8px; cursor: pointer; background: #fff; color: #444;
-      transition: background 0.12s, border-color 0.12s;
-    }
-    .nav-btn:hover { background: #f5f5f5; border-color: #bbb; }
-    .nav-btn.primary {
-      background: #6c63ff; color: #fff; border-color: #6c63ff;
-    }
-    .nav-btn.primary:hover { background: #574fd6; border-color: #574fd6; }
-    .nav-btn:disabled { opacity: 0.4; cursor: default; }
 
     .join-btn {
       width: 100%; padding: 10px; background: #6c63ff; color: #fff;
@@ -303,60 +230,7 @@
           </div>
         </div>
         <div class="error-msg" id="reg-error"></div>
-        <button class="join-btn" id="next-to-builder-btn">Build your character →</button>
-      </div>
-
-      <!-- ═══ Steps 1-4: Character builder ═══ -->
-      <div id="builder-section">
-        <!-- Progress dots -->
-        <div class="step-indicator">
-          <div class="step-dot active" id="sd-1">Hair</div>
-          <div class="step-arrow">›</div>
-          <div class="step-dot" id="sd-2">Skin</div>
-          <div class="step-arrow">›</div>
-          <div class="step-dot" id="sd-3">Clothes</div>
-        </div>
-
-        <!-- Preview + options side by side -->
-        <div class="builder-body">
-          <!-- Live preview -->
-          <div class="preview-col">
-            <canvas id="preview-canvas" width="80" height="160"></canvas>
-            <div class="preview-label">Preview</div>
-            <div id="color-summary" style="margin-top:8px;font-size:11px;color:#666;line-height:1.6;min-width:80px;text-align:left;"></div>
-          </div>
-
-          <!-- Step content (right column) -->
-          <div class="options-col">
-
-            <!-- Step 1: Hair -->
-            <div id="bstep-1">
-              <div class="opt-section-label">Hair Style</div>
-              <div class="hair-style-row" id="hair-style-picker"></div>
-              <div class="opt-section-label">Hair Color</div>
-              <div class="swatch-row" id="hair-color-picker"></div>
-            </div>
-
-            <!-- Step 2: Skin -->
-            <div id="bstep-2" style="display:none">
-              <div class="opt-section-label">Skin Tone</div>
-              <div class="swatch-row" id="skin-tone-picker"></div>
-            </div>
-
-            <!-- Step 3: Clothes -->
-            <div id="bstep-3" style="display:none">
-              <div class="opt-section-label">Clothes Color</div>
-              <div class="swatch-row" id="clothes-color-picker"></div>
-            </div>
-
-          </div>
-        </div>
-
-        <!-- Nav -->
-        <div class="step-nav">
-          <button class="nav-btn" id="btn-back">← Back</button>
-          <button class="nav-btn primary" id="btn-next">Next →</button>
-        </div>
+        <button class="join-btn" id="reg-submit-btn">Request Access →</button>
       </div>
     </div>
 
@@ -469,349 +343,62 @@
 
     const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
     const CHAR_FILES  = {
-      adam:   '/assets/Adam_run_16x16.png',
+      adam:   '/assets/Adam_16x16.png',
       alex:   '/assets/Alex_run_16x16.png',
       amelia: '/assets/Amelia_run_16x16.png',
       bob:    '/assets/Bob_run_16x16.png',
     };
 
-    // Hair colors — earthy tones appropriate for hair
-    const HAIR_COLORS = [
-      { label: 'Original',  css: null       },
-      { label: 'Black',     css: '#1c1008'  },
-      { label: 'Dark Brown',css: '#4a2410'  },
-      { label: 'Brown',     css: '#7a4020'  },
-      { label: 'Auburn',    css: '#9c3820'  },
-      { label: 'Ginger',    css: '#c05018'  },
-      { label: 'Blonde',    css: '#c8982c'  },
-      { label: 'Platinum',  css: '#ddd0a0'  },
-      { label: 'White',     css: '#ece8e0'  },
-    ];
+    // Per-character animation frame ranges.
+    // Adam has the full 7-row directional sheet (168 frames, 24 cols × 7 rows).
+    // Alex/Amelia/Bob only have a single-row run sheet (24 frames); all walk
+    // directions fall back to the same 0-7 run cycle.
+    const CHAR_ANIM_SPEC = {
+      adam:   { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:48,end:55},  walk_left:{start:72,end:79},  walk_right:{start:96,end:103} },
+      alex:   { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
+      amelia: { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
+      bob:    { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
+    };
 
-    // Skin tones
-    const SKIN_TONES = [
-      { label: 'Original', css: null       },
-      { label: 'Fair',     css: '#fde0c0'  },
-      { label: 'Light',    css: '#f5b87a'  },
-      { label: 'Medium',   css: '#d4895c'  },
-      { label: 'Tan',      css: '#b06438'  },
-      { label: 'Brown',    css: '#7a3c1c'  },
-      { label: 'Dark',     css: '#4a2010'  },
-    ];
+    // Player state
+    let _playerName   = '';
+    let _playerChar   = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
+    let _playerCoins  = 0;
+    let _ownedItems   = [];
 
-    // Clothing colors — vivid palette
-    const CLOTH_COLORS = [
-      { label: 'Original', css: null       },
-      { label: 'Red',      css: '#e84040'  },
-      { label: 'Orange',   css: '#f08030'  },
-      { label: 'Yellow',   css: '#e8c820'  },
-      { label: 'Green',    css: '#50bb30'  },
-      { label: 'Teal',     css: '#20bba8'  },
-      { label: 'Blue',     css: '#3880f0'  },
-      { label: 'Purple',   css: '#9840f0'  },
-      { label: 'Pink',     css: '#e840a0'  },
-    ];
-
-    // Player appearance state
-    let _playerName     = '';
-    let _playerChar     = 'adam';
-    let _playerHairIdx  = 0;
-    let _playerSkinIdx  = 0;
-    let _playerClothesIdx = 0;
-    let _playerCoins    = 0;
-    let _ownedItems     = [];
-
-    let _builderStep   = 0;
     let _phaserKbd     = null;
     let _approvedQueue = null;
 
-    // Per-character loaded images + detected zone colors
-    const _charImages     = {};
-    const _charZoneColors = {};   // { hair, skin, shirt, pants } each {r,g,b} or null
-
-    // ────────────────────────────────────────────────────────────────────
-    // Palette-swap helpers
-    // ────────────────────────────────────────────────────────────────────
-
-    function _hexCssToRGB(css) {
-      const n = parseInt(css.slice(1), 16);
-      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
-    }
-
-    // Source colors per character — derived from frame-0 pixel analysis of each run spritesheet.
-    // Each zone has r/g/b (centroid of representative pixels) and t (swap threshold radius).
-    // yMin/yMax bound each swap to a row range within the 16×32 frame (0-based, exclusive yMax).
-    //
-    // Hair source selection rationale:
-    //   Adam:   source=(149,157,88) — bright olive; yMax=16 (was 17) to exclude the one
-    //           skin pixel (187,163,134) at y=16 that falls within t=80.
-    //   Alex/Amelia: source=(186,141,94) — bright highlight instead of (138,101,82).
-    //           Outlines (86,89,114) are 114 units away → never caught.
-    //           All hair shades (186→149→141→138) fall within t=65.
-    //   Bob:    t=35 (was 25) to also catch shirt-gray (93,88,95) that appears in the
-    //           hair zone (y<17); Y-masking keeps it separate from the shirt zone (y≥17).
-    const CHAR_ZONE_COLORS = {
-      adam:   {
-        hair:  {r:110,g:118,b:78, t:80, yMax:23, shirtYMax:17}, // yMax=23 hat-only (full olive); shirtYMax:17 → hat covers y<17, shirt zone y≥17 — no overlap row
-        skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:93, g:96, b:67,  t:11, yMin:17, yMax:23},  // t:11 (t²=121) — only (93,96,67) dist²=0 caught; collar (95,105,74) dist²=134 excluded
-        pants: {r:159,g:116,b:168,t:50, yMin:23},
-        shoe:  {r:93, g:96, b:67,  t:11, yMin:26},
-      },
-      alex:   {
-        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:17},  // bright-highlight source — outlines (86,89,114) dist=114>65, not caught; yMax:17 keeps hair zone above shirt body rows y=17..18
-        skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:138,g:101,b:82, t:20, yMin:17, yMax:24},  // yMin:17 covers collar rows — when no hair selected these turn clothes-color; when hair selected, hair runs first and wins those rows
-        pants: {r:162,g:57, b:75,  t:50, yMin:24},
-      },
-      amelia: {
-        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20, flowXMax:8},  // mid-range source: skin (191,139,120) is dist=75.5 > t=65 → face pixels SAFE; shirtYMax:20 — main pass y=11..19; flowXMax:8 → 2nd pass y=20..23 x=0..7 for flowing hair
-        skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:185,g:93, b:114, t:50, yMin:20, yMax:24, xMin:8},  // xMin:8 excludes flowing-hair columns (x=0..7); frameW fix ensures this masks per-frame, not per-sheet
-        pants: {r:185,g:93, b:114, t:50, yMin:24},
-      },
-      bob:    {
-        hair:  {r:113,g:107,b:110,t:60, yMax:17},           // t=60: catches (70,70,94) top-head outline at dist=59 → fills hair silhouette edge; (85,81,87) edge-fill at dist=45 also caught; shirt at yMin=17 so no Y-overlap
-        skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:93, g:88, b:95,  t:40, yMin:17, yMax:23},
-        pants: {r:194,g:184,b:213,t:50, yMin:23},
-      },
-    };
-
-    function _detectZoneColors(char) {
-      return CHAR_ZONE_COLORS[char] || null;
-    }
-
-    // Swap pixels within threshold Euclidean distance of source → target, preserving luminance.
-    // fw     = image width in pixels (sheet width; used to compute row index for Y-range clamping).
-    // frameW = per-frame width for X-range clamping (defaults to fw). Pass 16 when fw is a
-    //          multi-frame sheet so xMin/xMax are applied per-frame, not per-sheet.
-    // yMin/yMax are row indices within the frame (0-based, yMax exclusive); omit to swap all rows.
-    // xMin/xMax are frame-local column indices (0-based, xMax exclusive); omit to swap all columns.
-    function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax, xMin, xMax, frameW) {
-      const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
-      const t2 = threshold * threshold;
-      const rowBytes = (fw || 0) * 4;
-      const useY = rowBytes > 0 && (yMin !== undefined || yMax !== undefined);
-      const useX = rowBytes > 0 && (xMin !== undefined || xMax !== undefined);
-      const fwX  = frameW || fw;   // frame width for x-masking
-      for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i+3] < 128) continue;
-        if (useY || useX) {
-          const y = Math.floor(i / rowBytes);
-          if (useY) {
-            if (yMin !== undefined && y < yMin) continue;
-            if (yMax !== undefined && y >= yMax) continue;
-          }
-          if (useX) {
-            const x = ((i >> 2) % fw) % fwX;   // frame-local x
-            if (xMin !== undefined && x < xMin) continue;
-            if (xMax !== undefined && x >= xMax) continue;
-          }
-        }
-        const dr = pixels[i]-sr, dg = pixels[i+1]-sg, db = pixels[i+2]-sb;
-        if (dr*dr + dg*dg + db*db > t2) continue;
-        const lum = (0.299*pixels[i] + 0.587*pixels[i+1] + 0.114*pixels[i+2]) / srcLum;
-        pixels[i]   = Math.min(255, Math.round(tr * lum));
-        pixels[i+1] = Math.min(255, Math.round(tg * lum));
-        pixels[i+2] = Math.min(255, Math.round(tb * lum));
-      }
-    }
-
-    // Apply all four zone swaps to an ImageData in-place. Order: skin → hair → shirt → pants.
-    // fw     = sheet width in pixels (forwarded to _swapColorsData for Y-range masking).
-    // frameW = per-frame width for X-range masking (pass 16 when fw is a multi-frame sheet).
-    function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
-      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax,frameW); }
-      if (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   { const [r,g,b]=_hexCssToRGB(HAIR_COLORS[hairIdx].css); const hairYMax=(shirtIdx&&zones.hair.shirtYMax!=null)?zones.hair.shirtYMax:zones.hair.yMax; _swapColorsData(pixels,zones.hair.r, zones.hair.g, zones.hair.b, r,g,b,zones.hair.t ??44,fw,zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax,frameW); if(shirtIdx&&zones.hair.flowXMax!=null&&hairYMax<zones.hair.yMax){_swapColorsData(pixels,zones.hair.r,zones.hair.g,zones.hair.b,r,g,b,zones.hair.t??44,fw,hairYMax,zones.hair.yMax,zones.hair.xMin,zones.hair.flowXMax,frameW);} }
-      if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax,zones.shirt.xMin,zones.shirt.xMax,frameW); }
-      if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
-        const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[pantsIdx].css);
-        _swapColorsData(pixels,zones.pants.r,zones.pants.g,zones.pants.b,r,g,b,zones.pants.t??50,fw,zones.pants.yMin,zones.pants.yMax,zones.pants.xMin,zones.pants.xMax,frameW);
-        if (zones.shoe) _swapColorsData(pixels,zones.shoe.r,zones.shoe.g,zones.shoe.b,r,g,b,zones.shoe.t??40,fw,zones.shoe.yMin,zones.shoe.yMax,zones.shoe.xMin,zones.shoe.xMax,frameW);
-      }
-    }
-
-    // Update the small color-summary strip below the preview canvas.
-    function _updateColorSummary() {
-      const el = document.getElementById('color-summary');
-      if (!el) return;
-      function dot(css) {
-        return css ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${css};border:1px solid #ccc;vertical-align:middle;margin-right:3px;"></span>` : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:3px;background:#f5f5f5;"></span>`;
-      }
-      const hc = _playerHairIdx    ? HAIR_COLORS[_playerHairIdx]?.css    : null;
-      const sc = _playerSkinIdx    ? SKIN_TONES[_playerSkinIdx]?.css     : null;
-      const cc = _playerClothesIdx ? CLOTH_COLORS[_playerClothesIdx]?.css : null;
-      el.innerHTML = `${dot(hc)}Hair<br>${dot(sc)}Skin<br>${dot(cc)}Clothes`;
-    }
-
-    // Redraw the 80×160 preview canvas with current appearance choices.
-    function _redrawPreview() {
-      const cv = document.getElementById('preview-canvas');
-      if (!cv) return;
-      const img = _charImages[_playerChar];
-      if (!img) return;
-      const ctx = cv.getContext('2d');
-      ctx.clearRect(0, 0, 80, 160);
-      ctx.imageSmoothingEnabled = false;
-
-      const zones = _charZoneColors[_playerChar];
-      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_playerClothesIdx;
-
-      if (noSwap || !zones) {
-        ctx.drawImage(img, 0, 0, 16, 32, 0, 0, 80, 160);
-        _updateColorSummary();
-        return;
-      }
-
-      const tmp = document.createElement('canvas');
-      tmp.width = 16; tmp.height = 32;
-      const tc = tmp.getContext('2d');
-      tc.drawImage(img, 0, 0, 16, 32, 0, 0, 16, 32);
-      const id = tc.getImageData(0, 0, 16, 32);
-      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerClothesIdx, _playerClothesIdx, 16);
-      tc.putImageData(id, 0, 0);
-      ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
-      _updateColorSummary();
-    }
-
-    // ── Load character images + detect zones ──────────────────────────
-    CHARACTERS.forEach(char => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = CHAR_FILES[char];
-      img.onload = () => {
-        _charImages[char] = img;
-        _charZoneColors[char] = _detectZoneColors(char);
-        _redrawPreview();
-        // Refresh hair style canvas if on builder
-        const cv = document.getElementById(`hair-cv-${char}`);
-        if (cv) _drawHairStyleCanvas(cv, char);
-      };
-    });
-
-    function _drawHairStyleCanvas(cv, char) {
-      const img = _charImages[char];
-      if (!img) return;
-      const ctx = cv.getContext('2d');
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, 0, 0, 16, 32, 0, 0, cv.width, cv.height);
-    }
-
-    // ── Build hair style picker (DOM) ──────────────────────────────────
-    const hairStylePicker = document.getElementById('hair-style-picker');
-    CHARACTERS.forEach((char, idx) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'hair-opt' + (idx === 0 ? ' selected' : '');
-      wrap.dataset.char = char;
-
-      const cv = document.createElement('canvas');
-      cv.id = `hair-cv-${char}`;
-      cv.width = 36; cv.height = 72;
-      cv.style.cssText = 'width:36px;height:72px';
-      _drawHairStyleCanvas(cv, char);
-
-      const lbl = document.createElement('span');
-      lbl.textContent = char.charAt(0).toUpperCase() + char.slice(1);
-
-      wrap.appendChild(cv); wrap.appendChild(lbl);
-      wrap.addEventListener('click', () => {
-        document.querySelectorAll('.hair-opt').forEach(el => el.classList.remove('selected'));
-        wrap.classList.add('selected');
-        _playerChar = char;
-        _redrawPreview();
-      });
-      hairStylePicker.appendChild(wrap);
-    });
-
-    // ── Build swatch pickers ───────────────────────────────────────────
-    function _buildSwatchRow(containerId, palette, getIdx, setIdx, isRound) {
-      const row = document.getElementById(containerId);
-      palette.forEach((item, idx) => {
-        const sw = document.createElement('div');
-        sw.className = (isRound ? 'cswatch' : 'sswatch') + (idx === 0 ? ' selected c-none' : '');
-        sw.title = item.label;
-        if (item.css) sw.style.background = item.css;
-        sw.addEventListener('click', () => {
-          row.querySelectorAll(isRound ? '.cswatch' : '.sswatch').forEach(el => el.classList.remove('selected'));
-          sw.classList.add('selected');
-          setIdx(idx);
-          _redrawPreview();
-        });
-        row.appendChild(sw);
-      });
-    }
-
-    _buildSwatchRow('hair-color-picker',   HAIR_COLORS, ()=>_playerHairIdx,    v=>{ _playerHairIdx=v;    }, true);
-    _buildSwatchRow('skin-tone-picker',    SKIN_TONES,  ()=>_playerSkinIdx,    v=>{ _playerSkinIdx=v;    }, false);
-    _buildSwatchRow('clothes-color-picker',CLOTH_COLORS,()=>_playerClothesIdx, v=>{ _playerClothesIdx=v; }, true);
-
-    // ── Step navigation ────────────────────────────────────────────────
-    function goToStep(n) {
-      _builderStep = n;
-      [1,2,3].forEach(i => {
-        document.getElementById(`bstep-${i}`).style.display = (i === n) ? '' : 'none';
-        const dot = document.getElementById(`sd-${i}`);
-        dot.classList.toggle('active', i === n);
-        dot.classList.toggle('done',   i < n);
-      });
-      const backBtn = document.getElementById('btn-back');
-      const nextBtn = document.getElementById('btn-next');
-      backBtn.style.visibility = n > 1 ? 'visible' : 'hidden';
-      if (n < 3) {
-        nextBtn.textContent = 'Next →';
-        nextBtn.onclick = () => goToStep(n + 1);
-      } else {
-        nextBtn.textContent = 'Request Access →';
-        nextBtn.onclick = tryRegister;
-      }
-      backBtn.onclick = () => goToStep(n - 1 < 1 ? 1 : n - 1);
-      _redrawPreview();
-    }
-
-    function goToBuilder() {
+    // ── Registration ──────────────────────────────────────────────────
+    function tryRegister() {
       const first = document.getElementById('inp-first').value.trim();
+      const last  = document.getElementById('inp-last').value.trim();
       const email = document.getElementById('inp-email').value.trim();
       const errEl = document.getElementById('reg-error');
       if (!first) { errEl.textContent = 'First name is required.'; return; }
       if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
       errEl.textContent = '';
-      document.getElementById('info-section').style.display = 'none';
-      document.getElementById('builder-section').classList.add('active');
-      goToStep(1);
+      document.getElementById('reg-submit-btn').disabled = true;
+      socket.emit('register', {
+        firstName: first, lastName: last, email,
+        character: _playerChar,
+        hairIdx: 0, skinIdx: 0, clothesIdx: 0,
+      });
     }
 
-    // ── Personal info inputs ───────────────────────────────────────────
     function _stopAndEnter(e) {
       e.stopPropagation();
-      if (e.key === 'Enter') goToBuilder();
+      if (e.key === 'Enter') tryRegister();
     }
     document.getElementById('inp-first').addEventListener('keydown', _stopAndEnter);
     document.getElementById('inp-last').addEventListener('keydown',  _stopAndEnter);
     document.getElementById('inp-email').addEventListener('keydown', _stopAndEnter);
-    document.getElementById('next-to-builder-btn').addEventListener('click', goToBuilder);
+    document.getElementById('reg-submit-btn').addEventListener('click', tryRegister);
 
     ['inp-first','inp-last','inp-email'].forEach(id => {
       document.getElementById(id).addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
       document.getElementById(id).addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
     });
-
-    // ── Registration submit ────────────────────────────────────────────
-    function tryRegister() {
-      const first = document.getElementById('inp-first').value.trim();
-      const last  = document.getElementById('inp-last').value.trim();
-      const email = document.getElementById('inp-email').value.trim();
-
-      document.getElementById('btn-next').disabled = true;
-      socket.emit('register', {
-        firstName: first, lastName: last, email,
-        character:   _playerChar,
-        hairIdx:     _playerHairIdx,
-        skinIdx:     _playerSkinIdx,
-        clothesIdx:  _playerClothesIdx,
-      });
-    }
 
     // ── Registration lifecycle ────────────────────────────────────────
     socket.on('registrationPending', () => {
@@ -825,22 +412,17 @@
     });
 
     socket.on('kicked', () => {
-      // Hide all overlay cards and show the kicked card
       ['card-register','card-pending','card-rejected'].forEach(id => {
         document.getElementById(id)?.classList.add('hidden');
       });
       document.getElementById('card-kicked').classList.remove('hidden');
-      // Also hide the game overlay (join overlay) in case they were in-game
       document.getElementById('join-overlay').style.display = 'flex';
     });
 
     socket.on('approved', (data) => {
-      _playerName    = data.name;
-      _playerChar    = data.character;
-      _playerHairIdx    = data.hairIdx    ?? 0;
-      _playerSkinIdx    = data.skinIdx    ?? 0;
-      _playerClothesIdx = data.clothesIdx ?? 0;
-      _playerCoins    = data.coins;
+      _playerName  = data.name;
+      _playerChar  = data.character;
+      _playerCoins = data.coins;
 
       const overlay = document.getElementById('join-overlay');
       overlay.classList.add('hidden');
@@ -1029,7 +611,7 @@
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
-          this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
+          this.load.spritesheet(char, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
         });
 
         this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 16, frameHeight: 32 });
@@ -1047,10 +629,14 @@
         map.createLayer('Floor', tilesets).setScale(3);
         const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
 
-        // Base animations
+        // Directional animations — frame ranges vary by character sheet layout
         CHARACTERS.forEach(char => {
-          this.anims.create({ key: `idle_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`,{start:0,end:0}), frameRate:1,  repeat:-1 });
-          this.anims.create({ key: `walk_${char}`, frames: this.anims.generateFrameNumbers(`run_${char}`,{start:0,end:7}), frameRate:10, repeat:-1 });
+          const s = CHAR_ANIM_SPEC[char];
+          this.anims.create({ key: `${char}_idle`,       frames: this.anims.generateFrameNumbers(char, s.idle),       frameRate:4, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_down`,  frames: this.anims.generateFrameNumbers(char, s.walk_down),  frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_up`,    frames: this.anims.generateFrameNumbers(char, s.walk_up),    frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_left`,  frames: this.anims.generateFrameNumbers(char, s.walk_left),  frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_right`, frames: this.anims.generateFrameNumbers(char, s.walk_right), frameRate:8, repeat:-1 });
         });
         this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',  {start:0,end:5}), frameRate:8, repeat:-1 });
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
@@ -1075,7 +661,6 @@
         this.localCrown      = null;
         this.localBubble     = null;
         this.sitting         = false;
-        this.lastFlipX       = false;
         this._sendTimer      = 0;
         this._pendingPlayers = null;
 
@@ -1101,11 +686,18 @@
           const entry = this.otherPlayers[data.id];
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
-          entry.sprite.setFlipX(data.flipX);
-          const ak = data.anim === 'sit'
-            ? (this.anims.exists(`sit_${entry.texKey}`) ? `sit_${entry.texKey}` : `idle_${entry.texKey}`)
-            : `${data.anim}_${entry.texKey}`;
-          if (entry.sprite.anims.currentAnim?.key !== ak && this.anims.exists(ak)) entry.sprite.play(ak);
+          const char = entry.character;
+          const anim = data.anim || 'idle';
+          let ak;
+          if (anim === 'sit' && char === 'adam') {
+            ak = 'sit_adam';
+          } else if (anim !== 'sit' && anim !== 'idle') {
+            ak = `${char}_${anim}`;
+          } else {
+            ak = `${char}_idle`;
+          }
+          if (!this.anims.exists(ak)) ak = `${char}_idle`;
+          if (entry.sprite.anims.currentAnim?.key !== ak) entry.sprite.play(ak);
           entry.nameTag.setPosition(data.x, data.y-40);
           if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
@@ -1137,62 +729,14 @@
         if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
       }
 
-      // Build (or retrieve cached) palette-swapped sprite sheet texture for a player.
-      // Returns texture key string.
-      _buildPlayerTex(char, hairIdx, skinIdx, clothesIdx) {
-        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_cl${clothesIdx}`;
-        if (this.textures.exists(key)) return key;
-
-        const srcImg = this.textures.get(`run_${char}`).source[0].image;
-        const sw = srcImg.width, sh = srcImg.height;
-        const cv = document.createElement('canvas');
-        cv.width = sw; cv.height = sh;
-        const cx = cv.getContext('2d');
-        cx.drawImage(srcImg, 0, 0);
-
-        const zones = _charZoneColors[char];
-        if (zones && (hairIdx || skinIdx || clothesIdx)) {
-          const id = cx.getImageData(0, 0, sw, sh);
-          _applySwaps(id.data, zones, hairIdx, skinIdx, clothesIdx, clothesIdx, sw, 16);
-          cx.putImageData(id, 0, 0);
-        }
-
-        this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
-        this.anims.create({ key: `idle_${key}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:0}), frameRate:1,  repeat:-1 });
-        this.anims.create({ key: `walk_${key}`, frames: this.anims.generateFrameNumbers(key,{start:0,end:7}), frameRate:10, repeat:-1 });
-
-        // Also build a sit variant for adam
-        if (char === 'adam') {
-          const sitKey = `pl_sit_${char}_h${hairIdx}_sk${skinIdx}_cl${clothesIdx}`;
-          if (!this.textures.exists(sitKey)) {
-            const sitSrc = this.textures.get('adam_sit').source[0].image;
-            const sc = document.createElement('canvas');
-            sc.width = sitSrc.width; sc.height = sitSrc.height;
-            const scx = sc.getContext('2d');
-            scx.drawImage(sitSrc, 0, 0);
-            if (zones && (hairIdx || skinIdx || clothesIdx)) {
-              const sid = scx.getImageData(0, 0, sc.width, sc.height);
-              _applySwaps(sid.data, zones, hairIdx, skinIdx, clothesIdx, clothesIdx, sc.width, 16);
-              scx.putImageData(sid, 0, 0);
-            }
-            this.textures.addSpriteSheet(sitKey, sc, { frameWidth: 16, frameHeight: 32 });
-            this.anims.create({ key: `sit_${key}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
-          }
-        }
-
-        return key;
-      }
-
       _onApproved(data) {
         const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
 
-        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerClothesIdx);
-        this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
-        this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
+        this.player = this.physics.add.sprite(SPAWN_X, SPAWN_Y, _playerChar);
         this.player.setScale(3).setOrigin(0.5,0.5);
         this.player.body.setSize(12,12);
         this.player.setCollideWorldBounds(true);
-        this.player.play(`idle_${texKey}`);
+        this.player.play(`${_playerChar}_idle`);
         this.physics.add.collider(this.player, this.wallLayer);
 
         this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
@@ -1265,18 +809,21 @@
       }
 
       _addOtherPlayer(id, data) {
-        const char        = data.character  || 'adam';
-        const hairIdx     = data.hairIdx    || 0;
-        const skinIdx     = data.skinIdx    || 0;
-        const clothesIdx  = data.clothesIdx || 0;
-
-        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, clothesIdx);
-        const sprite = this.add.sprite(data.x, data.y, texKey);
+        const char = data.character || 'adam';
+        const sprite = this.add.sprite(data.x, data.y, char);
         sprite.setScale(3).setOrigin(0.5,0.5);
-        const animVerb = (data.anim === 'sit' && char !== 'adam') ? 'idle' : (data.anim || 'idle');
-        const playKey  = (data.anim === 'sit' && char === 'adam') ? 'sit_adam' : `${animVerb}_${texKey}`;
+
+        const anim = data.anim || 'idle';
+        let playKey;
+        if (anim === 'sit' && char === 'adam') {
+          playKey = 'sit_adam';
+        } else if (anim !== 'sit' && anim !== 'idle') {
+          playKey = `${char}_${anim}`;
+        } else {
+          playKey = `${char}_idle`;
+        }
+        if (!this.anims.exists(playKey)) playKey = `${char}_idle`;
         sprite.play(playKey);
-        sprite.setFlipX(data.flipX ?? false);
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
@@ -1286,7 +833,7 @@
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
 
-        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey };
+        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char };
       }
 
       update(time, delta) {
@@ -1294,11 +841,9 @@
 
         const { cursors, wasd, player } = this;
 
-        // Use stored run-sheet key — player.texture.key drifts when sit anim plays
-        const texKey  = this.playerTexKey;
-        const idleKey = `idle_${texKey}`;
-        const walkKey = `walk_${texKey}`;
-        const sitKey  = _playerChar === 'adam' ? `sit_${texKey}` : idleKey;
+        const char    = _playerChar;
+        const idleKey = `${char}_idle`;
+        const sitKey  = char === 'adam' ? 'sit_adam' : idleKey;
 
         if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
@@ -1334,7 +879,6 @@
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
-            player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
           } else if (nearFurniture) {
             const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y)
               || this.furnitureLayer.getTileAt(ptx, pty-1);
@@ -1344,9 +888,7 @@
 
         if (this.sitting) {
           player.setVelocity(0,0);
-          player.setFlipX(this.lastFlipX);
-          const sitExists = this.anims.exists(sitKey);
-          const playSit = sitExists ? sitKey : idleKey;
+          const playSit = this.anims.exists(sitKey) ? sitKey : idleKey;
           if (player.anims.currentAnim?.key !== playSit) player.play(playSit);
         } else {
           player.setVelocity(0,0);
@@ -1356,20 +898,29 @@
           else if (down)  player.setVelocityY( SPEED);
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(SPEED);
 
-          if (left)                { this.lastFlipX=true;  player.setFlipX(true);  }
-          else if (right)          { this.lastFlipX=false; player.setFlipX(false); }
-          else if (down && !up)    { this.lastFlipX=false; player.setFlipX(false); } // face toward camera when walking down
-
-          const targetAnim = (left||right||up||down) ? walkKey : idleKey;
+          let targetAnim;
+          if      (left)  targetAnim = `${char}_walk_left`;
+          else if (right) targetAnim = `${char}_walk_right`;
+          else if (up)    targetAnim = `${char}_walk_up`;
+          else if (down)  targetAnim = `${char}_walk_down`;
+          else            targetAnim = idleKey;
           if (player.anims.currentAnim?.key !== targetAnim && this.anims.exists(targetAnim)) player.play(targetAnim);
         }
 
         this._sendTimer += delta;
         if (this._sendTimer >= 50) {
           this._sendTimer = 0;
-          const animState = this.sitting ? 'sit'
-            : (player.anims.currentAnim?.key.includes('walk') ? 'walk' : 'idle');
-          socket.emit('playerMove', {x:player.x, y:player.y, flipX:player.flipX, anim:animState});
+          let animState = 'idle';
+          if (this.sitting) {
+            animState = 'sit';
+          } else {
+            const curKey = player.anims.currentAnim?.key || '';
+            if      (curKey.endsWith('walk_left'))  animState = 'walk_left';
+            else if (curKey.endsWith('walk_right')) animState = 'walk_right';
+            else if (curKey.endsWith('walk_up'))    animState = 'walk_up';
+            else if (curKey.endsWith('walk_down'))  animState = 'walk_down';
+          }
+          socket.emit('playerMove', {x:player.x, y:player.y, anim:animState});
         }
 
         const count = Object.keys(this.otherPlayers).length + 1;
