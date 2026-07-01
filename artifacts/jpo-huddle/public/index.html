@@ -664,11 +664,16 @@
     //           hair zone (y<17); Y-masking keeps it separate from the shirt zone (y≥17).
     const CHAR_ZONE_COLORS = {
       adam:   {
-        hair:  {r:110,g:118,b:78, t:80, yMax:23, shirtYMax:17}, // yMax=23 hat-only (full olive); shirtYMax:17 → hat covers y<17, shirt zone y≥17 — no overlap row
+        // Frame-0 pixel dump anatomy: hair+fringe OLIVE (110,118,78 family incl. 93,96,67) y9-21;
+        // face y17-22; collar y23; shirt/torso PURPLE (159,116,168 / 128,94,142) y24-27;
+        // legs/pants OLIVE (93,96,67 / 104,114,83) y28-31. Hair and legs share the olive family,
+        // so hair is Y-capped at 23 to stay off the legs. Shirt (purple) and pants (olive) are
+        // separated by SOURCE COLOUR, so both can span the whole lower body (y>=23) without
+        // touching each other or the hair fringe.
+        hair:  {r:110,g:118,b:78, t:80, yMax:23},
         skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:93, g:96, b:67,  t:11, yMin:17, yMax:23},  // t:11 (t²=121) — only (93,96,67) dist²=0 caught; collar (95,105,74) dist²=134 excluded
-        pants: {r:159,g:116,b:168,t:50, yMin:23},
-        shoe:  {r:93, g:96, b:67,  t:11, yMin:26},
+        shirt: {r:159,g:116,b:168,t:50, yMin:23},  // purple torso — matches only purple, never the olive hair-fringe/legs
+        pants: {r:93, g:96, b:67,  t:40, yMin:23},  // olive legs — matches only olive, never the purple torso
       },
       alex:   {
         // Hair is a bob that hangs down the sides of the face (fringe) to y≈22, and the fringe

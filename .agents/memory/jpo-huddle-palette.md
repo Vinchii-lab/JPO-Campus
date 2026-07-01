@@ -32,10 +32,12 @@ For characters where the hair zone extends into the shirt zone (Adam, Amelia), t
 
 | char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin | shirt t |
 |--------|----------------------|---------------------------|------------|---------|
-| adam   | 23                   | **17**                    | 17         | **11**  |
+| adam   | 23                   | (none — removed)          | 23         | 50      |
 | amelia | 24                   | **20**                    | **20**     | **40**  |
 | alex   | 17                   | (none needed)             | **17**     | 20      |
 | bob    | 17                   | (none needed)             | 17         | 40      |
+
+**Adam no longer uses `shirtYMax`.** Its shirt zone is the PURPLE torso (y24-27), color-separated from the olive hair/legs, so hair can keep its full y<23 range even when a shirt is picked — no shrink needed. See the adam anatomy note below.
 
 ## Swap order: HAIR → SKIN → SHIRT → PANTS (critical)
 
@@ -103,11 +105,10 @@ Shirt and trousers are now SEPARATE colors, each chosen from `CLOTH_COLORS` (ind
 
 | char   | zone  | r,g,b         | t  | yMin | yMax | notes |
 |--------|-------|---------------|----|------|------|-------|
-| adam   | hair  | 110,118,78    | 80 | —    | **23** | yMax=23 hat-only; shirtYMax=17 when shirt selected |
+| adam   | hair  | 110,118,78    | 80 | —    | **23** | olive; yMax=23 caps hair off the olive legs (y28+); NO shirtYMax |
 | adam   | skin  | 255,203,176   | 50 | —    | —    | |
-| adam   | shirt | 93,96,67      | **11** | 17 | 23 | t=11 (t²=121) — only pure (93,96,67) caught; collar (95,105,74) dist²=134 excluded |
-| adam   | pants | 159,116,168   | 50 | 23   | —    | |
-| adam   | shoe  | 93,96,67      | 11 | 26   | —    | same olive as shirt; swapped to pants color |
+| adam   | shirt | **159,116,168** | 50 | **23** | — | PURPLE torso (y24-27); matches only purple — never the olive hair-fringe/legs |
+| adam   | pants | **93,96,67**  | **40** | **23** | — | OLIVE legs (y28-31); matches only olive — never the purple torso |
 | alex   | hair  | **186,141,94** | 65 | **10** | **23** | bright-highlight source; extends to y=22 to claim the fringe; face pixels dist>65 survive for skin |
 | alex   | hairOutline | 70,70,94 | **35** | 10 | 23 | catches (86,89,114) at d=31.9 too; darkRatio 0.49 |
 | alex   | skin  | 255,203,176   | 50 | —    | —    | also catches the hand pixels in the torso |
@@ -123,13 +124,17 @@ Shirt and trousers are now SEPARATE colors, each chosen from `CLOTH_COLORS` (ind
 | bob    | shirt | **70,70,94**  | **70** | **23** | **28** | REGION-gated: whole outfit is same navy as outlines, so gate by y only |
 | bob    | pants | **70,70,94**  | **70** | **28** | — | REGION-gated navy legs |
 
-# Adam shoe zone
+# Adam anatomy — the mis-assigned-zones bug (FIXED)
 
-Adam's shoes (y=28–31) are the exact same olive-green (93,96,67) as his shirt. The `shoe` zone entry causes `_applySwaps` to run an extra swap of those pixels to the chosen **pants** color, so the full lower half matches the pants selection.
+**Symptom reported:** picking a SHIRT colour recoloured Adam's hair, and picking TROUSERS recoloured both shirt and trousers. **Root cause:** Adam's zones were mislabelled against his real anatomy. Frame-0 pixel dump: hair+fringe OLIVE `93,96,67`/`104,114,83`/`149,157,88` at y9-21 (the fringe olive hangs beside the face down to y≈21); face y17-22; collar y23; **shirt/torso PURPLE `159,116,168`/`128,94,142` at y24-27**; **legs/pants OLIVE `93,96,67` at y28-31**.
+- Old `shirt` zone = olive `93,96,67` at y17-23 → that's the **hair fringe**, so the shirt picker painted hair.
+- Old `pants` zone = purple `159,116,168` at y≥23 (the real shirt) + a `shoe` hack for the olive legs → the trousers picker painted the real torso AND legs.
+**Fix:** shirt → purple source `159,116,168` t50 y≥23; pants → olive source `93,96,67` t40 y≥23; removed the `shoe` zone and `shirtYMax`. Purple vs olive are far apart, so both zones span the whole lower body and separate purely by SOURCE COLOUR — no cross-bleed, no touching the hair fringe.
+**Key lesson:** Adam's hair, legs, AND shirt-fringe are all olive — do NOT tune his clothes zones by Y-band alone. Verify against a real frame-0 pixel dump, and separate torso vs legs by their distinct source colours (purple torso vs olive legs), not by a hard Y cut that the walk cycle shifts across.
 
 # Swap order
 
-`_applySwaps` runs: hair → skin → shirt → pants (+shoe for Adam). Hair runs FIRST on original pixels (claims fringe before shirt); skin second (claims face); then shirt/pants. See the top-of-file swap-order section for why.
+`_applySwaps` runs: hair → skin → shirt → pants. Hair runs FIRST on original pixels (claims fringe before shirt); skin second (claims face); then shirt/pants. (A generic `shoe` pass still exists in `_applySwaps` but no character defines a `shoe` zone anymore — it's inert.) See the top-of-file swap-order section for why.
 
 # `_swapColorsData` / `_applySwaps` signatures
 
