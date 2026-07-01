@@ -291,6 +291,51 @@
       position: fixed; bottom: 10px; left: 14px; z-index: 99;
       font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.18); pointer-events: none;
     }
+
+    /* ── Admin announcement composer (inside owner panel) ── */
+    .op-ann-input {
+      width: 100%; box-sizing: border-box; padding: 8px 10px; margin-bottom: 8px;
+      font-family: monospace; font-size: 12px; line-height: 1.4;
+      background: #111; border: 1px solid #444; border-radius: 7px; color: #eee;
+      outline: none; resize: vertical;
+    }
+    .op-ann-input:focus { border-color: #6c63ff; }
+    .op-ann-list { margin-top: 14px; }
+    .op-ann-row {
+      display: flex; align-items: flex-start; gap: 8px; padding: 8px 0;
+      border-bottom: 1px solid #23233a; font-size: 12px;
+    }
+    .op-ann-row:last-child { border-bottom: none; }
+    .op-ann-row-text { flex: 1; color: #ccc; white-space: pre-wrap; word-break: break-word; }
+    .op-ann-row-text small { display: block; color: #666; margin-top: 3px; }
+    .op-ann-empty { color: #444; text-align: center; padding: 10px; }
+
+    /* ── Announcement board reader (press E) ── */
+    #board-panel {
+      position: fixed; inset: 0; z-index: 10000; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55); padding: 20px;
+    }
+    #board-panel.open { display: flex; }
+    #board-card {
+      background: #1e1e30; border: 1px solid #3a3a5e; border-radius: 14px;
+      width: 460px; max-width: 100%; max-height: calc(100vh - 60px); overflow-y: auto;
+      font-family: monospace; color: #eee; box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+    #board-card-header {
+      display: flex; align-items: center; padding: 18px 22px;
+      border-bottom: 1px solid #2a2a40; position: sticky; top: 0; background: #1e1e30; z-index: 1;
+    }
+    #board-card-header h2 { font-size: 16px; flex: 1; margin: 0; }
+    #board-close { background: none; border: none; color: #666; font-size: 20px; cursor: pointer; line-height: 1; padding: 0 2px; }
+    #board-close:hover { color: #eee; }
+    .board-list { padding: 10px 22px 20px; }
+    .board-item { padding: 14px 0; border-bottom: 1px solid #2a2a40; }
+    .board-item:last-child { border-bottom: none; }
+    .board-item-text { font-size: 14px; line-height: 1.5; color: #eee; white-space: pre-wrap; word-break: break-word; }
+    .board-item-meta { font-size: 11px; color: #888; margin-top: 7px; }
+    .board-item-author { color: #6c63ff; }
+    .board-empty { color: #555; text-align: center; padding: 30px 8px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -471,8 +516,28 @@
           </tbody>
         </table>
       </div>
+      <div class="owner-section">
+        <h3>Announcements</h3>
+        <textarea id="op-ann-input" class="op-ann-input" rows="2" maxlength="280" placeholder="Post an announcement to the office boards…"></textarea>
+        <button class="o-btn o-btn-approve" onclick="postAnnouncement()">Post announcement</button>
+        <div id="op-ann-list" class="op-ann-list"></div>
+      </div>
     </div>
   </div>
+
+  <!-- ── Announcement board (press E facing a board) ── -->
+  <div id="board-panel">
+    <div id="board-card">
+      <div id="board-card-header">
+        <h2>📢 Announcements</h2>
+        <button id="board-close" onclick="closeBoardPanel()">✕</button>
+      </div>
+      <div id="board-list" class="board-list">
+        <div class="board-empty">No announcements yet.</div>
+      </div>
+    </div>
+  </div>
+
   <div id="owner-hint">[F8] settings</div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -488,6 +553,12 @@
     // 24-frame directional run sheets: RIGHT 0-5, UP(back) 6-11, LEFT 12-17, DOWN(front) 18-23
     const DIR_ROWS  = { right:[0,5], up:[6,11], left:[12,17], down:[18,23] };
     const DIR_START = { right:0, up:6, left:12, down:18 };
+
+    // Furniture tile GIDs that are announcement boards (wall-mounted chalk/white boards).
+    const BOARD_GIDS = new Set([959,960,975,976,991,992,963,964,979,980,995,996,1042,1043,1005,1006,1007,1008,1009,1010,1011]);
+    // Furniture tile GIDs that are plants/greenery — solid, but not something you sit at.
+    const PLANT_GIDS = new Set([1106,1109,1110,1122,1123,1272,1273,1274,1288,1289,1290]);
+
     const CHAR_FILES  = {
       adam:   '/assets/Adam_run_16x16.png',
       alex:   '/assets/Alex_run_16x16.png',
@@ -1034,7 +1105,7 @@
     document.getElementById('owner-pwd-input').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
     document.getElementById('owner-pwd-input').addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
 
-    function openOwnerPanel() { _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); }
+    function openOwnerPanel() { _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); }
     function closeOwnerPanel() {
       _ownerPanelOpen = false;
       document.getElementById('owner-panel').classList.remove('open');
@@ -1043,6 +1114,75 @@
 
     socket.on('adminAuthOk', () => { _adminAuthed = true; closeOwnerPwd(); openOwnerPanel(); });
     socket.on('adminAuthFail', () => { document.getElementById('owner-pwd-error').textContent = 'Incorrect password.'; });
+
+    // ── Announcement boards ───────────────────────────────────────────
+    let _boardPanelOpen = false;
+    let _announcements  = [];
+
+    function escHtml(str) { const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
+    function annTimeAgo(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return 'just now';
+      const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+    function openBoardPanel() {
+      _boardPanelOpen = true;
+      document.getElementById('board-panel').classList.add('open');
+      renderBoard();
+    }
+    function closeBoardPanel() {
+      _boardPanelOpen = false;
+      document.getElementById('board-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    function renderBoard() {
+      const list = document.getElementById('board-list');
+      if (list) {
+        list.innerHTML = _announcements.length
+          ? _announcements.map(a =>
+              '<div class="board-item"><div class="board-item-text">' + escHtml(a.text) + '</div>' +
+              '<div class="board-item-meta"><span class="board-item-author">' + escHtml(a.name) + '</span> · ' + annTimeAgo(a.ts) + '</div></div>'
+            ).join('')
+          : '<div class="board-empty">No announcements yet.</div>';
+      }
+      renderAdminAnnouncements();
+    }
+    function renderAdminAnnouncements() {
+      const el = document.getElementById('op-ann-list');
+      if (!el) return;
+      el.innerHTML = _announcements.length
+        ? _announcements.map(a =>
+            '<div class="op-ann-row"><div class="op-ann-row-text">' + escHtml(a.text) +
+            '<small>' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
+            '<button class="o-btn o-btn-reject" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button></div>'
+          ).join('')
+        : '<div class="op-ann-empty">No announcements yet</div>';
+    }
+    function postAnnouncement() {
+      const inp = document.getElementById('op-ann-input');
+      const text = inp.value.trim();
+      if (!text) return;
+      socket.emit('postAnnouncement', { text });
+      inp.value = '';
+    }
+    function deleteAnnouncement(id) { socket.emit('deleteAnnouncement', { id }); }
+
+    socket.on('announcements',       list => { _announcements = list || []; renderBoard(); });
+    socket.on('announcementsUpdate', list => { _announcements = list || []; renderBoard(); });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _boardPanelOpen) { e.preventDefault(); closeBoardPanel(); }
+    });
+
+    (() => {
+      const inp = document.getElementById('op-ann-input');
+      if (!inp) return;
+      inp.addEventListener('keydown', e => { e.stopPropagation(); });
+      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
 
     socket.on('pendingList', (list) => {
       document.getElementById('op-pending-count').textContent = list.length;
@@ -1117,6 +1257,9 @@
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
         wallLayer.setCollisionByExclusion([-1]);
+        // Furniture (desks, chairs, cabinets, boards, plants) is solid — you can't walk through it.
+        // Rugs/carpets live on the Floor layer, so nothing walkable is blocked.
+        furnitureLayer.setCollisionByExclusion([-1]);
 
         [[12,17],[14,17],[16,17],[12,19],[14,19],[16,19]].forEach(([col,row],i) => {
           const wx=col*48+24, wy=row*48+8; const g=this.add.graphics();
@@ -1163,8 +1306,13 @@
           entry.sprite.setFlipX(false);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
           if (data.anim === 'sit') {
-            const sk = this.anims.exists(`sit_${entry.texKey}`) ? `sit_${entry.texKey}` : `idle_${entry.texKey}`;
-            if (entry.sprite.anims.currentAnim?.key !== sk && this.anims.exists(sk)) entry.sprite.play(sk);
+            const sk = `sit_${entry.texKey}`;
+            if (this.anims.exists(sk)) {
+              if (entry.sprite.anims.currentAnim?.key !== sk) entry.sprite.play(sk);
+            } else {
+              entry.sprite.anims.stop();
+              entry.sprite.setFrame(DIR_START[rdir]);
+            }
           } else if (data.anim === 'walk') {
             const wk = `walk_${entry.texKey}_${rdir}`;
             if (entry.sprite.anims.currentAnim?.key !== wk && this.anims.exists(wk)) entry.sprite.play(wk);
@@ -1271,6 +1419,7 @@
         this.player.setCollideWorldBounds(true);
         this.player.play(`idle_${texKey}`);
         this.physics.add.collider(this.player, this.wallLayer);
+        this.physics.add.collider(this.player, this.furnitureLayer);
 
         this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
 
@@ -1353,8 +1502,9 @@
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
         sprite.setFlipX(false);
         if (data.anim === 'sit') {
-          const sk = this.anims.exists(`sit_${texKey}`) ? `sit_${texKey}` : `idle_${texKey}`;
-          sprite.play(sk);
+          const sk = `sit_${texKey}`;
+          if (this.anims.exists(sk)) sprite.play(sk);
+          else { sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
         } else if (data.anim === 'walk') {
           const wk = `walk_${texKey}_${dir}`;
           sprite.play(this.anims.exists(wk) ? wk : `idle_${texKey}`);
@@ -1388,7 +1538,7 @@
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCrown?-95:-78));
 
-        if (_chatOpen || _ownerPanelOpen) {
+        if (_chatOpen || _ownerPanelOpen || _boardPanelOpen) {
           player.setVelocity(0,0);
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
@@ -1408,35 +1558,55 @@
 
         const ptx = Math.floor(player.x/48);
         const pty = Math.floor(player.y/48);
-        let nearFurniture = false;
+
+        // Look at the 4 adjacent furniture tiles: boards can be read, other solid
+        // furniture (desks/chairs) can be sat at. Prefer whatever we're facing.
+        const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
+        const gidAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
+        // First interactable neighbour in priority order (facing first) wins, and
+        // its OWN type decides the action — so facing a desk always sits even if a
+        // board sits off to the side, and vice-versa.
+        let interact = null;   // { type:'board'|'sit', dir }
         if (!this.sitting) {
-          outer: for (let dx=-1;dx<=1;dx++) {
-            for (let dy=-1;dy<=1;dy++) {
-              const t = this.furnitureLayer.getTileAt(ptx+dx,pty+dy);
-              if (t && t.index>0) { nearFurniture=true; break outer; }
-            }
+          for (const d of [this.lastDir,'up','down','left','right']) {
+            const v = DIRVEC[d]; if (!v) continue;
+            const g = gidAt(ptx+v[0], pty+v[1]);
+            if (!g) continue;
+            if (BOARD_GIDS.has(g))       { interact = { type:'board', dir:d }; break; }
+            else if (!PLANT_GIDS.has(g)) { interact = { type:'sit',   dir:d }; break; }
           }
         }
-        this.eHint.setVisible(nearFurniture);
-        if (nearFurniture) this.eHint.setPosition(player.x, player.y-58);
+
+        if (this.sitting)                    this.eHint.setVisible(false);
+        else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
+        else                                 this.eHint.setVisible(false);
 
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
-          } else if (nearFurniture) {
-            const tile = this.furnitureLayer.getTileAtWorldXY(player.x, player.y)
-              || this.furnitureLayer.getTileAt(ptx, pty-1);
-            if (tile) { player.setPosition(tile.getCenterX(), tile.getCenterY()); this.sitting=true; }
+          } else if (interact?.type === 'board') {
+            this.lastDir = interact.dir;
+            openBoardPanel();
+          } else if (interact?.type === 'sit') {
+            this.lastDir = interact.dir;
+            player.setVelocity(0,0);
+            player.setPosition(ptx*48+24, pty*48+24);   // tidy up onto tile centre
+            this.sitting = true;
           }
         }
 
         if (this.sitting) {
           player.setVelocity(0,0);
           player.setFlipX(false);
-          const sitExists = this.anims.exists(sitKey);
-          const playSit = sitExists ? sitKey : idleKey;
-          if (player.anims.currentAnim?.key !== playSit) player.play(playSit);
+          // Adam has a real sit animation; everyone else holds a static seated pose facing the furniture.
+          if (_playerChar === 'adam' && this.anims.exists(sitKey)) {
+            if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
+          } else {
+            player.anims.stop();
+            player.setFrame(DIR_START[this.lastDir]);
+          }
         } else {
           player.setVelocity(0,0);
           if (left)       player.setVelocityX(-SPEED);

@@ -49,6 +49,9 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → full player state
 const admins  = new Set();
 
+const announcements = [];   // newest-first: { id, name, text, ts }
+let announcementSeq = 0;
+
 const SHOP = { crown: 30 };
 
 function clampIdx(v, max) {
@@ -65,6 +68,9 @@ setInterval(() => {
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
+
+  // Send the current announcement board to every new connection.
+  socket.emit("announcements", announcements);
 
   // ── Registration ─────────────────────────────────────────────────────
   socket.on("register", ({ firstName, lastName, email, character, hairIdx, skinIdx, clothesIdx }) => {
@@ -160,6 +166,27 @@ io.on("connection", (socket) => {
     const text = (message || "").trim().slice(0, 120);
     if (!text) return;
     io.emit("chatMessage", { id: socket.id, name: players[socket.id].name, message: text });
+  });
+
+  // ── Announcements (admin-only posting, broadcast to everyone) ─────────
+  socket.on("postAnnouncement", ({ text }) => {
+    if (!admins.has(socket.id)) return;
+    const clean = (text || "").trim().slice(0, 280);
+    if (!clean) return;
+    const name = players[socket.id]?.name || "Admin";
+    announcements.unshift({ id: `a${++announcementSeq}`, name, text: clean, ts: Date.now() });
+    if (announcements.length > 50) announcements.length = 50;
+    io.emit("announcementsUpdate", announcements);
+    console.log(`Announcement by ${name}: ${clean.slice(0, 40)}`);
+  });
+
+  socket.on("deleteAnnouncement", ({ id }) => {
+    if (!admins.has(socket.id)) return;
+    const idx = announcements.findIndex((a) => a.id === id);
+    if (idx !== -1) {
+      announcements.splice(idx, 1);
+      io.emit("announcementsUpdate", announcements);
+    }
   });
 
   socket.on("buyCosmetic", ({ item }) => {

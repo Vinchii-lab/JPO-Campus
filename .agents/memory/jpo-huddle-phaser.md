@@ -55,3 +55,10 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 - Some rooms are **sealed**: the Wall layer fully encloses them with no doorway gap even though floor is painted underneath. No code/collision change can open them — a gap must be added in the Wall layer in Tiled.
 - Spawn point: tile (22, 17) = world (1080, 840) — center of the starting room (cols 18–25, rows 15–20).
 - World size: 2400×1728 (50×36 tiles × 48px).
+
+# Furniture collision + sit model + announcement boards
+- **Making the whole Furniture layer solid is SAFE** — rugs/carpets live on the **Floor** layer, not Furniture, so it blocks no walkway, doorway, or the spawn tile. Don't fear a blanket furniture collider here.
+- **Chairs and desks are drawn as COMBINED sprites** — there is no standalone "seat" tile to stand on. So sitting must be **"stay on your adjacent walkable tile and face the furniture"**, never snap the player onto the (now-solid) furniture tile, or the collider ejects them.
+- **Boards are wall-mounted on multiple sides** (including the right wall), so board/sit interaction must scan all 4 neighbours, not just the tile below — a below-only check misses side-wall boards.
+- **Only Adam has seated artwork.** Alex/Amelia/Bob have no sit frames, so they hold a static facing frame both locally AND for remote viewers — the remote (`playerMoved`/`_addOtherPlayer`) sit path must special-case "no sit anim → freeze on the directional frame", NOT fall back to the down-facing idle, or other clients see the wrong seated pose. A true seated pose for them needs new art.
+- Announcements are **server-side in-memory only** (lost on restart), **admin-gated** for both post and delete; new clients get the current list on connect and posts broadcast live. Admin identity is the F8 password (stored in the server's `ADMIN_PASSWORD`, sourced from env/secret — never hardcode or record the value).
