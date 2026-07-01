@@ -1,2 +1,2 @@
-- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — directional anims; Adam has full 7-row sheet, Alex/Amelia/Bob are single-row (CHAR_ANIM_SPEC for per-char frame ranges); no flipX.
-- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — historical only; palette-swap system removed in Task #12 refactor.
+- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — all 4 chars use 384×224 directional sheet; identical frame layout; no flipX; registration flow simplified.
+- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — historical only; palette-swap system has been removed.

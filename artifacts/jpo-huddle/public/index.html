@@ -344,20 +344,9 @@
     const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
     const CHAR_FILES  = {
       adam:   '/assets/Adam_16x16.png',
-      alex:   '/assets/Alex_run_16x16.png',
-      amelia: '/assets/Amelia_run_16x16.png',
-      bob:    '/assets/Bob_run_16x16.png',
-    };
-
-    // Per-character animation frame ranges.
-    // Adam has the full 7-row directional sheet (168 frames, 24 cols × 7 rows).
-    // Alex/Amelia/Bob only have a single-row run sheet (24 frames); all walk
-    // directions fall back to the same 0-7 run cycle.
-    const CHAR_ANIM_SPEC = {
-      adam:   { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:48,end:55},  walk_left:{start:72,end:79},  walk_right:{start:96,end:103} },
-      alex:   { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
-      amelia: { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
-      bob:    { idle:{start:0,end:3}, walk_down:{start:0,end:7},  walk_up:{start:0,end:7},    walk_left:{start:0,end:7},    walk_right:{start:0,end:7}   },
+      alex:   '/assets/Alex_16x16.png',
+      amelia: '/assets/Amelia_16x16.png',
+      bob:    '/assets/Bob_16x16.png',
     };
 
     // Player state
@@ -629,14 +618,14 @@
         map.createLayer('Floor', tilesets).setScale(3);
         const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
 
-        // Directional animations — frame ranges vary by character sheet layout
+        // All 4 characters use identical frame layout (24 cols × 7 rows, 16×32):
+        //   idle: 0-3, walk_down: 0-7, walk_up: 48-55, walk_left: 72-79, walk_right: 96-103
         CHARACTERS.forEach(char => {
-          const s = CHAR_ANIM_SPEC[char];
-          this.anims.create({ key: `${char}_idle`,       frames: this.anims.generateFrameNumbers(char, s.idle),       frameRate:4, repeat:-1 });
-          this.anims.create({ key: `${char}_walk_down`,  frames: this.anims.generateFrameNumbers(char, s.walk_down),  frameRate:8, repeat:-1 });
-          this.anims.create({ key: `${char}_walk_up`,    frames: this.anims.generateFrameNumbers(char, s.walk_up),    frameRate:8, repeat:-1 });
-          this.anims.create({ key: `${char}_walk_left`,  frames: this.anims.generateFrameNumbers(char, s.walk_left),  frameRate:8, repeat:-1 });
-          this.anims.create({ key: `${char}_walk_right`, frames: this.anims.generateFrameNumbers(char, s.walk_right), frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_idle`,       frames: this.anims.generateFrameNumbers(char, {start:0,  end:3  }), frameRate:4, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_down`,  frames: this.anims.generateFrameNumbers(char, {start:0,  end:7  }), frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_up`,    frames: this.anims.generateFrameNumbers(char, {start:48, end:55 }), frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_left`,  frames: this.anims.generateFrameNumbers(char, {start:72, end:79 }), frameRate:8, repeat:-1 });
+          this.anims.create({ key: `${char}_walk_right`, frames: this.anims.generateFrameNumbers(char, {start:96, end:103}), frameRate:8, repeat:-1 });
         });
         this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',  {start:0,end:5}), frameRate:8, repeat:-1 });
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
