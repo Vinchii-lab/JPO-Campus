@@ -27,13 +27,20 @@ app.use((req, res, next) => {
 // guaranteeing the browser fetches a fresh copy every time.
 app.get('/', (_req, res) => {
   const html = readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
-    .replace('</head>', `<meta name="build-stamp" content="${BUILD_STAMP}">\n</head>`);
+    .replace('__BUILD_STAMP_TOKEN__', BUILD_STAMP);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('ETag', `"${BUILD_STAMP}"`);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
+});
+
+// Stamp endpoint — always returns the current server's build stamp, never cached.
+// The page checks this on load and force-reloads if it was served from a stale cache.
+app.get('/stamp', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ stamp: BUILD_STAMP });
 });
 
 app.use(express.static(path.join(__dirname, "public")));

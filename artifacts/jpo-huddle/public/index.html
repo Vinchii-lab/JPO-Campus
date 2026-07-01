@@ -6,6 +6,23 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>JPO Huddle</title>
   <link rel="icon" href="data:,">
+  <script>
+    // Self-healing cache buster: the server injects __BUILD__ at page-generation time.
+    // On load we ping /stamp; if the server has restarted since this page was cached,
+    // stamps won't match and we force a hard reload — bypassing every proxy / iframe cache.
+    window.__BUILD__ = '__BUILD_STAMP_TOKEN__';
+    window.addEventListener('load', function() {
+      fetch('/stamp', { cache: 'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (String(d.stamp) !== String(window.__BUILD__)) {
+            console.log('[cache-buster] stale page detected — reloading');
+            location.href = location.pathname + '?_cb=' + d.stamp;
+          }
+        })
+        .catch(function(){});
+    });
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #1a1a2e; overflow: hidden; }
@@ -559,19 +576,27 @@
         shoe:  {r:93, g:96, b:67,  t:11, yMin:26},
       },
       alex:   {
-        hair:  {r:186,g:141,b:94, t:65, yMin:11, yMax:17},  // bright-highlight source — outlines (86,89,114) dist=114>65, not caught; yMax:17 keeps hair zone above shirt body rows y=17..18
+        hair:        {r:186,g:141,b:94, t:65, yMin:11, yMax:17},
+        // Dark outline pixels (70,70,94) and (58,58,80) sit in the hair zone but are 136 units
+        // from the hair source — too far for the main swap. hairOutline catches them and maps them
+        // to a proportionally-darkened version of the selected hair colour (ratio ≈ 0.49).
+        hairOutline: {r:70, g:70, b:94, t:22, yMin:11, yMax:17, darkRatio:0.49},
         skin:  {r:255,g:203,b:176,t:50},
-        shirt: {r:138,g:101,b:82, t:20, yMin:17, yMax:24},  // yMin:17 covers collar rows — when no hair selected these turn clothes-color; when hair selected, hair runs first and wins those rows
+        shirt: {r:138,g:101,b:82, t:20, yMin:17, yMax:24},
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
       },
       amelia: {
-        hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20, flowXMax:8},  // mid-range source: skin (191,139,120) is dist=75.5 > t=65 → face pixels SAFE; shirtYMax:20 — main pass y=11..19; flowXMax:8 → 2nd pass y=20..23 x=0..7 for flowing hair
+        hair:        {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20, flowXMax:8},
+        hairOutline: {r:70, g:70, b:94, t:22, yMin:11, yMax:24, darkRatio:0.66},
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:185,g:93, b:114, t:40, yMin:20, yMax:24, xMin:8},  // t:40 — skin pixels (191,139,120) at d=46.8 are excluded; actual shirt pixels (181,121,114) d=28 and (170,94,86) d=32 still caught; xMin:8 excludes flowing-hair columns
+        shirt: {r:185,g:93, b:114, t:40, yMin:20, yMax:24, xMin:8},
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
-        hair:  {r:113,g:107,b:110,t:60, yMax:17},           // t=60: catches (70,70,94) top-head outline at dist=59 → fills hair silhouette edge; (85,81,87) edge-fill at dist=45 also caught; shirt at yMin=17 so no Y-overlap
+        // Main swap (t=60) already catches (70,70,94) at dist=58.9.
+        // hairOutline catches the slightly-darker outer outline (58,58,80) at dist=79.5.
+        hair:        {r:113,g:107,b:110,t:60, yMax:17},
+        hairOutline: {r:58, g:58, b:80, t:18, yMax:17, darkRatio:0.55},
         skin:  {r:255,g:203,b:176,t:50},
         shirt: {r:93, g:88, b:95,  t:40, yMin:17, yMax:23},
         pants: {r:194,g:184,b:213,t:50, yMin:23},
@@ -626,7 +651,25 @@
     // fw     = sheet width in pixels (forwarded to _swapColorsData for Y-range masking).
     // frameW = per-frame width for X-range masking (pass 16 when fw is a multi-frame sheet).
     function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
-      if (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   { const [r,g,b]=_hexCssToRGB(HAIR_COLORS[hairIdx].css); const hairYMax=(shirtIdx&&zones.hair.shirtYMax!=null)?zones.hair.shirtYMax:zones.hair.yMax; _swapColorsData(pixels,zones.hair.r, zones.hair.g, zones.hair.b, r,g,b,zones.hair.t ??44,fw,zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax,frameW); if(shirtIdx&&zones.hair.flowXMax!=null&&hairYMax<zones.hair.yMax){_swapColorsData(pixels,zones.hair.r,zones.hair.g,zones.hair.b,r,g,b,zones.hair.t??44,fw,hairYMax,zones.hair.yMax,zones.hair.xMin,zones.hair.flowXMax,frameW);} }
+      if (hairIdx && zones?.hair && HAIR_COLORS[hairIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(HAIR_COLORS[hairIdx].css);
+        const hairYMax = (shirtIdx && zones.hair.shirtYMax != null) ? zones.hair.shirtYMax : zones.hair.yMax;
+        // Main fill swap
+        _swapColorsData(pixels, zones.hair.r, zones.hair.g, zones.hair.b, r,g,b, zones.hair.t??44, fw, zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax, frameW);
+        // Flowing-hair second pass (Amelia only)
+        if (shirtIdx && zones.hair.flowXMax != null && hairYMax < zones.hair.yMax) {
+          _swapColorsData(pixels, zones.hair.r, zones.hair.g, zones.hair.b, r,g,b, zones.hair.t??44, fw, hairYMax, zones.hair.yMax, zones.hair.xMin, zones.hair.flowXMax, frameW);
+        }
+        // Outline pass: dark border pixels that are too far from the fill source to be caught above.
+        // Target is a proportionally-darkened version of the selected hair colour so the outline
+        // stays visually darker than the fill, matching the original sprite's contrast ratio.
+        if (zones.hairOutline) {
+          const oz = zones.hairOutline;
+          const ratio = oz.darkRatio ?? 0.5;
+          const or = Math.round(r*ratio), og = Math.round(g*ratio), ob = Math.round(b*ratio);
+          _swapColorsData(pixels, oz.r, oz.g, oz.b, or,og,ob, oz.t??22, fw, oz.yMin, oz.yMax, oz.xMin, oz.xMax, frameW);
+        }
+      }
       if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax,frameW); }
       if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax,zones.shirt.xMin,zones.shirt.xMax,frameW); }
       if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
