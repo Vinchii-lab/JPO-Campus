@@ -1291,14 +1291,17 @@
         const tilesets = [tsRoom, tsInter, tsExt];
 
         map.createLayer('Floor', tilesets).setScale(3);
-        const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
 
         // Base animations
         CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
         this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',  {start:0,end:5}), frameRate:8, repeat:-1 });
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
 
+        // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
+        // The Wall layer holds the upper/back parts of desks & chairs, so it must render
+        // ON TOP of Furniture — otherwise chairs float over the desks/computers.
         const furnitureLayer = map.createLayer('Furniture', tilesets).setScale(3);
+        const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
         wallLayer.setCollisionByExclusion([-1]);

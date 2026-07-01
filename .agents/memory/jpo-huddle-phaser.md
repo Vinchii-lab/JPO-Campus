@@ -47,13 +47,14 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 
 # TilemapLayer render ordering — CRITICAL
 - **`TilemapLayer.setDepth()` does NOT work reliably relative to Phaser Physics sprites in Phaser 3.80.1 WebGL renderer.**
-- **Fix: use insertion order only.** Create objects in this sequence:
+- **Fix: use insertion order only, and it MUST mirror the Tiled layer stack (bottom→top: Floor, Furniture, Wall).** Create objects in this sequence:
   1. Floor layer
-  2. Wall layer
-  3. Furniture layer
+  2. Furniture layer
+  3. Wall layer ← holds the upper/back parts of desks & chairs, so it MUST render ON TOP of Furniture
   4. **Other-player sprites** ← runtime-added, always end up on top
   5. **Local player sprite** ← last = always on top of everything
-- Player must be created AFTER furniture so it renders above it. Earlier attempts put player before furniture (making player ghosted/invisible behind desks).
+- **Wall must be created AFTER Furniture.** The earlier bug created Furniture last, which made office chairs float ON TOP of the desks/computers they should tuck under. In Tiled the chair backs live on the Wall layer and desks/monitors on Furniture; wherever they share a cell the Wall tile must win. The game's `createLayer` order has to match the `.tmj` bottom→top order or the running game disagrees with what the user sees in Tiled.
+- Player/other-player sprites carry no `setDepth` (default 0) and are created AFTER all tile layers, so insertion order keeps them above every layer including Wall — Wall-on-top does NOT occlude the player (earlier attempts that put the player before furniture made it ghosted/invisible behind desks; keep it last).
 - Remove all `setDepth` calls from TilemapLayers. Never rely on depth to lift a sprite above a tile layer.
 
 # Office.tmj map (user-authored in Tiled, swapped in periodically)
