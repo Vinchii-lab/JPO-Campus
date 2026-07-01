@@ -57,9 +57,11 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 - Remove all `setDepth` calls from TilemapLayers. Never rely on depth to lift a sprite above a tile layer.
 
 # Office.tmj map
-- Some rooms are **sealed**: the Wall layer fully encloses them with no doorway gap even though floor is painted underneath. No code/collision change can open them — a gap must be added in the Wall layer in Tiled.
-- Spawn point: tile (22, 17) = world (1080, 840) — center of the starting room (cols 18–25, rows 15–20).
+- **The map is user-authored in Tiled and swapped in periodically.** Swap procedure: user drops a `.tmx` (CSV encoding, layers Floor/Wall/Furniture, tilesets Room_Builder firstgid=1 + Interiors_free_16x16 firstgid=392). Convert by loading the current `Office.tmj` as a template and replacing each tilelayer's `data` array (matched by layer NAME) with the parsed CSV — this keeps the tileset defs/metadata the Phaser loader needs. **Preserve flip-flag GID ints verbatim** (e.g. 1610612800, 3221225536 = wall GID 64 + Tiled flip bits 0x80000000/0x40000000/0x20000000); Phaser strips them at render. Confirm firstgids match between tmx and tmj (else remap needed) and each layer = 1800 ints (50×36).
+- **Faithful conversion reproduces the source's design quirks — do NOT "fix" them in code.** User layouts routinely include sealed cubicle interiors (Wall layer fully encloses cells, no doorway) and decorative board-art tiles (BOARD_GIDS) embedded in exterior/double walls with no walkable neighbor, plus the odd chair boxed in by its own cluster. These aren't conversion bugs — opening/relocating them means editing the Tiled source (redesign), out of scope for a straight swap. Validate with flood-fill from spawn (blocked = wall!=0 OR furniture!=0, 4-conn) + chair/board adjacency, then REPORT gaps for user signoff rather than fabricating doorways.
+- Spawn point: tile (22, 17) = world (1080, 840); validated open (wall=0, furniture=0) — re-verify after every swap since a new layout can put a wall/desk there.
 - World size: 2400×1728 (50×36 tiles × 48px).
+- **Screen-glow ambiance must be anchored to explicitly identified monitor tiles in the CURRENT source, never hardcoded tile coords** — hardcoded coords silently point at the wrong furniture (or empty floor) after any map swap. Removed on the last swap because the new layout had no lit-monitor workstations.
 
 # Furniture collision + sit model + announcement boards
 - **Making the whole Furniture layer solid is SAFE** — rugs/carpets live on the **Floor** layer, not Furniture, so it blocks no walkway, doorway, or the spawn tile. Don't fear a blanket furniture collider here.

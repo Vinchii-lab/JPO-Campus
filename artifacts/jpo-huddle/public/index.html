@@ -1299,13 +1299,6 @@
         // Rugs/carpets live on the Floor layer, so nothing walkable is blocked.
         furnitureLayer.setCollisionByExclusion([-1]);
 
-        [[12,17],[14,17],[16,17],[12,19],[14,19],[16,19]].forEach(([col,row],i) => {
-          const wx=col*48+24, wy=row*48+8; const g=this.add.graphics();
-          g.fillStyle(0x44aaff,0.5); g.fillRoundedRect(wx-14,wy-7,28,14,3);
-          g.fillStyle(0x88ccff,0.6); g.fillRoundedRect(wx-8, wy-4,16, 8,2);
-          this.tweens.add({targets:g,alpha:{from:0.4,to:0.9},duration:1100+i*180,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
-        });
-
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
 
         this.otherPlayers    = {};
