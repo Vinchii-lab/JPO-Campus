@@ -547,8 +547,8 @@
   <script>
     const socket = io();
 
-    const WORLD_W = 2400;
-    const WORLD_H = 1728;
+    const WORLD_W = 3024;  // 63 tiles * 16px * 3 scale
+    const WORLD_H = 1728;  // 36 tiles * 16px * 3 scale
     const SPEED   = 150;
 
     const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
@@ -1262,6 +1262,7 @@
       preload() {
         this.load.image('roombuilder', '/assets/Room_Builder_free_16x16.png');
         this.load.image('interiors',   '/assets/Interiors_free_16x16.png');
+        this.load.image('ext',         '/assets/tilemap_packed.png');
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
@@ -1281,7 +1282,8 @@
         const map      = this.make.tilemap({ key: 'map' });
         const tsRoom   = map.addTilesetImage('Room_Builder',         'roombuilder');
         const tsInter  = map.addTilesetImage('Interiors_free_16x16', 'interiors');
-        const tilesets = [tsRoom, tsInter];
+        const tsExt    = map.addTilesetImage('Ext',                  'ext');
+        const tilesets = [tsRoom, tsInter, tsExt];
 
         map.createLayer('Floor', tilesets).setScale(3);
         const wallLayer = map.createLayer('Wall', tilesets).setScale(3);
@@ -1440,7 +1442,7 @@
       }
 
       _onApproved(data) {
-        const SPAWN_X = 22*48+24, SPAWN_Y = 17*48+24;
+        const SPAWN_X = 28*48+24, SPAWN_Y = 17*48+24;
 
         const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
