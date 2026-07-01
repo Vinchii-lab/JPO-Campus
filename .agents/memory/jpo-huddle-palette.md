@@ -17,9 +17,13 @@ For characters where the hair zone extends into the shirt zone (Adam, Amelia), t
 | char   | hair yMax (hat-only) | hair shirtYMax (hat+shirt) | shirt yMin | shirt t |
 |--------|----------------------|---------------------------|------------|---------|
 | adam   | 23                   | **17**                    | 17         | **11**  |
-| amelia | 24                   | **20**                    | **20**     | **50**  |
-| alex   | 19                   | (none needed)             | **17**     | 20      |
+| amelia | 24                   | **20**                    | **20**     | **40**  |
+| alex   | 17                   | (none needed)             | **17**     | 20      |
 | bob    | 17                   | (none needed)             | 17         | 40      |
+
+## Swap order: HAIR → SKIN → SHIRT → PANTS (critical)
+
+Hair **must** run first on original pixels. If skin runs before hair, it pre-colors face pixels to a brownish tone that can fall inside the hair zone threshold, causing hair color to bleed into the face on dark skin tones. With hair first, skin runs on already-hair-colored pixels (far from skin source) so no cross-contamination is possible. Skin before shirt also protects shirt: skin pre-empts face pixels so the shirt zone can't catch them.
 
 # Why auto-detection fails
 
@@ -84,7 +88,7 @@ The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a 
 | alex   | pants | 162,57,75     | 50 | 24   | —    | |
 | amelia | hair  | **138,101,82** | 65 | 11 | **24** | mid-range source — NOT 186,141,94 (Amelia skin dist=26, face gets colored); yMax=24; shirtYMax=20; flowXMax=8 |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
-| amelia | shirt | **185,93,114** | **50** | **20** | 24 | PLAID source — NOT hair source; xMin:8 + frameW=16 fix stops per-frame bleed |
+| amelia | shirt | **185,93,114** | **40** | **20** | 24 | PLAID source — NOT hair source; t:40 excludes skin pixels (191,139,120) at d=46.8; xMin:8 + frameW=16 fix stops per-frame bleed |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
 | bob    | hair  | 113,107,110   | **60** | — | 17   | t=60: catches (70,70,94) top-head outline at dist=59 → full silhouette; (85,81,87) edge-fill dist=45 also caught; (58,58,80) dist=79 stays dark |
 | bob    | skin  | 255,203,176   | 50 | —    | —    | |

@@ -567,7 +567,7 @@
       amelia: {
         hair:  {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20, flowXMax:8},  // mid-range source: skin (191,139,120) is dist=75.5 > t=65 → face pixels SAFE; shirtYMax:20 — main pass y=11..19; flowXMax:8 → 2nd pass y=20..23 x=0..7 for flowing hair
         skin:  {r:191,g:139,b:120,t:50},
-        shirt: {r:185,g:93, b:114, t:50, yMin:20, yMax:24, xMin:8},  // xMin:8 excludes flowing-hair columns (x=0..7); frameW fix ensures this masks per-frame, not per-sheet
+        shirt: {r:185,g:93, b:114, t:40, yMin:20, yMax:24, xMin:8},  // t:40 — skin pixels (191,139,120) at d=46.8 are excluded; actual shirt pixels (181,121,114) d=28 and (170,94,86) d=32 still caught; xMin:8 excludes flowing-hair columns
         pants: {r:185,g:93, b:114, t:50, yMin:24},
       },
       bob:    {
@@ -618,12 +618,16 @@
       }
     }
 
-    // Apply all four zone swaps to an ImageData in-place. Order: skin → hair → shirt → pants.
+    // Apply all four zone swaps to an ImageData in-place. Order: hair → skin → shirt → pants.
+    // Hair must run first on original pixels so that: (a) hair claims its zone before skin can
+    // pre-color face pixels to a brownish tone that would fall inside the hair threshold, and
+    // (b) skin then runs on already-hair-colored pixels which are far from the skin source,
+    // preventing skin from bleeding back into the hair zone.
     // fw     = sheet width in pixels (forwarded to _swapColorsData for Y-range masking).
     // frameW = per-frame width for X-range masking (pass 16 when fw is a multi-frame sheet).
     function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
-      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax,frameW); }
       if (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   { const [r,g,b]=_hexCssToRGB(HAIR_COLORS[hairIdx].css); const hairYMax=(shirtIdx&&zones.hair.shirtYMax!=null)?zones.hair.shirtYMax:zones.hair.yMax; _swapColorsData(pixels,zones.hair.r, zones.hair.g, zones.hair.b, r,g,b,zones.hair.t ??44,fw,zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax,frameW); if(shirtIdx&&zones.hair.flowXMax!=null&&hairYMax<zones.hair.yMax){_swapColorsData(pixels,zones.hair.r,zones.hair.g,zones.hair.b,r,g,b,zones.hair.t??44,fw,hairYMax,zones.hair.yMax,zones.hair.xMin,zones.hair.flowXMax,frameW);} }
+      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax,frameW); }
       if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax,zones.shirt.xMin,zones.shirt.xMax,frameW); }
       if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
         const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[pantsIdx].css);
