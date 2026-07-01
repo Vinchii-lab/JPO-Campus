@@ -45,7 +45,7 @@ app.get('/stamp', (_req, res) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
-const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, clothesIdx }
+const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, shirtIdx, pantsIdx }
 const players = {};   // socketId → full player state
 const admins  = new Set();
 
@@ -57,6 +57,9 @@ const SHOP = { crown: 30 };
 function clampIdx(v, max) {
   return (Number.isInteger(v) && v >= 0 && v <= max) ? v : 0;
 }
+
+// Max valid shirt/trouser colour index. MUST equal client CLOTH_COLORS.length - 1 in public/index.html.
+const CLOTH_MAX = 22;
 
 // Passive coin earning: +2 coins per minute per active player
 setInterval(() => {
@@ -73,7 +76,7 @@ io.on("connection", (socket) => {
   socket.emit("announcements", announcements);
 
   // ── Registration ─────────────────────────────────────────────────────
-  socket.on("register", ({ firstName, lastName, email, character, hairIdx, skinIdx, clothesIdx }) => {
+  socket.on("register", ({ firstName, lastName, email, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx }) => {
     const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
     const ln   = (lastName  || "").trim().slice(0, 20);
     const em   = (email     || "").trim().slice(0, 80);
@@ -82,9 +85,11 @@ io.on("connection", (socket) => {
 
     pending[socket.id] = {
       firstName: fn, lastName: ln, email: em, character: char, name,
-      hairIdx:    clampIdx(hairIdx,    8),
-      skinIdx:    clampIdx(skinIdx,    6),
-      clothesIdx: clampIdx(clothesIdx, 8),
+      hairIdx:  clampIdx(hairIdx, 8),
+      skinIdx:  clampIdx(skinIdx, 6),
+      // Legacy clients send a single clothesIdx for both — fall back to it when split fields are absent.
+      shirtIdx: clampIdx(shirtIdx ?? clothesIdx, CLOTH_MAX),
+      pantsIdx: clampIdx(pantsIdx ?? clothesIdx, CLOTH_MAX),
     };
     socket.emit("registrationPending");
     _notifyAdmins();
@@ -110,16 +115,17 @@ io.on("connection", (socket) => {
       x: 1080, y: 840, dir: "down", anim: "idle",
       name:       reg.name,
       character:  reg.character,
-      hairIdx:    reg.hairIdx,
-      skinIdx:    reg.skinIdx,
-      clothesIdx: reg.clothesIdx,
+      hairIdx:  reg.hairIdx,
+      skinIdx:  reg.skinIdx,
+      shirtIdx: reg.shirtIdx,
+      pantsIdx: reg.pantsIdx,
       coins: 50,
       cosmetics: [],
     };
 
     io.to(targetId).emit("approved", {
       name: reg.name, character: reg.character,
-      hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, clothesIdx: reg.clothesIdx,
+      hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
       coins: 50,
     });
     io.to(targetId).emit("currentPlayers", players);

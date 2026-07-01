@@ -1,2 +1,2 @@
 - [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — spritesheet/anim gotchas (16×32 run frames, 4-dir, 32px-wide sit poses), arcade-body scaling blocks doorways, tilemap insertion-order depth, sealed rooms.
-- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — Auto-detection via pixel heuristic fails; hardcoded CHAR_ZONE_COLORS per character is the correct approach.
+- [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ legacy clothesIdx fallback; clothes match a post-hair/skin snapshot so overlapping zones don't cascade.

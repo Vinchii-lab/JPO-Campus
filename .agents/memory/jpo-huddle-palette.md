@@ -85,9 +85,19 @@ Amelia's HAIR source (138,101,82) also fills x=2..7, y=20..23 (the shirt zone). 
 - `xMin:8` on shirt zone + `frameW=16` fix → only shirt fabric (x=8..15) gets shirt color in ALL 24 animation frames ✓
 - `flowXMax:8` on hair config → second hair pass covers y=20..23 x=0..7 (flowing hair preserved) ✓
 
-# Data model: clothesIdx (not shirtIdx/pantsIdx)
+# Data model: independent shirtIdx + pantsIdx (legacy clothesIdx fallback)
 
-The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a single `clothesIdx` value. The client emits `clothesIdx`, the server stores `clothesIdx`, and `_applySwaps` receives it as both `shirtIdx` and `pantsIdx` internally. Zone configs (shirt/pants entries in CHAR_ZONE_COLORS) are unchanged — the same value just gets applied to both.
+Shirt and trousers are now SEPARATE colors, each chosen from `CLOTH_COLORS` (index 0 = "Original"/no-swap; 23 entries total). The client emits `shirtIdx` + `pantsIdx`; the server stores both and clamps each to `CLOTH_MAX`.
+
+**`CLOTH_MAX` must always equal `CLOTH_COLORS.length - 1` (currently 22).** They live in different files (`server.js` vs `public/index.html`) — changing the palette length requires updating both in lockstep or the server clamps to the wrong bound.
+
+**Legacy compatibility:** old saved/remote payloads only have `clothesIdx`. Everywhere an incoming payload is read (register-approved path, `_addOtherPlayer`), use `data.shirtIdx ?? data.clothesIdx ?? 0` and `data.pantsIdx ?? data.clothesIdx ?? 0` so a single legacy value still colors both. Do NOT drop the `clothesIdx` fallback.
+
+## Clothes snapshot fix — overlapping shirt/pants zones must NOT cascade
+
+**Why:** Alex's shirt and pants zones spatially overlap (both yMin=23, no yMax) and their sources differ. Running shirt then pants IN-PLACE meant the pants pass re-matched the shirt's freshly-painted output (e.g. Slate shirt output falls within the pants source threshold), so the pants color would overwrite the shirt — a cascade bug that only appears when the two chosen colors are near each other.
+
+**How to apply:** `_applySwaps` snapshots the buffer AFTER the hair+skin passes (`clothesSrc`) and passes it as the new final `srcPixels` arg to every clothes pass (shirt, pants, shoe). Each clothes pass MATCHES against `clothesSrc` (the original post-hair/skin body) but WRITES into the live buffer. So shirt and pants both match the same untouched basis and never see each other's output. Disjoint-zone characters (adam/amelia/bob) are byte-identical to the old in-place behavior; only the overlap case changes. Because clothes still match the same post-hair/skin basis as before, this introduces NO new hair/face bleed.
 
 # Hardcoded zone table (CHAR_ZONE_COLORS in index.html)
 
@@ -124,9 +134,10 @@ Adam's shoes (y=28–31) are the exact same olive-green (93,96,67) as his shirt.
 # `_swapColorsData` / `_applySwaps` signatures
 
 ```js
-_swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax, xMin, xMax, frameW)
+_swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax, xMin, xMax, frameW, srcPixels)
 _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW)
 ```
+- `srcPixels` (15th, optional) = buffer to MATCH against; `const src = srcPixels || pixels`. Writes still go to `pixels`. Hair/skin passes omit it (match in-place); clothes passes pass the post-hair/skin snapshot so overlapping shirt/pants don't cascade (see snapshot fix above).
 - `fw` = sheet width in pixels; needed to compute `y = Math.floor(i / (fw * 4))`
 - `frameW` = per-frame width for x-masking. Pass `16` from `_buildPlayerTex` (multi-frame sheet). Omit/undefined from `_redrawPreview` (fw=16 already, so x%16=x — no change).
 - `yMax` is **exclusive** (y < yMax)
