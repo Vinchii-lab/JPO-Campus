@@ -12,7 +12,7 @@
     // stamps won't match and we force a hard reload — bypassing every proxy / iframe cache.
     window.__BUILD__ = '__BUILD_STAMP_TOKEN__';
     window.addEventListener('load', function() {
-      fetch('/stamp', { cache: 'no-store' })
+      fetch('/stamp?_=' + Date.now(), { cache: 'no-store' })
         .then(function(r){ return r.json(); })
         .then(function(d){
           if (String(d.stamp) !== String(window.__BUILD__)) {
@@ -580,7 +580,7 @@
         // Dark outline pixels (70,70,94) and (58,58,80) sit in the hair zone but are 136 units
         // from the hair source — too far for the main swap. hairOutline catches them and maps them
         // to a proportionally-darkened version of the selected hair colour (ratio ≈ 0.49).
-        hairOutline: {r:70, g:70, b:94, t:22, yMin:11, yMax:17, darkRatio:0.49},
+        hairOutline: {r:70, g:70, b:94, t:35, yMin:10, yMax:17, darkRatio:0.49},
         skin:  {r:255,g:203,b:176,t:50},
         shirt: {r:138,g:101,b:82, t:20, yMin:17, yMax:24},
         pants: {r:162,g:57, b:75,  t:50, yMin:24},
