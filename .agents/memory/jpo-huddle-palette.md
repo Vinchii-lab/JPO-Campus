@@ -3,7 +3,23 @@ name: JPO Huddle palette swap zones
 description: Hardcoded per-character hair/skin/shirt/pants zone colors with Y-range clamping. Authoritative source for all palette swap tuning decisions.
 ---
 
-# Core principle: hard Y cut between hair and shirt
+# Core principle: map zones to the REAL body anatomy by Y region
+
+The 16×32 sprites are NOT "hair-cap on top, shirt below". Verified via full pixel dump (frame 0, y=0..31):
+
+| y-rows | body part | notes |
+|--------|-----------|-------|
+| 10–16  | top of hair | |
+| 16–22  | **hair fringe on the sides** + FACE (skin) in the center | fringe shares the hair fill colour |
+| 23     | collar / neck line | all dark outline colour |
+| 24–27  | **real torso / shirt** | Alex = reddish (162,57,75); Bob = near-black navy |
+| 28–31  | **real legs / pants** | Alex = blue-grey (120,125,147); Bob = near-black navy |
+
+**The bug that fooled every earlier attempt:** the hair fringe hangs down to y≈22 and shares colour with the torso, so a shirt zone set at yMin=17 painted the *fringe* (a blue band across the face). And the *actual* shirt/pants live at y=24+, which earlier configs had mis-assigned. FIX = hair zone must extend to y≈22 to claim the fringe (face pixels are far from the hair source so skin still gets them), and shirt/pants zones must start at y≈23/28 on the real torso/legs.
+
+**Bob special case:** his entire outfit is the SAME near-black navy (58,58,80 / 70,70,94) as every outline on the sprite. It CANNOT be recoloured by a unique source colour — only by REGION (yMin/yMax gating). Bob shirt/pants both use source (70,70,94) t=70 gated to y=23..27 / y=28+.
+
+**Walk-cycle caveat (do NOT use tight torso/leg bands):** the body parts SHIFT between animation frames. For Alex the legs ride UP to y=23 and the torso drops to y=30 mid-stride. A shirt band of y=23..27 + pants band of y=28+ leaves gaps where original leg colour flashes. Since shirt & pants share ONE clothes colour (single clothesIdx), the fix is to overlap both zones across the WHOLE lower body (yMin=23, no yMax) so every body pixel is claimed in every frame. Verify a fix by rendering ALL 24 frames, not just frame 0 (the preview only shows frame 0). Bob's two zones already share one navy source and are contiguous, so no gap there.
 
 Hair and shirt share the same color family for all characters. The ONLY reliable way to separate them is a hard Y-row boundary. Do NOT rely on color distance alone.
 
@@ -82,18 +98,20 @@ The builder was simplified from 4 steps to 3 steps. Shirt and pants now share a 
 | adam   | shirt | 93,96,67      | **11** | 17 | 23 | t=11 (t²=121) — only pure (93,96,67) caught; collar (95,105,74) dist²=134 excluded |
 | adam   | pants | 159,116,168   | 50 | 23   | —    | |
 | adam   | shoe  | 93,96,67      | 11 | 26   | —    | same olive as shirt; swapped to pants color |
-| alex   | hair  | **186,141,94** | 65 | 11 | **17** | bright-highlight source; outlines dist=114>65; yMax=17 stops at shirt body (y=17..18 brownish rows must NOT be hair zone — they're shirt) |
-| alex   | skin  | 255,203,176   | 50 | —    | —    | |
-| alex   | shirt | 138,101,82    | **20** | **17** | 24 | yMin=17 covers collar rows; when hair selected, hair wins y=17..18 first |
-| alex   | pants | 162,57,75     | 50 | 24   | —    | |
+| alex   | hair  | **186,141,94** | 65 | **10** | **23** | bright-highlight source; extends to y=22 to claim the fringe; face pixels dist>65 survive for skin |
+| alex   | hairOutline | 70,70,94 | **35** | 10 | 23 | catches (86,89,114) at d=31.9 too; darkRatio 0.49 |
+| alex   | skin  | 255,203,176   | 50 | —    | —    | also catches the hand pixels in the torso |
+| alex   | shirt | **162,57,75** | **73** | **23** | — | reddish torso; NO yMax — torso drops to y=30 mid-stride so it must span whole lower body |
+| alex   | pants | **120,125,147** | **40** | **23** | — | blue-grey legs; yMin=23 (NOT 28) — legs ride UP to y=23 mid-stride; overlaps shirt (same clothes colour) |
 | amelia | hair  | **138,101,82** | 65 | 11 | **24** | mid-range source — NOT 186,141,94 (Amelia skin dist=26, face gets colored); yMax=24; shirtYMax=20; flowXMax=8 |
 | amelia | skin  | 191,139,120   | 50 | —    | —    | |
 | amelia | shirt | **185,93,114** | **40** | **20** | 24 | PLAID source — NOT hair source; t:40 excludes skin pixels (191,139,120) at d=46.8; xMin:8 + frameW=16 fix stops per-frame bleed |
 | amelia | pants | 185,93,114    | 50 | 24   | —    | |
-| bob    | hair  | 113,107,110   | **60** | — | 17   | t=60: catches (70,70,94) top-head outline at dist=59 → full silhouette; (85,81,87) edge-fill dist=45 also caught; (58,58,80) dist=79 stays dark |
-| bob    | skin  | 255,203,176   | 50 | —    | —    | |
-| bob    | shirt | 93,88,95      | 40 | 17   | 23   | body only; cut at y=17 |
-| bob    | pants | 194,184,213   | 50 | 23   | —    | |
+| bob    | hair  | 113,107,110   | **60** | — | **23** | t=60 catches top-head + fringe (85,81,87) d=45; extends to y=22 to claim the fringe |
+| bob    | hairOutline | 58,58,80 | 18 | — | **23** | catches outer outline (58,58,80) d=79 from hair src; darkRatio 0.55 |
+| bob    | skin  | 255,203,176   | 50 | —    | —    | also catches hand pixels in torso |
+| bob    | shirt | **70,70,94**  | **70** | **23** | **28** | REGION-gated: whole outfit is same navy as outlines, so gate by y only |
+| bob    | pants | **70,70,94**  | **70** | **28** | — | REGION-gated navy legs |
 
 # Adam shoe zone
 
@@ -101,7 +119,7 @@ Adam's shoes (y=28–31) are the exact same olive-green (93,96,67) as his shirt.
 
 # Swap order
 
-`_applySwaps` runs: skin → hair → shirt → pants (+shoe for Adam). Hair runs before shirt; this is critical for collar/flowing-hair overlap zones.
+`_applySwaps` runs: hair → skin → shirt → pants (+shoe for Adam). Hair runs FIRST on original pixels (claims fringe before shirt); skin second (claims face); then shirt/pants. See the top-of-file swap-order section for why.
 
 # `_swapColorsData` / `_applySwaps` signatures
 

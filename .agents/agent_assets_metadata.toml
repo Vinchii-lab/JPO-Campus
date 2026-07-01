@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "2tGIjzMTBBjBk5ewMEGvo"
+uri = "file://artifacts/jpo-huddle/.local/alex_walk_check.png"
+type = "image"
+title = "Alex walk-cycle render with corrected zones (6 frames)"
