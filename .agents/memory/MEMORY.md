@@ -1,2 +1,2 @@
-- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — run sheets are 24-frame 4-directional (R/U/L/D×6, front=18, no flipX); sheet is 16×32 not 16×16; scaled arcade body blocks doorways; some Office.tmj rooms sealed.
+- [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — spritesheet/anim gotchas (16×32 run frames, 4-dir, 32px-wide sit poses), arcade-body scaling blocks doorways, tilemap insertion-order depth, sealed rooms.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — Auto-detection via pixel heuristic fails; hardcoded CHAR_ZONE_COLORS per character is the correct approach.

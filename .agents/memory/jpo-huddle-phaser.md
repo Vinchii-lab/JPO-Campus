@@ -22,6 +22,11 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 # Sit animation key
 - Sit uses anim `sit_${texKey}` (frames come from the swapped `pl_sit_...` texture, but the anim is keyed off the run texKey). Remote joiners in `_addOtherPlayer` must play `sit_${texKey}`, never base `sit_adam`, or the sitting player renders un-customized until a later move event corrects it.
 
+# Adam_sit sheet poses are 32px wide — slicing at 16px makes the seated avatar SWAY
+- `public/assets/Adam_sit_16x16.png` filename lies: its seated poses are **32px wide** (each spans two 16px columns), unlike the 16px-wide run frames. Slicing at `frameWidth:16` splits each pose into left/right halves and the looping sit anim alternates them → a large on-screen left-right sway (the "chair sitting jitter / goes back and forth").
+- **Key lesson — animation-frame sway is invisible to transform probes:** `player.x/y` never move, only the rendered frame pixels shift, so position/physics jitter checks read exactly 0 and miss it. Diagnose by measuring per-frame content centroid in the source sheet (or diffing screenshots across anim frames), not the sprite transform.
+- **Fix:** slice at `frameWidth:32` in BOTH the `adam_sit` preload and the palette-swapped `addSpriteSheet(sitKey,…)` in `_buildPlayerTex`; keep frames 0–5. `_applySwaps` runs on raw pixels BEFORE slicing, so slice width doesn't affect palette swaps or remote avatars.
+
 # player.texture.key drifts during sit animation
 - Palette-swapped animations (e.g. `sit_pl_adam_h1_sk0_sh2_p3`) reference frames from a *different* texture than the run sheet. Phaser switches `sprite.texture` when playing them.
 - **Never use `player.texture.key` to derive walk/idle/sit animation keys** — it returns the sit texture key after the sit anim plays, and `walk_<sit_tex>` / `idle_<sit_tex>` do not exist → `anims.exists()` guard silently blocks `play()` → character freezes on sit frame.
