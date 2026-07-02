@@ -1378,23 +1378,39 @@
         const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
-        wallLayer.setCollisionByExclusion([-1]);
-        // Furniture (desks, chairs, cabinets, boards, plants) is solid — you can't walk through it.
-        // Rugs/carpets live on the Floor layer, so nothing walkable is blocked.
-        furnitureLayer.setCollisionByExclusion([-1]);
+        // COLLISION MODEL — walk freely; only real room walls stop you.
+        // Seat banks are packed workstations: each chair (Furniture layer) shares its
+        // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
+        // layer directly below it. Because the chairs sit shoulder-to-shoulder, every
+        // tile touching a chair is a wall-layer desk piece — which is why the middle
+        // seats used to be unreachable. So:
+        //   1) the whole Furniture layer is walkable (walk right up to / onto any seat),
+        //   2) on the Wall layer we open just the desk pieces that sit ON / directly
+        //      above / directly below a seat, so you can step into a bank and reach the
+        //      centre chairs, while structural room walls stay solid.
+        // This is derived from the loaded map (not a hard-coded GID list), so it keeps
+        // working across the periodic Tiled re-import.
+        wallLayer.setCollisionByExclusion([-1]);   // every wall tile solid first...
+        // Furniture never collides — nothing on that layer blocks movement.
+        const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
+        const isSeatCell = (c,r) => FURN_SEATS.has(seatGidAt(c,r));
+        for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+          const t = wallLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
+          // ...then re-open the workstation desk pieces around any seat.
+          if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
+        }
 
         // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
         // Office.tmj is regenerated from the user's Tiled project and re-imported
-        // periodically; a manager desk can end up walled off (no reachable adjacent
-        // walkable tile), making "your desk" impossible to reach. Flood-fill from spawn
-        // and warn so that a map regression shows up as a console message here instead
-        // of a "can't get to my desk" bug report. Scoped to manager desks on purpose:
-        // decorative workstation chairs / sofas are often boxed in the source map by
-        // design, so flagging them would only add noise that hides a real regression.
+        // periodically; a manager desk can end up walled off behind structural walls,
+        // making "your desk" impossible to reach. Flood-fill from spawn using the SAME
+        // collision model as gameplay (only solid walls block) and warn so a map
+        // regression shows up as a console message here instead of a bug report.
         (() => {
           const W = map.width, Hh = map.height, SPAWN = [28, 17];
-          const solid    = (lyr,c,r) => { const t = lyr.getTileAt(c,r); return !!(t && t.index > 0); };
-          const walkable = (c,r) => c>=0 && r>=0 && c<W && r<Hh && !solid(furnitureLayer,c,r) && !solid(wallLayer,c,r);
+          // Gameplay walkability: furniture never blocks; a wall blocks only if it
+          // still collides after the workstation openings above.
+          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const t = wallLayer.getTileAt(c,r); return !(t && t.collides); };
           const NB = [[0,1],[0,-1],[-1,0],[1,0]];
           const reached = new Set([SPAWN.join(',')]), stack = [SPAWN];
           while (stack.length) { const [c,r] = stack.pop();
@@ -1726,15 +1742,23 @@
         // the scan keeps looking for a genuine seat or board in the other directions.
         let interact = null;   // { type:'board'|'sit', dir, seat? }
         if (!this.sitting) {
-          for (const d of [this.lastDir,'up','down','left','right']) {
-            const v = DIRVEC[d]; if (!v) continue;
-            const nc = ptx+v[0], nr = pty+v[1];
-            const fg = furnAt(nc,nr);
-            if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d }; break; }
-            const desk = deskChairAt(fg, nc, nr);
-            if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
-            if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
-            // any other solid furniture/wall is not interactable
+          // Seat you're STANDING ON — packed workstation banks are walkable now, so you
+          // reach a middle chair by walking onto it and pressing E right there.
+          const cg = furnAt(ptx, pty);
+          const onDesk = deskChairAt(cg, ptx, pty);
+          if (onDesk)                  { interact = { type:'sit', dir:this.lastDir, seat:onDesk }; }
+          else if (FURN_SEATS.has(cg)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:SEAT_FACING[cg] || this.lastDir } }; }
+          else {
+            for (const d of [this.lastDir,'up','down','left','right']) {
+              const v = DIRVEC[d]; if (!v) continue;
+              const nc = ptx+v[0], nr = pty+v[1];
+              const fg = furnAt(nc,nr);
+              if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d }; break; }
+              const desk = deskChairAt(fg, nc, nr);
+              if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
+              if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
+              // any other solid furniture/wall is not interactable
+            }
           }
         }
 
