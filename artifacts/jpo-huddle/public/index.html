@@ -1383,6 +1383,41 @@
         // Rugs/carpets live on the Floor layer, so nothing walkable is blocked.
         furnitureLayer.setCollisionByExclusion([-1]);
 
+        // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
+        // Office.tmj is regenerated from the user's Tiled project and re-imported
+        // periodically; a manager desk can end up walled off (no reachable adjacent
+        // walkable tile), making "your desk" impossible to reach. Flood-fill from spawn
+        // and warn so that a map regression shows up as a console message here instead
+        // of a "can't get to my desk" bug report. Scoped to manager desks on purpose:
+        // decorative workstation chairs / sofas are often boxed in the source map by
+        // design, so flagging them would only add noise that hides a real regression.
+        (() => {
+          const W = map.width, Hh = map.height, SPAWN = [28, 17];
+          const solid    = (lyr,c,r) => { const t = lyr.getTileAt(c,r); return !!(t && t.index > 0); };
+          const walkable = (c,r) => c>=0 && r>=0 && c<W && r<Hh && !solid(furnitureLayer,c,r) && !solid(wallLayer,c,r);
+          const NB = [[0,1],[0,-1],[-1,0],[1,0]];
+          const reached = new Set([SPAWN.join(',')]), stack = [SPAWN];
+          while (stack.length) { const [c,r] = stack.pop();
+            for (const [dc,dr] of NB) { const nc=c+dc, nr=r+dr, k=nc+','+nr;
+              if (!reached.has(k) && walkable(nc,nr)) { reached.add(k); stack.push([nc,nr]); } } }
+          const hasReachableNbr = (cells) => cells.some(([c,r]) => NB.some(([dc,dr]) =>
+            !cells.some(x => x[0]===c+dc && x[1]===r+dr) && reached.has((c+dc)+','+(r+dr))));
+          let orphans = 0;
+          for (let r=0; r<Hh; r++) for (let c=0; c<W; c++) {
+            const t = furnitureLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
+            const gid = t.index;
+            // Only act on a manager desk's ORIGIN tile so each desk is checked once.
+            const fam = DESK_FAMILIES.find(f => f.gids[gid] && f.gids[gid][0]===0 && f.gids[gid][1]===0);
+            if (!fam) continue;
+            const cells = [[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]].map(([dc,dr]) => [c+dc, r+dr]);
+            if (!hasReachableNbr(cells)) {
+              orphans++;
+              console.warn(`[reachability] manager desk at (${c},${r}) gid ${gid} is walled off — no reachable adjacent tile in Office.tmj`);
+            }
+          }
+          if (orphans) console.warn(`[reachability] ${orphans} manager desk(s) unreachable from spawn — check the Tiled map.`);
+        })();
+
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
 
         this.otherPlayers    = {};
