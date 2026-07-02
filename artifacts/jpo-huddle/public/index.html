@@ -1494,15 +1494,7 @@
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
         });
 
-        socket.on('playerLeft', (id) => {
-          const e = this.otherPlayers[id];
-          if (e) {
-            e.sprite.destroy(); e.nameTag.destroy();
-            if (e.crown)      e.crown.destroy();
-            if (e.chatBubble) e.chatBubble.destroy();
-            delete this.otherPlayers[id];
-          }
-        });
+        socket.on('playerLeft', (id) => { this._removeOtherPlayer(id); });
 
         socket.on('chatMessage', ({id,message}) => {
           if (id === socket.id) {
@@ -1660,7 +1652,24 @@
         return bubble;
       }
 
+      _removeOtherPlayer(id) {
+        const e = this.otherPlayers[id];
+        if (!e) return;
+        e.sprite.destroy(); e.nameTag.destroy();
+        if (e.crown)      e.crown.destroy();
+        if (e.chatBubble) e.chatBubble.destroy();
+        delete this.otherPlayers[id];
+      }
+
       _addOtherPlayer(id, data) {
+        if (id === socket.id) return;           // never draw ourselves as a remote player
+        // Idempotent: tear down any existing sprite for this id before re-adding.
+        // Skipping this orphans the old sprite + nameTag — a frozen "ghost twin" that
+        // never moves (playerMoved only updates the newest entry). That is the
+        // duplicate-character bug: a second currentPlayers/playerJoined for an
+        // already-known id (e.g. after a socket reconnect) double-added the sprite,
+        // and it froze in whatever pose it held (often mid-sit).
+        this._removeOtherPlayer(id);
         const char        = data.character  || 'adam';
         const hairIdx     = data.hairIdx    || 0;
         const skinIdx     = data.skinIdx    || 0;
