@@ -588,16 +588,24 @@
     // Each announcement board belongs to a room; posting at a board only shows on
     // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
     // matching the map's walled areas. Every board tile falls inside exactly one.
-    // (Derived from the map: 3 columns x 3 bands, minus the outdoor park on the left.)
+    // (Derived from the map's walled areas. Some physically-open rooms are split into
+    // logical sub-rectangles so each gets its own floating label + board thread:
+    // the top-middle room is CEO (left) + Conference (right); the bottom-left room is
+    // QA (top) + L&D (bottom). Claims/Accounting ARE separated by a real wall at r31.
+    // Order matters: roomForTile returns the FIRST matching rect. The unlabelled
+    // middle-left training room (c13-23, r14-21) is intentionally left as 'office'.)
     const ROOMS = [
-      { id:'cubicles',   name:'Cubicles',        c0:13, c1:21, r0:0,  r1:11 },
-      { id:'conference', name:'Conference Room', c0:22, c1:43, r0:0,  r1:11 },
-      { id:'training-a', name:'Training Room A', c0:44, c1:62, r0:0,  r1:15 },
-      { id:'lounge',     name:'Lounge',          c0:22, c1:43, r0:12, r1:24 },
-      { id:'training-b', name:'Training Room B', c0:44, c1:62, r0:16, r1:24 },
-      { id:'break-room', name:'Break Room',      c0:13, c1:21, r0:22, r1:35 },
-      { id:'meeting',    name:'Meeting Booths',  c0:22, c1:43, r0:25, r1:35 },
-      { id:'training-c', name:'Training Room C', c0:44, c1:62, r0:25, r1:35 },
+      { id:'hr',         name:'HR',         c0:13, c1:23, r0:0,  r1:9  },
+      { id:'ceo',        name:'CEO',        c0:24, c1:31, r0:0,  r1:9  },
+      { id:'conference', name:'Conference', c0:32, c1:43, r0:0,  r1:9  },
+      { id:'operations', name:'Operations', c0:44, c1:62, r0:0,  r1:13 },
+      { id:'frontdesk',  name:'Front Desk', c0:24, c1:43, r0:10, r1:23 },
+      { id:'cma',        name:'CMA',        c0:44, c1:62, r0:14, r1:24 },
+      { id:'qa',         name:'QA',         c0:13, c1:23, r0:22, r1:28 },
+      { id:'ld',         name:'L&D',        c0:13, c1:23, r0:29, r1:35 },
+      { id:'pantry',     name:'Pantry',     c0:24, c1:43, r0:24, r1:35 },
+      { id:'claims',     name:'Claims',     c0:44, c1:62, r0:25, r1:31 },
+      { id:'accounting', name:'Accounting', c0:44, c1:62, r0:32, r1:35 },
     ];
     function roomForTile(c, r) { const m = ROOMS.find(x => c>=x.c0 && c<=x.c1 && r>=x.r0 && r<=x.r1); return m ? m.id : 'office'; }
     function roomNameById(id)  { const m = ROOMS.find(x => x.id === id); return m ? m.name : 'Announcements'; }
@@ -612,6 +620,7 @@
     // all sofas/benches); any GID without one falls back to the approach direction.
     const FURN_SEATS = new Set([
       606,                                                        // brown workstation chair (desk is directly below -> pinned 'down' in SEAT_FACING)
+      1006,                                                       // classroom study-desk chair (desk 1005 is on its LEFT -> faces 'left')
       510, 472, 474, 750, 751,                                    // conference + wooden chairs
       1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
       1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
@@ -627,7 +636,7 @@
     // open DOWN (backrest at top); the wooden settle is a SIDE-VIEW piece with its tall
     // back on the RIGHT, so it opens LEFT.
     const SEAT_FACING = {
-      606:'down', 750:'right', 751:'left',
+      606:'down', 750:'right', 751:'left', 1006:'left',                                // study-desk chair: desk on its left
       1583:'down', 1584:'down', 1599:'down', 1600:'down',                            // purple 2-seat sofa
       1548:'down', 1549:'down', 1550:'down', 1564:'down', 1565:'down', 1566:'down',  // gray sectional
       1580:'down', 1581:'down', 1582:'down', 1596:'down', 1597:'down',               //   (front base -> still 'down')
@@ -1452,6 +1461,19 @@
         const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
+        // A tile is a real seat only if its GID is in FURN_SEATS AND it isn't a
+        // study-desk chair (1006) whose cell is covered by a Wall-layer tile. The
+        // classroom's east column of chairs (c23) sits UNDER structural wall GID 64,
+        // which renders as an opaque wall over the chair; treating those as seats
+        // would let a player on the open pantry floor (e.g. (24,34)) face in, get a
+        // "sit" prompt and sit INSIDE the wall. The two open columns (c17/c20) have
+        // no wall on the chair cell and stay sittable. Kept 1006-specific on purpose:
+        // other seats legitimately share cells with wall GID 64 (benches, sofas).
+        this.isFurnSeat = (gid, c, r) => {
+          if (!FURN_SEATS.has(gid)) return false;
+          if (gid === 1006) { const w = this.wallLayer.getTileAt(c, r); if (w && w.index > 0) return false; }
+          return true;
+        };
         // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
         // Seat banks are packed workstations: each chair (Furniture layer) shares its
         // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
@@ -1469,11 +1491,11 @@
         wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
         furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
-        const isSeatCell = (c,r) => FURN_SEATS.has(seatGidAt(c,r));
+        const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
           // Open the seat tiles on the Furniture layer so chairs are walkable/steppable.
           const ft = furnitureLayer.getTileAt(c,r);
-          if (ft && ft.index > 0 && FURN_SEATS.has(ft.index)) ft.setCollision(false, false, false, false);
+          if (ft && ft.index > 0 && this.isFurnSeat(ft.index, c, r)) ft.setCollision(false, false, false, false);
           // ...then re-open the workstation desk pieces (Wall layer) around any seat.
           const t = wallLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
@@ -1927,7 +1949,7 @@
           const cg = furnAt(ptx, pty);
           const onDesk = deskChairAt(cg, ptx, pty);
           if (onDesk)                  { interact = { type:'sit', dir:this.lastDir, seat:onDesk }; }
-          else if (FURN_SEATS.has(cg)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:this.seatFacingAt[ptx+','+pty] || SEAT_FACING[cg] || this.lastDir } }; }
+          else if (this.isFurnSeat(cg, ptx, pty)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:this.seatFacingAt[ptx+','+pty] || SEAT_FACING[cg] || this.lastDir } }; }
           else {
             for (const d of [this.lastDir,'up','down','left','right']) {
               const v = DIRVEC[d]; if (!v) continue;
@@ -1936,7 +1958,7 @@
               if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
               const desk = deskChairAt(fg, nc, nr);
               if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
-              if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
+              if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
               // any other solid furniture/wall is not interactable
             }
           }
