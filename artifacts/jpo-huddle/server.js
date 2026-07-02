@@ -49,7 +49,7 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → full player state
 const admins  = new Set();
 
-const announcements = [];   // newest-first: { id, name, text, ts }
+const announcements = [];   // newest-first: { id, name, text, ts, room } — room = which board/room it was posted to
 let announcementSeq = 0;
 const announcers = new Set();   // emails an admin has designated as allowed to post announcements
 
@@ -190,17 +190,19 @@ io.on("connection", (socket) => {
   });
 
   // ── Announcements (admin-only posting, broadcast to everyone) ─────────
-  socket.on("postAnnouncement", ({ text }) => {
+  socket.on("postAnnouncement", ({ text, room }) => {
     const p = players[socket.id];
     const canPost = admins.has(socket.id) || !!(p && p.email && announcers.has(p.email));
     if (!canPost) return;
     const clean = (text || "").trim().slice(0, 280);
     if (!clean) return;
+    // Which room's board this belongs to (the client posts from the board it's standing at).
+    const roomId = (room || "").toString().trim().slice(0, 40) || "office";
     const name = p?.name || "Admin";
-    announcements.unshift({ id: `a${++announcementSeq}`, name, text: clean, ts: Date.now() });
+    announcements.unshift({ id: `a${++announcementSeq}`, name, text: clean, ts: Date.now(), room: roomId });
     if (announcements.length > 50) announcements.length = 50;
     io.emit("announcementsUpdate", announcements);
-    console.log(`Announcement by ${name}: ${clean.slice(0, 40)}`);
+    console.log(`Announcement by ${name} [${roomId}]: ${clean.slice(0, 40)}`);
   });
 
   socket.on("deleteAnnouncement", ({ id }) => {

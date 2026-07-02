@@ -520,8 +520,7 @@
       </div>
       <div class="owner-section">
         <h3>Announcements</h3>
-        <textarea id="op-ann-input" class="op-ann-input" rows="2" maxlength="280" placeholder="Post an announcement to the office boards…"></textarea>
-        <button class="o-btn o-btn-approve" onclick="postAnnouncement()">Post announcement</button>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Announcements are posted by walking up to a room's board in-game and pressing E. This list shows every room's posts so you can remove any.</p>
         <div id="op-ann-list" class="op-ann-list"></div>
       </div>
     </div>
@@ -531,7 +530,7 @@
   <div id="board-panel">
     <div id="board-card">
       <div id="board-card-header">
-        <h2>📢 Announcements</h2>
+        <h2>📢 <span id="board-room-name">Announcements</span></h2>
         <button id="board-close" onclick="closeBoardPanel()">✕</button>
       </div>
       <div id="board-list" class="board-list">
@@ -583,6 +582,23 @@
       1042,1043,1058,1059,
       1045,1046,1061,1062,
     ]);
+    // ── Rooms ──────────────────────────────────────────────────────────
+    // Each announcement board belongs to a room; posting at a board only shows on
+    // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
+    // matching the map's walled areas. Every board tile falls inside exactly one.
+    // (Derived from the map: 3 columns x 3 bands, minus the outdoor park on the left.)
+    const ROOMS = [
+      { id:'cubicles',   name:'Cubicles',        c0:13, c1:21, r0:0,  r1:11 },
+      { id:'conference', name:'Conference Room', c0:22, c1:43, r0:0,  r1:11 },
+      { id:'training-a', name:'Training Room A', c0:44, c1:62, r0:0,  r1:15 },
+      { id:'lounge',     name:'Lounge',          c0:22, c1:43, r0:12, r1:24 },
+      { id:'training-b', name:'Training Room B', c0:44, c1:62, r0:16, r1:24 },
+      { id:'break-room', name:'Break Room',      c0:13, c1:21, r0:22, r1:35 },
+      { id:'meeting',    name:'Meeting Booths',  c0:22, c1:43, r0:25, r1:35 },
+      { id:'training-c', name:'Training Room C', c0:44, c1:62, r0:25, r1:35 },
+    ];
+    function roomForTile(c, r) { const m = ROOMS.find(x => c>=x.c0 && c<=x.c1 && r>=x.r0 && r<=x.r1); return m ? m.id : 'office'; }
+    function roomNameById(id)  { const m = ROOMS.find(x => x.id === id); return m ? m.name : 'Announcements'; }
     // Sittable tiles ALL live on the FURNITURE layer. The "classroom"/workstation
     // brown chair is GID 606 (103 of them): it shares a cell with a monitor (Wall
     // 453/523) and sits directly ABOVE a desk-front tile (Wall 469/539). The 469/539
@@ -1228,13 +1244,31 @@
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('adminAuthOk', () => { _adminAuthed = true; closeOwnerPwd(); openOwnerPanel(); });
+    socket.on('adminAuthOk', () => { _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose(); closeOwnerPwd(); openOwnerPanel(); });
     socket.on('adminAuthFail', () => { document.getElementById('owner-pwd-error').textContent = 'Incorrect password.'; });
 
     // ── Announcement boards ───────────────────────────────────────────
     let _boardPanelOpen = false;
     let _announcements  = [];
     let _canPostAnnouncements = false;
+    let _currentBoardRoom = 'office';   // which room's board the player currently has open
+
+    // Per-room "last read" timestamps, kept in this browser. A room shows an unread
+    // "!" marker when it has an announcement newer than what this player has seen.
+    function _seenMap() { try { return JSON.parse(localStorage.getItem('jpo_seen_rooms') || '{}'); } catch { return {}; } }
+    function _saveSeen(m) { try { localStorage.setItem('jpo_seen_rooms', JSON.stringify(m)); } catch {} }
+    function roomHasUnread(room) { const seen = _seenMap()[room] || 0; return _announcements.some(a => a.room === room && a.ts > seen); }
+    function markRoomSeen(room) {
+      const m = _seenMap(); let mx = m[room] || 0;
+      _announcements.forEach(a => { if (a.room === room && a.ts > mx) mx = a.ts; });
+      m[room] = mx; _saveSeen(m); refreshBoardMarkers();
+    }
+    // Show/hide the floating "!" over each board based on unread state for its room.
+    function refreshBoardMarkers() {
+      const sc = window._gameScene;
+      if (!sc || !sc.boardMarkers) return;
+      sc.boardMarkers.forEach(m => m.badge.setVisible(roomHasUnread(m.room)));
+    }
 
     function escHtml(str) { const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
     function annTimeAgo(ts) {
@@ -1244,11 +1278,15 @@
       const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
       return Math.floor(h / 24) + 'd ago';
     }
-    function openBoardPanel() {
+    function openBoardPanel(room) {
+      _currentBoardRoom = room || 'office';
       _boardPanelOpen = true;
+      const nameEl = document.getElementById('board-room-name');
+      if (nameEl) nameEl.textContent = roomNameById(_currentBoardRoom);
       document.getElementById('board-panel').classList.add('open');
       renderBoard();
       updateBoardCompose();
+      markRoomSeen(_currentBoardRoom);   // reading a board clears its unread "!"
     }
     function closeBoardPanel() {
       _boardPanelOpen = false;
@@ -1258,8 +1296,9 @@
     function renderBoard() {
       const list = document.getElementById('board-list');
       if (list) {
-        list.innerHTML = _announcements.length
-          ? _announcements.map(a =>
+        const items = _announcements.filter(a => a.room === _currentBoardRoom);
+        list.innerHTML = items.length
+          ? items.map(a =>
               '<div class="board-item"><div class="board-item-text">' + escHtml(a.text) + '</div>' +
               '<div class="board-item-meta"><span class="board-item-author">' + escHtml(a.name) + '</span> · ' + annTimeAgo(a.ts) + '</div></div>'
             ).join('')
@@ -1273,17 +1312,10 @@
       el.innerHTML = _announcements.length
         ? _announcements.map(a =>
             '<div class="op-ann-row"><div class="op-ann-row-text">' + escHtml(a.text) +
-            '<small>' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
+            '<small>📍 ' + escHtml(roomNameById(a.room)) + ' · ' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
             '<button class="o-btn o-btn-reject" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button></div>'
           ).join('')
         : '<div class="op-ann-empty">No announcements yet</div>';
-    }
-    function postAnnouncement() {
-      const inp = document.getElementById('op-ann-input');
-      const text = inp.value.trim();
-      if (!text) return;
-      socket.emit('postAnnouncement', { text });
-      inp.value = '';
     }
     function updateBoardCompose() {
       const box = document.getElementById('board-compose');
@@ -1293,13 +1325,18 @@
       const inp = document.getElementById('board-ann-input');
       const text = inp.value.trim();
       if (!text) return;
-      socket.emit('postAnnouncement', { text });
+      socket.emit('postAnnouncement', { text, room: _currentBoardRoom });
       inp.value = '';
     }
     function deleteAnnouncement(id) { socket.emit('deleteAnnouncement', { id }); }
 
-    socket.on('announcements',       list => { _announcements = list || []; renderBoard(); });
-    socket.on('announcementsUpdate', list => { _announcements = list || []; renderBoard(); });
+    function _onAnnouncements(list) {
+      _announcements = list || [];
+      if (_boardPanelOpen) { renderBoard(); markRoomSeen(_currentBoardRoom); }  // viewing a board = its new posts count as read
+      else                 { renderAdminAnnouncements(); refreshBoardMarkers(); }
+    }
+    socket.on('announcements',       _onAnnouncements);
+    socket.on('announcementsUpdate', _onAnnouncements);
     socket.on('announcerStatus', ({ canPost }) => { _canPostAnnouncements = !!canPost; updateBoardCompose(); });
 
     document.addEventListener('keydown', e => {
@@ -1539,6 +1576,45 @@
         });
 
         window._gameScene = this;
+
+        // ── Unread "!" markers over boards ────────────────────────────────
+        // Find every board (a cluster of adjacent board tiles on the Furniture
+        // layer) and float a red "!" over it while that room has unread posts.
+        this.boardMarkers = [];
+        {
+          const cells = new Map();
+          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            const t = furnitureLayer.getTileAt(c, r);
+            if (t && t.index > 0 && BOARD_GIDS.has(t.index)) cells.set(c + ',' + r, { c, r });
+          }
+          const seen = new Set();
+          for (const [key, cell] of cells) {
+            if (seen.has(key)) continue;
+            const comp = [], stack = [cell];
+            while (stack.length) {
+              const cur = stack.pop(), ck = cur.c + ',' + cur.r;
+              if (seen.has(ck) || !cells.has(ck)) continue;
+              seen.add(ck); comp.push(cur);
+              for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+                const nk = (cur.c + dc) + ',' + (cur.r + dr);
+                if (cells.has(nk) && !seen.has(nk)) stack.push({ c: cur.c + dc, r: cur.r + dr });
+              }
+            }
+            const minC = Math.min(...comp.map(p => p.c)), maxC = Math.max(...comp.map(p => p.c));
+            const minR = Math.min(...comp.map(p => p.r)), maxR = Math.max(...comp.map(p => p.r));
+            const room = roomForTile(Math.round((minC + maxC) / 2), Math.round((minR + maxR) / 2));
+            const cx = ((minC + maxC) / 2) * 48 + 24;
+            const cy = ((minR + maxR) / 2) * 48 + 24;
+            const badge = this.add.text(cx, cy, '!', {
+              fontSize: '22px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
+              color: '#fff', backgroundColor: '#e23b3b', padding: { x: 8, y: 2 },
+            }).setOrigin(0.5, 0.5).setDepth(900).setVisible(false);
+            this.tweens.add({ targets: badge, y: cy - 8, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+            this.boardMarkers.push({ room, badge });
+          }
+          refreshBoardMarkers();   // announcements may already be loaded
+        }
+
         if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
       }
 
@@ -1798,7 +1874,7 @@
               const v = DIRVEC[d]; if (!v) continue;
               const nc = ptx+v[0], nr = pty+v[1];
               const fg = furnAt(nc,nr);
-              if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d }; break; }
+              if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
               const desk = deskChairAt(fg, nc, nr);
               if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
               if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
@@ -1823,7 +1899,7 @@
             player.body.enable = true;
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
-            openBoardPanel();
+            openBoardPanel(roomForTile(interact.bcol, interact.brow));
           } else if (interact?.type === 'sit') {
             const s = interact.seat;
             this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on
