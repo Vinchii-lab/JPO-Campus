@@ -589,9 +589,9 @@
     // tiles are the DESK, NOT the seat — sitting on them put the player on the desk
     // edge / made front-row chairs unreachable, so they are intentionally excluded.
     // Also: wooden chairs 750/751 (flank a shared desk, so they face toward it),
-    // conference chairs 510/472/474, and the sofas / benches. Any GID without a fixed
-    // facing below falls back to the approach direction, so you always end up facing
-    // the desk / furniture you sat at.
+    // conference chairs 510/472/474, and the sofas / benches. Seats with a fixed
+    // orientation get a SEAT_FACING entry below (workstation chairs, wooden chairs and
+    // all sofas/benches); any GID without one falls back to the approach direction.
     const FURN_SEATS = new Set([
       606,                                                        // brown workstation chair (desk is directly below -> pinned 'down' in SEAT_FACING)
       510, 472, 474, 750, 751,                                    // conference + wooden chairs
@@ -600,11 +600,22 @@
       1210, 1211, 1226, 1227,                                     // wooden waiting benches
       1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
     ]);
-    // Fixed sit-facing for seats whose orientation is baked into the tile art. Workstation
-    // chairs (606) always have their desk + monitor directly BELOW them, so they are pinned
-    // to 'down' -- otherwise walking in from the side seats the worker facing sideways
-    // instead of at their monitor.
-    const SEAT_FACING = { 606:'down', 750:'right', 751:'left' };
+    // Fixed sit-facing for seats whose orientation is baked into the tile art, so a seated
+    // player faces the way the FURNITURE faces (its open front) instead of the aisle they
+    // walked in from. Workstation chairs (606) have their desk + monitor directly BELOW
+    // them -> 'down'. Wooden chairs 750/751 flank a shared desk -> right/left toward it.
+    // Sofa/bench facing was derived PER-PIECE by rendering the art + an in-map composite
+    // crop (map has NO flip flags): the purple sofa, gray sectional and waiting benches
+    // open DOWN (backrest at top); the wooden settle is a SIDE-VIEW piece with its tall
+    // back on the RIGHT, so it opens LEFT.
+    const SEAT_FACING = {
+      606:'down', 750:'right', 751:'left',
+      1583:'down', 1584:'down', 1599:'down', 1600:'down',                            // purple 2-seat sofa
+      1548:'down', 1549:'down', 1550:'down', 1564:'down', 1565:'down', 1566:'down',  // gray sectional
+      1580:'down', 1581:'down', 1582:'down', 1596:'down', 1597:'down',               //   (front base -> still 'down')
+      1210:'down', 1211:'down', 1226:'down', 1227:'down',                            // wooden waiting benches
+      1679:'left', 1680:'left', 1695:'left', 1696:'left', 1711:'left', 1712:'left',  // wooden settle (back on right -> faces left)
+    };
 
     // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
     // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
