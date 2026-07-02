@@ -678,6 +678,7 @@
 
     // Player appearance state
     let _playerName     = '';
+    let _playerEmail    = '';
     let _playerChar     = 'adam';
     let _playerHairIdx  = 0;
     let _playerSkinIdx  = 0;
@@ -1025,6 +1026,7 @@
       const first = document.getElementById('inp-first').value.trim();
       const last  = document.getElementById('inp-last').value.trim();
       const email = document.getElementById('inp-email').value.trim();
+      _playerEmail = email;   // remembered so we can skip a stale copy of OURSELVES
 
       document.getElementById('btn-next').disabled = true;
       socket.emit('register', {
@@ -1378,25 +1380,30 @@
         const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
-        // COLLISION MODEL — walk freely; only real room walls stop you.
+        // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
         // Seat banks are packed workstations: each chair (Furniture layer) shares its
         // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
         // layer directly below it. Because the chairs sit shoulder-to-shoulder, every
         // tile touching a chair is a wall-layer desk piece — which is why the middle
         // seats used to be unreachable. So:
-        //   1) the whole Furniture layer is walkable (walk right up to / onto any seat),
+        //   1) the Furniture layer is solid by default (you can't walk through a fridge,
+        //      cabinet, plant or desk), EXCEPT the sittable seat tiles (FURN_SEATS),
+        //      which we open so you can step onto / among the chairs,
         //   2) on the Wall layer we open just the desk pieces that sit ON / directly
         //      above / directly below a seat, so you can step into a bank and reach the
         //      centre chairs, while structural room walls stay solid.
         // This is derived from the loaded map (not a hard-coded GID list), so it keeps
         // working across the periodic Tiled re-import.
-        wallLayer.setCollisionByExclusion([-1]);   // every wall tile solid first...
-        // Furniture never collides — nothing on that layer blocks movement.
+        wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
+        furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => FURN_SEATS.has(seatGidAt(c,r));
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+          // Open the seat tiles on the Furniture layer so chairs are walkable/steppable.
+          const ft = furnitureLayer.getTileAt(c,r);
+          if (ft && ft.index > 0 && FURN_SEATS.has(ft.index)) ft.setCollision(false, false, false, false);
+          // ...then re-open the workstation desk pieces (Wall layer) around any seat.
           const t = wallLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
-          // ...then re-open the workstation desk pieces around any seat.
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
 
@@ -1408,9 +1415,9 @@
         // regression shows up as a console message here instead of a bug report.
         (() => {
           const W = map.width, Hh = map.height, SPAWN = [28, 17];
-          // Gameplay walkability: furniture never blocks; a wall blocks only if it
-          // still collides after the workstation openings above.
-          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const t = wallLayer.getTileAt(c,r); return !(t && t.collides); };
+          // Gameplay walkability: a tile blocks if its wall OR furniture tile still
+          // collides after the seat/desk openings above (only seats & aisles are open).
+          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const w = wallLayer.getTileAt(c,r); if (w && w.collides) return false; const f = furnitureLayer.getTileAt(c,r); return !(f && f.collides); };
           const NB = [[0,1],[0,-1],[-1,0],[1,0]];
           const reached = new Set([SPAWN.join(',')]), stack = [SPAWN];
           while (stack.length) { const [c,r] = stack.pop();
@@ -1663,6 +1670,12 @@
 
       _addOtherPlayer(id, data) {
         if (id === socket.id) return;           // never draw ourselves as a remote player
+        // Also skip a STALE copy of ourselves: a fast refresh/reconnect can leave our
+        // previous socket's player on the server for a moment, so currentPlayers /
+        // playerJoined arrives with a second entry carrying OUR email but a different
+        // (old) id — rendering it makes a frozen "ghost twin". Email uniquely identifies
+        // a person, so this never hides a genuinely different player.
+        if (_playerEmail && data && data.email && data.email === _playerEmail) return;
         // Idempotent: tear down any existing sprite for this id before re-adding.
         // Skipping this orphans the old sprite + nameTag — a frozen "ghost twin" that
         // never moves (playerMoved only updates the newest entry). That is the
