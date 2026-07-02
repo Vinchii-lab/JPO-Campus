@@ -569,24 +569,27 @@
     // colorful cork bulletin boards (682-685 / 698-701 / 714-717) and green
     // chalkboards (1042/1043 top, 1058/1059 base). Desks & monitors are NOT boards.
     const BOARD_GIDS = new Set([682,683,684,685,698,699,700,701,714,715,716,717,1013,1014,1029,1030,1042,1043,1058,1059]);
-    // The office chairs in the "classroom" rows live on the WALL layer as a backrest
-    // tile (453/523) stacked directly above a SEAT tile (469/539). You sit on the
-    // seat, which faces AWAY from the backrest (i.e. DOWN). The backrests are never
-    // sat on, so only the seat GIDs are listed here.
-    const WALL_SEATS = new Set([469, 539]);
-    // Sittable tiles on the FURNITURE layer: wooden chairs 750/751 (flank a shared
-    // desk, so they face toward it), conference chairs 510/472/474, and the sofas /
-    // benches. Any GID without a fixed facing below falls back to the approach
-    // direction so you end up facing the furniture you sat at.
+    // Sittable tiles ALL live on the FURNITURE layer. The "classroom"/workstation
+    // brown chair is GID 606 (103 of them): it shares a cell with a monitor (Wall
+    // 453/523) and sits directly ABOVE a desk-front tile (Wall 469/539). The 469/539
+    // tiles are the DESK, NOT the seat — sitting on them put the player on the desk
+    // edge / made front-row chairs unreachable, so they are intentionally excluded.
+    // Also: wooden chairs 750/751 (flank a shared desk, so they face toward it),
+    // conference chairs 510/472/474, and the sofas / benches. Any GID without a fixed
+    // facing below falls back to the approach direction, so you always end up facing
+    // the desk / furniture you sat at.
     const FURN_SEATS = new Set([
-      510, 472, 474, 750, 751,                                    // chairs
+      606,                                                        // brown workstation chair (faces its desk via approach dir)
+      510, 472, 474, 750, 751,                                    // conference + wooden chairs
       1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
       1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
       1210, 1211, 1226, 1227,                                     // wooden waiting benches
       1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
     ]);
-    // Fixed sit-facing for seats whose orientation is baked into the tile art.
-    const SEAT_FACING = { 469:'down', 539:'down', 750:'right', 751:'left' };
+    // Fixed sit-facing for seats whose orientation is baked into the tile art. The 606
+    // workstation chairs are omitted on purpose: they use the approach direction so the
+    // player faces the desk no matter which aisle they walked in from.
+    const SEAT_FACING = { 750:'right', 751:'left' };
 
     // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
     // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
@@ -1667,11 +1670,10 @@
         const pty = Math.floor((player.y + BODY_DY) / 48);
 
         // Scan the 4 adjacent tiles (facing first). Boards read; chairs and manager
-        // desks sit. Chairs live on BOTH layers: seat tiles 469/539 on the wall
-        // layer, and 750/751/sofas on the furniture layer — so we probe both.
+        // desks sit. All sit targets (brown chair 606, wooden 750/751, sofas, and the
+        // baked-in manager-desk chairs) live on the FURNITURE layer, so we probe it.
         const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
         const furnAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
-        const wallAt = (c,r) => { const t = this.wallLayer.getTileAt(c,r);      return (t && t.index>0) ? t.index : 0; };
         // First interactable neighbour in priority order (facing first) wins. Its
         // OWN type decides the action; plain solid furniture/walls are skipped so
         // the scan keeps looking for a genuine seat or board in the other directions.
@@ -1680,11 +1682,10 @@
           for (const d of [this.lastDir,'up','down','left','right']) {
             const v = DIRVEC[d]; if (!v) continue;
             const nc = ptx+v[0], nr = pty+v[1];
-            const fg = furnAt(nc,nr), wg = wallAt(nc,nr);
+            const fg = furnAt(nc,nr);
             if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d }; break; }
             const desk = deskChairAt(fg, nc, nr);
             if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
-            if (WALL_SEATS.has(wg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[wg] || d } }; break; }
             if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
             // any other solid furniture/wall is not interactable
           }
