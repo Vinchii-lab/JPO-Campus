@@ -1347,12 +1347,14 @@
           this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
         });
 
-        // NOTE: the seated poses in this sheet are 32px wide (each pose spans two 16px columns).
-        // Slicing at 16px splits every pose into a left/right half that the sit animation would
-        // alternate between, making the seated avatar visibly sway left-right. Slice at 32px.
-        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT)
-        this.load.spritesheet('adam_sit2',  '/assets/Adam_sit2_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // UP (back of head)
-        this.load.spritesheet('adam_sit3',  '/assets/Adam_sit3_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // DOWN (face)
+        // Seated-sheet pitch is per-sheet, NOT uniform. sit (RIGHT) and sit2 (UP) are 32px per pose
+        // (figure centred with padding; sheet is 384px = 12 frames). sit3 (DOWN) is 16px per pose
+        // (poses packed edge-to-edge; sheet is 192px = 12 frames). Slicing sit3 at 32px merges two
+        // adjacent poses into one frame and renders TWO characters one tile apart. Slice each sheet
+        // at its own true pitch.
+        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT), 32px pitch
+        this.load.spritesheet('adam_sit2',  '/assets/Adam_sit2_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // UP (back of head), 32px pitch
+        this.load.spritesheet('adam_sit3',  '/assets/Adam_sit3_16x16.png',  { frameWidth: 16, frameHeight: 32 });  // DOWN (face), 16px pitch
         this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
       }
 
@@ -1569,7 +1571,7 @@
               _applySwaps(sid.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, 16);
               scx.putImageData(sid, 0, 0);
             }
-            this.textures.addSpriteSheet(sitKey, sc, { frameWidth: 32, frameHeight: 32 });
+            this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
             this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
           }
         }
