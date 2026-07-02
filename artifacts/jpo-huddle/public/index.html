@@ -335,6 +335,8 @@
     .board-item-text { font-size: 14px; line-height: 1.5; color: #eee; white-space: pre-wrap; word-break: break-word; }
     .board-item-meta { font-size: 11px; color: #888; margin-top: 7px; }
     .board-item-author { color: #6c63ff; }
+    .board-item-del { margin-left: 10px; background: none; border: none; color: #e23b3b; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; opacity: .75; }
+    .board-item-del:hover { opacity: 1; }
     .board-empty { color: #555; text-align: center; padding: 30px 8px; font-size: 13px; }
   </style>
 </head>
@@ -632,6 +634,12 @@
       1210:'down', 1211:'down', 1226:'down', 1227:'down',                            // wooden waiting benches
       1679:'left', 1680:'left', 1695:'left', 1696:'left', 1711:'left', 1712:'left',  // wooden settle (back on right -> faces left)
     };
+    // Conference chairs (472/474/510) ring a shared table and the SAME GID (510) is
+    // used on the top, left, right AND bottom edges, so a single per-GID facing can't
+    // be correct. Their facing is derived PER-TILE at scene create() from whichever
+    // orthogonal neighbour is one of these conference-table tiles.
+    const CONF_CHAIR_GIDS = new Set([472, 474, 510]);
+    const CONF_TABLE_GIDS = new Set([488, 489, 490, 504, 505, 506, 520, 521, 522]);
 
     // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
     // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
@@ -1251,23 +1259,25 @@
     let _boardPanelOpen = false;
     let _announcements  = [];
     let _canPostAnnouncements = false;
-    let _currentBoardRoom = 'office';   // which room's board the player currently has open
+    let _currentBoard = 'office';       // which individual board (cluster) the player currently has open
+    let _boardLabels  = {};             // boardId -> human label (e.g. "Conference Room · Board 2"), filled when the scene clusters boards
 
-    // Per-room "last read" timestamps, kept in this browser. A room shows an unread
+    // Per-board "last read" timestamps, kept in this browser. A board shows an unread
     // "!" marker when it has an announcement newer than what this player has seen.
-    function _seenMap() { try { return JSON.parse(localStorage.getItem('jpo_seen_rooms') || '{}'); } catch { return {}; } }
-    function _saveSeen(m) { try { localStorage.setItem('jpo_seen_rooms', JSON.stringify(m)); } catch {} }
-    function roomHasUnread(room) { const seen = _seenMap()[room] || 0; return _announcements.some(a => a.room === room && a.ts > seen); }
-    function markRoomSeen(room) {
-      const m = _seenMap(); let mx = m[room] || 0;
-      _announcements.forEach(a => { if (a.room === room && a.ts > mx) mx = a.ts; });
-      m[room] = mx; _saveSeen(m); refreshBoardMarkers();
+    function _seenMap() { try { return JSON.parse(localStorage.getItem('jpo_seen_boards') || '{}'); } catch { return {}; } }
+    function _saveSeen(m) { try { localStorage.setItem('jpo_seen_boards', JSON.stringify(m)); } catch {} }
+    function boardLabel(id) { return _boardLabels[id] || 'Announcements'; }
+    function boardHasUnread(board) { const seen = _seenMap()[board] || 0; return _announcements.some(a => a.board === board && a.ts > seen); }
+    function markBoardSeen(board) {
+      const m = _seenMap(); let mx = m[board] || 0;
+      _announcements.forEach(a => { if (a.board === board && a.ts > mx) mx = a.ts; });
+      m[board] = mx; _saveSeen(m); refreshBoardMarkers();
     }
-    // Show/hide the floating "!" over each board based on unread state for its room.
+    // Show/hide the floating "!" over each board based on unread state for that board.
     function refreshBoardMarkers() {
       const sc = window._gameScene;
       if (!sc || !sc.boardMarkers) return;
-      sc.boardMarkers.forEach(m => m.badge.setVisible(roomHasUnread(m.room)));
+      sc.boardMarkers.forEach(m => m.badge.setVisible(boardHasUnread(m.boardId)));
     }
 
     function escHtml(str) { const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
@@ -1278,15 +1288,15 @@
       const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
       return Math.floor(h / 24) + 'd ago';
     }
-    function openBoardPanel(room) {
-      _currentBoardRoom = room || 'office';
+    function openBoardPanel(board) {
+      _currentBoard = board || 'office';
       _boardPanelOpen = true;
       const nameEl = document.getElementById('board-room-name');
-      if (nameEl) nameEl.textContent = roomNameById(_currentBoardRoom);
+      if (nameEl) nameEl.textContent = boardLabel(_currentBoard);
       document.getElementById('board-panel').classList.add('open');
       renderBoard();
       updateBoardCompose();
-      markRoomSeen(_currentBoardRoom);   // reading a board clears its unread "!"
+      markBoardSeen(_currentBoard);   // reading a board clears its unread "!"
     }
     function closeBoardPanel() {
       _boardPanelOpen = false;
@@ -1296,11 +1306,13 @@
     function renderBoard() {
       const list = document.getElementById('board-list');
       if (list) {
-        const items = _announcements.filter(a => a.room === _currentBoardRoom);
+        const items = _announcements.filter(a => a.board === _currentBoard);
         list.innerHTML = items.length
           ? items.map(a =>
               '<div class="board-item"><div class="board-item-text">' + escHtml(a.text) + '</div>' +
-              '<div class="board-item-meta"><span class="board-item-author">' + escHtml(a.name) + '</span> · ' + annTimeAgo(a.ts) + '</div></div>'
+              '<div class="board-item-meta"><span class="board-item-author">' + escHtml(a.name) + '</span> · ' + annTimeAgo(a.ts) +
+              (_adminAuthed ? '<button class="board-item-del" title="Delete announcement" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button>' : '') +
+              '</div></div>'
             ).join('')
           : '<div class="board-empty">No announcements yet.</div>';
       }
@@ -1312,7 +1324,7 @@
       el.innerHTML = _announcements.length
         ? _announcements.map(a =>
             '<div class="op-ann-row"><div class="op-ann-row-text">' + escHtml(a.text) +
-            '<small>📍 ' + escHtml(roomNameById(a.room)) + ' · ' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
+            '<small>📍 ' + escHtml(boardLabel(a.board)) + ' · ' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
             '<button class="o-btn o-btn-reject" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button></div>'
           ).join('')
         : '<div class="op-ann-empty">No announcements yet</div>';
@@ -1325,14 +1337,14 @@
       const inp = document.getElementById('board-ann-input');
       const text = inp.value.trim();
       if (!text) return;
-      socket.emit('postAnnouncement', { text, room: _currentBoardRoom });
+      socket.emit('postAnnouncement', { text, board: _currentBoard });
       inp.value = '';
     }
     function deleteAnnouncement(id) { socket.emit('deleteAnnouncement', { id }); }
 
     function _onAnnouncements(list) {
       _announcements = list || [];
-      if (_boardPanelOpen) { renderBoard(); markRoomSeen(_currentBoardRoom); }  // viewing a board = its new posts count as read
+      if (_boardPanelOpen) { renderBoard(); markBoardSeen(_currentBoard); }  // viewing a board = its new posts count as read
       else                 { renderAdminAnnouncements(); refreshBoardMarkers(); }
     }
     socket.on('announcements',       _onAnnouncements);
@@ -1581,6 +1593,8 @@
         // Find every board (a cluster of adjacent board tiles on the Furniture
         // layer) and float a red "!" over it while that room has unread posts.
         this.boardMarkers = [];
+        this.boardIdByTile = {};   // "c,r" -> boardId, so pressing E at a board tile finds its cluster
+        _boardLabels = {};         // boardId -> human label, shared with the announcement UI
         {
           const cells = new Map();
           for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
@@ -1588,6 +1602,7 @@
             if (t && t.index > 0 && BOARD_GIDS.has(t.index)) cells.set(c + ',' + r, { c, r });
           }
           const seen = new Set();
+          const clusters = [];
           for (const [key, cell] of cells) {
             if (seen.has(key)) continue;
             const comp = [], stack = [cell];
@@ -1602,18 +1617,62 @@
             }
             const minC = Math.min(...comp.map(p => p.c)), maxC = Math.max(...comp.map(p => p.c));
             const minR = Math.min(...comp.map(p => p.r)), maxR = Math.max(...comp.map(p => p.r));
-            const room = roomForTile(Math.round((minC + maxC) / 2), Math.round((minR + maxR) / 2));
-            const cx = ((minC + maxC) / 2) * 48 + 24;
-            const cy = ((minR + maxR) / 2) * 48 + 24;
+            clusters.push({ comp, minC, maxC, minR, maxR,
+              room: roomForTile(Math.round((minC + maxC) / 2), Math.round((minR + maxR) / 2)) });
+          }
+          // Deterministic top-to-bottom, left-to-right order so board numbering is stable.
+          clusters.sort((a, b) => (a.minR - b.minR) || (a.minC - b.minC));
+          const perRoomTotal = {};
+          clusters.forEach(cl => { perRoomTotal[cl.room] = (perRoomTotal[cl.room] || 0) + 1; });
+          const perRoomIdx = {};
+          clusters.forEach(cl => {
+            const n = (perRoomIdx[cl.room] = (perRoomIdx[cl.room] || 0) + 1);
+            const boardId = cl.room + '#' + n;
+            // Each board is its own thread; only append "· Board N" when a room has more than one.
+            _boardLabels[boardId] = roomNameById(cl.room) + (perRoomTotal[cl.room] > 1 ? ' · Board ' + n : '');
+            cl.comp.forEach(p => { this.boardIdByTile[p.c + ',' + p.r] = boardId; });
+            const cx = ((cl.minC + cl.maxC) / 2) * 48 + 24;
+            const cy = ((cl.minR + cl.maxR) / 2) * 48 + 24;
             const badge = this.add.text(cx, cy, '!', {
               fontSize: '22px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
               color: '#fff', backgroundColor: '#e23b3b', padding: { x: 8, y: 2 },
             }).setOrigin(0.5, 0.5).setDepth(900).setVisible(false);
             this.tweens.add({ targets: badge, y: cy - 8, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-            this.boardMarkers.push({ room, badge });
-          }
+            this.boardMarkers.push({ boardId, badge });
+          });
           refreshBoardMarkers();   // announcements may already be loaded
         }
+
+        // ── Conference chairs: pin each to face its adjacent table tile ────
+        // 510 (and 472/474) sit on every side of the table, so we resolve facing
+        // per TILE here: whichever orthogonal neighbour is a conference-table tile
+        // is the way that seat faces. Chairs with no table beside them are left out
+        // and fall back to the approach direction at sit time.
+        this.seatFacingAt = {};
+        {
+          const NB = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            const t = furnitureLayer.getTileAt(c, r);
+            if (!t || !CONF_CHAIR_GIDS.has(t.index)) continue;
+            for (const d in NB) {
+              const nt = furnitureLayer.getTileAt(c + NB[d][0], r + NB[d][1]);
+              if (nt && CONF_TABLE_GIDS.has(nt.index)) { this.seatFacingAt[c + ',' + r] = d; break; }
+            }
+          }
+        }
+
+        // ── Floating room-name labels hovering over the centre of each room ──
+        // Default depth (0) + created after the tile layers but before any player
+        // sprite, so labels sit above the map yet players still walk in front of them.
+        ROOMS.forEach(rm => {
+          const lx = ((rm.c0 + rm.c1) / 2) * 48 + 24;
+          const ly = ((rm.r0 + rm.r1) / 2) * 48 + 24;
+          this.add.text(lx, ly, rm.name, {
+            fontFamily: 'Arial, sans-serif', fontSize: '20px', fontStyle: 'bold',
+            color: '#ffffff', stroke: '#10182e', strokeThickness: 4,
+            backgroundColor: 'rgba(16,24,46,0.5)', padding: { x: 10, y: 4 }, align: 'center',
+          }).setOrigin(0.5, 0.5).setAlpha(0.92);
+        });
 
         if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
       }
@@ -1868,7 +1927,7 @@
           const cg = furnAt(ptx, pty);
           const onDesk = deskChairAt(cg, ptx, pty);
           if (onDesk)                  { interact = { type:'sit', dir:this.lastDir, seat:onDesk }; }
-          else if (FURN_SEATS.has(cg)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:SEAT_FACING[cg] || this.lastDir } }; }
+          else if (FURN_SEATS.has(cg)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:this.seatFacingAt[ptx+','+pty] || SEAT_FACING[cg] || this.lastDir } }; }
           else {
             for (const d of [this.lastDir,'up','down','left','right']) {
               const v = DIRVEC[d]; if (!v) continue;
@@ -1877,7 +1936,7 @@
               if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
               const desk = deskChairAt(fg, nc, nr);
               if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
-              if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:SEAT_FACING[fg] || d } }; break; }
+              if (FURN_SEATS.has(fg)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
               // any other solid furniture/wall is not interactable
             }
           }
@@ -1899,7 +1958,7 @@
             player.body.enable = true;
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
-            openBoardPanel(roomForTile(interact.bcol, interact.brow));
+            openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
           } else if (interact?.type === 'sit') {
             const s = interact.seat;
             this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on
