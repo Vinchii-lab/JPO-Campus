@@ -564,11 +564,16 @@
     // 24-frame directional run sheets: RIGHT 0-5, UP(back) 6-11, LEFT 12-17, DOWN(front) 18-23
     const DIR_ROWS  = { right:[0,5], up:[6,11], left:[12,17], down:[18,23] };
     const DIR_START = { right:0, up:6, left:12, down:18 };
+    // Adam's three seated spritesheets: sit=RIGHT profile (mirror for LEFT), sit2=UP
+    // (back of head), sit3=DOWN (face). Only Adam has seated art; other characters fall
+    // back to a standing frame. SIT_DIR collapses 'left' onto the right sheet (flipped).
+    const SIT_SHEETS = { right: 'adam_sit', up: 'adam_sit2', down: 'adam_sit3' };
+    const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
 
     // Furniture tile GIDs that are ACTUAL wall-mounted announcement boards:
     // colorful cork bulletin boards (682-685 / 698-701 / 714-717) and green
     // chalkboards (1042/1043 top, 1058/1059 base). Desks & monitors are NOT boards.
-    const BOARD_GIDS = new Set([682,683,684,685,698,699,700,701,714,715,716,717,1013,1014,1029,1030,1042,1043,1058,1059]);
+    const BOARD_GIDS = new Set([682,683,684,685,698,699,700,701,714,715,716,717,1042,1043,1058,1059]);
     // Sittable tiles ALL live on the FURNITURE layer. The "classroom"/workstation
     // brown chair is GID 606 (103 of them): it shares a cell with a monitor (Wall
     // 453/523) and sits directly ABOVE a desk-front tile (Wall 469/539). The 469/539
@@ -1343,7 +1348,9 @@
         // NOTE: the seated poses in this sheet are 32px wide (each pose spans two 16px columns).
         // Slicing at 16px splits every pose into a left/right half that the sit animation would
         // alternate between, making the seated avatar visibly sway left-right. Slice at 32px.
-        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT)
+        this.load.spritesheet('adam_sit2',  '/assets/Adam_sit2_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // UP (back of head)
+        this.load.spritesheet('adam_sit3',  '/assets/Adam_sit3_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // DOWN (face)
         this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
       }
 
@@ -1360,7 +1367,8 @@
 
         // Base animations
         CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
-        this.anims.create({ key: 'sit_adam',   frames: this.anims.generateFrameNumbers('adam_sit',  {start:0,end:5}), frameRate:8, repeat:-1 });
+        Object.entries(SIT_SHEETS).forEach(([dir, sheet]) =>
+          this.anims.create({ key: `sit_adam_${dir}`, frames: this.anims.generateFrameNumbers(sheet, {start:0,end:5}), frameRate:8, repeat:-1 }));
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
 
         // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
@@ -1410,20 +1418,23 @@
           const entry = this.otherPlayers[data.id];
           if (!entry) return;
           entry.sprite.setPosition(data.x, data.y);
-          entry.sprite.setFlipX(false);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
           if (data.anim === 'sit') {
-            const sk = `sit_${entry.texKey}`;
+            const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
             if (this.anims.exists(sk)) {
+              entry.sprite.setFlipX(rdir === 'left');
               if (entry.sprite.anims.currentAnim?.key !== sk) entry.sprite.play(sk);
             } else {
+              entry.sprite.setFlipX(false);
               entry.sprite.anims.stop();
               entry.sprite.setFrame(DIR_START[rdir]);
             }
           } else if (data.anim === 'walk') {
+            entry.sprite.setFlipX(false);
             const wk = `walk_${entry.texKey}_${rdir}`;
             if (entry.sprite.anims.currentAnim?.key !== wk && this.anims.exists(wk)) entry.sprite.play(wk);
           } else {
+            entry.sprite.setFlipX(false);
             entry.sprite.anims.stop();
             entry.sprite.setFrame(DIR_START[rdir]);
           }
@@ -1493,11 +1504,12 @@
         this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
         this._createDirAnims(key);
 
-        // Also build a sit variant for adam
+        // Also build directional sit variants for adam (right/up/down sheets; left mirrors right).
         if (char === 'adam') {
-          const sitKey = `pl_sit_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
-          if (!this.textures.exists(sitKey)) {
-            const sitSrc = this.textures.get('adam_sit').source[0].image;
+          for (const [dir, sheet] of Object.entries(SIT_SHEETS)) {
+            const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+            if (this.textures.exists(sitKey)) continue;
+            const sitSrc = this.textures.get(sheet).source[0].image;
             const sc = document.createElement('canvas');
             sc.width = sitSrc.width; sc.height = sitSrc.height;
             const scx = sc.getContext('2d');
@@ -1508,7 +1520,7 @@
               scx.putImageData(sid, 0, 0);
             }
             this.textures.addSpriteSheet(sitKey, sc, { frameWidth: 32, frameHeight: 32 });
-            this.anims.create({ key: `sit_${key}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
+            this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
           }
         }
 
@@ -1608,15 +1620,16 @@
         const sprite = this.add.sprite(data.x, data.y, texKey);
         sprite.setScale(3).setOrigin(0.5,0.5);
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
-        sprite.setFlipX(false);
         if (data.anim === 'sit') {
-          const sk = `sit_${texKey}`;
-          if (this.anims.exists(sk)) sprite.play(sk);
-          else { sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
+          const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
+          if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
+          else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
         } else if (data.anim === 'walk') {
+          sprite.setFlipX(false);
           const wk = `walk_${texKey}_${dir}`;
           sprite.play(this.anims.exists(wk) ? wk : `idle_${texKey}`);
         } else {
+          sprite.setFlipX(false);
           sprite.anims.stop();
           sprite.setFrame(DIR_START[dir]);
         }
@@ -1640,7 +1653,6 @@
         // Use stored run-sheet key — player.texture.key drifts when sit anim plays
         const texKey  = this.playerTexKey;
         const idleKey = `idle_${texKey}`;
-        const sitKey  = _playerChar === 'adam' ? `sit_${texKey}` : idleKey;
 
         if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
@@ -1723,11 +1735,14 @@
 
         if (this.sitting) {
           player.setVelocity(0,0);
-          player.setFlipX(false);
-          // Adam has a real sit animation; everyone else holds a static seated pose facing the furniture.
-          if (_playerChar === 'adam' && this.anims.exists(sitKey)) {
-            if (player.anims.currentAnim?.key !== sitKey) player.play(sitKey);
+          // Adam has real directional sit animations (left mirrors the right sheet); everyone
+          // else holds a static seated pose facing the furniture.
+          const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
+          if (_playerChar === 'adam' && this.anims.exists(sitAnim)) {
+            player.setFlipX(this.lastDir === 'left');
+            if (player.anims.currentAnim?.key !== sitAnim) player.play(sitAnim);
           } else {
+            player.setFlipX(false);
             player.anims.stop();
             player.setFrame(DIR_START[this.lastDir]);
           }
