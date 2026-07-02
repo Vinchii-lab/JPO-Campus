@@ -1421,6 +1421,12 @@
         this.load.image('roombuilder', '/assets/Room_Builder_free_16x16.png');
         this.load.image('interiors',   '/assets/Interiors_free_16x16.png');
         this.load.image('ext',         '/assets/tilemap_packed.png');
+        // Same three tilesets also loaded as 16×16 spritesheets so a single desk/monitor
+        // tile can be redrawn as a high-depth overlay that occludes a seated body
+        // (tuck-under-desk). Frame index within each sheet == GID - firstgid.
+        this.load.spritesheet('roombuilder_ss', '/assets/Room_Builder_free_16x16.png', { frameWidth: 16, frameHeight: 16 });
+        this.load.spritesheet('interiors_ss',   '/assets/Interiors_free_16x16.png',   { frameWidth: 16, frameHeight: 16 });
+        this.load.spritesheet('ext_ss',         '/assets/tilemap_packed.png',         { frameWidth: 16, frameHeight: 16 });
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
@@ -1543,6 +1549,7 @@
         this.localNameTag    = null;
         this.localCrown      = null;
         this.localBubble     = null;
+        this._seatOccluders  = [];
         this.sitting         = false;
         this.lastDir         = 'down';
         this._moving         = false;
@@ -1582,6 +1589,7 @@
               entry.sprite.anims.stop();
               entry.sprite.setFrame(DIR_START[rdir]);
             }
+            if (!entry.occluders) entry.occluders = this._seatOccludersFor(data.x, data.y, rdir);
           } else if (data.anim === 'walk') {
             entry.sprite.setFlipX(false);
             const wk = `walk_${entry.texKey}_${rdir}`;
@@ -1591,6 +1599,7 @@
             entry.sprite.anims.stop();
             entry.sprite.setFrame(DIR_START[rdir]);
           }
+          if (data.anim !== 'sit' && entry.occluders) { this._clearOccluders(entry.occluders); entry.occluders = null; }
           entry.nameTag.setPosition(data.x, data.y-40);
           if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
@@ -1797,6 +1806,58 @@
         }
       }
 
+      // ── Desk occlusion ────────────────────────────────────────────────
+      // Map a Tiled GID to the matching 16×16 overlay spritesheet + frame index.
+      _gidToSheet(gid) {
+        if (gid >= 1816) return { key: 'ext_ss',        frame: gid - 1816 };
+        if (gid >= 392)  return { key: 'interiors_ss',  frame: gid - 392  };
+        return                { key: 'roombuilder_ss',  frame: gid - 1    };
+      }
+      // Redraw the desk/monitor tiles that belong IN FRONT of a seated body as
+      // high-depth overlay images, so the body tucks UNDER the desk instead of
+      // rendering on top of it. Returns the overlay images (caller stores + destroys).
+      _makeSeatOccluders(col, row, facing) {
+        const out = [], cells = [];
+        const seatGid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        const deskFam = DESK_FAMILIES.find(f => f.gids[seatGid]);
+        if (deskFam) {
+          // Manager desk: the whole 2×3 desk (with a baked-in chair) is on the
+          // Furniture layer. Overlay desk tiles at/below the chair row only — the
+          // sprite extends one tile UP, so overlaying rows above would cover the head.
+          for (const rc of Object.values(deskFam.gids)) {
+            const dc = col + (rc[0] - deskFam.chair[0]);
+            const dr = row + (rc[1] - deskFam.chair[1]);
+            if (dr < row) continue;                 // never occlude the head
+            if (dc === col && dr === row) continue; // chair cell stays behind the body
+            cells.push({ layer: this.furnitureLayer, c: dc, r: dr });
+          }
+        } else if (seatGid === 606) {
+          // Workstation: a monitor shares the chair cell and a desk-front sits in the
+          // facing direction, both on the Wall layer. Gated to the workstation chair so
+          // sofas/benches that legitimately share a cell with structural wall GID 64
+          // never get that wall redrawn over the seated body.
+          const fwd = { down:[0,1], up:[0,-1], left:[-1,0], right:[1,0] }[facing] || [0,1];
+          cells.push({ layer: this.wallLayer, c: col,          r: row          });
+          cells.push({ layer: this.wallLayer, c: col + fwd[0], r: row + fwd[1] });
+        }
+        for (const cell of cells) {
+          const t = cell.layer.getTileAt(cell.c, cell.r);
+          if (!t || t.index <= 0) continue;
+          const { key, frame } = this._gidToSheet(t.index);
+          if (!this.textures.exists(key)) continue;
+          out.push(this.add.image(cell.c * 48, cell.r * 48, key, frame)
+            .setOrigin(0, 0).setScale(3).setDepth(900));
+        }
+        return out;
+      }
+      // Same, but locate the seat cell from a seated sprite's pixel position (remote players).
+      _seatOccludersFor(x, y, facing) {
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        return this._makeSeatOccluders(col, row, facing);
+      }
+      _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
+
       _setLocalCrown(show) {
         if (this.localCrown) { this.localCrown.destroy(); this.localCrown = null; }
         if (show && this.player) {
@@ -1846,6 +1907,7 @@
         e.sprite.destroy(); e.nameTag.destroy();
         if (e.crown)      e.crown.destroy();
         if (e.chatBubble) e.chatBubble.destroy();
+        this._clearOccluders(e.occluders);
         delete this.otherPlayers[id];
       }
 
@@ -1874,10 +1936,12 @@
         const sprite = this.add.sprite(data.x, data.y, texKey);
         sprite.setScale(3).setOrigin(0.5,0.5);
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
+        let occluders = null;
         if (data.anim === 'sit') {
           const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
           if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
           else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
+          occluders = this._seatOccludersFor(data.x, data.y, dir);
         } else if (data.anim === 'walk') {
           sprite.setFlipX(false);
           const wk = `walk_${texKey}_${dir}`;
@@ -1896,7 +1960,7 @@
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
 
-        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey };
+        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey, occluders };
       }
 
       update(time, delta) {
@@ -1973,6 +2037,8 @@
         if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
           if (this.sitting) {
             this.sitting = false;
+            this._clearOccluders(this._seatOccluders);
+            this._seatOccluders = [];
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
             // body.reset re-syncs the body + its prev position (plain setPosition can
             // leave the body stale for a tick); _preSitPos is the walkable tile we
@@ -1992,6 +2058,8 @@
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
             this.lastDir = s.facing;                // face the way the chair is oriented
             this.sitting = true;
+            this._clearOccluders(this._seatOccluders);
+            this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);
           }
         }
 
