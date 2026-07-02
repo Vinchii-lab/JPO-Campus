@@ -571,9 +571,18 @@
     const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
 
     // Furniture tile GIDs that are ACTUAL wall-mounted announcement boards:
-    // colorful cork bulletin boards (682-685 / 698-701 / 714-717) and green
-    // chalkboards (1042/1043 top, 1058/1059 base). Desks & monitors are NOT boards.
-    const BOARD_GIDS = new Set([682,683,684,685,698,699,700,701,714,715,716,717,1042,1043,1058,1059]);
+    //   - colorful cork bulletin boards        682-685 / 698-701 / 714-717
+    //   - colorful notice/bulletin boards       1013/1014 top, 1029/1030 base
+    //   - green chalkboard (on stand)           1042/1043 top, 1058/1059 base
+    //   - blackboard                            1045/1046 top, 1061/1062 base
+    // Desks, monitors, lockers (1044/1060), thin wall trim (1031/1047/1063) and
+    // shelves/plants are NOT boards.
+    const BOARD_GIDS = new Set([
+      682,683,684,685,698,699,700,701,714,715,716,717,
+      1013,1014,1029,1030,
+      1042,1043,1058,1059,
+      1045,1046,1061,1062,
+    ]);
     // Sittable tiles ALL live on the FURNITURE layer. The "classroom"/workstation
     // brown chair is GID 606 (103 of them): it shares a cell with a monitor (Wall
     // 453/523) and sits directly ABOVE a desk-front tile (Wall 469/539). The 469/539
@@ -584,17 +593,18 @@
     // facing below falls back to the approach direction, so you always end up facing
     // the desk / furniture you sat at.
     const FURN_SEATS = new Set([
-      606,                                                        // brown workstation chair (faces its desk via approach dir)
+      606,                                                        // brown workstation chair (desk is directly below -> pinned 'down' in SEAT_FACING)
       510, 472, 474, 750, 751,                                    // conference + wooden chairs
       1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
       1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
       1210, 1211, 1226, 1227,                                     // wooden waiting benches
       1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
     ]);
-    // Fixed sit-facing for seats whose orientation is baked into the tile art. The 606
-    // workstation chairs are omitted on purpose: they use the approach direction so the
-    // player faces the desk no matter which aisle they walked in from.
-    const SEAT_FACING = { 750:'right', 751:'left' };
+    // Fixed sit-facing for seats whose orientation is baked into the tile art. Workstation
+    // chairs (606) always have their desk + monitor directly BELOW them, so they are pinned
+    // to 'down' -- otherwise walking in from the side seats the worker facing sideways
+    // instead of at their monitor.
+    const SEAT_FACING = { 606:'down', 750:'right', 751:'left' };
 
     // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
     // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
