@@ -1583,7 +1583,12 @@
             const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
             if (this.anims.exists(sk)) {
               entry.sprite.setFlipX(rdir === 'left');
-              if (entry.sprite.anims.currentAnim?.key !== sk) entry.sprite.play(sk);
+              if (entry.sprite.anims.currentAnim?.key !== sk) {
+                entry.sprite.anims.stop();          // stop the in-flight walk before swapping to the seated pose
+                entry.sprite.play(sk);
+                const f0 = this.anims.get(sk)?.frames?.[0];
+                if (f0) entry.sprite.setTexture(f0.textureKey, f0.textureFrame);
+              }
             } else {
               entry.sprite.setFlipX(false);
               entry.sprite.anims.stop();
@@ -1939,7 +1944,13 @@
         let occluders = null;
         if (data.anim === 'sit') {
           const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
-          if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
+          if (this.anims.exists(sk)) {
+            sprite.setFlipX(dir === 'left');
+            sprite.anims.stop();
+            sprite.play(sk);
+            const f0 = this.anims.get(sk)?.frames?.[0];
+            if (f0) sprite.setTexture(f0.textureKey, f0.textureFrame);
+          }
           else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
           occluders = this._seatOccludersFor(data.x, data.y, dir);
         } else if (data.anim === 'walk') {
@@ -2070,7 +2081,17 @@
           const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
           if (_playerChar === 'adam' && this.anims.exists(sitAnim)) {
             player.setFlipX(this.lastDir === 'left');
-            if (player.anims.currentAnim?.key !== sitAnim) player.play(sitAnim);
+            // Entering a sit straight from an actively-playing WALK anim used to leave the sprite
+            // on its last walk frame (facing the aisle) the FIRST time you sat — play() didn't
+            // reliably swap the frame when the previous anim was still mid-play. Stop first (the
+            // idle->sit path, which always worked, already does), then force the seated frame so
+            // the correct pose shows on the very first frame.
+            if (player.anims.currentAnim?.key !== sitAnim) {
+              player.anims.stop();
+              player.play(sitAnim);
+              const f0 = this.anims.get(sitAnim)?.frames?.[0];
+              if (f0) player.setTexture(f0.textureKey, f0.textureFrame);
+            }
           } else {
             player.setFlipX(false);
             player.anims.stop();
