@@ -2069,6 +2069,8 @@
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
             this.lastDir = s.facing;                // face the way the chair is oriented
             this.sitting = true;
+            this._sitLogN = 0;
+            console.log('[SITDBG enter] seatFacing=%s col=%s row=%s -> lastDir=%s (interact.dir=%s)', s.facing, s.col, s.row, this.lastDir, interact.dir);
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);
           }
@@ -2091,6 +2093,12 @@
               player.play(sitAnim);
               const f0 = this.anims.get(sitAnim)?.frames?.[0];
               if (f0) player.setTexture(f0.textureKey, f0.textureFrame);
+            }
+            if ((this._sitLogN ?? 99) < 4) {
+              this._sitLogN++;
+              console.log('[SITDBG render#%d] lastDir=%s SIT_DIR=%s sitAnim=%s exists=%s cur=%s tex=%s frame=%s flip=%s',
+                this._sitLogN, this.lastDir, SIT_DIR[this.lastDir], sitAnim, this.anims.exists(sitAnim),
+                player.anims.currentAnim?.key, player.texture.key, player.frame?.name, player.flipX);
             }
           } else {
             player.setFlipX(false);
