@@ -120,14 +120,24 @@ function takeToken(b) {
 }
 
 // Movement: accept at most one update per MOVE_MIN_INTERVAL_MS (the client sends
-// every ~50ms), and reject teleports — a single move may cover at most the
-// distance a normal walk could since the last accepted update, plus a fixed
-// allowance for the legit one-tile "snap" when sitting down / standing up.
-const MOVE_MIN_INTERVAL_MS = 33;    // < client's 50ms cadence, so legit frames never drop
-const MOVE_SPEED           = 150;   // px/s, MUST match client SPEED in public/index.html
-const MOVE_SPEED_TOLERANCE = 3;     // slack for network jitter / batched updates
-const MOVE_ELAPSED_CAP_MS  = 1500;  // cap the time budget so idling can't bank a long teleport
-const MOVE_SNAP_ALLOWANCE  = 160;   // covers a seat snap (~1 tile + BODY_DY) + rounding
+// every ~50ms), and reject teleports. A single move may cover at most the distance
+// a normal walk could since the last ACCEPTED update (MOVE_SPEED · elapsed, with a
+// modest tolerance for jitter and a small fixed floor for one frame at ~0 elapsed).
+// A previous version added a 160px allowance to EVERY move, which let a modified
+// client chain small hops far faster than walking; that allowance is now granted
+// ONLY on a sit<->stand "snap" (see SEAT_SNAP_ALLOWANCE), so normal travel stays
+// bounded to roughly walk speed.
+const MOVE_MIN_INTERVAL_MS  = 33;    // < client's 50ms cadence, so legit frames never drop
+const MOVE_SPEED            = 150;   // px/s, MUST match client SPEED in public/index.html
+const MOVE_SPEED_TOLERANCE  = 1.6;   // multiplicative slack over walk speed for network jitter
+const MOVE_JITTER_PX        = 12;    // small additive floor: covers one ~7.5px frame at near-0 elapsed
+const MOVE_ELAPSED_CAP_MS   = 1500;  // cap the time budget so a long idle can't bank a big teleport
+const MOVE_BOUNDS_EPSILON   = 48;    // minimal out-of-bounds slack (~1 tile / body offset), NOT snap-sized
+// Seat "snap": sitting/standing teleports the avatar ~1 tile onto/off the chair and
+// flips the reported anim to/from 'sit'. Grant the extra distance ONLY on that
+// transition, and rate-limit it so a modified client can't fake it every frame.
+const SEAT_SNAP_ALLOWANCE   = 160;   // extra one-time distance for a legit sit/stand snap
+const SEAT_SNAP_COOLDOWN_MS = 400;   // min gap between granted snap allowances (blocks anim-toggle abuse)
 
 // ── Resume tokens (lightweight identity continuity, NOT auth) ─────────────────
 // A signed "<payload>.<hmac>" token proves the server once approved this email, so
@@ -344,6 +354,8 @@ io.on("connection", (socket) => {
   const buyBucket  = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
   const postBucket = makeBucket(3, 1000);  // guards announcement spam
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
+  let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
+  let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
 
   // Send the current announcement board to every new connection.
   fetchAnnouncements()
@@ -567,24 +579,37 @@ io.on("connection", (socket) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
     // Reject out-of-bounds positions (a modified client can't leave the office).
-    // Bounds come from the loaded map; the snap allowance absorbs edge rounding.
-    if (x < -MOVE_SNAP_ALLOWANCE || x > WORLD_W + MOVE_SNAP_ALLOWANCE ||
-        y < -MOVE_SNAP_ALLOWANCE || y > WORLD_H + MOVE_SNAP_ALLOWANCE) return;
+    // Bounds come from the loaded map; a minimal epsilon absorbs the body offset /
+    // edge rounding (a seat on the top row snaps to y ≈ -BODY_DY) — NOT a teleport.
+    if (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
+        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON) return;
+
+    // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
+    // grant the extra distance only on that transition, cooldown-gated so it can't be
+    // replayed every frame to fake fast movement.
+    const sitting = data.anim === "sit";
+    let snapBonus = 0;
+    if (sitting !== wasSitting && now - lastSnapAt >= SEAT_SNAP_COOLDOWN_MS) {
+      snapBonus = SEAT_SNAP_ALLOWANCE;
+      lastSnapAt = now;
+    }
 
     // Reject impossible jumps once we have a baseline. The FIRST move after
     // (re)joining just establishes position — the client spawns the local avatar
     // at a fixed point that may differ from the server's restored coords, so a
-    // distance check there would falsely reject a legitimate spawn.
+    // distance check there would falsely reject a legitimate spawn. Normal travel is
+    // bounded to ~MOVE_SPEED (walk speed); only a real sit/stand adds snapBonus.
     if (lastMoveAt) {
       const elapsed = Math.min(now - lastMoveAt, MOVE_ELAPSED_CAP_MS) / 1000;
-      const maxDist = MOVE_SPEED * elapsed * MOVE_SPEED_TOLERANCE + MOVE_SNAP_ALLOWANCE;
+      const maxDist = MOVE_SPEED * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
-      if (dx * dx + dy * dy > maxDist * maxDist) return;   // teleport / speed hack
+      if (dx * dx + dy * dy > maxDist * maxDist) return;   // teleport / speed hack (silently dropped)
     }
 
     me.x = x; me.y = y;
     if (typeof data.dir === "string") me.dir = data.dir;
     me.anim = data.anim;
+    wasSitting = sitting;
     lastMoveAt = now;
     socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
   });
