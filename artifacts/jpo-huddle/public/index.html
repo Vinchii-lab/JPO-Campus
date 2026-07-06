@@ -338,6 +338,67 @@
     .board-item-del { margin-left: 10px; background: none; border: none; color: #e23b3b; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; opacity: .75; }
     .board-item-del:hover { opacity: 1; }
     .board-empty { color: #555; text-align: center; padding: 30px 8px; font-size: 13px; }
+
+    /* ── On-screen touch controls (mobile) ── */
+    #touch-controls { display: none; }
+    body.touch-device.playing #touch-controls { display: block; }
+    /* while typing, hide the movement/action pads so the chat box is unobstructed */
+    body.touch-device.playing.chatting #touch-joystick,
+    body.touch-device.playing.chatting #touch-action,
+    body.touch-device.playing.chatting #touch-chat { display: none; }
+
+    #touch-joystick {
+      position: fixed; left: 24px; bottom: 30px; z-index: 250;
+      width: 128px; height: 128px; border-radius: 50%;
+      background: rgba(0,0,0,0.30); border: 2px solid rgba(255,255,255,0.20);
+      touch-action: none; -webkit-user-select: none; user-select: none;
+    }
+    #touch-knob {
+      position: absolute; left: 50%; top: 50%;
+      width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+      background: rgba(255,255,255,0.55); border: 2px solid rgba(255,255,255,0.8);
+      pointer-events: none;
+    }
+    #touch-action, #touch-chat {
+      position: fixed; right: 26px; z-index: 250;
+      border-radius: 50%; font-family: monospace; color: #fff; font-weight: bold;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #touch-action {
+      bottom: 44px; width: 86px; height: 86px; font-size: 15px;
+      background: rgba(108,99,255,0.88); border: 2px solid rgba(255,255,255,0.6);
+    }
+    #touch-action:active { background: rgba(87,79,214,0.95); }
+    #touch-action.disabled { opacity: 0.3; }
+    #touch-chat {
+      bottom: 148px; width: 62px; height: 62px; font-size: 24px;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
+    }
+    #touch-chat:active { background: rgba(0,0,0,0.8); }
+
+    /* Chat send/close buttons — only shown on touch devices */
+    .chat-touch-btn {
+      display: none; align-items: center; justify-content: center;
+      width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+      border: none; font-family: monospace; font-size: 16px; color: #fff;
+      background: rgba(255,255,255,0.14); flex-shrink: 0;
+    }
+    body.touch-device .chat-touch-btn { display: inline-flex; }
+    body.touch-device #chat-hint, body.touch-device #owner-hint { display: none; }
+
+    /* ── Small-screen overlay scaling ── */
+    @media (max-width: 560px) {
+      #join-overlay { align-items: flex-start; overflow-y: auto; padding: 14px; }
+      .join-card { min-width: 0; width: 100%; max-width: 100%; padding: 22px 18px; }
+      .builder-body { flex-direction: column; align-items: center; gap: 12px; }
+      .options-col { width: 100%; }
+      #shop-modal { align-items: flex-start; overflow-y: auto; padding: 16px; }
+      #shop-card { min-width: 0; width: 100%; max-width: 420px; padding: 24px 20px; }
+      #chat-bar { max-width: calc(100vw - 20px); padding: 10px 12px; gap: 8px; }
+      #chat-input { width: auto; flex: 1; min-width: 0; }
+    }
   </style>
 </head>
 <body>
@@ -457,8 +518,17 @@
   <div id="chat-bar">
     <span style="color:#888;font-size:14px">💬</span>
     <input id="chat-input" type="text" placeholder="Say something… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
+    <button id="chat-send" class="chat-touch-btn" type="button" aria-label="Send">➤</button>
+    <button id="chat-close" class="chat-touch-btn" type="button" aria-label="Close">✕</button>
   </div>
   <div id="chat-hint">[T] chat</div>
+
+  <!-- ── On-screen touch controls (mobile) ── -->
+  <div id="touch-controls">
+    <div id="touch-joystick"><div id="touch-knob"></div></div>
+    <button id="touch-chat" type="button" aria-label="Open chat">💬</button>
+    <button id="touch-action" type="button" class="disabled">E</button>
+  </div>
 
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
@@ -1128,6 +1198,7 @@
       overlay.classList.add('hidden');
       setTimeout(() => overlay.remove(), 300);
 
+      document.body.classList.add('playing');
       document.getElementById('coin-hud').classList.add('visible');
       document.getElementById('coin-count').textContent = _playerCoins;
 
@@ -1180,6 +1251,16 @@
       }
     }
 
+    // ── Touch / shared input state ────────────────────────────────────
+    // ?touch=1 forces the on-screen controls on (QA aid on non-touch devices).
+    const IS_TOUCH = /[?&]touch=1/.test(location.search) || (window.matchMedia
+      ? window.matchMedia('(pointer: coarse)').matches
+      : ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+    if (IS_TOUCH) document.body.classList.add('touch-device');
+    // Virtual movement booleans (OR'd with the keyboard in update) + a one-shot action flag.
+    const touchMove   = { up:false, down:false, left:false, right:false };
+    const touchAction = { queued:false };
+
     // ── Chat ──────────────────────────────────────────────────────────
     let _chatOpen = false;
     const chatBar   = document.getElementById('chat-bar');
@@ -1188,12 +1269,15 @@
     function openChat() {
       if (_chatOpen) return;
       _chatOpen = true;
+      document.body.classList.add('chatting');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
       chatBar.classList.add('open');
       chatInput.value = '';
       setTimeout(() => chatInput.focus(), 30);
     }
     function closeChat() {
       _chatOpen = false;
+      document.body.classList.remove('chatting');
       chatBar.classList.remove('open');
       document.querySelector('canvas')?.focus();
     }
@@ -1214,6 +1298,62 @@
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChat(); }
       e.stopPropagation();
     });
+
+    // ── On-screen touch controls (joystick + action/chat buttons) ──────
+    if (IS_TOUCH) {
+      // Send / close buttons in the chat bar (mobile keyboards have no Esc key).
+      document.getElementById('chat-send')?.addEventListener('pointerdown', e => { e.preventDefault(); sendChat(); });
+      document.getElementById('chat-close')?.addEventListener('pointerdown', e => { e.preventDefault(); closeChat(); });
+
+      // Floating chat + action buttons.
+      document.getElementById('touch-chat')?.addEventListener('pointerdown', e => { e.preventDefault(); openChat(); });
+      const actionBtn = document.getElementById('touch-action');
+      actionBtn?.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (!actionBtn.classList.contains('disabled')) touchAction.queued = true;
+      });
+
+      // Virtual joystick → the same up/down/left/right booleans the keyboard sets,
+      // so all existing movement/animation/facing logic (incl. diagonals) is reused.
+      const stick = document.getElementById('touch-joystick');
+      const knob  = document.getElementById('touch-knob');
+      if (stick && knob) {
+        let pid = null;
+        const clearMove = () => { touchMove.up = touchMove.down = touchMove.left = touchMove.right = false; };
+        const center = () => { const r = stick.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+        function apply(dx, dy) {
+          const max  = stick.offsetWidth/2 - knob.offsetWidth/2;
+          const dead = max * 0.32;
+          const mag  = Math.hypot(dx, dy);
+          if (mag < dead) { clearMove(); knob.style.transform = `translate(${dx}px,${dy}px)`; return; }
+          const cl = Math.min(mag, max);
+          knob.style.transform = `translate(${dx/mag*cl}px,${dy/mag*cl}px)`;
+          // 8-way octant: 0=right,1=down-right,2=down,3=down-left,4=left,5=up-left,6=up,7=up-right (y grows down)
+          const deg = (Math.atan2(dy, dx) * 180/Math.PI + 360) % 360;
+          const oct = Math.round(deg/45) % 8;
+          touchMove.right = (oct === 0 || oct === 1 || oct === 7);
+          touchMove.down  = (oct === 1 || oct === 2 || oct === 3);
+          touchMove.left  = (oct === 3 || oct === 4 || oct === 5);
+          touchMove.up    = (oct === 5 || oct === 6 || oct === 7);
+        }
+        stick.addEventListener('pointerdown', e => {
+          e.preventDefault(); pid = e.pointerId;
+          try { stick.setPointerCapture(pid); } catch (_) {}
+          const c = center(); apply(e.clientX - c.x, e.clientY - c.y);
+        });
+        stick.addEventListener('pointermove', e => {
+          if (pid === null || e.pointerId !== pid) return;
+          const c = center(); apply(e.clientX - c.x, e.clientY - c.y);
+        });
+        const release = e => {
+          if (pid !== null && e.pointerId !== pid) return;
+          pid = null; clearMove(); knob.style.transform = 'translate(0px,0px)';
+        };
+        stick.addEventListener('pointerup', release);
+        stick.addEventListener('pointercancel', release);
+        stick.addEventListener('lostpointercapture', release);
+      }
+    }
 
     // ── F8 Owner panel ────────────────────────────────────────────────
     let _adminAuthed    = false;
@@ -1964,6 +2104,20 @@
         this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey, occluders };
       }
 
+      // Keep the on-screen action button's label + enabled state in sync with the "[E]" prompt.
+      _updateTouchActionBtn(interact, forceDisabled) {
+        if (!IS_TOUCH) return;
+        const btn = this._actionBtn || (this._actionBtn = document.getElementById('touch-action'));
+        if (!btn) return;
+        let label = 'E', avail = false;
+        if (forceDisabled)                   { /* keep disabled */ }
+        else if (this.sitting)               { label = 'Stand'; avail = true; }
+        else if (interact?.type === 'board') { label = 'Read';  avail = true; }
+        else if (interact?.type === 'sit')   { label = 'Sit';   avail = true; }
+        if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
+        if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
+      }
+
       update(time, delta) {
         if (!this.player) return;
 
@@ -1982,6 +2136,8 @@
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
           this.eHint.setVisible(false);
+          touchAction.queued = false;
+          this._updateTouchActionBtn(null, true);
           this._sendTimer += delta;
           if (this._sendTimer >= 50) {
             this._sendTimer = 0;
@@ -1990,10 +2146,10 @@
           return;
         }
 
-        const up    = cursors.up.isDown    || wasd.up.isDown;
-        const down  = cursors.down.isDown  || wasd.down.isDown;
-        const left  = cursors.left.isDown  || wasd.left.isDown;
-        const right = cursors.right.isDown || wasd.right.isDown;
+        const up    = cursors.up.isDown    || wasd.up.isDown    || touchMove.up;
+        const down  = cursors.down.isDown  || wasd.down.isDown  || touchMove.down;
+        const left  = cursors.left.isDown  || wasd.left.isDown  || touchMove.left;
+        const right = cursors.right.isDown || wasd.right.isDown || touchMove.right;
 
         // Tile we're standing on, measured from the arcade body (feet), not the
         // sprite origin (chest) — otherwise the E-scan probes one row too high.
@@ -2034,8 +2190,11 @@
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
+        this._updateTouchActionBtn(interact);
 
-        if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+        const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
+        touchAction.queued = false;
+        if (doAction) {
           if (this.sitting) {
             this.sitting = false;
             this._clearOccluders(this._seatOccluders);
