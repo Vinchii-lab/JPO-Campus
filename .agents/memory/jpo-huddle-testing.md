@@ -27,6 +27,17 @@ Then register in the browser with the same email (case doesn't matter on input �
 the server lowercases it). `upsertPlayerProfile` never overwrites `approved`, so
 the seeded approval sticks. No email-domain validation server-side.
 
+# Coins drift during long e2e runs (don't assert exact coin totals)
+
+Approved players earn **+2 coins/minute** on a server tick. Any e2e test that
+takes ~a minute or more (e.g. multi-context resume/grace tests) can see a seeded
+coin balance increment (e.g. 30 → 32) legitimately mid-run.
+
+**Rule:** never assert an exact coin count in a long-running test; assert `>=` the
+seeded value (or that it's numeric) instead. A strict equality check will report a
+false-negative "bug" that is really just the coin tick — and actually confirms
+persistence rather than breaking it.
+
 # Mobile touch-controls QA override
 
 The on-screen mobile controls are gated behind `body.touch-device.playing`, and

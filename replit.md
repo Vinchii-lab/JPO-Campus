@@ -10,7 +10,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string; `ADMIN_PASSWORD` — gates the in-game admin panel
+- Required env: `DATABASE_URL` — Postgres connection string; `ADMIN_PASSWORD` — gates the in-game admin panel; `SESSION_SECRET` — signs the resume tokens that auto-rejoin returning players (when unset, auto-rejoin is disabled and everyone uses the normal register flow)
 
 ## Stack
 
@@ -43,6 +43,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 - Approved players walk around a shared office, chat, earn +2 coins/minute, and spend coins in the shop (e.g. a 30-coin crown cosmetic).
 - Admins and designated announcers post to the announcement board (scoped to individual board clusters); everyone sees the board.
 - All of the above survives server restarts: reconnecting with the same email restores your coins, cosmetics, announcer status, and last position.
+- Returning players auto-rejoin: a signed token stored in the browser lets a refresh or reopened tab drop you straight back into the office without re-registering, and a brief disconnect keeps your avatar in place for others during a short grace window.
 
 ## User preferences
 
@@ -52,6 +53,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 
 - **`CLOTH_MAX` in `server.js` must equal `CLOTH_COLORS.length - 1` in `public/index.html`.** It clamps shirt/pants colour indexes; if the client palette grows, bump this or valid choices get rejected.
 - **Identity is email-only and unauthenticated (interim).** Anyone who types someone else's email inherits that account (coins, cosmetics, announcer rights). This is a known, accepted residual risk until real auth lands (a downstream task). Do not treat email identity as a security boundary.
+- **Resume tokens & the reconnection grace period are UX continuity, NOT auth.** On approval the server issues an HMAC-signed token (via `SESSION_SECRET`) that the browser stores in `localStorage` under `jpo_session_token` and replays on load to auto-rejoin (no re-registering/re-approval). The token only certifies "this email was approved" — it inherits the same email-only trust caveat above and is not an identity proof. On disconnect an email-backed player is parked in a ~10s grace window (`GRACE_MS` in `server.js`, keyed by `graceByEmail`) so a refresh/blip resumes the SAME session without their avatar vanishing for others; only after it expires do others see them leave. Tokens are cleared client-side on kick/reject so a revoked user can't auto-resume back in.
 - **Empty-email clients fall back to session-only play** (nothing persists) because email is the PK. The web client always requires a valid email, so this only affects non-standard clients.
 - **Don't add a build step to jpo-huddle.** The client is CDN-loaded plain JS and the server is plain ESM by design; `node server.js` must keep working.
 - After changing `lib/db` schema, run `pnpm --filter @workspace/db run push` (dev) — the running server picks up the new columns immediately since it uses raw SQL.

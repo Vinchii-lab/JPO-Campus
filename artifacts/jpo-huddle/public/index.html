@@ -487,6 +487,14 @@
       </div>
     </div>
 
+    <!-- Auto-rejoin: reconnecting a returning browser -->
+    <div class="join-card hidden" id="card-reconnecting">
+      <h2>🏢 JPO Huddle</h2>
+      <p>Welcome back!</p>
+      <div class="spinner"></div>
+      <p style="font-size:14px;color:#444;">Reconnecting you to the office…</p>
+    </div>
+
     <!-- Step 2: Pending -->
     <div class="join-card hidden" id="card-pending">
       <h2>🏢 JPO Huddle</h2>
@@ -621,6 +629,47 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
     const socket = io();
+
+    // ── Resume tokens: lightweight auto-rejoin (see server.js) ──────────
+    const TOKEN_KEY = 'jpo_session_token';
+    function _saveToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch {} }
+    function _loadToken()  { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } }
+    function _clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch {} }
+
+    function _showRegisterForm() {
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-register')?.classList.remove('hidden');
+    }
+
+    // Returning browser: show the "reconnecting…" placeholder up front so the
+    // register form never flashes before the auto-resume resolves.
+    if (_loadToken()) {
+      document.getElementById('card-register')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.remove('hidden');
+    }
+
+    // Auto-identify with a stored token. We only emit once the socket is connected
+    // AND the game scene exists, so the currentPlayers snapshot (rendered by the
+    // scene handler) is never dropped by arriving too early. _resumeSent resets on
+    // disconnect so a network blip re-resumes the SAME session within the grace window.
+    let _connected = false, _resumeSent = false;
+    function _maybeResume() {
+      if (_resumeSent || !_connected || !window._gameScene) return;
+      const t = _loadToken();
+      if (!t) return;
+      _resumeSent = true;
+      socket.emit('resumeSession', { token: t });
+    }
+    socket.on('connect',    () => { _connected = true;  _maybeResume(); });
+    socket.on('disconnect', () => { _connected = false; _resumeSent = false; });
+
+    socket.on('sessionToken', ({ token }) => { if (token) _saveToken(token); });
+
+    socket.on('resumeFailed', () => {
+      _clearToken();
+      _showRegisterForm();
+    });
 
     const WORLD_W = 3024;  // 63 tiles * 16px * 3 scale
     const WORLD_H = 1728;  // 36 tiles * 16px * 3 scale
@@ -1167,17 +1216,20 @@
     // ── Registration lifecycle ────────────────────────────────────────
     socket.on('registrationPending', () => {
       document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
       document.getElementById('card-pending').classList.remove('hidden');
     });
 
     socket.on('rejected', () => {
+      _clearToken();   // don't auto-resume back into the queue on the next load
       document.getElementById('card-pending').classList.add('hidden');
       document.getElementById('card-rejected').classList.remove('hidden');
     });
 
     socket.on('kicked', () => {
+      _clearToken();   // revoked: must re-register, not auto-resume
       // Hide all overlay cards and show the kicked card
-      ['card-register','card-pending','card-rejected'].forEach(id => {
+      ['card-register','card-reconnecting','card-pending','card-rejected'].forEach(id => {
         document.getElementById(id)?.classList.add('hidden');
       });
       document.getElementById('card-kicked').classList.remove('hidden');
@@ -1187,6 +1239,7 @@
 
     socket.on('approved', (data) => {
       _playerName    = data.name;
+      _playerEmail   = data.email || _playerEmail;   // resume path skips the form — seed identity here (used to skip a stale self-copy)
       _playerChar    = data.character;
       _playerHairIdx  = data.hairIdx  ?? 0;
       _playerSkinIdx  = data.skinIdx  ?? 0;
@@ -1195,8 +1248,10 @@
       _playerCoins    = data.coins;
 
       const overlay = document.getElementById('join-overlay');
-      overlay.classList.add('hidden');
-      setTimeout(() => overlay.remove(), 300);
+      if (overlay) {                 // null after the first approval removed it — a blip resume re-fires 'approved'
+        overlay.classList.add('hidden');
+        setTimeout(() => overlay.remove(), 300);
+      }
 
       document.body.classList.add('playing');
       document.getElementById('coin-hud').classList.add('visible');
@@ -1707,7 +1762,11 @@
 
         socket.on('currentPlayers', (allPlayers) => {
           if (!this.player) { this._pendingPlayers = allPlayers; return; }
+          // Reconcile against the authoritative list: add/refresh everyone present,
+          // and drop any local sprite no longer there (e.g. someone left while we
+          // were briefly away during a reconnect).
           Object.entries(allPlayers).forEach(([id,data]) => { if (id!==socket.id) this._addOtherPlayer(id,data); });
+          Object.keys(this.otherPlayers).forEach((id) => { if (!allPlayers[id]) this._removeOtherPlayer(id); });
         });
 
         socket.on('playerJoined', (data) => {
@@ -1761,6 +1820,7 @@
         });
 
         window._gameScene = this;
+        _maybeResume();   // scene is ready — safe to auto-rejoin if a token is stored
 
         // ── Unread "!" markers over boards ────────────────────────────────
         // Find every board (a cluster of adjacent board tiles on the Furniture
@@ -1909,6 +1969,9 @@
       }
 
       _onApproved(data) {
+        // Idempotent: a blip resume re-fires 'approved'. If we already have a local
+        // player (scene survived the socket reconnect), don't build a second sprite.
+        if (this.player) { this.cameras?.main?.startFollow(this.player); return; }
         const SPAWN_X = 28*48+24, SPAWN_Y = 17*48+24;
 
         const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);

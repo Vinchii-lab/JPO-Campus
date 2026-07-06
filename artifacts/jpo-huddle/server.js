@@ -5,9 +5,14 @@ import { fileURLToPath } from "url";
 import path from "path";
 import { readFileSync } from "fs";
 import pg from "pg";
+import crypto from "crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
+// Signs the resume tokens that let a returning browser auto-rejoin without
+// re-registering. When unset, auto-rejoin is disabled and everyone falls back to
+// the normal register flow. This is lightweight identity continuity, NOT auth.
+const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const BUILD_STAMP = Date.now();
 
 // ── Database ───────────────────────────────────────────────────────────────
@@ -62,6 +67,13 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
 
+// email → { oldId, name, x, y, dir, timer }. A gracefully-disconnected player is
+// parked here for GRACE_MS so a quick refresh / network blip resumes the SAME
+// session without the avatar vanishing for everyone else. The frozen sprite (still
+// shown on other clients under `oldId`) is removed only if they don't return in time.
+const graceByEmail = {};
+const GRACE_MS = 10_000;
+
 const SHOP = { crown: 30 };
 
 function clampIdx(v, max) {
@@ -70,6 +82,37 @@ function clampIdx(v, max) {
 
 // Max valid shirt/trouser colour index. MUST equal client CLOTH_COLORS.length - 1 in public/index.html.
 const CLOTH_MAX = 22;
+
+// ── Resume tokens (lightweight identity continuity, NOT auth) ─────────────────
+// A signed "<payload>.<hmac>" token proves the server once approved this email, so
+// a returning browser can auto-rejoin. It is NOT a security boundary — email
+// identity stays unauthenticated (see replit.md). Disabled entirely when
+// SESSION_SECRET is unset (signToken → "", verifyToken → null).
+const TOKEN_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;  // 30 days
+
+function signToken(email) {
+  if (!SESSION_SECRET) return "";
+  const payload = Buffer.from(JSON.stringify({ email, iat: Date.now() })).toString("base64url");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+function verifyToken(token) {
+  if (!SESSION_SECRET || typeof token !== "string") return null;
+  const dot = token.indexOf(".");
+  if (dot <= 0) return null;
+  const payload = token.slice(0, dot), sig = token.slice(dot + 1);
+  const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  // timingSafeEqual throws on length mismatch — guard first.
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!data || typeof data.email !== "string" || !data.email) return null;
+    if (!Number.isFinite(data.iat) || Date.now() - data.iat > TOKEN_MAX_AGE_MS) return null;
+    return { email: data.email };
+  } catch { return null; }
+}
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -159,6 +202,19 @@ function dropLiveByEmail(email, exceptId) {
   }
 }
 
+// Cancel a pending grace hold for an email (called when they reconnect): stop the
+// removal timer and clear the frozen old sprite from every client, so restore can
+// re-add a fresh one at the resumed position. Returns the parked entry (with its
+// live x/y/dir snapshot) so the caller can prefer it over a possibly-stale DB row.
+function cancelGrace(email) {
+  const g = graceByEmail[email];
+  if (!g) return null;
+  clearTimeout(g.timer);
+  io.emit("playerLeft", g.oldId);
+  delete graceByEmail[email];
+  return g;
+}
+
 // Put a socket into the office from a durable jpo_players row: cache it live and
 // send the client everything it needs to render. Used both when an admin
 // approves someone and when an already-approved email reconnects. The identity
@@ -166,10 +222,20 @@ function dropLiveByEmail(email, exceptId) {
 // reconnection-token task will swap the email check there for a token check.
 async function restorePlayer(socket, row) {
   const state = rowToPlayerState(row);
+
+  // If they're returning within the grace window, remove the frozen old sprite and
+  // prefer the live in-memory position snapshot over the DB row (the disconnect
+  // flush may still be in flight, and the row is only written each coin tick).
+  const g = state.email ? cancelGrace(state.email) : null;
+  if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
+    state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
+  }
+
   players[socket.id] = state;
 
   socket.emit("approved", {
     name:      state.name,
+    email:     state.email,
     character: state.character,
     hairIdx:   state.hairIdx,
     skinIdx:   state.skinIdx,
@@ -183,6 +249,12 @@ async function restorePlayer(socket, row) {
   socket.emit("currentPlayers", players);
   socket.emit("announcerStatus", { canPost: state.isAnnouncer });
   socket.emit("announcements", await fetchAnnouncements());
+
+  // Issue a resume token so this browser can auto-rejoin later (email-backed only).
+  if (state.email) {
+    const token = signToken(state.email);
+    if (token) socket.emit("sessionToken", { token });
+  }
 
   for (const pid in players) {
     if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
@@ -276,6 +348,47 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("register failed:", err);
       socket.emit("registrationPending");
+    }
+  });
+
+  // ── Resume (auto-rejoin with a signed token) ──────────────────────────
+  // A returning browser sends its stored token instead of re-filling the form.
+  // We validate it, look up the durable row, and either drop them straight back
+  // into the office (approved) or back into the waiting queue (not approved).
+  socket.on("resumeSession", async ({ token } = {}) => {
+    try {
+      const data = verifyToken(token);
+      if (!data) { socket.emit("resumeFailed"); return; }
+      const em = data.email;
+
+      // One live session per email — drop any stale live duplicate first.
+      dropLiveByEmail(em, socket.id);
+
+      const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+      const row = rows[0];
+      if (!row) { socket.emit("resumeFailed"); return; }
+
+      if (row.approved) {
+        await restorePlayer(socket, row);
+        _notifyAdmins();
+        console.log(`Resumed: ${row.name} <${em}>`);
+      } else {
+        // Approved-then-revoked (kicked) or still awaiting first approval: rebuild
+        // the pending entry from the row so admins can (re-)approve them.
+        cancelGrace(em);
+        pending[socket.id] = {
+          firstName: row.first_name, lastName: row.last_name, email: row.email,
+          character: row.character, name: row.name,
+          hairIdx: row.hair_idx, skinIdx: row.skin_idx,
+          shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
+        };
+        socket.emit("registrationPending");
+        _notifyAdmins();
+        console.log(`Resume pending (not approved): ${row.name} <${em}>`);
+      }
+    } catch (err) {
+      console.error("resumeSession failed:", err);
+      socket.emit("resumeFailed");
     }
   });
 
@@ -487,17 +600,37 @@ io.on("connection", (socket) => {
     }
     const p = players[socket.id];
     if (p) {
-      console.log(`${p.name} left`);
       delete players[socket.id];
-      io.emit("playerLeft", socket.id);
-      // Flush final position so they resume near where they left off.
       if (p.email) {
+        // Grace period: don't broadcast "left" yet. Keep the avatar visible for
+        // everyone else and let a quick reconnect (refresh / blip) resume the SAME
+        // session via cancelGrace. Only remove the sprite if they don't return in
+        // time. We snapshot the live position so the resume lands exactly here even
+        // if the DB flush below is still in flight.
+        const email = p.email;
+        if (graceByEmail[email]) {
+          clearTimeout(graceByEmail[email].timer);
+          io.emit("playerLeft", graceByEmail[email].oldId);
+        }
+        graceByEmail[email] = {
+          oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir,
+          timer: setTimeout(() => {
+            io.emit("playerLeft", socket.id);
+            delete graceByEmail[email];
+            console.log(`${p.name} left (grace expired)`);
+          }, GRACE_MS),
+        };
+        // Flush final position so a restore AFTER grace expiry still resumes here.
         try {
           await pool.query(
             `UPDATE jpo_players SET x = $2, y = $3, dir = $4, updated_at = now() WHERE email = $1`,
-            [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down"],
+            [email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down"],
           );
         } catch (err) { console.error("disconnect flush failed:", err); }
+      } else {
+        // Session-only player: nothing durable to resume — remove immediately.
+        console.log(`${p.name} left`);
+        io.emit("playerLeft", socket.id);
       }
     }
     admins.delete(socket.id);
