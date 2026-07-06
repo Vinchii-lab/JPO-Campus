@@ -1,15 +1,16 @@
-# [Project name]
+# JPO Huddle
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne team: people walk around as pixel avatars, chat, earn coins, buy cosmetics, and read the announcement board. All game state is now durable in Postgres.
 
 ## Run & Operate
 
+- `pnpm --filter @workspace/jpo-huddle run dev` — run the JPO Huddle game server (`node server.js`)
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Postgres connection string; `ADMIN_PASSWORD` — gates the in-game admin panel
 
 ## Stack
 
@@ -22,23 +23,38 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/jpo-huddle/server.js` — the whole game server: Express 5 static serving (with cache-busting `BUILD_STAMP`), socket.io event handlers, and all DB reads/writes via a raw `pg` Pool. Plain ES modules, run with `node server.js` (no build step).
+- `artifacts/jpo-huddle/public/index.html` — the entire client (~2100 lines of plain JS): Phaser 3 + socket.io loaded from CDN, no bundler. Source of truth for socket event shapes and the `CLOTH_COLORS` palette.
+- `lib/db/src/schema/jpoPlayers.ts`, `lib/db/src/schema/jpoAnnouncements.ts` — Drizzle table definitions (source of truth for the DB schema). Re-exported from `lib/db/src/schema/index.ts`. These exist so `drizzle-kit push` and future migrations work; the game server itself talks to Postgres with raw SQL, not Drizzle.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **DB is the source of truth; the in-memory maps (`players`, `pending`, `admins`) are only a live-connection cache.** Every durable field (coins, cosmetics, approval, announcer status, position, announcements) is read from / written to Postgres.
+- **`server.js` uses a raw `pg` Pool, not the Drizzle client.** This keeps the server as plain `node server.js` (no `tsx`/transpile step) while still using the shared `@workspace/db` schema for `push` and future publish-time migrations.
+- **Identity key = lowercased email.** `jpo_players.email` is the primary key. Registering an already-approved email auto-restores the player straight into the office (no re-approval). `restorePlayer()` is the single seam for this; the identity gate that decides *who* may restore lives in the `register` handler.
+- **Kick = revoke.** Because an approved email auto-restores on next connect, kicking flips `approved` back to `false` (a session-only removal would just let them walk right back in).
+- **Coin/position writes are batched to the once-per-minute coin tick** (and a final flush on disconnect), so per-move traffic never hits the DB. Coin awards and purchases use atomic relative SQL (`coins = coins + N ... RETURNING`) so concurrent ticks and buys can't race.
+- **One live session per email:** a new connection for an email already online disconnects the older socket (`dropLiveByEmail`).
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Register with first/last name + a JustPressOne email and pick an avatar (character, hair, skin, shirt, pants). New people wait in a pending queue.
+- An admin (unlocked with `ADMIN_PASSWORD`) approves/rejects pending people, kicks (revokes) players, and designates "announcers".
+- Approved players walk around a shared office, chat, earn +2 coins/minute, and spend coins in the shop (e.g. a 30-coin crown cosmetic).
+- Admins and designated announcers post to the announcement board (scoped to individual board clusters); everyone sees the board.
+- All of the above survives server restarts: reconnecting with the same email restores your coins, cosmetics, announcer status, and last position.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- _None recorded yet._
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- **`CLOTH_MAX` in `server.js` must equal `CLOTH_COLORS.length - 1` in `public/index.html`.** It clamps shirt/pants colour indexes; if the client palette grows, bump this or valid choices get rejected.
+- **Identity is email-only and unauthenticated (interim).** Anyone who types someone else's email inherits that account (coins, cosmetics, announcer rights). This is a known, accepted residual risk until real auth lands (a downstream task). Do not treat email identity as a security boundary.
+- **Empty-email clients fall back to session-only play** (nothing persists) because email is the PK. The web client always requires a valid email, so this only affects non-standard clients.
+- **Don't add a build step to jpo-huddle.** The client is CDN-loaded plain JS and the server is plain ESM by design; `node server.js` must keep working.
+- After changing `lib/db` schema, run `pnpm --filter @workspace/db run push` (dev) — the running server picks up the new columns immediately since it uses raw SQL.
 
 ## Pointers
 
