@@ -684,10 +684,12 @@
     // 24-frame directional run sheets: RIGHT 0-5, UP(back) 6-11, LEFT 12-17, DOWN(front) 18-23
     const DIR_ROWS  = { right:[0,5], up:[6,11], left:[12,17], down:[18,23] };
     const DIR_START = { right:0, up:6, left:12, down:18 };
-    // Adam's three seated spritesheets: sit=RIGHT profile (mirror for LEFT), sit2=UP
-    // (back of head), sit3=DOWN (face). Only Adam has seated art; other characters fall
-    // back to a standing frame. SIT_DIR collapses 'left' onto the right sheet (flipped).
-    const SIT_SHEETS = { right: 'adam_sit', up: 'adam_sit2', down: 'adam_sit3' };
+    // Every character has three seated spritesheets: sit=RIGHT profile (mirror for LEFT),
+    // sit2=UP (back of head), sit3=DOWN (face). SIT_SUFFIX maps a direction to the texture-key
+    // suffix; the per-character texture key is `${char}_${suffix}` (e.g. 'alex_sit3'). Alex/
+    // Amelia/Bob seated sheets are recoloured offline from Adam's via an exact-shade palette LUT
+    // (see /tmp/gen_sit.py). SIT_DIR collapses 'left' onto the right sheet (flipped).
+    const SIT_SUFFIX = { right: 'sit', up: 'sit2', down: 'sit3' };
     const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
 
     // Furniture tile GIDs that are ACTUAL wall-mounted announcement boards:
@@ -941,6 +943,52 @@
         pants: {r:70, g:70, b:94,  t:70, yMin:28},
       },
     };
+
+    // Seated anatomy differs from standing: the folded body packs hair/torso/legs into different
+    // rows, so the standing zones' Y-gates (tuned for a standing figure) would miss or mis-assign
+    // seated pixels during customization. These per-direction overrides retune ONLY the Y-bounds
+    // for the seated sheets. Geometry is shared across characters (every seated sheet is recoloured
+    // from Adam's), so one table serves everyone; the per-character SOURCE colours still come from
+    // the base zones. The values come straight from the generator's HAIRMAX (the row that splits
+    // olive-hair above from olive-legs below in Adam's source sheets, inherited by every recoloured
+    // sheet): right/down hair ends at y22, up (back of head, no fringe) at y17. `split` is the
+    // shirt/pants boundary used only when a character's shirt & pants share one source colour.
+    const SIT_ANATOMY = {
+      down:  { hairYMax:22, split:28 },
+      right: { hairYMax:22, split:29 },
+      up:    { hairYMax:17, split:24 },
+    };
+
+    // Merge a character's base zones with seated Y-overrides for one direction. Hair keeps NO yMin so
+    // the top/back of the head is always recoloured (the standing yMin cut it off), and its yMax is
+    // clamped to hairYMax so it stops at the torso — load-bearing for Amelia (brown hair within
+    // threshold of her pink body) and Bob (grey hair within threshold of his navy body), where the
+    // Y band is the only thing separating hair from the body. The flowing-hair 2nd pass and Amelia's
+    // xMin gate are dropped (no flowing hair / X-masking when seated).
+    //
+    // The shirt/pants zones ALWAYS start at hairYMax (pants uses `split` instead when it shares a
+    // source colour with the shirt). This is deliberately unconditional — NOT gated on a nominal
+    // shirt-vs-hair colour distance — because each sprite zone is a multi-shade family (see the shade
+    // lists in CHAR_ZONE_COLORS) and a character's darker hair shades can fall inside the shirt/pants
+    // threshold even when the nominal colours look far apart (e.g. Alex). If a body zone had no yMin,
+    // customizing the shirt while leaving hair at default (which SKIPS the hair pass, so hair pixels
+    // stay their original colour in the swap snapshot) would repaint the hair mass in the shirt colour.
+    // Clamping to hairYMax costs only the ~2px of true shirt that sits above HAIRMAX in Adam's source
+    // (the same accepted shoulder-seam residual for every seated character); protecting the hair is
+    // worth that. Adam is never passed here.
+    function _sitZones(char, dir) {
+      const base = CHAR_ZONE_COLORS[char]; if (!base) return base;
+      const a = SIT_ANATOMY[dir] || SIT_ANATOMY.down;
+      const sharedSrc = base.shirt && base.pants &&
+        base.shirt.r === base.pants.r && base.shirt.g === base.pants.g && base.shirt.b === base.pants.b;
+      const z = { ...base };
+      if (base.hair)        z.hair        = { ...base.hair, yMin:undefined, yMax:a.hairYMax, shirtYMax:undefined, flowXMax:undefined };
+      if (base.hairOutline) z.hairOutline = { ...base.hairOutline, yMin:undefined, yMax:a.hairYMax };
+      // skin stays colour-only (no Y gate) so it works at any seated row.
+      if (base.shirt) z.shirt = { ...base.shirt, yMin:a.hairYMax, yMax:sharedSrc?a.split:undefined, xMin:undefined };
+      if (base.pants) z.pants = { ...base.pants, yMin:sharedSrc?a.split:a.hairYMax, yMax:undefined, xMin:undefined };
+      return z;
+    }
 
     function _detectZoneColors(char) {
       return CHAR_ZONE_COLORS[char] || null;
@@ -1632,10 +1680,14 @@
         // (figure centred with padding; sheet is 384px = 12 frames). sit3 (DOWN) is 16px per pose
         // (poses packed edge-to-edge; sheet is 192px = 12 frames). Slicing sit3 at 32px merges two
         // adjacent poses into one frame and renders TWO characters one tile apart. Slice each sheet
-        // at its own true pitch.
-        this.load.spritesheet('adam_sit',   '/assets/Adam_sit_16x16.png',   { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT), 32px pitch
-        this.load.spritesheet('adam_sit2',  '/assets/Adam_sit2_16x16.png',  { frameWidth: 32, frameHeight: 32 });  // UP (back of head), 32px pitch
-        this.load.spritesheet('adam_sit3',  '/assets/Adam_sit3_16x16.png',  { frameWidth: 16, frameHeight: 32 });  // DOWN (face), 16px pitch
+        // at its own true pitch. Every character has its own trio (Adam's are the originals; Alex/
+        // Amelia/Bob are recoloured offline from Adam's — see /tmp/gen_sit.py).
+        CHARACTERS.forEach(char => {
+          const C = char.charAt(0).toUpperCase() + char.slice(1);
+          this.load.spritesheet(`${char}_sit`,  `/assets/${C}_sit_16x16.png`,  { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT), 32px pitch
+          this.load.spritesheet(`${char}_sit2`, `/assets/${C}_sit2_16x16.png`, { frameWidth: 32, frameHeight: 32 });  // UP (back of head), 32px pitch
+          this.load.spritesheet(`${char}_sit3`, `/assets/${C}_sit3_16x16.png`, { frameWidth: 16, frameHeight: 32 });  // DOWN (face), 16px pitch
+        });
         this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
       }
 
@@ -1652,8 +1704,8 @@
 
         // Base animations
         CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
-        Object.entries(SIT_SHEETS).forEach(([dir, sheet]) =>
-          this.anims.create({ key: `sit_adam_${dir}`, frames: this.anims.generateFrameNumbers(sheet, {start:0,end:5}), frameRate:8, repeat:-1 }));
+        // Seated anims are per-player (palette-swapped) and created in _buildPlayerTex; no base
+        // sit anims are needed here.
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
 
         // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
@@ -1945,24 +1997,28 @@
         this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
         this._createDirAnims(key);
 
-        // Also build directional sit variants for adam (right/up/down sheets; left mirrors right).
-        if (char === 'adam') {
-          for (const [dir, sheet] of Object.entries(SIT_SHEETS)) {
-            const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
-            if (this.textures.exists(sitKey)) continue;
-            const sitSrc = this.textures.get(sheet).source[0].image;
-            const sc = document.createElement('canvas');
-            sc.width = sitSrc.width; sc.height = sitSrc.height;
-            const scx = sc.getContext('2d');
-            scx.drawImage(sitSrc, 0, 0);
-            if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
-              const sid = scx.getImageData(0, 0, sc.width, sc.height);
-              _applySwaps(sid.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, 16);
-              scx.putImageData(sid, 0, 0);
-            }
-            this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
-            this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
+        // Build directional sit variants for EVERY character (right/up/down sheets; left mirrors
+        // right). Adam uses his authored zones as-is; Alex/Amelia/Bob use seated-anatomy zone
+        // overrides (see _sitZones), because a folded body's hair/torso/legs sit at different rows
+        // than the standing zones assume — without them, customization would leave patches.
+        for (const [dir, suffix] of Object.entries(SIT_SUFFIX)) {
+          const sheet = `${char}_${suffix}`;
+          const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+          if (this.textures.exists(sitKey)) continue;
+          const sitSrc = this.textures.get(sheet).source[0].image;
+          const sc = document.createElement('canvas');
+          sc.width = sitSrc.width; sc.height = sitSrc.height;
+          const scx = sc.getContext('2d');
+          scx.drawImage(sitSrc, 0, 0);
+          if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+            const sitZones = char === 'adam' ? zones : _sitZones(char, dir);
+            const frameW = dir === 'down' ? 16 : 32;
+            const sid = scx.getImageData(0, 0, sc.width, sc.height);
+            _applySwaps(sid.data, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+            scx.putImageData(sid, 0, 0);
           }
+          this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
+          this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
         }
 
         return key;
@@ -2288,10 +2344,9 @@
 
         if (this.sitting) {
           player.setVelocity(0,0);
-          // Adam has real directional sit animations (left mirrors the right sheet); everyone
-          // else holds a static seated pose facing the furniture.
+          // Every character has real directional sit animations (left mirrors the right sheet).
           const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
-          if (_playerChar === 'adam' && this.anims.exists(sitAnim)) {
+          if (this.anims.exists(sitAnim)) {
             player.setFlipX(this.lastDir === 'left');
             // Re-play the seated anim whenever it isn't ACTIVELY playing — not just when the key
             // differs. Standing up calls setTexture() without clearing currentAnim, and the idle

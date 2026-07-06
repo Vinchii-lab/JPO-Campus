@@ -166,6 +166,16 @@ for y in range(11,25):
 ```
 Use this to find the first Y row where brownish pixels are ONLY shirt fabric (not hair), and confirm outlines (86,89,114) are NOT within threshold.
 
+# Seated (sit) sheets — separate zone tuning from standing
+
+Every non-Adam seated sheet (`{Alex,Amelia,Bob}_sit/sit2/sit3_16x16.png`) is a RECOLOUR of Adam's seated sheets, so seated pixel geometry is IDENTICAL across characters — one Y-band table (`SIT_ANATOMY` in `index.html`) serves everyone. Values = the offline generator's HAIRMAX (the row splitting olive-hair above from olive-legs below in Adam's source): right/down hair→y22, up (back of head, no fringe)→y17; `split` (28/29/24) is the shirt/pants boundary used only when shirt & pants share one source colour. `_sitZones(char,dir)` merges the standing `CHAR_ZONE_COLORS` with these seated Y-overrides; Adam is never passed through it.
+
+**Load-bearing rule: seated shirt/pants zones ALWAYS get `yMin = hairYMax` (pants uses `split` when it shares the shirt's source colour). This is unconditional — do NOT gate it on a nominal shirt-vs-hair colour distance.**
+**Why:** each zone is a multi-shade family. A character's darker hair shades can land INSIDE the shirt/pants threshold even when the nominal colours look far apart — e.g. Alex hair shade (138,101,82) is dist≈51 from shirt-red (162,57,75), inside t=73. Customizing shirt while leaving hair at DEFAULT skips the hair pass, so hair pixels keep their original colour in the swap snapshot; an un-gated shirt zone then repaints the whole hair mass in the shirt colour (Alex went fully blue; Amelia partly). An earlier "colour-separable char keeps no Y gate" heuristic shipped this bug because offline QA only tested all-zones-customized (the hair pass masked it).
+**How to apply:** always clamp; the only cost is the ~2px of true shirt above HAIRMAX (an accepted shoulder seam, same as Bob). When verifying a seated recolour change, the offline sim MUST include the default-hair + custom-shirt and default-hair + custom-pants combos, not just all-four-customized.
+
+Accepted seated residuals (pre-existing standing quirks, out of scope): Amelia's orange lower-leg pixels are uncatchable by her pink pants zone; changing Amelia's skin tints her shirt (skin within threshold of her pink shirt source). Amelia's seated hair is short (inherits Adam's silhouette), not her long standing hair.
+
 # Adding new characters
 
 - Find cut-Y where head pixels end and shirt body begins.
