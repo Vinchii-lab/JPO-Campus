@@ -83,6 +83,52 @@ function clampIdx(v, max) {
 // Max valid shirt/trouser colour index. MUST equal client CLOTH_COLORS.length - 1 in public/index.html.
 const CLOTH_MAX = 22;
 
+// ── World bounds (derived from the loaded Tiled map, NOT hardcoded) ───────────
+// Movement validation rejects positions outside the office. We read the same
+// Tiled map the client renders (public/assets/Office.tmj) so the bounds track a
+// future map swap automatically. RENDER_SCALE must match the client's setScale(3)
+// in public/index.html — the map file stores tile counts/sizes, not the on-screen
+// render scale. Falls back to the current 63×36 map if the file can't be read.
+const RENDER_SCALE = 3;
+const { WORLD_W, WORLD_H } = (() => {
+  try {
+    const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "Office.tmj"), "utf8"));
+    const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
+    const h = tmj.height * tmj.tileheight * RENDER_SCALE;
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return { WORLD_W: w, WORLD_H: h };
+  } catch (err) {
+    console.error("map bounds load failed, using fallback:", err);
+  }
+  return { WORLD_W: 3024, WORLD_H: 1728 };  // 63×36 tiles · 16px · scale 3
+})();
+
+// ── Rate limiting (basic per-socket abuse protection) ────────────────────────
+// A tiny token bucket throttles bursty events WITHOUT disconnecting the player:
+// excess events are silently dropped. `tokens` refills 1 per `refillMs` up to
+// `capacity`, so a short human burst is fine but a sustained flood is capped.
+function makeBucket(capacity, refillMs) {
+  return { tokens: capacity, capacity, refillMs, last: Date.now() };
+}
+function takeToken(b) {
+  const now = Date.now();
+  if (now > b.last) {
+    const steps = Math.floor((now - b.last) / b.refillMs);
+    if (steps > 0) { b.tokens = Math.min(b.capacity, b.tokens + steps); b.last += steps * b.refillMs; }
+  }
+  if (b.tokens > 0) { b.tokens--; return true; }
+  return false;
+}
+
+// Movement: accept at most one update per MOVE_MIN_INTERVAL_MS (the client sends
+// every ~50ms), and reject teleports — a single move may cover at most the
+// distance a normal walk could since the last accepted update, plus a fixed
+// allowance for the legit one-tile "snap" when sitting down / standing up.
+const MOVE_MIN_INTERVAL_MS = 33;    // < client's 50ms cadence, so legit frames never drop
+const MOVE_SPEED           = 150;   // px/s, MUST match client SPEED in public/index.html
+const MOVE_SPEED_TOLERANCE = 3;     // slack for network jitter / batched updates
+const MOVE_ELAPSED_CAP_MS  = 1500;  // cap the time budget so idling can't bank a long teleport
+const MOVE_SNAP_ALLOWANCE  = 160;   // covers a seat snap (~1 tile + BODY_DY) + rounding
+
 // ── Resume tokens (lightweight identity continuity, NOT auth) ─────────────────
 // A signed "<payload>.<hmac>" token proves the server once approved this email, so
 // a returning browser can auto-rejoin. It is NOT a security boundary — email
@@ -291,6 +337,13 @@ setInterval(async () => {
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
+
+  // Per-connection rate-limit state — closed over by the handlers below and
+  // GC'd with the socket on disconnect (no global map to clean up).
+  const chatBucket = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
+  const buyBucket  = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
+  const postBucket = makeBucket(3, 1000);  // guards announcement spam
+  let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
 
   // Send the current announcement board to every new connection.
   fetchAnnouncements()
@@ -502,18 +555,43 @@ io.on("connection", (socket) => {
   socket.on("playerMove", (data) => {
     const me = players[socket.id];
     if (!me || !data) return;
-    // Validate coords: they're written to integer columns on the coin tick /
-    // disconnect, so a non-finite or absurd value would throw there every time.
+
+    // Throttle: cap how often we accept + rebroadcast movement. The client sends
+    // ~20/s (every 50ms); anything faster than MOVE_MIN_INTERVAL_MS is a flood.
+    const now = Date.now();
+    if (now - lastMoveAt < MOVE_MIN_INTERVAL_MS) return;
+
+    // Coords must be finite — they're written to integer columns on the coin tick
+    // / disconnect, so a NaN/Infinity would throw there every time.
     const x = Number(data.x), y = Number(data.y);
-    if (Number.isFinite(x)) me.x = Math.max(-100000, Math.min(100000, x));
-    if (Number.isFinite(y)) me.y = Math.max(-100000, Math.min(100000, y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    // Reject out-of-bounds positions (a modified client can't leave the office).
+    // Bounds come from the loaded map; the snap allowance absorbs edge rounding.
+    if (x < -MOVE_SNAP_ALLOWANCE || x > WORLD_W + MOVE_SNAP_ALLOWANCE ||
+        y < -MOVE_SNAP_ALLOWANCE || y > WORLD_H + MOVE_SNAP_ALLOWANCE) return;
+
+    // Reject impossible jumps once we have a baseline. The FIRST move after
+    // (re)joining just establishes position — the client spawns the local avatar
+    // at a fixed point that may differ from the server's restored coords, so a
+    // distance check there would falsely reject a legitimate spawn.
+    if (lastMoveAt) {
+      const elapsed = Math.min(now - lastMoveAt, MOVE_ELAPSED_CAP_MS) / 1000;
+      const maxDist = MOVE_SPEED * elapsed * MOVE_SPEED_TOLERANCE + MOVE_SNAP_ALLOWANCE;
+      const dx = x - me.x, dy = y - me.y;
+      if (dx * dx + dy * dy > maxDist * maxDist) return;   // teleport / speed hack
+    }
+
+    me.x = x; me.y = y;
     if (typeof data.dir === "string") me.dir = data.dir;
     me.anim = data.anim;
+    lastMoveAt = now;
     socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
   });
 
   socket.on("chatMessage", ({ message }) => {
     if (!players[socket.id]) return;
+    if (!takeToken(chatBucket)) return;   // throttle chat spam (silently drop)
     const text = (message || "").trim().slice(0, 120);
     if (!text) return;
     io.emit("chatMessage", { id: socket.id, name: players[socket.id].name, message: text });
@@ -524,6 +602,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     const canPost = admins.has(socket.id) || !!(p && p.isAnnouncer);
     if (!canPost) return;
+    if (!takeToken(postBucket)) return;   // throttle announcement spam
     const clean = (text || "").trim().slice(0, 280);
     if (!clean) return;
     // Which individual board this belongs to (the client posts from the board it's standing at).
@@ -552,6 +631,7 @@ io.on("connection", (socket) => {
   socket.on("buyCosmetic", async ({ item }) => {
     const p = players[socket.id], cost = SHOP[item];
     if (!p || !cost) return;
+    if (!takeToken(buyBucket)) return;   // throttle rapid buy attempts
 
     // Session-only players (no email): memory-only purchase.
     if (!p.email) {
