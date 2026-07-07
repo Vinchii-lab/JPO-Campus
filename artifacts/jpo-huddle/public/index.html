@@ -1835,15 +1835,23 @@
           entry.sprite.setPosition(data.x, data.y);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
           if (data.anim === 'sit') {
-            const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
-            if (this.anims.exists(sk)) {
-              entry.sprite.setFlipX(rdir === 'left');
-              // isPlaying guard too: a re-sit reuses the stale sit currentAnim.key (see local note).
-              if (entry.sprite.anims.currentAnim?.key !== sk || !entry.sprite.anims.isPlaying) entry.sprite.play(sk);
-            } else {
+            if (this._isFaceForwardSeatAt(data.x, data.y)) {
+              // Workstation: mirror the local face-forward look (standing down frame).
+              entry.sprite.setTexture(entry.texKey);
               entry.sprite.setFlipX(false);
               entry.sprite.anims.stop();
-              entry.sprite.setFrame(DIR_START[rdir]);
+              entry.sprite.setFrame(DIR_START.down);
+            } else {
+              const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
+              if (this.anims.exists(sk)) {
+                entry.sprite.setFlipX(rdir === 'left');
+                // isPlaying guard too: a re-sit reuses the stale sit currentAnim.key (see local note).
+                if (entry.sprite.anims.currentAnim?.key !== sk || !entry.sprite.anims.isPlaying) entry.sprite.play(sk);
+              } else {
+                entry.sprite.setFlipX(false);
+                entry.sprite.anims.stop();
+                entry.sprite.setFrame(DIR_START[rdir]);
+              }
             }
             if (!entry.occluders) entry.occluders = this._seatOccludersFor(data.x, data.y, rdir);
           } else if (data.anim === 'walk') {
@@ -2123,6 +2131,15 @@
         const row = Math.round((y - 24 + BODY_DY) / 48);
         return this._makeSeatOccluders(col, row, facing);
       }
+      // Workstation seats (GID 606) have no seated sprite that faces the viewer, so a seated
+      // avatar there shows the standing DOWN frame (face visible toward the monitor) while the
+      // desk occluder hides the legs. Detect it from the seat cell under a seated sprite's pixel
+      // position (same col/row math as _seatOccludersFor) so local + remote agree.
+      _isFaceForwardSeatAt(x, y) {
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        return (this.furnitureLayer.getTileAt(col, row)?.index || 0) === 606;
+      }
       _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
 
       _setLocalCrown(show) {
@@ -2205,9 +2222,13 @@
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
         let occluders = null;
         if (data.anim === 'sit') {
-          const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
-          if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
-          else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
+          if (this._isFaceForwardSeatAt(data.x, data.y)) {
+            sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START.down);
+          } else {
+            const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
+            if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
+            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
+          }
           occluders = this._seatOccludersFor(data.x, data.y, dir);
         } else if (data.anim === 'walk') {
           sprite.setFlipX(false);
@@ -2323,6 +2344,7 @@
         if (doAction) {
           if (this.sitting) {
             this.sitting = false;
+            this._sitFaceForward = false;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = [];
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
@@ -2342,7 +2364,11 @@
             // origin sits BODY_DY above it, so the character rests IN the chair.
             player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
-            this.lastDir = interact.dir;            // approach-based: keep the direction you were facing when you sat
+            // Computers (GID 606) have no seated sprite that faces the viewer, so a workstation
+            // sit faces DOWN and renders the standing down frame (see the update() sit block);
+            // every other seat keeps the approach-based facing you walked in with.
+            this._sitFaceForward = (furnAt(s.col, s.row) === 606);
+            this.lastDir = this._sitFaceForward ? 'down' : interact.dir;
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);
@@ -2351,21 +2377,31 @@
 
         if (this.sitting) {
           player.setVelocity(0,0);
-          // Every character has real directional sit animations (left mirrors the right sheet).
-          const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
-          if (this.anims.exists(sitAnim)) {
-            player.setFlipX(this.lastDir === 'left');
-            // Re-play the seated anim whenever it isn't ACTIVELY playing — not just when the key
-            // differs. Standing up calls setTexture() without clearing currentAnim, and the idle
-            // path calls anims.stop(), so currentAnim.key can still equal sitAnim while the anim is
-            // STOPPED and the sprite is showing the standing run frame. A key-only guard then thinks
-            // "already seated" and leaves the character frozen facing the way you last walked — the
-            // "sit faces the wrong way until you sit again" bug. Checking isPlaying forces it to start.
-            if (player.anims.currentAnim?.key !== sitAnim || !player.anims.isPlaying) player.play(sitAnim);
-          } else {
+          if (this._sitFaceForward) {
+            // Workstation (GID 606): no seated sprite faces the viewer, so show the standing
+            // DOWN idle frame — the face is visible looking at the monitor, and the desk/monitor
+            // occluder hides the legs so it still reads as sitting at the desk.
+            player.setTexture(this.playerTexKey);
             player.setFlipX(false);
             player.anims.stop();
-            player.setFrame(DIR_START[this.lastDir]);
+            player.setFrame(DIR_START.down);
+          } else {
+            // Every character has real directional sit animations (left mirrors the right sheet).
+            const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
+            if (this.anims.exists(sitAnim)) {
+              player.setFlipX(this.lastDir === 'left');
+              // Re-play the seated anim whenever it isn't ACTIVELY playing — not just when the key
+              // differs. Standing up calls setTexture() without clearing currentAnim, and the idle
+              // path calls anims.stop(), so currentAnim.key can still equal sitAnim while the anim is
+              // STOPPED and the sprite is showing the standing run frame. A key-only guard then thinks
+              // "already seated" and leaves the character frozen facing the way you last walked — the
+              // "sit faces the wrong way until you sit again" bug. Checking isPlaying forces it to start.
+              if (player.anims.currentAnim?.key !== sitAnim || !player.anims.isPlaying) player.play(sitAnim);
+            } else {
+              player.setFlipX(false);
+              player.anims.stop();
+              player.setFrame(DIR_START[this.lastDir]);
+            }
           }
         } else {
           player.setVelocity(0,0);
