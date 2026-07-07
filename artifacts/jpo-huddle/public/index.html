@@ -789,11 +789,10 @@
         if (!bp) continue;
         const oc = c - bp[0], or = r - bp[1];       // block origin (top-left cell)
         // fam.facing records the chair's TRUE orientation (into the desk: blue->right,
-        // green->left). Product decision: seat the avatar facing DOWN (toward the viewer)
-        // anyway, so you see its face instead of a side profile. This is safe because the
-        // manager-desk occluders derive their cells from the desk block geometry, NOT from
-        // `facing` (only the 606-workstation branch of _makeSeatOccluders reads facing).
-        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: 'down' };
+        // green->left). Sitting is approach-based (the avatar keeps the direction it was
+        // facing when it sat), so this `facing` no longer drives the sprite — it is only a
+        // fallback/record. Manager-desk occluders derive their cells from desk geometry.
+        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: fam.facing };
       }
       return null;
     };
@@ -2098,10 +2097,13 @@
           }
         } else if (seatGid === 606) {
           // Workstation: a monitor shares the chair cell and a desk-front sits in the
-          // facing direction, both on the Wall layer. Gated to the workstation chair so
-          // sofas/benches that legitimately share a cell with structural wall GID 64
-          // never get that wall redrawn over the seated body.
-          const fwd = { down:[0,1], up:[0,-1], left:[-1,0], right:[1,0] }[facing] || [0,1];
+          // seat's REAL orientation (SEAT_FACING), both on the Wall layer. This is derived
+          // from the seat — NOT the sprite's approach facing — so the desk-front is always
+          // occluded correctly even though the avatar now sits facing whatever way it
+          // walked in. Gated to the workstation chair so sofas/benches that legitimately
+          // share a cell with structural wall GID 64 never get that wall redrawn over the body.
+          const seatDir = SEAT_FACING[seatGid] || 'down';
+          const fwd = { down:[0,1], up:[0,-1], left:[-1,0], right:[1,0] }[seatDir] || [0,1];
           cells.push({ layer: this.wallLayer, c: col,          r: row          });
           cells.push({ layer: this.wallLayer, c: col + fwd[0], r: row + fwd[1] });
         }
@@ -2340,7 +2342,7 @@
             // origin sits BODY_DY above it, so the character rests IN the chair.
             player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
-            this.lastDir = s.facing;                // face the way the chair is oriented
+            this.lastDir = interact.dir;            // approach-based: keep the direction you were facing when you sat
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);

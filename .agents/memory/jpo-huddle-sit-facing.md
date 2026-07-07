@@ -1,34 +1,37 @@
 ---
 name: JPO Huddle seated facing
-description: How seated avatars face at each desk/seat type, and the product decision that manager-desk sitters face the viewer.
+description: Seated avatars face the direction the player was facing when they pressed sit (approach-based), NOT the seat's baked orientation.
 ---
 
-# Seated facing per seat type — triage the SEAT before "fixing"
+# Seated facing is APPROACH-BASED — the sprite keeps the player's pre-sit direction
 
-Different seats face different ways on purpose. Establish WHICH seat before assuming a bug.
+When a player sits, the avatar keeps whatever direction it was facing when it pressed sit.
+Face left → sit facing left; face down → sit facing down; etc. This holds for EVERY seat type
+(workstations, manager desks, sofas/benches, conference chairs).
 
-## Manager desks (blue 959.. / green 963..) → forced DOWN (product decision)
-`DESK_FAMILIES` blue/green desks are 2×3 furniture sprites with the chair baked into the block.
-The chair's TRUE art orientation is into the desk (blue chair left→faces right, green chair
-right→faces left), still recorded as `fam.facing`. **But `deskChairAt()` intentionally returns
-`facing:'down'`** so the seated avatar faces the viewer (you see its face, not a side profile).
+**Rule:** the `sit` handler assigns `this.lastDir = interact.dir` (the pre-sit / approach direction),
+NOT the seat's baked `facing`. `interact.dir` is `this.lastDir` when standing on a walkable seat or
+manager desk, or the scanned direction toward a neighbor seat (scan tries `this.lastDir` first, so a
+seat in your facing direction preserves your facing).
 
-**Why:** users repeatedly read the full right-side profile (`*_sit_16x16.png`) at a manager desk as a
-bug ("whole body turned right"). The owner chose face-the-viewer over face-the-desk. Accepted visual
-tradeoff: the baked-in chair back is drawn side-on, so a down-facing avatar sits slightly incongruously
-against a sideways chair.
+**Why:** the earlier per-seat baked-facing model (manager desks forced 'down', 606 forced 'down',
+etc.) was unpredictable to the user and read as "always facing right" at computers (the down-sit
+`*_sit3` pose leans slightly right and is easily mistaken for the right profile `*_sit`). The owner
+chose predictable, player-controlled facing over furniture-aware auto-orientation. This SUPERSEDES the
+old "manager-desk sitters forced DOWN (product decision)" rule — do not reinstate forced facing.
 
-**How to apply:** this override lives ONLY in `deskChairAt()`'s return. It is safe because manager-desk
-seat occluders in `_makeSeatOccluders` derive their overlay cells from the desk BLOCK geometry
-(`deskFam.gids`/`deskFam.chair`), NOT from `facing` — only the `606` workstation branch reads `facing`.
-`fam.facing` is otherwise unused for rendering. Do NOT "restore" right/left facing here thinking it's a
-bug — it was a deliberate choice.
-
-## Workstation chairs (GID 606) → DOWN; front-desk sofa → DOWN
-606 chairs resolve to `down` via `SEAT_FACING` (verified at runtime even when walking in from the right).
-Front Desk has only 606 chairs + a down-facing sectional sofa — no right-facing seat exists there, so a
-"faces right at the front desk" report is impossible from resolution and was a misread.
+**How to apply:**
+- The seat object's `facing` field (`SEAT_FACING` / `seatFacingAt` / `fam.facing`) is now vestigial for
+  the SPRITE — it does not drive which way the avatar looks. Don't wire the sprite back to it.
+- Occluders must stay tied to the SEAT, not the sprite. `_makeSeatOccluders` ignores its `facing` param:
+  the manager-desk branch derives overlay cells from desk BLOCK geometry (`deskFam.gids`/`deskFam.chair`),
+  and the `606` workstation branch derives the desk-front cell from `SEAT_FACING[seatGid]` (='down').
+  This is essential for REMOTE players: they rebuild occluders via `_seatOccludersFor(x,y,rdir)` where
+  `rdir` is the broadcast SPRITE dir — if the occluder read that, an up/left sitter would mis-occlude.
+- All four directions have sit anims for every character (`SIT_DIR` collapses left→right sheet with
+  `setFlipX`), so any approach direction renders fine.
 
 ## General
 Any real change to seated ART is high-risk — see jpo-huddle-palette.md (`_sitZones`/`SIT_ANATOMY`). The
-low-res in-game screenshot is a poor oracle for facing; confirm resolution in code or a runtime log.
+down-sit (`*_sit3`) and right-sit (`*_sit`) poses look near-identical at game res (both bowed-head), so
+the low-res screenshot is a poor oracle for facing — confirm resolution in code or a runtime log.

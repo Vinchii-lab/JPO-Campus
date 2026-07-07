@@ -1,3 +1,4 @@
+- [JPO Huddle seated facing](jpo-huddle-sit-facing.md) — sitting is APPROACH-BASED (avatar keeps pre-sit direction); seat baked `facing` is vestigial for the sprite; occluders derive from seat geometry/SEAT_FACING, not sprite facing.
 - [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — 4-dir run + 3-sheet directional sit, insertion-order depth, sit-facing pins per-GID but conference chairs need per-tile facing.
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD (boardId=roomId#n from clustering); walk-up post/admin-delete; E-press, "!" badge, panel all key off one clustering pass.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ clothesIdx fallback; clothes match post-hair/skin snapshot.
