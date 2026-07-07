@@ -1,27 +1,36 @@
 ---
 name: JPO Huddle seated "facing right" reports
-description: Why recurring "character faces right when sitting at a desk" reports usually aren't a facing-resolution bug.
+description: How to triage recurring "character faces right when sitting at a desk" reports — usually correct-by-design, not a bug.
 ---
 
-# Seated "facing right" at a desk is (almost always) the down-sit ART, not the facing resolution
+# "Faces right when sitting at a desk" — triage the SEAT TYPE first
 
-Desk/workstation chairs (Furniture GID 606) resolve their seated facing to **`down`** via `SEAT_FACING`,
-and that resolution has been verified correct at runtime — even when the player walks in from the right
-(forced `lastDir='right'` + sit still yields `resolvedFacing=down, lastDir=down`). There is no code path
-that produces `right` for a 606 seat (conference chairs are the only lastDir-fallback seats, and there are
-zero orphan conference chairs in the map).
+There are two very different desk seats, and they SHOULD look different when seated. Most "faces
+right" reports are the manager-desk case below, which is correct by design.
 
-**Why it still *looks* like "facing right":** the `down` sit sheet (`*_sit3_16x16.png`, played via
-`SIT_SUFFIX.down='sit3'`) is a **head-bowed-toward-the-desk** pose whose head/eye lean down-and-slightly-right
-in every frame. At normal game zoom (low effective resolution) that read easily as a right profile. It is
-visually distinct from the true right profile (`*_sit_16x16.png`), which is a full sideways head turn.
+## 1. Blue manager desks → correctly face RIGHT (this is the usual culprit)
+`DESK_FAMILIES` blue desks (GIDs 959/960/975/976/991/992) are a 2×3 furniture sprite with the chair
+baked into the **left-middle** cell and the desk+monitor occupying the **right** column. So the seated
+person faces **right, into their own desk** — `deskChairAt()` returns `facing:'right'`, `lastDir` becomes
+`right`, and the client plays the `sit` sheet (`*_sit_16x16.png`) which is a **full right-side profile**.
+That matches the user phrase "the whole body is turned right." **It is correct.** Blue desks live in
+**HR, CEO, QA, L&D**. Green manager desks are the mirror (chair right-middle, face **left**) — Operations,
+IT, CMA, Claims, Accounting.
 
-**Why:** this exact "sitting faces right" symptom has been reported/‷fixed‴ many times. The fixes that
-mattered were all facing-*resolution* fixes (which seat faces which way). Once resolution is correct, further
-identical reports are most likely reacting to the down-pose head-tilt (an ART matter), NOT a resolution bug.
+## 2. Front-desk / workstation chairs (GID 606) → correctly face DOWN
+606 chairs resolve to `down` via `SEAT_FACING` (verified at runtime even when walking in from the right:
+`resolvedFacing=down, lastDir=down`). Their `down` sheet (`*_sit3_16x16.png`, a head-bowed-toward-desk
+pose) leans slightly right at low zoom but is NOT a full side profile. Front Desk has only 606 chairs +
+a down-facing sectional sofa — no right-facing seat exists there.
 
-**How to apply:** before touching `SEAT_FACING` / sit-resolution again, first confirm at runtime what facing
-actually resolves to (a temporary URL-gated debug hook that seats an avatar and logs `resolvedFacing`/`lastDir`
-is the fastest oracle — the low-res user screenshot is NOT a reliable oracle). If it already resolves to
-`down`, the fix (if any) belongs in the `sit3` art, not the resolution code — and regenerating seated sheets
-is high-risk (see jpo-huddle-palette.md / the `_sitZones` + `SIT_ANATOMY` constraints), so confirm intent first.
+**Why this matters:** an earlier pass "fixed" the sit bug by only testing 606 chairs (down) and concluded
+it was an art head-tilt. That missed that the reporter was almost certainly at a **blue manager desk**,
+where the full right profile is intentional. Always establish WHICH seat the user sat in before deciding
+anything is broken.
+
+**How to apply:** ask/deduce the seat type. If it's a manager desk, right/left facing is correct (facing
+their desk) — changing it (e.g. forcing all desk sitters to face the viewer) is a DESIGN choice, not a bug
+fix, and looks like the avatar is turned away from its desk. If truly a resolution bug is suspected, confirm
+at runtime (temporary URL-gated hook logging `resolvedFacing`/`lastDir`); the low-res screenshot is not a
+reliable oracle. Any real change to seated ART is high-risk — see jpo-huddle-palette.md (`_sitZones` /
+`SIT_ANATOMY`).
