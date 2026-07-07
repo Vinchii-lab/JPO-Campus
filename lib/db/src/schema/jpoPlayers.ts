@@ -23,6 +23,9 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   x: integer("x").notNull().default(1080),
   y: integer("y").notNull().default(840),
   dir: text("dir").notNull().default("down"),
+  // 'sit' | 'idle' — persisted so a player who was sitting is restored SEATED
+  // (not standing on their chair) after a refresh / server restart.
+  anim: text("anim").notNull().default("idle"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

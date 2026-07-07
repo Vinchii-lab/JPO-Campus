@@ -176,7 +176,7 @@ function verifyToken(token) {
 // player state shape (camelCase).
 function rowToPlayerState(row) {
   return {
-    x: row.x, y: row.y, dir: row.dir, anim: "idle",
+    x: row.x, y: row.y, dir: row.dir, anim: row.anim === "sit" ? "sit" : "idle",
     name:      row.name,
     email:     row.email,
     character: row.character,
@@ -285,6 +285,7 @@ async function restorePlayer(socket, row) {
   const g = state.email ? cancelGrace(state.email) : null;
   if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
     state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
+    state.anim = g.anim === "sit" ? "sit" : "idle";
   }
 
   players[socket.id] = state;
@@ -328,10 +329,10 @@ setInterval(async () => {
       try {
         const { rows } = await pool.query(
           `UPDATE jpo_players
-              SET coins = coins + 2, x = $2, y = $3, dir = $4, updated_at = now()
+              SET coins = coins + 2, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
             WHERE email = $1
             RETURNING coins`,
-          [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down"],
+          [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
         );
         if (rows[0]) p.coins = rows[0].coins;
       } catch (err) {
@@ -718,7 +719,7 @@ io.on("connection", (socket) => {
           io.emit("playerLeft", graceByEmail[email].oldId);
         }
         graceByEmail[email] = {
-          oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir,
+          oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir, anim: p.anim,
           timer: setTimeout(() => {
             io.emit("playerLeft", socket.id);
             delete graceByEmail[email];
@@ -728,8 +729,8 @@ io.on("connection", (socket) => {
         // Flush final position so a restore AFTER grace expiry still resumes here.
         try {
           await pool.query(
-            `UPDATE jpo_players SET x = $2, y = $3, dir = $4, updated_at = now() WHERE email = $1`,
-            [email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down"],
+            `UPDATE jpo_players SET x = $2, y = $3, dir = $4, anim = $5, updated_at = now() WHERE email = $1`,
+            [email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
           );
         } catch (err) { console.error("disconnect flush failed:", err); }
       } else {

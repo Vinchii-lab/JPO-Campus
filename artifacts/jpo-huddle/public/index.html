@@ -1845,14 +1845,20 @@
           entry.sprite.setPosition(data.x, data.y);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
           if (data.anim === 'sit') {
-            if (this._isFaceForwardSeatAt(data.x, data.y)) {
-              // Desk-type seats (606 computers + manager desks): show the standing DOWN frame so the
-              // face is visible looking at the desk; the desk occluder hides the legs. (No seated sit
-              // sheet faces the viewer — the down-sit bows the head and angles the legs right.)
-              entry.sprite.setTexture(entry.texKey);
-              entry.sprite.setFlipX(false);
-              entry.sprite.anims.stop();
-              entry.sprite.setFrame(DIR_START.down);
+            const dp = this._deskPoseAt(data.x, data.y);
+            if (dp) {
+              // Desk-type seat: 606 -> upright standing DOWN frame (desk hides the legs);
+              // manager-desk chair -> seated sit3 sheet mirrored toward the desk (see _deskPoseAt).
+              const dsk = `sit_${entry.texKey}_down`;
+              if (dp.pose === 'sit3' && this.anims.exists(dsk)) {
+                entry.sprite.setFlipX(dp.flip === true);
+                if (entry.sprite.anims.currentAnim?.key !== dsk || !entry.sprite.anims.isPlaying) entry.sprite.play(dsk);
+              } else {
+                entry.sprite.setTexture(entry.texKey);
+                entry.sprite.setFlipX(false);
+                entry.sprite.anims.stop();
+                entry.sprite.setFrame(DIR_START.down);
+              }
             } else {
               const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
               if (this.anims.exists(sk)) {
@@ -2147,19 +2153,26 @@
         const row = Math.round((y - 24 + BODY_DY) / 48);
         return this._makeSeatOccluders(col, row, facing);
       }
-      // Desk-type seats — computer workstations (GID 606) and the baked-in manager-desk chairs —
-      // seat you facing the desk, so we render the standing DOWN frame (face visible toward the
-      // desk) instead of a seated sit sheet. None of the sit sheets face the viewer: right/left are
-      // hunched side profiles, up is the back of the head, and the down-sit bows the head and angles
-      // the legs right (reads as "facing right"). The desk occluder hides the legs, so the upright
-      // standing frame reads as sitting at the desk looking out. Detect it from the seat cell under a
-      // seated sprite's pixel position (same col/row math as _seatOccludersFor) so local + remote
-      // agree regardless of the broadcast approach dir.
-      _isFaceForwardSeatAt(x, y) {
+      // Desk-type seat pose, detected from the seat cell under a seated sprite's pixel position
+      // (same col/row math as _seatOccludersFor) so local + remote + snapshot render the same pose
+      // regardless of the broadcast approach dir. Returns:
+      //  - { pose:'stand' } for computer workstations (GID 606): upright standing DOWN frame. The
+      //    desk + monitor in front hide the legs, so it reads as seated with the face visible —
+      //    the owner-approved look; do NOT swap it for a sit sheet.
+      //  - { pose:'sit3', flip } for the baked-in manager-desk chairs: the real seated DOWN sheet,
+      //    mirrored so the legs angle TOWARD the desk (blue chair sits LEFT of its desk -> legs
+      //    right, unflipped; green chair sits RIGHT of its desk -> flipped, legs left). These
+      //    chairs are side-on with nothing occluding the body, so a standing frame there reads as
+      //    "standing on the chair" — they need a genuine seated pose.
+      //  - null for every other seat (approach-based directional sit anims).
+      _deskPoseAt(x, y) {
         const col = Math.round((x - 24) / 48);
         const row = Math.round((y - 24 + BODY_DY) / 48);
         const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
-        return gid === 606 || deskChairAt(gid, col, row) !== null;
+        if (gid === 606) return { pose: 'stand' };
+        const desk = deskChairAt(gid, col, row);
+        if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
+        return null;
       }
       _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
 
@@ -2243,9 +2256,12 @@
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
         let occluders = null;
         if (data.anim === 'sit') {
-          if (this._isFaceForwardSeatAt(data.x, data.y)) {
-            // Desk-type seats: standing DOWN frame (face visible); the occluder hides the legs.
-            sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START.down);
+          const dp = this._deskPoseAt(data.x, data.y);
+          if (dp) {
+            // Desk-type seat: 606 -> standing DOWN frame; manager desk -> sit3 toward the desk.
+            const dsk = `sit_${texKey}_down`;
+            if (dp.pose === 'sit3' && this.anims.exists(dsk)) { sprite.setFlipX(dp.flip === true); sprite.play(dsk); }
+            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START.down); }
           } else {
             const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
             if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
@@ -2366,7 +2382,7 @@
         if (doAction) {
           if (this.sitting) {
             this.sitting = false;
-            this._sitFaceForward = false;
+            this._deskPose = null;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = [];
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
@@ -2386,13 +2402,16 @@
             // origin sits BODY_DY above it, so the character rests IN the chair.
             player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
-            // Desk-type seats (computer workstations 606 + the baked-in manager-desk chairs) seat
-            // you facing the desk, so force face-forward: render the standing DOWN frame (see the
-            // sitting block below). Every other seat keeps the approach facing you walked in with.
-            // Detection matches _isFaceForwardSeatAt so remote viewers render the same pose.
+            // Desk-type seats face the desk: 606 workstations render the standing DOWN frame,
+            // manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the sitting
+            // block below — detection matches _deskPoseAt so remote viewers render the same pose).
+            // Every other seat keeps the approach facing you walked in with.
             const seatGid = furnAt(s.col, s.row);
-            this._sitFaceForward = seatGid === 606 || deskChairAt(seatGid, s.col, s.row) !== null;
-            this.lastDir = this._sitFaceForward ? 'down' : interact.dir;
+            const deskInfo = deskChairAt(seatGid, s.col, s.row);
+            this._deskPose = seatGid === 606 ? { pose: 'stand' }
+                           : deskInfo        ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
+                           : null;
+            this.lastDir = this._deskPose ? 'down' : interact.dir;
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);
@@ -2401,16 +2420,21 @@
 
         if (this.sitting) {
           player.setVelocity(0,0);
-          if (this._sitFaceForward) {
-            // Desk-type seats (606 computers + manager desks): show the standing DOWN idle frame —
-            // the face is visible looking at the desk, and the desk occluder hides the legs so it
-            // still reads as sitting. No seated sit sheet faces the viewer (the down-sit bows the
-            // head and angles the legs right, which reads as "facing right"), so we use the upright
-            // standing frame instead.
-            player.setTexture(this.playerTexKey);
-            player.setFlipX(false);
-            player.anims.stop();
-            player.setFrame(DIR_START.down);
+          if (this._deskPose) {
+            // Desk-type seat: 606 workstations show the upright standing DOWN idle frame — the
+            // desk + monitor hide the legs so it reads as seated with the face visible (the
+            // approved look). Manager-desk chairs are side-on with nothing occluding the body, so
+            // they play the real seated sit3 sheet mirrored toward the desk instead.
+            const deskSit = `sit_${texKey}_down`;
+            if (this._deskPose.pose === 'sit3' && this.anims.exists(deskSit)) {
+              player.setFlipX(this._deskPose.flip === true);
+              if (player.anims.currentAnim?.key !== deskSit || !player.anims.isPlaying) player.play(deskSit);
+            } else {
+              player.setTexture(this.playerTexKey);
+              player.setFlipX(false);
+              player.anims.stop();
+              player.setFrame(DIR_START.down);
+            }
           } else {
             // Every character has real directional sit animations (left mirrors the right sheet).
             const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;

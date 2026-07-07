@@ -1,4 +1,4 @@
-- [JPO Huddle seated facing](jpo-huddle-sit-facing.md) — sitting is approach-based; desk seats (606 + manager desks) render the upright STANDING DOWN frame, NOT sit3 (sit3 reads as "facing right").
+- [JPO Huddle seated facing](jpo-huddle-sit-facing.md) — approach-based sitting; computers (606) = STANDING DOWN frame, manager desks = sit3-down mirrored toward desk; anim persists in DB.
 - [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — 4-dir run + 3-sheet directional sit, insertion-order depth, sit-facing pins per-GID but conference chairs need per-tile facing.
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD (boardId=roomId#n from clustering); walk-up post/admin-delete; E-press, "!" badge, panel all key off one clustering pass.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ clothesIdx fallback; clothes match post-hair/skin snapshot.
