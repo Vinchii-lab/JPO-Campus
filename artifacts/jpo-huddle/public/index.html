@@ -788,7 +788,12 @@
         const bp = fam.gids[gid];
         if (!bp) continue;
         const oc = c - bp[0], or = r - bp[1];       // block origin (top-left cell)
-        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: fam.facing };
+        // fam.facing records the chair's TRUE orientation (into the desk: blue->right,
+        // green->left). Product decision: seat the avatar facing DOWN (toward the viewer)
+        // anyway, so you see its face instead of a side profile. This is safe because the
+        // manager-desk occluders derive their cells from the desk block geometry, NOT from
+        // `facing` (only the 606-workstation branch of _makeSeatOccluders reads facing).
+        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: 'down' };
       }
       return null;
     };
