@@ -3,3 +3,4 @@
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ clothesIdx fallback; clothes match post-hair/skin snapshot.
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp; full register→approve→buy→restart→restore loop.
 - [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — reach the "playing" state without admin by seeding an approved jpo_players row with a LOWERCASED email (server lowercases identity → auto-restore); ?touch=1 forces mobile controls on non-touch browsers.
+- [JPO Huddle seated "facing right" reports](jpo-huddle-sit-facing.md) — 606 desk chairs resolve to 'down' (verified at runtime); recurring "faces right when sitting" is the down-sit ART head-tilt, not a resolution bug. Verify facing at runtime, not from the low-res screenshot.
