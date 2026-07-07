@@ -1,59 +1,67 @@
 ---
 name: JPO Huddle seated facing
-description: Seated avatars keep the player's pre-sit direction (approach-based), EXCEPT computer workstations (GID 606) which force face-forward down using the standing frame.
+description: Seated avatars keep the player's pre-sit direction (approach-based), EXCEPT desk-type seats (computer workstations GID 606 + manager-desk baked chairs) which force the face-visible DOWN sit3 pose.
 ---
 
-# Seated facing is APPROACH-BASED — EXCEPT computer workstations face the monitor
+# Seated facing is APPROACH-BASED — EXCEPT desk-type seats face the viewer (sit3 down)
 
 When a player sits, the avatar keeps whatever direction it was facing when it pressed sit.
-Face left → sit facing left; face down → sit facing down; etc. This holds for sofas/benches,
-conference chairs, and manager desks.
+Face left → sit facing left; face down → sit facing down; etc. This holds for sofas/benches and
+conference chairs.
 
-## Exception: computer workstations (GID 606) → forced face-forward DOWN, STANDING frame
-At a 606 computer seat the avatar is forced to face DOWN (toward the monitor) AND rendered with
-the **standing down idle frame** (`DIR_START.down`), NOT any seated sit sheet.
+## Exception: desk-type seats → forced face-forward DOWN sit3 pose
+Computer workstations (GID 606) AND the baked-in manager-desk chairs seat you facing the desk, so
+the avatar is forced to face DOWN and render the **`*_sit3` (down) seated sheet** — the ONLY seated
+pose whose face is visible.
 
-**Why:** the owner wants to SEE THE FACE while working at a computer (confirmed with a reference
-screenshot of the standing down pose at a desk). None of the seated sheets show a front face — the
-down-sit `*_sit3` is a bowed head that reads as "right", up-sit is the back of the head, and
-right/left are profiles. The ONLY face-forward down pose in the art is the standing idle frame. The
-desk/monitor occluder (depth 900, redrawn over the chair cell + one forward cell) hides the legs, so
-a standing frame at the seat still reads as "sitting at the desk facing the screen".
-
-**How to apply:**
-- Detection is by SEAT GID, not sprite facing: `_sitFaceForward = (furnAt(seatCol,seatRow) === 606)`
-  locally; `_isFaceForwardSeatAt(x,y)` (reuses `_seatOccludersFor`'s col/row math) for REMOTE players
-  and the join snapshot, so everyone renders the same thing. Set on sit, cleared on stand-up.
-- The face-forward render is: `setTexture(playerTexKey/entry.texKey)` + `anims.stop()` +
-  `setFrame(DIR_START.down)`. Do NOT play a sit anim for 606.
-- Broadcast stays `{dir:'down', anim:'sit'}` so the SERVER's `anim==='sit'` seat-snap movement
-  allowance is unaffected — do not change the broadcast to 'idle'/'walk' or the snap gets rejected.
-- Do NOT "restore" approach-based facing for 606 thinking the forced-down is a bug — it is the
-  deliberate face-the-monitor choice. (This is the one place forced facing is intentional.)
-
-**Rule:** the `sit` handler assigns `this.lastDir = interact.dir` (the pre-sit / approach direction),
-NOT the seat's baked `facing`. `interact.dir` is `this.lastDir` when standing on a walkable seat or
-manager desk, or the scanned direction toward a neighbor seat (scan tries `this.lastDir` first, so a
-seat in your facing direction preserves your facing).
-
-**Why:** the earlier blanket baked-facing model (every seat forced to a per-GID direction) was
-unpredictable, so approach-based facing replaced it for sofas/benches, conference chairs, and manager
-desks. Computers (606) are the ONE deliberate exception (see the section above): the bowed down-sit
-`*_sit3` pose leans slightly right and read as "always facing right", so 606 uses the standing
-face-forward frame instead. Do not reinstate blanket forced facing for the NON-606 seats.
+**Why:** the owner wants to SEE THE FACE at a desk (confirmed with reference screenshots) and loves
+the sit3 look (face visible, legs tucked). The other seated sheets do NOT show a front face —
+right/left `*_sit` are hunched SIDE PROFILES (no face; this is what looked "WTF" at the ops manager
+desk), and up `*_sit2` is the back of the head. sit3 (down) IS a proper front-facing seated pose.
+(Correcting an earlier MISTAKEN belief that "no seated sprite faces the viewer" — that led to a
+now-removed workaround which rendered the STANDING down idle frame at 606. Do NOT reintroduce a
+standing frame for seated desks; sit3 is the correct, better-looking seated pose.)
 
 **How to apply:**
-- The seat object's `facing` field (`SEAT_FACING` / `seatFacingAt` / `fam.facing`) is now vestigial for
+- Detection is by SEAT GID, not sprite facing:
+  `_sitFaceForward = seatGid===606 || deskChairAt(seatGid,col,row)!==null` locally on sit;
+  `_isFaceForwardSeatAt(x,y)` uses the IDENTICAL predicate (reusing `_seatOccludersFor`'s col/row
+  math) for REMOTE players and the join snapshot, so everyone renders the same pose regardless of
+  the broadcast approach dir. `deskChairAt` is module-level and in scope everywhere it's used.
+- Render goes through the NORMAL sit path: force the direction to `down` (`this.lastDir='down'`
+  locally; `sdir = faceForward ? 'down' : approachDir` for remote/snapshot) and play
+  `sit_${texKey}_down`. There is no special standing-frame branch anymore.
+- Occluders stay tied to the SEAT, not the sprite (see below), so they still hide the lower body —
+  the face/upper body shows above the desk. Remote occluders still take the broadcast `rdir`; the
+  desk branches ignore it, so that's fine.
+- Broadcast stays `{dir:lastDir, anim:'sit'}` (dir is 'down' at desks). The SERVER's seat-snap
+  movement allowance keys on `anim==='sit'` only — do not change the broadcast to 'idle'/'walk'.
+
+**Rule:** the `sit` handler assigns `this.lastDir = _sitFaceForward ? 'down' : interact.dir`, where
+`interact.dir` is the pre-sit/approach direction (`this.lastDir` when standing on a walkable seat, or
+the scanned direction toward a neighbour seat; the scan tries `this.lastDir` first). Do NOT wire the
+sprite to the seat's baked `facing`.
+
+**Why (non-desk seats):** the old blanket baked-facing model (every seat forced to a per-GID
+direction) was unpredictable, so approach-based facing replaced it for the non-desk seats. Only
+desk-type seats force facing, and now they force DOWN sit3 (not a standing frame). Do not reinstate
+blanket forced facing for non-desk seats.
+
+**How to apply (occluders):**
+- The seat object's `facing` field (`SEAT_FACING` / `seatFacingAt` / `fam.facing`) is vestigial for
   the SPRITE — it does not drive which way the avatar looks. Don't wire the sprite back to it.
-- Occluders must stay tied to the SEAT, not the sprite. `_makeSeatOccluders` ignores its `facing` param:
-  the manager-desk branch derives overlay cells from desk BLOCK geometry (`deskFam.gids`/`deskFam.chair`),
-  and the `606` workstation branch derives the desk-front cell from `SEAT_FACING[seatGid]` (='down').
-  This is essential for REMOTE players: they rebuild occluders via `_seatOccludersFor(x,y,rdir)` where
-  `rdir` is the broadcast SPRITE dir — if the occluder read that, an up/left sitter would mis-occlude.
-- All four directions have sit anims for every character (`SIT_DIR` collapses left→right sheet with
-  `setFlipX`), so any approach direction renders fine.
+- `_makeSeatOccluders` ignores its `facing` param: the manager-desk branch derives overlay cells from
+  desk BLOCK geometry (`deskFam.gids`/`deskFam.chair`), and the 606 branch derives the desk-front
+  cell from `SEAT_FACING[seatGid]` (='down'). Essential for REMOTE players (they rebuild via
+  `_seatOccludersFor(x,y,rdir)` with the broadcast dir) so an up/left sitter can't mis-occlude.
+
+## Removed operations lounge couch (deliberate, not a bug)
+A side-view sofa in the operations lounge (its only usable pose would be the disliked hunched side
+profile) was removed at the owner's request. It's deleted at scene create via GID-keyed
+`furnitureLayer.removeTileAt` for its tileset GIDs (they appear ONLY at that couch), so it stays gone
+across the periodic Tiled re-import. Do NOT "restore" it thinking the map lost furniture.
 
 ## General
-Any real change to seated ART is high-risk — see jpo-huddle-palette.md (`_sitZones`/`SIT_ANATOMY`). The
-down-sit (`*_sit3`) and right-sit (`*_sit`) poses look near-identical at game res (both bowed-head), so
-the low-res screenshot is a poor oracle for facing — confirm resolution in code or a runtime log.
+Any real change to seated ART is high-risk — see jpo-huddle-palette.md (`_sitZones`/`SIT_ANATOMY`).
+Confirm pose facing from the tileset/sit sheets in code (crop the actual PNG), not from a low-res
+in-game screenshot: sit3 (down, face visible) vs `*_sit` (side profile) look similar at game res.
