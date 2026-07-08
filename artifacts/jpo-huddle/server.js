@@ -881,6 +881,31 @@ io.on("connection", (socket) => {
     io.emit("playerEmote", { id: socket.id, emote });
   });
 
+  // ── Private whispers (DMs) — delivered ONLY to the target, echoed to sender ──
+  // The client resolves the display name to a specific socket id via its online
+  // roster (autocomplete), so name collisions are settled in the UI; the server
+  // just validates the id is a live player. Shares chatBucket with public chat
+  // so the combined message rate is what's limited. In-session only (no DB).
+  socket.on("whisper", (payload) => {
+    const { targetId, message } = payload || {};
+    const sender = players[socket.id];
+    if (!sender) return;
+    if (!takeToken(chatBucket)) return;   // same throttle as public chat (shared bucket)
+    const text = (typeof message === "string" ? message : "").trim().slice(0, 120);
+    if (!text || typeof targetId !== "string") return;
+    if (targetId === socket.id) {
+      socket.emit("whisperFailed", { message: "You can't DM yourself." });
+      return;
+    }
+    const target = players[targetId];
+    if (!target) {
+      socket.emit("whisperFailed", { message: "They're not in the office right now." });
+      return;
+    }
+    io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, message: text });
+    socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
+  });
+
   // ── Announcements (admin / designated announcers post, broadcast to all) ──
   socket.on("postAnnouncement", async (payload) => {
     const { text, board } = payload || {};

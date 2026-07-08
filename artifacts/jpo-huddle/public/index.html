@@ -403,7 +403,7 @@
     /* Touch layout: the joystick owns the bottom-left corner, so the emote bar
        collapses behind a 😀 toggle stacked above the chat button on the right. */
     body.touch-device #emote-bar {
-      left: auto; right: 26px; bottom: 296px;
+      left: auto; right: 26px; bottom: 368px;
       flex-wrap: wrap; width: 108px; justify-content: center; padding: 6px;
     }
     body.touch-device.playing #emote-bar { display: none; }
@@ -422,6 +422,82 @@
     }
     body.touch-device.playing.chatting #emote-toggle { display: none; }
     #emote-toggle:active { background: rgba(0,0,0,0.8); }
+
+    /* ── DM (whisper) composer ── */
+    #dm-bar {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 210; display: none; align-items: center; gap: 10px;
+      background: rgba(30,18,50,0.92); border: 1px solid rgba(167,139,250,0.5);
+      border-radius: 10px; padding: 10px 18px; font-family: monospace;
+      backdrop-filter: blur(4px); box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    #dm-bar.open { display: flex; }
+    #dm-bar .dm-label { color: #a78bfa; font-size: 13px; white-space: nowrap; }
+    #dm-to {
+      width: 130px; background: transparent; border: none;
+      border-bottom: 1px solid rgba(167,139,250,0.55);
+      color: #e9d5ff; font-size: 14px; font-family: monospace; outline: none; padding: 2px 0;
+    }
+    #dm-to::placeholder { color: rgba(233,213,255,0.35); }
+    #dm-input {
+      width: 280px; background: transparent; border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.25);
+      color: #fff; font-size: 15px; font-family: monospace; outline: none; padding: 2px 0;
+    }
+    #dm-input::placeholder { color: rgba(255,255,255,0.35); }
+    #dm-suggest {
+      position: absolute; bottom: calc(100% + 6px); left: 14px;
+      min-width: 230px; display: none; flex-direction: column;
+      background: rgba(30,18,50,0.97); border: 1px solid rgba(167,139,250,0.5);
+      border-radius: 8px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    #dm-suggest.open { display: flex; }
+    .dm-sug {
+      background: none; border: none; text-align: left; cursor: pointer;
+      padding: 8px 12px; color: #ddd; font-family: monospace; font-size: 13px;
+    }
+    .dm-sug:hover { background: rgba(167,139,250,0.22); }
+    .dm-sug small { color: #8b7bb8; margin-left: 8px; font-size: 10px; }
+    #dm-error {
+      position: absolute; bottom: calc(100% + 6px); left: 14px; display: none;
+      background: rgba(60,18,24,0.95); border: 1px solid rgba(231,76,60,0.5);
+      border-radius: 8px; padding: 7px 12px; color: #f5b7b1;
+      font-family: monospace; font-size: 12px; max-width: 340px;
+    }
+    #dm-error.open { display: block; }
+
+    /* ── DM log feed (whispers are in-session only) ── */
+    #dm-log {
+      position: fixed; top: 60px; right: 14px; z-index: 220;
+      display: none; flex-direction: column; gap: 6px; max-width: 320px;
+    }
+    body.playing #dm-log { display: flex; }
+    .dm-msg {
+      background: rgba(30,18,50,0.9); border-left: 3px solid #a78bfa;
+      border-radius: 8px; padding: 8px 12px; font-family: monospace;
+      font-size: 12px; color: #e9d5ff; word-break: break-word;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    }
+    .dm-msg .dm-who { color: #c4b5fd; font-weight: bold; }
+    .dm-msg.in { cursor: pointer; }
+    .dm-msg.in:hover { background: rgba(48,30,76,0.95); }
+    .dm-msg.out { border-left-color: #6d6a8a; color: #cfcae0; opacity: 0.88; }
+    .dm-msg.out .dm-who { color: #a3a0bf; }
+    .dm-msg.err { border-left-color: #e74c3c; color: #f5b7b1; }
+
+    /* Touch: DM button in the right-side column (above the emote toggle);
+       the emote bar opens above it. */
+    #touch-dm { display: none; }
+    body.touch-device.playing #touch-dm {
+      display: flex; position: fixed; right: 26px; bottom: 296px; z-index: 250;
+      width: 62px; height: 62px; border-radius: 50%; font-size: 22px;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.touch-device.playing.chatting #touch-dm { display: none; }
+    #touch-dm:active { background: rgba(0,0,0,0.8); }
 
     /* Chat send/close buttons — only shown on touch devices */
     .chat-touch-btn {
@@ -443,6 +519,10 @@
       #shop-card { min-width: 0; width: 100%; max-width: 420px; padding: 24px 20px; }
       #chat-bar { max-width: calc(100vw - 20px); padding: 10px 12px; gap: 8px; }
       #chat-input { width: auto; flex: 1; min-width: 0; }
+      #dm-bar { max-width: calc(100vw - 20px); padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+      #dm-to { width: 100px; }
+      #dm-input { width: auto; flex: 1; min-width: 120px; }
+      #dm-log { max-width: min(320px, calc(100vw - 100px)); }
     }
   </style>
 </head>
@@ -622,12 +702,25 @@
     <button id="chat-send" class="chat-touch-btn" type="button" aria-label="Send">➤</button>
     <button id="chat-close" class="chat-touch-btn" type="button" aria-label="Close">✕</button>
   </div>
-  <div id="chat-hint">[T] chat</div>
+  <div id="chat-hint">[T] chat · [Tab] DM</div>
+
+  <!-- ── DM (whisper) composer + log feed ── -->
+  <div id="dm-bar">
+    <div id="dm-suggest"></div>
+    <div id="dm-error"></div>
+    <span class="dm-label">🤫 To:</span>
+    <input id="dm-to" type="text" placeholder="name…" maxlength="24" autocomplete="off" />
+    <input id="dm-input" type="text" placeholder="Private message… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
+    <button id="dm-send" class="chat-touch-btn" type="button" aria-label="Send DM">➤</button>
+    <button id="dm-close" class="chat-touch-btn" type="button" aria-label="Close DM">✕</button>
+  </div>
+  <div id="dm-log"></div>
 
   <!-- ── On-screen touch controls (mobile) ── -->
   <div id="touch-controls">
     <div id="touch-joystick"><div id="touch-knob"></div></div>
     <button id="touch-chat" type="button" aria-label="Open chat">💬</button>
+    <button id="touch-dm" type="button" aria-label="Send a private message">🤫</button>
     <button id="touch-action" type="button" class="disabled">E</button>
   </div>
 
@@ -1564,6 +1657,7 @@
 
     function openChat() {
       if (_chatOpen) return;
+      if (_dmOpen) closeDM();   // chat and the DM composer are mutually exclusive
       _chatOpen = true;
       document.body.classList.add('chatting');
       touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
@@ -1584,7 +1678,8 @@
     }
 
     document.addEventListener('keydown', e => {
-      if ((e.key === 't' || e.key === 'T') && !_chatOpen
+      if ((e.key === 't' || e.key === 'T') && !_chatOpen && !_dmOpen
+          && !document.getElementById('shop-modal').classList.contains('open')
           && document.activeElement.tagName !== 'INPUT') {
         e.preventDefault(); openChat();
       }
@@ -1645,11 +1740,226 @@
       if (n >= 1 && n <= EMOTES.length) { e.preventDefault(); sendEmote(EMOTES[n - 1].id); }
     });
 
+    // ── Private DMs (whispers) ─────────────────────────────────────────
+    // In-session only: whispers are never persisted. The composer resolves a
+    // display name to ONE specific live session (socket id) via the online
+    // roster below, so name collisions are settled here, not on the server.
+    let _dmOpen = false;
+    let _dmTargetId = null;   // socket id picked via autocomplete / avatar click
+    const dmBar     = document.getElementById('dm-bar');
+    const dmTo      = document.getElementById('dm-to');
+    const dmInput   = document.getElementById('dm-input');
+    const dmSuggest = document.getElementById('dm-suggest');
+    const dmError   = document.getElementById('dm-error');
+    const dmLog     = document.getElementById('dm-log');
+
+    // Online roster (id → {name, character}), maintained at DOM level from the
+    // same socket events the scene consumes (socket.io supports multiple
+    // listeners). Skips ourselves AND a stale ghost copy of our own email that
+    // can briefly linger during a reconnect (same rule as _addOtherPlayer).
+    const _online = {};
+    function _rosterSkip(id, d) {
+      if (id === socket.id) return true;
+      return !!(_playerEmail && d && d.email && d.email === _playerEmail);
+    }
+    socket.on('currentPlayers', (all) => {
+      Object.keys(_online).forEach(k => delete _online[k]);
+      Object.entries(all).forEach(([id, d]) => {
+        if (!_rosterSkip(id, d)) _online[id] = { name: d.name || '?', character: d.character || '' };
+      });
+    });
+    socket.on('playerJoined', (d) => {
+      if (d && d.id && !_rosterSkip(d.id, d)) _online[d.id] = { name: d.name || '?', character: d.character || '' };
+    });
+    socket.on('playerLeft', (id) => { delete _online[id]; });
+
+    function _dmSetError(msg) {
+      dmError.textContent = msg || '';
+      dmError.classList.toggle('open', !!msg);
+      if (msg) _dmHideSuggest();
+    }
+    function _dmHideSuggest() { dmSuggest.classList.remove('open'); dmSuggest.innerHTML = ''; }
+
+    function _dmMatches(q) {
+      const s = (q || '').trim().toLowerCase();
+      return Object.entries(_online).filter(([, p]) => !s || p.name.toLowerCase().includes(s));
+    }
+
+    // Rebuild the suggestion dropdown from the current input. Each row is a
+    // SPECIFIC session — picking one binds _dmTargetId, so two people with the
+    // same display name stay distinguishable (character tag shown as a hint).
+    function _dmShowSuggest() {
+      _dmSetError('');
+      const items = _dmMatches(dmTo.value).slice(0, 8);
+      dmSuggest.innerHTML = '';
+      if (!items.length) { _dmHideSuggest(); return; }
+      items.forEach(([id, p]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'dm-sug';
+        b.textContent = p.name;                       // textContent — names are user data
+        if (p.character) {
+          const tag = document.createElement('small');
+          tag.textContent = p.character;
+          b.appendChild(tag);
+        }
+        b.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          _dmTargetId = id;
+          dmTo.value = p.name;
+          _dmHideSuggest();
+          dmInput.focus();
+        });
+        dmSuggest.appendChild(b);
+      });
+      dmSuggest.classList.add('open');
+    }
+
+    function openDM(prefillId) {
+      if (_dmOpen) return;
+      if (_chatOpen) closeChat();
+      _dmOpen = true;
+      document.body.classList.add('chatting');   // reuse all "typing" CSS behavior
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      dmBar.classList.add('open');
+      _dmSetError('');
+      dmInput.value = '';
+      if (prefillId && _online[prefillId]) {
+        _dmTargetId = prefillId;
+        dmTo.value = _online[prefillId].name;
+        _dmHideSuggest();
+        setTimeout(() => dmInput.focus(), 30);
+      } else {
+        _dmTargetId = null;
+        dmTo.value = '';
+        _dmHideSuggest();
+        setTimeout(() => dmTo.focus(), 30);
+      }
+    }
+    function closeDM() {
+      _dmOpen = false;
+      _dmTargetId = null;
+      document.body.classList.remove('chatting');
+      dmBar.classList.remove('open');
+      _dmHideSuggest(); _dmSetError('');
+      document.querySelector('canvas')?.focus();
+    }
+
+    // Resolve the recipient to one socket id. A dropdown pick wins; otherwise
+    // fall back to the typed name (unique exact match, then unique partial).
+    function _dmResolveTarget() {
+      if (_dmTargetId && _online[_dmTargetId]) return _dmTargetId;
+      _dmTargetId = null;
+      const typed = dmTo.value.trim();
+      if (!typed) { _dmSetError('Who is it for? Type a name or pick from the list.'); dmTo.focus(); return null; }
+      const s = typed.toLowerCase();
+      const exact = Object.entries(_online).filter(([, p]) => p.name.toLowerCase() === s);
+      if (exact.length === 1) return exact[0][0];
+      if (exact.length > 1) { _dmSetError(`Several people are named “${typed}” — pick one from the list.`); _dmShowSuggest(); dmTo.focus(); return null; }
+      const partial = _dmMatches(s);
+      if (partial.length === 1) return partial[0][0];
+      if (partial.length > 1) { _dmSetError(`A few names match “${typed}” — pick one from the list.`); _dmShowSuggest(); dmTo.focus(); return null; }
+      _dmSetError(`No one named “${typed}” is in the office right now.`);
+      dmTo.focus();
+      return null;
+    }
+
+    function sendDM() {
+      const target = _dmResolveTarget();
+      if (!target) return;
+      const msg = dmInput.value.trim();
+      if (!msg) { dmInput.focus(); return; }
+      socket.emit('whisper', { targetId: target, message: msg });
+      closeDM();
+    }
+
+    // Session-only DM feed (top-right). Entries fade after a while; received
+    // whispers are clickable to reply.
+    function _dmLogAdd(kind, who, text, fromId) {
+      const div = document.createElement('div');
+      div.className = 'dm-msg ' + kind;   // 'in' | 'out' | 'err'
+      if (kind !== 'err') {
+        const whoSpan = document.createElement('span');
+        whoSpan.className = 'dm-who';
+        whoSpan.textContent = kind === 'in' ? `(whisper) ${who}: ` : `(to ${who}): `;
+        div.appendChild(whoSpan);
+      }
+      div.appendChild(document.createTextNode(text));   // textContent path — never innerHTML
+      if (kind === 'in' && fromId) {
+        div.title = 'Click to reply';
+        div.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          if (!_dmOpen && !_chatOpen && document.body.classList.contains('playing')) openDM(fromId);
+        });
+      }
+      dmLog.appendChild(div);
+      while (dmLog.children.length > 6) dmLog.removeChild(dmLog.firstChild);
+      setTimeout(() => {
+        div.style.transition = 'opacity 1s';
+        div.style.opacity = '0';
+        setTimeout(() => div.remove(), 1000);
+      }, kind === 'err' ? 6000 : 14000);
+    }
+
+    socket.on('whisper', (payload) => {
+      const { fromId, fromName, message } = payload || {};
+      if (typeof message !== 'string' || !message) return;
+      _dmLogAdd('in', fromName || '?', message, fromId);
+      // Also show a purple whisper bubble over the sender's avatar if visible.
+      if (fromId && window._gameScene) window._gameScene._showWhisperBubble(fromId, message);
+    });
+    socket.on('whisperSent', (payload) => {
+      const { toName, message } = payload || {};
+      if (typeof message !== 'string' || !message) return;
+      _dmLogAdd('out', toName || '?', message);
+    });
+    socket.on('whisperFailed', (payload) => {
+      const { message } = payload || {};
+      _dmLogAdd('err', '', message || "They're not in the office right now.");
+    });
+
+    // Tab opens the composer — ONLY while playing and never while typing in a
+    // field (Tab must keep doing normal focus-nav inside forms/modals).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen) return;
+      if (document.getElementById('shop-modal').classList.contains('open')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      openDM();
+    });
+    dmTo.addEventListener('input', () => { _dmTargetId = null; _dmShowSuggest(); });
+    dmTo.addEventListener('focus', () => { if (_dmOpen) _dmShowSuggest(); });
+    dmTo.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  {
+        e.preventDefault(); e.stopPropagation();
+        // A unique match locks in on Enter so keyboard-only flow needs no click.
+        const items = _dmMatches(dmTo.value);
+        if (!_dmTargetId && items.length === 1) { _dmTargetId = items[0][0]; dmTo.value = items[0][1].name; }
+        _dmHideSuggest();
+        dmInput.focus();
+      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDM(); }
+      e.stopPropagation();
+    });
+    dmInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendDM(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDM(); }
+      e.stopPropagation();
+    });
+
     // ── On-screen touch controls (joystick + action/chat buttons) ──────
     if (IS_TOUCH) {
       // Send / close buttons in the chat bar (mobile keyboards have no Esc key).
       document.getElementById('chat-send')?.addEventListener('pointerdown', e => { e.preventDefault(); sendChat(); });
       document.getElementById('chat-close')?.addEventListener('pointerdown', e => { e.preventDefault(); closeChat(); });
+
+      // DM composer send/close + the floating DM button.
+      document.getElementById('dm-send')?.addEventListener('pointerdown', e => { e.preventDefault(); sendDM(); });
+      document.getElementById('dm-close')?.addEventListener('pointerdown', e => { e.preventDefault(); closeDM(); });
+      document.getElementById('touch-dm')?.addEventListener('pointerdown', e => { e.preventDefault(); openDM(); });
 
       // Floating chat + action buttons.
       document.getElementById('touch-chat')?.addEventListener('pointerdown', e => { e.preventDefault(); openChat(); });
@@ -2478,12 +2788,13 @@
         }).setOrigin(0.5,1).setDepth(990);
       }
 
-      _showChatBubble(sprite, message, isLocal) {
+      _showChatBubble(sprite, message, isLocal, isWhisper) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
         const yOff  = isLocal ? (this.localCrown ? -95 : -78) : -85;
         const bubble = this.add.text(sprite.x, sprite.y+yOff, message, {
-          fontSize:'14px', fontFamily:'monospace', color:'#111',
-          backgroundColor:'#ffffffee', padding:{x:10,y:7},
+          fontSize:'14px', fontFamily:'monospace',
+          color: isWhisper ? '#e9d5ff' : '#111',
+          backgroundColor: isWhisper ? '#2e1b4de6' : '#ffffffee', padding:{x:10,y:7},
           wordWrap:{width:220}, resolution:2,
         }).setOrigin(0.5,1).setDepth(1002);
         this.tweens.add({
@@ -2492,6 +2803,16 @@
         });
         if (isLocal) this.localBubble = bubble;
         return bubble;
+      }
+
+      // Whisper bubble over the SENDER's avatar — only the recipient ever
+      // receives the event, so nothing leaks to bystanders. Reuses the shared
+      // chat-bubble slot so follow-the-player positioning keeps working.
+      _showWhisperBubble(fromId, message) {
+        const entry = this.otherPlayers[fromId];
+        if (!entry) return;
+        if (entry.chatBubble) entry.chatBubble.destroy();
+        entry.chatBubble = this._showChatBubble(entry.sprite, '🤫 ' + message, false, true);
       }
 
       // Emote bubbles reuse the chat-bubble slot (this.localBubble /
@@ -2574,6 +2895,14 @@
           sprite.setFrame(DIR_START[dir]);
         }
 
+        // Clicking someone opens the DM composer pre-addressed to them.
+        // Listener dies with the sprite on destroy — no cleanup bookkeeping.
+        sprite.setInteractive({ useHandCursor: true });
+        sprite.on('pointerdown', () => {
+          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
+              && !_ownerPanelOpen && !_boardPanelOpen) openDM(id);
+        });
+
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
         let crown = null;
@@ -2612,7 +2941,7 @@
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCrown?-95:-78));
 
-        if (_chatOpen || _ownerPanelOpen || _boardPanelOpen) {
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen) {
           player.setVelocity(0,0);
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
