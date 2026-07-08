@@ -623,6 +623,59 @@
     .rps-out.lose { color: #e74c3c; }
     .rps-out.draw { color: #f1c40f; }
 
+    /* Game picker (wager modal + arcade) */
+    #rps-game-row { display: flex; gap: 8px; justify-content: center; margin: 4px 0 14px; }
+    .rps-game {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 10px 4px 8px; font-size: 19px; cursor: pointer;
+      background: #26263c; border: 2px solid #444; border-radius: 10px; color: #eee;
+      font-family: monospace; -webkit-tap-highlight-color: transparent;
+    }
+    .rps-game span { font-size: 10px; color: #aaa; }
+    .rps-game:hover { border-color: #6c63ff; }
+    .rps-game.picked { border-color: #6c63ff; background: #2c2650; }
+
+    /* Tic-Tac-Toe board (inside #rps-match) */
+    #ttt-board {
+      display: none; grid-template-columns: repeat(3, 64px); gap: 6px;
+      justify-content: center; margin: 14px auto 6px;
+    }
+    #ttt-board.show { display: grid; }
+    .ttt-cell {
+      width: 64px; height: 64px; font-size: 30px; line-height: 1; font-family: monospace;
+      background: #26263c; border: 2px solid #444; border-radius: 10px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent; padding: 0;
+    }
+    #ttt-board.myturn .ttt-cell.empty:hover { border-color: #6c63ff; }
+    #ttt-board:not(.myturn) .ttt-cell { cursor: default; }
+    .ttt-cell.x { color: #6c63ff; }
+    .ttt-cell.o { color: #f1c40f; }
+
+    /* Quick Draw panel (inside #rps-match) */
+    #qd-panel { display: none; margin: 14px 0 6px; }
+    #qd-panel.show { display: block; }
+    #qd-zone {
+      width: 100%; padding: 36px 10px; border-radius: 12px; cursor: pointer;
+      font-family: monospace; font-size: 19px; font-weight: bold; color: #fff;
+      background: #3a2430; border: 2px solid #7a3048;
+      -webkit-tap-highlight-color: transparent; transition: background .08s;
+    }
+    #qd-zone.live { background: #1f5c33; border-color: #2ecc71; font-size: 26px; }
+
+    /* ⚔️ quick-challenge: last slot in the emote bar + a dedicated touch button */
+    .emote-btn.challenge { margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.18); border-radius: 0 8px 8px 0; }
+    #touch-challenge { display: none; }
+    body.touch-device.playing #touch-challenge {
+      display: flex; position: fixed; right: 122px; bottom: 56px; z-index: 250;
+      width: 62px; height: 62px; border-radius: 50%; font-size: 24px;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.touch-device.playing.chatting #touch-challenge { display: none; }
+    #touch-challenge:active { background: rgba(0,0,0,0.8); }
+
     #rps-toast {
       position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000;
       display: none; background: rgba(30,30,48,0.96); border: 1px solid #3a3a5e;
@@ -859,15 +912,22 @@
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
     <button id="rps-menu-dm" type="button">💬 Whisper</button>
-    <button id="rps-menu-challenge" type="button">✊ Challenge</button>
+    <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
   </div>
 
   <div id="rps-wager-modal">
     <div class="rps-card">
       <h3 id="rps-wager-title">Challenge</h3>
-      <p class="rps-sub">Rock · Paper · Scissors</p>
-      <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
-      <input id="rps-wager-input" type="number" min="0" step="1" value="0" inputmode="numeric" autocomplete="off" />
+      <p class="rps-sub" id="rps-wager-sub">Pick a game</p>
+      <div id="rps-game-row">
+        <button class="rps-game picked" data-game="rps" type="button">✊✋✌️<span>Rock·Paper·Scissors</span></button>
+        <button class="rps-game" data-game="ttt" type="button">❌⭕<span>Tic-Tac-Toe</span></button>
+        <button class="rps-game" data-game="qd" type="button">🤠<span>Quick Draw</span></button>
+      </div>
+      <div id="rps-wager-fields">
+        <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
+        <input id="rps-wager-input" type="number" min="0" step="1" value="0" inputmode="numeric" autocomplete="off" />
+      </div>
       <div id="rps-wager-error"></div>
       <div class="rps-btn-row">
         <button id="rps-wager-send" class="rps-btn primary" type="button">Send challenge</button>
@@ -899,6 +959,8 @@
         <button class="rps-pick" data-pick="paper" type="button">✋<span>Paper</span></button>
         <button class="rps-pick" data-pick="scissors" type="button">✌️<span>Scissors</span></button>
       </div>
+      <div id="ttt-board"></div>
+      <div id="qd-panel"><button id="qd-zone" type="button">Wait for it…</button></div>
       <div id="rps-match-status"></div>
       <div id="rps-result" style="display:none">
         <div id="rps-result-picks"></div>
@@ -915,6 +977,7 @@
     <div id="touch-joystick"><div id="touch-knob"></div></div>
     <button id="touch-chat" type="button" aria-label="Open chat">💬</button>
     <button id="touch-dm" type="button" aria-label="Send a private message">🤫</button>
+    <button id="touch-challenge" type="button" aria-label="Challenge nearest player">⚔️</button>
     <button id="touch-action" type="button" class="disabled">E</button>
   </div>
 
@@ -2073,6 +2136,20 @@
         b.addEventListener('pointerdown', ev => { ev.preventDefault(); sendEmote(e.id); });
         bar.appendChild(b);
       });
+      // ⚔️ quick challenge rides in the emote bar (NOT in EMOTES — it isn't an
+      // emote id the server knows about; it opens the challenge flow instead).
+      const cb = document.createElement('button');
+      cb.type = 'button';
+      cb.className = 'emote-btn challenge';
+      cb.setAttribute('aria-label', 'Challenge nearest player');
+      cb.title = 'Challenge the nearest player';
+      cb.textContent = '⚔️';
+      cb.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        if (IS_TOUCH) bar.classList.remove('open');
+        window._quickChallenge?.();
+      });
+      bar.appendChild(cb);
       document.getElementById('emote-toggle')?.addEventListener('pointerdown', ev => {
         ev.preventDefault(); bar.classList.toggle('open');
       });
@@ -2368,16 +2445,28 @@
     // incoming cards intentionally do NOT freeze you: being challenged must
     // never lock someone's avatar in place (that would be a griefing tool).
     let _rpsUiOpen = false;
-    let _rpsPhase = null;          // 'wager' | 'waiting' | 'incoming' | 'picking' | 'result'
+    let _rpsPhase = null;          // 'wager' | 'waiting' | 'incoming' | 'picking' | 'ttt' | 'qd' | 'result'
     let _rpsChallengeId = null;
     let _rpsWagerTargetId = null;
     let _rpsMyPick = null;
-    let _rpsCountTimer = null;     // the ONE live countdown interval (incoming XOR picking)
+    let _rpsCountTimer = null;     // the ONE live countdown interval (incoming XOR in-match)
     let _rpsResultTimer = null;
     let _rpsToastTimer = null;
     let _rpsMenuTargetId = null;
     let _rpsMenuAt = 0;
+    let _rpsGamePick = 'rps';      // game chosen in the wager modal
+    let _rpsArcadeMode = false;    // wager modal doubling as the arcade's game picker
+    let _tttMyMark = '?';
+    let _tttMyTurn = false;
     const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+    // Ids MUST match the server's GAMES allowlist in server.js.
+    const GAME_META = {
+      rps: { icon: '✊✋✌️', label: 'Rock·Paper·Scissors' },
+      ttt: { icon: '❌⭕',   label: 'Tic-Tac-Toe' },
+      qd:  { icon: '🤠',     label: 'Quick Draw' },
+    };
+    // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
+    const CHALLENGE_RANGE_PX = 480;
 
     const rpsMenu = document.getElementById('rps-menu');
     const rpsEl = (id) => document.getElementById(id);
@@ -2409,10 +2498,14 @@
       _rpsStopCount();
       clearTimeout(_rpsResultTimer);
       _rpsPhase = null; _rpsChallengeId = null; _rpsWagerTargetId = null; _rpsMyPick = null;
+      _rpsArcadeMode = false; _tttMyTurn = false;
       rpsEl('rps-wager-modal').classList.remove('open');
+      rpsEl('rps-wager-fields').style.display = '';
       rpsEl('rps-waiting').classList.remove('open');
       rpsEl('rps-incoming').classList.remove('open');
       rpsEl('rps-match').classList.remove('open');
+      rpsEl('ttt-board').classList.remove('show', 'myturn');
+      rpsEl('qd-panel').classList.remove('show');
       _rpsHideMenu();
       if (_rpsUiOpen) {
         _rpsUiOpen = false;
@@ -2448,6 +2541,16 @@
       if (id) openRpsWager(id);
     });
 
+    // Game picker (shared by direct challenges and the arcade cabinet).
+    function _rpsSetGame(g) {
+      _rpsGamePick = g;
+      document.querySelectorAll('.rps-game').forEach((b) => b.classList.toggle('picked', b.dataset.game === g));
+      rpsEl('rps-wager-sub').textContent = GAME_META[g].label;
+    }
+    document.querySelectorAll('.rps-game').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSetGame(b.dataset.game); });
+    });
+
     function openRpsWager(targetId) {
       if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
       const p = _online[targetId];
@@ -2456,8 +2559,11 @@
       if (_dmOpen) closeDM();
       _rpsWagerTargetId = targetId;
       _rpsPhase = 'wager'; _rpsUiOpen = true;
+      _rpsArcadeMode = false;
+      _rpsSetGame('rps');
       rpsEl('rps-wager-title').textContent = 'Challenge ' + p.name;
       rpsEl('rps-wager-error').textContent = '';
+      rpsEl('rps-wager-fields').style.display = '';
       const inp = rpsEl('rps-wager-input');
       inp.value = '0';
       rpsEl('rps-wager-modal').classList.add('open');
@@ -2465,16 +2571,67 @@
       if (!IS_TOUCH) { inp.focus(); inp.select(); }
     }
 
+    // Arcade cabinet: same modal in picker-only mode (always a friendly 0-wager
+    // match — the wager row is hidden). Sends an interact intent, not rpsChallenge;
+    // the server picks the nearest other player standing at the cabinet.
+    function openArcadePicker() {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      _rpsPhase = 'wager'; _rpsUiOpen = true;
+      _rpsArcadeMode = true;
+      _rpsSetGame('rps');
+      rpsEl('rps-wager-title').textContent = '🕹️ Arcade — pick a game';
+      rpsEl('rps-wager-error').textContent = '';
+      rpsEl('rps-wager-fields').style.display = 'none';
+      rpsEl('rps-wager-modal').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+    }
+    window._openArcadePicker = openArcadePicker;   // called from the Phaser E-press
+
+    // ⚔️ quick challenge: nearest online player within range (the server
+    // re-validates range + busy state — this is just target selection).
+    function quickChallenge() {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      const sc = window._gameScene;
+      if (!sc || !sc.player || !sc.otherPlayers) return;
+      let bestId = null, bestD = Infinity;
+      for (const id in sc.otherPlayers) {
+        if (!_online[id]) continue;   // mirrors the DM roster's stale-ghost skip
+        const spr = sc.otherPlayers[id] && sc.otherPlayers[id].sprite;
+        if (!spr) continue;
+        const dx = spr.x - sc.player.x, dy = spr.y - sc.player.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; bestId = id; }
+      }
+      if (!bestId || bestD > CHALLENGE_RANGE_PX * CHALLENGE_RANGE_PX) {
+        _rpsToast('No one close enough — walk up to someone first!');
+        return;
+      }
+      openRpsWager(bestId);
+    }
+    window._quickChallenge = quickChallenge;
+    document.getElementById('touch-challenge')?.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); quickChallenge();
+    });
+
     function _rpsSendChallenge() {
+      if (_rpsArcadeMode) {
+        const g = _rpsGamePick;
+        closeAllRps();
+        socket.emit('interact', { object: 'arcade', game: g });   // server re-checks proximity + partner
+        return;
+      }
       const inp = rpsEl('rps-wager-input');
       const err = rpsEl('rps-wager-error');
       const w = parseInt(inp.value, 10);
       if (!Number.isInteger(w) || w < 0) { err.textContent = 'Wager must be 0 or more.'; return; }
       if (w > _playerCoins) { err.textContent = 'You only have ' + _playerCoins + ' 🪙.'; return; }
       const targetId = _rpsWagerTargetId;
+      const game = _rpsGamePick;
       closeAllRps();
       _rpsPhase = 'waiting';   // hold the slot until rpsChallengeSent/Failed answers
-      socket.emit('rpsChallenge', { targetId, wager: w });
+      socket.emit('rpsChallenge', { targetId, wager: w, game });
     }
     rpsEl('rps-wager-send').addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSendChallenge(); });
     rpsEl('rps-wager-cancel').addEventListener('pointerdown', (e) => { e.preventDefault(); closeAllRps(); });
@@ -2521,6 +2678,51 @@
       else if (rpsMenu.classList.contains('open')) _rpsHideMenu();
     });
 
+    // ── Tic-Tac-Toe board (cells built once; server owns all game logic) ──
+    {
+      const bd = rpsEl('ttt-board');
+      for (let i = 0; i < 9; i++) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'ttt-cell empty';
+        c.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          if (_rpsPhase !== 'ttt' || !_tttMyTurn || c.textContent) return;
+          socket.emit('tttMove', { challengeId: _rpsChallengeId, cell: i });
+        });
+        bd.appendChild(c);
+      }
+    }
+    function _tttPaint(board) {
+      rpsEl('ttt-board').querySelectorAll('.ttt-cell').forEach((c, i) => {
+        const v = Array.isArray(board) ? board[i] : null;
+        c.textContent = v || '';
+        c.className = 'ttt-cell' + (v ? (v === 'X' ? ' x' : ' o') : ' empty');
+      });
+    }
+    function _tttRender(board, myTurn, moveMs) {
+      const bd = rpsEl('ttt-board');
+      bd.classList.add('show');
+      bd.classList.toggle('myturn', myTurn);
+      _tttMyTurn = myTurn;
+      _tttPaint(board);
+      rpsEl('rps-match-status').textContent =
+        (myTurn ? 'Your move' : 'Their move') + ' — you are ' + _tttMyMark;
+      _rpsCountdown(rpsEl('rps-match-count'), moveMs || 20000,
+        myTurn ? 'Your move locks in ' : 'They must move in ');
+    }
+
+    // ── Quick Draw panel ──
+    function _qdFire() {
+      if (_rpsPhase !== 'qd') return;
+      socket.emit('qdTap', { challengeId: _rpsChallengeId });   // server adjudicates early vs live
+    }
+    rpsEl('qd-zone').addEventListener('pointerdown', (e) => { e.preventDefault(); _qdFire(); });
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'qd') return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _qdFire(); }
+    });
+
     // ── RPS socket events ──
     socket.on('rpsChallengeFailed', (payload) => {
       const { message } = payload || {};
@@ -2528,24 +2730,27 @@
       _rpsToast(message || 'Challenge failed.');
     });
     socket.on('rpsChallengeSent', (payload) => {
-      const { challengeId, toName, wager, arcade } = payload || {};
+      const { challengeId, toName, wager, game, arcade } = payload || {};
+      const meta = GAME_META[game] || GAME_META.rps;
       _rpsChallengeId = challengeId;
       _rpsPhase = 'waiting';
       rpsEl('rps-waiting-text').textContent = arcade
-        ? '🕹️ Invited ' + (toName || '?') + ' to the arcade — waiting…'
-        : 'Challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
+        ? '🕹️ Invited ' + (toName || '?') + ' to ' + meta.label + ' at the arcade — waiting…'
+        : meta.label + ' challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
       rpsEl('rps-waiting').classList.add('open');
     });
     socket.on('rpsChallengeIncoming', (payload) => {
-      const { challengeId, fromName, wager, timeoutMs, arcade } = payload || {};
+      const { challengeId, fromName, wager, game, timeoutMs, arcade } = payload || {};
+      const meta = GAME_META[game] || GAME_META.rps;
       // The server's busy-check guarantees we're not mid-match — any RPS UI
       // still open here (e.g. a half-typed wager) is stale; reset first.
       closeAllRps();
       _rpsChallengeId = challengeId;
       _rpsPhase = 'incoming';
       rpsEl('rps-incoming-text').textContent = arcade
-        ? '🕹️ ' + (fromName || '?') + ' wants to play ✊✋✌️ at the arcade! (friendly)'
-        : (fromName || '?') + ' challenges you to ✊✋✌️' + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
+        ? '🕹️ ' + (fromName || '?') + ' wants to play ' + meta.icon + ' ' + meta.label + ' at the arcade! (friendly)'
+        : (fromName || '?') + ' challenges you to ' + meta.icon + ' ' + meta.label + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
+      rpsEl('rps-accept').textContent = 'Accept ' + (game === 'ttt' ? '⭕' : game === 'qd' ? '🤠' : '✊');
       rpsEl('rps-incoming').classList.add('open');
       _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
     });
@@ -2555,21 +2760,53 @@
       _rpsToast(reason || 'Match cancelled.');
     });
     socket.on('rpsStart', (payload) => {
-      const { challengeId, opponentName, wager, pickMs } = payload || {};
+      const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs } = payload || {};
       closeAllRps();
       if (_chatOpen) closeChat();
       if (_dmOpen) closeDM();
+      const g = GAME_META[game] ? game : 'rps';
       _rpsChallengeId = challengeId;
-      _rpsPhase = 'picking'; _rpsUiOpen = true; _rpsMyPick = null;
+      _rpsUiOpen = true; _rpsMyPick = null;
       rpsEl('rps-match-title').textContent =
-        '✊✋✌️ vs ' + (opponentName || '?') + (wager ? ' · ' + wager + ' 🪙' : '');
-      rpsEl('rps-match-status').textContent = 'Make your pick!';
+        GAME_META[g].icon + ' vs ' + (opponentName || '?') + (wager ? ' · ' + wager + ' 🪙' : '');
       rpsEl('rps-result').style.display = 'none';
-      rpsEl('rps-pick-row').style.display = 'flex';
-      document.querySelectorAll('.rps-pick').forEach((x) => x.classList.remove('picked', 'disabled'));
+      rpsEl('rps-pick-row').style.display = 'none';
+      rpsEl('rps-match-count').textContent = '';
       rpsEl('rps-match').classList.add('open');
       touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
-      _rpsCountdown(rpsEl('rps-match-count'), pickMs || 20000, 'Picks lock in ');
+
+      if (g === 'ttt') {
+        _rpsPhase = 'ttt';
+        _tttMyMark = yourMark || '?';
+        _tttRender(Array(9).fill(null), !!yourTurn, moveMs);
+      } else if (g === 'qd') {
+        _rpsPhase = 'qd';
+        const z = rpsEl('qd-zone');
+        z.classList.remove('live');
+        z.textContent = 'Wait for it…';
+        rpsEl('qd-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent = 'Tap only AFTER it turns green — early = instant loss!';
+      } else {
+        _rpsPhase = 'picking';
+        rpsEl('rps-match-status').textContent = 'Make your pick!';
+        rpsEl('rps-pick-row').style.display = 'flex';
+        document.querySelectorAll('.rps-pick').forEach((x) => x.classList.remove('picked', 'disabled'));
+        _rpsCountdown(rpsEl('rps-match-count'), pickMs || 20000, 'Picks lock in ');
+      }
+    });
+    socket.on('tttState', (payload) => {
+      const { challengeId, board, yourTurn, yourMark, moveMs } = payload || {};
+      if (_rpsPhase !== 'ttt' || challengeId !== _rpsChallengeId) return;
+      if (yourMark) _tttMyMark = yourMark;
+      _tttRender(board, !!yourTurn, moveMs);
+    });
+    socket.on('qdSignal', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'qd' || challengeId !== _rpsChallengeId) return;
+      const z = rpsEl('qd-zone');
+      z.classList.add('live');
+      z.textContent = '🔫 DRAW! TAP!';
+      rpsEl('rps-match-status').textContent = 'TAP NOW! (click / Space)';
     });
     socket.on('rpsOpponentPicked', () => {
       if (_rpsPhase !== 'picking') return;
@@ -2578,22 +2815,51 @@
         : 'Opponent locked in — your turn!';
     });
     socket.on('rpsResult', (payload) => {
-      const { outcome, yourPick, theirPick, coinsDelta, forfeit } = payload || {};
+      const { game, outcome, yourPick, theirPick, coinsDelta, forfeit,
+              board, reactionMs, early, youFiredEarly } = payload || {};
       _rpsStopCount();
       clearTimeout(_rpsResultTimer);
+      const g = GAME_META[game] ? game : 'rps';
       _rpsPhase = 'result'; _rpsUiOpen = true;
       rpsEl('rps-match').classList.add('open');
       rpsEl('rps-pick-row').style.display = 'none';
+      rpsEl('qd-panel').classList.remove('show');
       rpsEl('rps-match-count').textContent = '';
-      rpsEl('rps-result-picks').textContent =
-        'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
-        '  ·  Them: ' + (theirPick ? RPS_EMOJI[theirPick] + ' ' + theirPick : '(no pick)');
+
+      let picksLine = '', statusLine = '';
+      if (g === 'ttt') {
+        // Keep the final board on screen under the verdict.
+        if (Array.isArray(board)) {
+          const bd = rpsEl('ttt-board');
+          bd.classList.add('show'); bd.classList.remove('myturn');
+          _tttMyTurn = false;
+          _tttPaint(board);
+        }
+        picksLine = outcome === 'draw' ? 'Board full — dead heat.' : (forfeit ? '' : 'Three in a row!');
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They ran out of time — forfeit.' : 'You ran out of time — forfeit.')
+          : '';
+      } else if (g === 'qd') {
+        if (early) {
+          picksLine = youFiredEarly ? '💥 You fired before the signal!' : '💥 They fired before the signal!';
+          statusLine = 'Firing early is an instant loss.';
+        } else {
+          picksLine = typeof reactionMs === 'number' ? '⚡ Winning reaction: ' + reactionMs + ' ms' : '';
+        }
+      } else {
+        picksLine =
+          'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
+          '  ·  Them: ' + (theirPick ? RPS_EMOJI[theirPick] + ' ' + theirPick : '(no pick)');
+        statusLine = forfeit
+          ? (outcome === 'win' ? "They didn't pick in time — forfeit." : "You didn't pick in time — forfeit.")
+          : '';
+      }
+      rpsEl('rps-result-picks').textContent = picksLine;
       const out = rpsEl('rps-result-outcome');
       if (outcome === 'draw')     { out.textContent = "It's a draw — no coins moved."; out.className = 'rps-out draw'; }
       else if (outcome === 'win') { out.textContent = 'You win!'  + (coinsDelta ? ' +' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out win'; }
       else                        { out.textContent = 'You lose.' + (coinsDelta ? ' ' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out lose'; }
-      rpsEl('rps-match-status').textContent =
-        forfeit ? (outcome === 'win' ? "They didn't pick in time — forfeit." : "You didn't pick in time — forfeit.") : '';
+      rpsEl('rps-match-status').textContent = statusLine;
       rpsEl('rps-result').style.display = 'block';
       _rpsResultTimer = setTimeout(() => { if (_rpsPhase === 'result') closeAllRps(); }, 8000);
     });
@@ -3718,7 +3984,10 @@
             this.lastDir = interact.dir;
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
           } else if (interact?.type === 'object') {
-            socket.emit('interact', { object: interact.obj.id });
+            // The arcade opens the game picker first; the modal then sends
+            // interact {object:'arcade', game}. Everything else fires directly.
+            if (interact.obj.id === 'arcade' && window._openArcadePicker) window._openArcadePicker();
+            else socket.emit('interact', { object: interact.obj.id });
           } else if (interact?.type === 'sit') {
             const s = interact.seat;
             this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on

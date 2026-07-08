@@ -480,8 +480,29 @@ const RPS_ACCEPT_MS = 30_000;  // challenged player has this long to accept/decl
 const RPS_PICK_MS   = 20_000;  // both players must pick within this window
 const RPS_WAGER_MAX = 10_000;
 const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scale 3
+
+// The duel roster. Every game shares ONE lifecycle (challenge → accept →
+// play → finishMatch → settle) and ONE match map (rpsBySocket), so all the
+// cleanup seams (disconnect/kick/dropLiveByEmail → cancelMatchFor) and the
+// mid-match spend block apply to new games automatically. The `rps*` event
+// names are kept for the shared lifecycle events (they predate the roster);
+// payloads carry a `game` field.
+const GAMES      = new Set(["rps", "ttt", "qd"]);
+const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw" };
+const TTT_MOVE_MS   = 20_000;  // per-move clock — the slow side forfeits
+const TTT_LINES     = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const QD_ARM_MIN_MS = 2_000;   // random wait before the DRAW! signal…
+const QD_ARM_MAX_MS = 6_000;   // …lands somewhere in [min, max]
+const QD_LIVE_MS    = 5_000;   // nobody taps within this after the signal → cancel
 let rpsSeq = 0;
 const rpsBySocket = new Map(); // socketId → shared match object (both parties map to the SAME object)
+
+// Every timer a match object can own, across all games. cancelMatchFor and
+// finishMatch clear the whole set so no orphaned timer can fire on a dead match.
+function clearMatchTimers(m) {
+  clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
+  clearTimeout(m.moveTimer);   clearTimeout(m.signalTimer); clearTimeout(m.liveTimer);
+}
 
 function rpsOtherId(m, id) { return id === m.challengerId ? m.targetId : m.challengerId; }
 
@@ -492,9 +513,9 @@ function rpsOtherId(m, id) { return id === m.challengerId ? m.targetId : m.chall
 // (picks were locked; the result stands even if someone disconnects mid-settle).
 function cancelMatchFor(id, reason) {
   const m = rpsBySocket.get(id);
-  if (!m || (m.state !== "pending" && m.state !== "picking")) return;
+  if (!m || (m.state !== "pending" && m.state !== "picking" && m.state !== "playing")) return;
   m.state = "done";
-  clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
+  clearMatchTimers(m);
   rpsBySocket.delete(m.challengerId);
   rpsBySocket.delete(m.targetId);
   const msg = reason || "Match cancelled — no coins moved.";
@@ -506,23 +527,23 @@ function cancelMatchFor(id, reason) {
 // rpsChallenge handler and the arcade cabinet (which starts a friendly,
 // 0-wager match). Callers must have already validated: both players exist,
 // neither is in rpsBySocket, and the wager is affordable if > 0.
-function startRpsChallenge(challengerId, targetId, wager, viaArcade = false) {
+function startRpsChallenge(challengerId, targetId, wager, viaArcade = false, game = "rps") {
   const me = players[challengerId], target = players[targetId];
   if (!me || !target) return;
   const m = {
-    id: ++rpsSeq, challengerId, targetId, wager,
+    id: ++rpsSeq, challengerId, targetId, wager, game,
     state: "pending", picks: {}, pickTimer: null,
     acceptTimer: setTimeout(() => cancelMatchFor(challengerId, "Challenge expired."), RPS_ACCEPT_MS),
   };
   rpsBySocket.set(challengerId, m);
   rpsBySocket.set(targetId, m);
   io.to(targetId).emit("rpsChallengeIncoming", {
-    challengeId: m.id, fromId: challengerId, fromName: me.name, wager, timeoutMs: RPS_ACCEPT_MS, arcade: viaArcade,
+    challengeId: m.id, fromId: challengerId, fromName: me.name, wager, game, timeoutMs: RPS_ACCEPT_MS, arcade: viaArcade,
   });
   io.to(challengerId).emit("rpsChallengeSent", {
-    challengeId: m.id, toId: targetId, toName: target.name, wager, arcade: viaArcade,
+    challengeId: m.id, toId: targetId, toName: target.name, wager, game, arcade: viaArcade,
   });
-  console.log(`RPS challenge${viaArcade ? " (arcade)" : ""}: ${me.name} → ${target.name} (${wager} coins)`);
+  console.log(`${GAME_NAMES[game]} challenge${viaArcade ? " (arcade)" : ""}: ${me.name} → ${target.name} (${wager} coins)`);
 }
 
 // Move the wager loser→winner. Email players settle in SQL with the same
@@ -578,37 +599,25 @@ async function rpsSettle(winnerId, loserId, wager) {
   return wager;
 }
 
-// Resolve a picking-phase match: called when both picks are in OR the pick
-// timer expires. One picked → forfeit win; none → cancel (no coins move).
-async function rpsResolve(m) {
-  if (m.state !== "picking") return;   // double-fire guard (pick race vs timer)
+// Shared settlement for EVERY game — the ONLY picking/playing → settling
+// transition. The state flip is SYNCHRONOUS (before any await), so a late
+// timer, a repeat tap/move/pick, or cancelMatchFor firing mid-settle are all
+// no-ops (double-settle is impossible even though rpsSettle awaits SQL).
+// `extras(recipientId, otherId)` merges game-specific fields (picks, board,
+// reaction time) into each side's rpsResult payload.
+async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false, extras } = {}) {
+  if (m.state !== "picking" && m.state !== "playing") return;
   m.state = "settling";
-  clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
+  clearMatchTimers(m);
   const { challengerId: cId, targetId: tId, wager } = m;
   const done = () => { m.state = "done"; rpsBySocket.delete(cId); rpsBySocket.delete(tId); };
-
-  const pc = m.picks[cId], pt = m.picks[tId];
-  if (!pc && !pt) {
-    const msg = "Nobody picked in time — match cancelled, no coins moved.";
-    io.to(cId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
-    io.to(tId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
-    done();
-    return;
-  }
-
-  let winnerId, loserId, draw = false;
-  if (pc && pt) {
-    if (pc === pt) draw = true;
-    else if (RPS_BEATS[pc] === pt) { winnerId = cId; loserId = tId; }
-    else { winnerId = tId; loserId = cId; }
-  } else if (pc) { winnerId = cId; loserId = tId; }
-  else { winnerId = tId; loserId = cId; }
+  const extra = (me, them) => (extras ? extras(me, them) : {});
 
   if (draw) {
     for (const [me, them] of [[cId, tId], [tId, cId]]) {
       io.to(me).emit("rpsResult", {
-        challengeId: m.id, outcome: "draw", forfeit: false,
-        yourPick: m.picks[me], theirPick: m.picks[them], wager, coinsDelta: 0,
+        challengeId: m.id, game: m.game, outcome: "draw", forfeit: false,
+        wager, coinsDelta: 0, ...extra(me, them),
       });
     }
     io.emit("rpsIndicator", { draw: true, aId: cId, bId: tId });
@@ -621,26 +630,77 @@ async function rpsResolve(m) {
     try {
       transferred = await rpsSettle(winnerId, loserId, wager);
     } catch (err) {
-      console.error("rps settle failed:", err);
+      console.error(`${m.game} settle failed:`, err);
     }
   }
-  const forfeit = !(pc && pt);
   const wp = players[winnerId], lp = players[loserId];
   io.to(winnerId).emit("rpsResult", {
-    challengeId: m.id, outcome: "win", forfeit,
-    yourPick: m.picks[winnerId] || null, theirPick: m.picks[loserId] || null,
-    wager, coinsDelta: transferred,
+    challengeId: m.id, game: m.game, outcome: "win", forfeit,
+    wager, coinsDelta: transferred, ...extra(winnerId, loserId),
   });
   io.to(loserId).emit("rpsResult", {
-    challengeId: m.id, outcome: "lose", forfeit,
-    yourPick: m.picks[loserId] || null, theirPick: m.picks[winnerId] || null,
-    wager, coinsDelta: -transferred,
+    challengeId: m.id, game: m.game, outcome: "lose", forfeit,
+    wager, coinsDelta: -transferred, ...extra(loserId, winnerId),
   });
   if (wp) io.to(winnerId).emit("coinUpdate", { coins: wp.coins });
   if (lp) io.to(loserId).emit("coinUpdate", { coins: lp.coins });
   io.emit("rpsIndicator", { draw: false, winnerId, loserId });
-  console.log(`RPS: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
+  console.log(`${GAME_NAMES[m.game] || m.game}: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
   done();
+}
+
+// Resolve a picking-phase RPS match: called when both picks are in OR the pick
+// timer expires. One picked → forfeit win; none → cancel (no coins move).
+async function rpsResolve(m) {
+  if (m.state !== "picking") return;   // double-fire guard (pick race vs timer)
+  const { challengerId: cId, targetId: tId } = m;
+  const pc = m.picks[cId], pt = m.picks[tId];
+  if (!pc && !pt) {
+    cancelMatchFor(cId, "Nobody picked in time — match cancelled, no coins moved.");
+    return;
+  }
+
+  let winnerId, loserId, draw = false;
+  if (pc && pt) {
+    if (pc === pt) draw = true;
+    else if (RPS_BEATS[pc] === pt) { winnerId = cId; loserId = tId; }
+    else { winnerId = tId; loserId = cId; }
+  } else if (pc) { winnerId = cId; loserId = tId; }
+  else { winnerId = tId; loserId = cId; }
+
+  await finishMatch(m, {
+    draw, winnerId, loserId, forfeit: !(pc && pt),
+    extras: (me, them) => ({ yourPick: m.picks[me] || null, theirPick: m.picks[them] || null }),
+  });
+}
+
+// Tic-Tac-Toe helpers. Boards are 9-slot arrays of 'X' | 'O' | null; the
+// server owns the board and turn — clients only send move intents.
+function tttWinner(board) {
+  for (const [a, b, c] of TTT_LINES) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) return board[a];
+  }
+  return null;
+}
+function tttExtras(m) {
+  return (me) => ({ board: m.board.slice(), yourMark: m.marks[me] });
+}
+// Per-move clock expiry: whoever's turn it is forfeits (mirrors the RPS
+// pick-timeout forfeit). Timer callbacks re-check state at fire time.
+function tttTimeout(m) {
+  if (m.state !== "playing" || m.game !== "ttt") return;
+  const slow = m.turn, fast = rpsOtherId(m, slow);
+  finishMatch(m, { winnerId: fast, loserId: slow, forfeit: true, extras: tttExtras(m) })
+    .catch((err) => console.error("ttt timeout resolve failed:", err));
+}
+function tttBroadcast(m) {
+  for (const id of [m.challengerId, m.targetId]) {
+    io.to(id).emit("tttState", {
+      challengeId: m.id, board: m.board.slice(),
+      yourTurn: m.state === "playing" && m.turn === id,
+      yourMark: m.marks[id], moveMs: TTT_MOVE_MS,
+    });
+  }
 }
 
 // Passive coin earning (+2/min per active player). We also flush each
@@ -1188,10 +1248,14 @@ io.on("connection", (socket) => {
   // live, busy, in range, can afford the wager), timing, pick secrecy, and the
   // coin transfer are all decided here. See the RPS section above io.on().
   socket.on("rpsChallenge", (payload) => {
-    const { targetId, wager } = payload || {};
+    const { targetId, wager, game } = payload || {};
     const me = players[socket.id];
     if (!me) return;
     if (!takeToken(rpsBucket)) { socket.emit("rpsChallengeFailed", { message: "Slow down a moment." }); return; }
+    // Omitted game = RPS (back-compat); anything else must be on the roster.
+    const g = (game === undefined || game === null) ? "rps"
+            : (typeof game === "string" && GAMES.has(game)) ? game : null;
+    if (g === null) { socket.emit("rpsChallengeFailed", { message: "Unknown game." }); return; }
     const w = (Number.isInteger(wager) && wager >= 0 && wager <= RPS_WAGER_MAX) ? wager : null;
     if (w === null) { socket.emit("rpsChallengeFailed", { message: "Invalid wager." }); return; }
     if (typeof targetId !== "string" || targetId === socket.id) {
@@ -1211,7 +1275,7 @@ io.on("connection", (socket) => {
     if (w > 0 && me.coins < w)     { socket.emit("rpsChallengeFailed", { message: "You don't have that many coins." }); return; }
     if (w > 0 && target.coins < w) { socket.emit("rpsChallengeFailed", { message: `${target.name} doesn't have that many coins.` }); return; }
 
-    startRpsChallenge(socket.id, targetId, w);
+    startRpsChallenge(socket.id, targetId, w, false, g);
   });
 
   socket.on("rpsRespond", (payload) => {
@@ -1228,17 +1292,56 @@ io.on("connection", (socket) => {
       cancelMatchFor(socket.id, "Not enough coins on one side — match cancelled.");
       return;
     }
-    m.state = "picking";
     clearTimeout(m.acceptTimer);
+    const base = (oppId, oppName) => ({
+      challengeId: m.id, game: m.game, opponentId: oppId, opponentName: oppName, wager: m.wager,
+    });
+
+    if (m.game === "ttt") {
+      // Server-authoritative board; first mover is random and plays X.
+      m.state = "playing";
+      m.board = Array(9).fill(null);
+      m.turn = Math.random() < 0.5 ? m.challengerId : m.targetId;
+      m.marks = { [m.turn]: "X", [rpsOtherId(m, m.turn)]: "O" };
+      m.moveTimer = setTimeout(() => tttTimeout(m), TTT_MOVE_MS);
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     yourMark: m.marks[m.challengerId], yourTurn: m.turn === m.challengerId, moveMs: TTT_MOVE_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), yourMark: m.marks[m.targetId],     yourTurn: m.turn === m.targetId,     moveMs: TTT_MOVE_MS });
+      return;
+    }
+
+    if (m.game === "qd") {
+      // Armed → (random 2–6s) → live signal → first tap wins. Tapping while
+      // still armed is an instant loss (adjudicated in qdTap). If nobody taps
+      // within QD_LIVE_MS of the signal, the match cancels with no coins moved.
+      m.state = "playing";
+      m.qdPhase = "armed";
+      const armMs = QD_ARM_MIN_MS + Math.floor(Math.random() * (QD_ARM_MAX_MS - QD_ARM_MIN_MS + 1));
+      m.signalTimer = setTimeout(() => {
+        if (m.state !== "playing" || m.qdPhase !== "armed") return;  // re-check at fire time
+        m.qdPhase = "live";
+        m.qdSignalAt = Date.now();
+        io.to(m.challengerId).emit("qdSignal", { challengeId: m.id });
+        io.to(m.targetId).emit("qdSignal", { challengeId: m.id });
+        m.liveTimer = setTimeout(() => {
+          if (m.state !== "playing") return;
+          cancelMatchFor(m.challengerId, "Nobody drew — match cancelled, no coins moved.");
+        }, QD_LIVE_MS);
+      }, armMs);
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     maxArmMs: QD_ARM_MAX_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), maxArmMs: QD_ARM_MAX_MS });
+      return;
+    }
+
+    m.state = "picking";
     m.pickTimer = setTimeout(() => { rpsResolve(m).catch((err) => console.error("rps resolve failed:", err)); }, RPS_PICK_MS);
-    io.to(m.challengerId).emit("rpsStart", { challengeId: m.id, opponentId: m.targetId,     opponentName: tg.name, wager: m.wager, pickMs: RPS_PICK_MS });
-    io.to(m.targetId).emit("rpsStart",     { challengeId: m.id, opponentId: m.challengerId, opponentName: ch.name, wager: m.wager, pickMs: RPS_PICK_MS });
+    io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     pickMs: RPS_PICK_MS });
+    io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), pickMs: RPS_PICK_MS });
   });
 
   socket.on("rpsPick", (payload) => {
     const { challengeId, pick } = payload || {};
     const m = rpsBySocket.get(socket.id);
-    if (!m || m.id !== challengeId || m.state !== "picking") return;
+    if (!m || m.id !== challengeId || m.game !== "rps" || m.state !== "picking") return;
     if (typeof pick !== "string" || !RPS_PICKS.has(pick)) return;
     if (m.picks[socket.id]) return;   // first pick locks — no take-backs
     m.picks[socket.id] = pick;
@@ -1246,6 +1349,54 @@ io.on("connection", (socket) => {
     io.to(rpsOtherId(m, socket.id)).emit("rpsOpponentPicked", { challengeId: m.id });
     if (m.picks[m.challengerId] && m.picks[m.targetId]) {
       rpsResolve(m).catch((err) => console.error("rps resolve failed:", err));
+    }
+  });
+
+  // Tic-Tac-Toe move intent. All board/turn validation is server-side; a bad
+  // move is silently dropped (same policy as a bad rpsPick).
+  socket.on("tttMove", (payload) => {
+    const { challengeId, cell } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "ttt" || m.state !== "playing") return;
+    if (m.turn !== socket.id) return;
+    if (!Number.isInteger(cell) || cell < 0 || cell > 8 || m.board[cell]) return;
+    m.board[cell] = m.marks[socket.id];
+    clearTimeout(m.moveTimer);
+    const other = rpsOtherId(m, socket.id);
+    const win = tttWinner(m.board);
+    const full = m.board.every(Boolean);
+    if (win || full) {
+      tttBroadcast(m);   // both sides see the final move land before the result card
+      finishMatch(m, win
+        ? { winnerId: socket.id, loserId: other, extras: tttExtras(m) }
+        : { draw: true, extras: tttExtras(m) },
+      ).catch((err) => console.error("ttt resolve failed:", err));
+      return;
+    }
+    m.turn = other;
+    m.moveTimer = setTimeout(() => tttTimeout(m), TTT_MOVE_MS);
+    tttBroadcast(m);
+  });
+
+  // Quick Draw tap intent. Armed phase → tapper loses instantly (fired
+  // early); live phase → first tap wins. finishMatch's synchronous settling
+  // flip makes any second tap a no-op.
+  socket.on("qdTap", (payload) => {
+    const { challengeId } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "qd" || m.state !== "playing") return;
+    const other = rpsOtherId(m, socket.id);
+    if (m.qdPhase === "armed") {
+      finishMatch(m, {
+        winnerId: other, loserId: socket.id, forfeit: true,
+        extras: (me) => ({ early: true, youFiredEarly: me === socket.id }),
+      }).catch((err) => console.error("qd resolve failed:", err));
+    } else if (m.qdPhase === "live") {
+      const reactionMs = Date.now() - m.qdSignalAt;
+      finishMatch(m, {
+        winnerId: socket.id, loserId: other,
+        extras: () => ({ reactionMs }),
+      }).catch((err) => console.error("qd resolve failed:", err));
     }
   });
 
@@ -1457,7 +1608,7 @@ io.on("connection", (socket) => {
   // arcade (starts a friendly RPS match with whoever else is standing there).
   // The bucket is consumed BEFORE any validation, like every other handler.
   socket.on("interact", (payload) => {
-    const { object } = payload || {};
+    const { object, game } = payload || {};
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(interactBucket)) return;   // silently drop spam
@@ -1516,7 +1667,10 @@ io.on("connection", (socket) => {
         socket.emit("interactError", { message: "The arcade needs two players — wave someone over! 🕹️" });
         return;
       }
-      startRpsChallenge(socket.id, bestId, 0, true);   // friendly (0-wager) match
+      // The cabinet's game picker rides along on the interact intent; anything
+      // off the roster falls back to RPS. Always a friendly (0-wager) match.
+      const g = (typeof game === "string" && GAMES.has(game)) ? game : "rps";
+      startRpsChallenge(socket.id, bestId, 0, true, g);
     }
   });
 

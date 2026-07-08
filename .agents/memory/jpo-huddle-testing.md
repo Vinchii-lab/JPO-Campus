@@ -58,6 +58,14 @@ works, stop debugging game code and drive a browser directly:
 - `puppeteer-core` (npm i in /tmp) + a nix-store `ungoogled-chromium` binary
   (`ls /nix/store | grep ungoogled-chromium`, pick newest, `bin/chromium`,
   launch args `--no-sandbox --disable-gpu`).
+- **Pin `puppeteer-core@20`** for the nix Chromium 114 — the latest
+  puppeteer-core silently times out (30s) on `launch` against that binary
+  (protocol handshake mismatch), while v20.x (built for Chrome ~113–115)
+  launches first try. Two-browser multiplayer runs work fine; drive UI
+  clicks with `el.dispatchEvent(new PointerEvent('pointerdown', …))` in
+  `page.evaluate` (the game's handlers listen for pointerdown, not click).
+- Background long runs: `nohup node test.cjs > run.log 2>&1 &` then poll —
+  a 2-browser register+matches run exceeds a 2-min foreground shell limit.
 - `page.goto` MUST use `waitUntil: "domcontentloaded"` — the socket.io
   connection keeps the page from ever reaching `networkidle2` (30s timeout).
 - Do NOT teleport the sprite (`body.reset`) to skip walking: the server's
