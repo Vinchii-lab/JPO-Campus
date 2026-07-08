@@ -99,7 +99,7 @@ const BOOST_GRACE_MS  = 2_500;   // extra server-side slack past expiry so laten
 // and rate limits are all enforced here.
 const OBJECTS = {
   coffee_machine: { x: 1056, y: 864, r: 150 },   // vending-machine bank, IT kitchenette corner (c21-22, r17-18)
-  water_cooler:   { x: 2832, y: 408, r: 150 },   // water dispenser, Operations (c58-59, r7-9)
+  water_cooler:   { x: 1800, y: 1272, r: 150 },  // water dispenser, Pantry (c37, r25-26, beside the potted plant)
   arcade:         { x: 720,  y: 720, r: 170 },   // twin TV screens, IT lounge (c13-16, r14-15)
 };
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee

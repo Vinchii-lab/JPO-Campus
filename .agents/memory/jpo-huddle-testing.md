@@ -44,3 +44,31 @@ The on-screen mobile controls are gated behind `body.touch-device.playing`, and
 `touch-device` is only added when `matchMedia('(pointer: coarse)')` matches — so a
 normal headless/desktop browser won't show them. Append `?touch=1` to force
 `touch-device` on for verification on non-touch browsers.
+
+# When the e2e harness can't deliver a single keypress (E), drive puppeteer yourself
+
+The black-box browser-test harness sometimes fails to deliver a single
+keypress (E) to Phaser's `JustDown` even when HELD arrow keys walk fine —
+three runs "pressed E, nothing happened" while a self-driven browser proved
+the game code correct on the first try. Absence of a debug log after a
+harness keypress is evidence about the HARNESS, not the game.
+
+**How to apply:** when a key-press-dependent e2e fails but held-key movement
+works, stop debugging game code and drive a browser directly:
+- `puppeteer-core` (npm i in /tmp) + a nix-store `ungoogled-chromium` binary
+  (`ls /nix/store | grep ungoogled-chromium`, pick newest, `bin/chromium`,
+  launch args `--no-sandbox --disable-gpu`).
+- `page.goto` MUST use `waitUntil: "domcontentloaded"` — the socket.io
+  connection keeps the page from ever reaching `networkidle2` (30s timeout).
+- Do NOT teleport the sprite (`body.reset`) to skip walking: the server's
+  movement validation silently rejects the impossible jump, its position
+  stays at the restored spawn, and `interact` fails with "Walk a little
+  closer" even though the client shows the prompt. Walk legitimately.
+- Naive greedy arrow-walking gets stuck on furniture. BFS-pathfind in
+  `page.evaluate`: find TilemapLayers via
+  `scene.children.list.filter(o => o.type === 'TilemapLayer')`, identify by
+  `l.layer.name` ('Wall'/'Furniture'), a tile is solid iff
+  `data[r][c].index > 0 && .collides`; player tile =
+  `floor(x/48), floor((y+27)/48)` (feet offset); waypoint world px =
+  `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
+  ~(dist/220)*1000 ms per waypoint. Works first try.

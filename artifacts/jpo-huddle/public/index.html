@@ -1163,8 +1163,8 @@
     const OFFICE_OBJECTS = [
       { id:'coffee_machine', x:1056, y:864, r:150, label:'Brew free coffee', touch:'Brew',
         hl:{ x:21*48, y:17*48, w:2*48, h:2*48 } },   // vending-machine bank, IT kitchenette corner
-      { id:'water_cooler',   x:2832, y:408, r:150, label:'Grab some water',  touch:'Drink',
-        hl:{ x:2832-24, y:7*48, w:48, h:2*48 } },    // hugs the cooler sprite (1×2 tiles, centered on the anchor), Operations
+      { id:'water_cooler',   x:1800, y:1272, r:150, label:'Grab some water', touch:'Drink',
+        hl:{ x:37*48, y:25*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r25-26), Pantry
       { id:'arcade',         x:720,  y:720, r:170, label:'Play arcade (2P)', touch:'Play',
         hl:{ x:13*48, y:14*48, w:4*48, h:2*48 } },   // twin TV screens, IT lounge
     ];
@@ -2835,8 +2835,8 @@
         this.load.spritesheet('roombuilder_ss', '/assets/Room_Builder_free_16x16.png', { frameWidth: 16, frameHeight: 16 });
         this.load.spritesheet('interiors_ss',   '/assets/Interiors_free_16x16.png',   { frameWidth: 16, frameHeight: 16 });
         this.load.spritesheet('ext_ss',         '/assets/tilemap_packed.png',         { frameWidth: 16, frameHeight: 16 });
-        // Custom furniture sprite (not part of the Tiled map): the Operations water
-        // cooler, drawn where the removed lounge couch used to be. 16×32 source px.
+        // Custom furniture sprite (not part of the Tiled map): the Pantry water
+        // cooler, drawn beside the potted plant. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
@@ -2922,26 +2922,26 @@
           const ct = furnitureLayer.getTileAt(c, r);
           if (ct && COUCH_REMOVE.has(ct.index)) furnitureLayer.removeTileAt(c, r);
         }
-        // ── Water cooler sprite (Operations) ─────────────────────────────
-        // A custom 16×32 sprite standing where the removed couch was, centered on
-        // the interaction anchor (2832, 408 — see OFFICE_OBJECTS / server OBJECTS;
-        // the anchor itself is unchanged, so no server lockstep edit is needed).
+        // ── Water cooler sprite (Pantry, beside the potted plant) ────────
+        // A custom 16×32 sprite centered on the interaction anchor (1800, 1272)
+        // — MUST stay in lockstep with OFFICE_OBJECTS.water_cooler and the server
+        // OBJECTS.water_cooler anchor (base tile c37 r26, top half over r25).
         // Split into two images from the same texture so players layer correctly:
-        //  - base (bottom 16 source px = the r8 footprint tile): default depth 0,
+        //  - base (bottom 16 source px = the r26 footprint tile): default depth 0,
         //    created before any player sprite, so players render in front of it;
         //  - top (bottle + taps, upper 16 source px): depth 900 (same scheme as the
         //    seat occluders — sprite-vs-sprite depth IS reliable, tilemap depth is
-        //    not), so a player walking the r7 tile behind it is occluded by it.
+        //    not), so a player walking the r25 tile behind it is occluded by it.
         // A static body over the base tile keeps anyone from walking through the
         // stand itself (client-side only — the server has no tile collision).
-        const COOLER_X = 2832, COOLER_BOTTOM = 9*48;   // feet of the sprite = bottom of r8
+        const COOLER_X = 1800, COOLER_BOTTOM = 27*48;  // feet of the sprite = bottom of r26
         const coolerBase = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
           .setOrigin(0.5, 1).setScale(3);
         coolerBase.setCrop(0, 16, 16, 16);
         const coolerTop = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
           .setOrigin(0.5, 1).setScale(3).setDepth(900);
         coolerTop.setCrop(0, 0, 16, 16);
-        this._coolerBlock = this.add.zone(COOLER_X, 8*48+24, 48, 48);   // the r8 base tile
+        this._coolerBlock = this.add.zone(COOLER_X, 26*48+24, 48, 48);  // the r26 base tile
         this.physics.add.existing(this._coolerBlock, true);
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);

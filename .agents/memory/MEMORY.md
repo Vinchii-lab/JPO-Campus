@@ -3,4 +3,4 @@
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD (boardId=roomId#n from clustering); walk-up post/admin-delete; E-press, "!" badge, panel all key off one clustering pass.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ clothesIdx fallback; clothes match post-hair/skin snapshot.
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp; full register→approve→buy→restart→restore loop.
-- [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — reach the "playing" state without admin by seeding an approved jpo_players row with a LOWERCASED email (server lowercases identity → auto-restore); ?touch=1 forces mobile controls on non-touch browsers.
+- [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — seed approved row w/ LOWERCASED email to skip admin; ?touch=1 forces mobile controls; harness may drop single keypresses → self-drive puppeteer + nix chromium w/ BFS walk.
