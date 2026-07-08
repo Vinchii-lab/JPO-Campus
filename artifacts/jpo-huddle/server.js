@@ -76,6 +76,10 @@ const GRACE_MS = 10_000;
 
 const SHOP = { crown: 30 };
 
+// Fixed emote allowlist — ids only, the client maps them to emoji. MUST match
+// the EMOTES list in public/index.html.
+const EMOTES = new Set(["wave", "heart", "laugh", "party", "thumbs", "fire", "sad", "shock"]);
+
 function clampIdx(v, max) {
   return (Number.isInteger(v) && v >= 0 && v <= max) ? v : 0;
 }
@@ -408,9 +412,10 @@ io.on("connection", (socket) => {
 
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).
-  const chatBucket = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
-  const buyBucket  = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
-  const postBucket = makeBucket(3, 1000);  // guards announcement spam
+  const chatBucket  = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
+  const buyBucket   = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
+  const postBucket  = makeBucket(3, 1000);  // guards announcement spam
+  const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -560,7 +565,12 @@ io.on("connection", (socket) => {
 
   // ── Sign in (returning player with a password) ────────────────────────
   // No profile changes here — it only authenticates and restores.
-  socket.on("login", async ({ email, password } = {}) => {
+  // NOTE (all handlers below): never destructure the raw socket payload in the
+  // parameter list — `({ x } = {})` still throws on an explicit `null` payload,
+  // and one malicious `socket.emit("event", null)` would crash the whole server.
+  // Always take `payload` and destructure from `payload || {}`.
+  socket.on("login", async (payload) => {
+    const { email, password } = payload || {};
     try {
       const em = (email || "").trim().slice(0, 80).toLowerCase();
       const pw = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
@@ -613,7 +623,8 @@ io.on("connection", (socket) => {
   // A returning browser sends its stored token instead of re-filling the form.
   // We validate it, look up the durable row, and either drop them straight back
   // into the office (approved) or back into the waiting queue (not approved).
-  socket.on("resumeSession", async ({ token } = {}) => {
+  socket.on("resumeSession", async (payload) => {
+    const { token } = payload || {};
     try {
       const data = verifyToken(token);
       if (!data) { socket.emit("resumeFailed"); return; }
@@ -660,7 +671,8 @@ io.on("connection", (socket) => {
   });
 
   // ── Admin auth ───────────────────────────────────────────────────────
-  socket.on("adminAuth", ({ password }) => {
+  socket.on("adminAuth", (payload) => {
+    const { password } = payload || {};
     if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
     admins.add(socket.id);
     socket.emit("adminAuthOk");
@@ -750,7 +762,8 @@ io.on("connection", (socket) => {
 
   // Admin designates (or revokes) a player as an announcer — persisted on the
   // player row so it survives reconnects and restarts.
-  socket.on("setAnnouncer", async ({ targetId, canPost }) => {
+  socket.on("setAnnouncer", async (payload) => {
+    const { targetId, canPost } = payload || {};
     if (!admins.has(socket.id)) return;
     const p = players[targetId];
     if (!p || !p.email) return;
@@ -771,7 +784,8 @@ io.on("connection", (socket) => {
   // token issued before this moment, and any live session for the email is
   // dropped — so whoever held the account is fully signed out. The next
   // register with this email sets a fresh password (same claim rule as legacy).
-  socket.on("adminResetPassword", async ({ email } = {}) => {
+  socket.on("adminResetPassword", async (payload) => {
+    const { email } = payload || {};
     if (!admins.has(socket.id)) return;
     const em = (email || "").trim().slice(0, 80).toLowerCase();
     if (!em) { socket.emit("resetPasswordDone", { ok: false, message: "Email is required." }); return; }
@@ -849,7 +863,8 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
   });
 
-  socket.on("chatMessage", ({ message }) => {
+  socket.on("chatMessage", (payload) => {
+    const { message } = payload || {};
     if (!players[socket.id]) return;
     if (!takeToken(chatBucket)) return;   // throttle chat spam (silently drop)
     const text = (message || "").trim().slice(0, 120);
@@ -857,8 +872,18 @@ io.on("connection", (socket) => {
     io.emit("chatMessage", { id: socket.id, name: players[socket.id].name, message: text });
   });
 
+  // ── Emotes (ephemeral reaction bubbles, relayed to everyone) ─────────
+  socket.on("emote", (payload) => {
+    const { emote } = payload || {};
+    if (!players[socket.id]) return;
+    if (!takeToken(emoteBucket)) return;             // throttle emote spam (silently drop)
+    if (typeof emote !== "string" || !EMOTES.has(emote)) return;
+    io.emit("playerEmote", { id: socket.id, emote });
+  });
+
   // ── Announcements (admin / designated announcers post, broadcast to all) ──
-  socket.on("postAnnouncement", async ({ text, board }) => {
+  socket.on("postAnnouncement", async (payload) => {
+    const { text, board } = payload || {};
     const p = players[socket.id];
     const canPost = admins.has(socket.id) || !!(p && p.isAnnouncer);
     if (!canPost) return;
@@ -878,7 +903,8 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("postAnnouncement failed:", err); }
   });
 
-  socket.on("deleteAnnouncement", async ({ id }) => {
+  socket.on("deleteAnnouncement", async (payload) => {
+    const { id } = payload || {};
     if (!admins.has(socket.id)) return;
     const numId = parseInt(id, 10);
     if (!Number.isInteger(numId)) return;
@@ -888,7 +914,8 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("deleteAnnouncement failed:", err); }
   });
 
-  socket.on("buyCosmetic", async ({ item }) => {
+  socket.on("buyCosmetic", async (payload) => {
+    const { item } = payload || {};
     const p = players[socket.id], cost = SHOP[item];
     if (!p || !cost) return;
     if (!takeToken(buyBucket)) return;   // throttle rapid buy attempts

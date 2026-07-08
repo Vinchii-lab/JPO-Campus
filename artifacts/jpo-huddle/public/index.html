@@ -378,6 +378,51 @@
     }
     #touch-chat:active { background: rgba(0,0,0,0.8); }
 
+    /* ── Emote bar ── */
+    #emote-bar {
+      position: fixed; bottom: 24px; left: 24px; z-index: 240;
+      display: none; align-items: center; gap: 4px;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px; padding: 5px 8px; backdrop-filter: blur(4px);
+    }
+    body.playing #emote-bar { display: flex; }
+    body.playing.chatting #emote-bar { display: none; }
+    .emote-btn {
+      position: relative; background: none; border: none; cursor: pointer;
+      font-size: 21px; line-height: 1; padding: 5px 6px 8px; border-radius: 8px;
+      transition: transform 0.1s, background 0.12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .emote-btn:hover { background: rgba(255,255,255,0.14); transform: scale(1.15); }
+    .emote-btn .emote-key {
+      position: absolute; bottom: 0; right: 2px; font-size: 9px;
+      font-family: monospace; color: rgba(255,255,255,0.55); pointer-events: none;
+    }
+    #emote-toggle { display: none; }
+
+    /* Touch layout: the joystick owns the bottom-left corner, so the emote bar
+       collapses behind a 😀 toggle stacked above the chat button on the right. */
+    body.touch-device #emote-bar {
+      left: auto; right: 26px; bottom: 296px;
+      flex-wrap: wrap; width: 108px; justify-content: center; padding: 6px;
+    }
+    body.touch-device.playing #emote-bar { display: none; }
+    body.touch-device.playing #emote-bar.open { display: flex; }
+    body.touch-device.playing.chatting #emote-bar { display: none; }
+    body.touch-device .emote-btn { font-size: 24px; padding: 7px; }
+    body.touch-device .emote-btn .emote-key { display: none; }
+    body.touch-device.playing #emote-toggle {
+      display: flex; position: fixed; right: 26px; bottom: 224px; z-index: 250;
+      width: 62px; height: 62px; border-radius: 50%; font-size: 24px;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
+      color: #fff;
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.touch-device.playing.chatting #emote-toggle { display: none; }
+    #emote-toggle:active { background: rgba(0,0,0,0.8); }
+
     /* Chat send/close buttons — only shown on touch devices */
     .chat-touch-btn {
       display: none; align-items: center; justify-content: center;
@@ -585,6 +630,10 @@
     <button id="touch-chat" type="button" aria-label="Open chat">💬</button>
     <button id="touch-action" type="button" class="disabled">E</button>
   </div>
+
+  <!-- ── Emote bar (buttons are built from EMOTES in JS) ── -->
+  <button id="emote-toggle" type="button" aria-label="Emotes">😀</button>
+  <div id="emote-bar"></div>
 
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
@@ -1546,6 +1595,56 @@
       e.stopPropagation();
     });
 
+    // ── Emotes (reaction bubbles) ─────────────────────────────────────
+    // Ids MUST match the server's EMOTES allowlist in server.js. Array order
+    // defines the 1–8 keyboard shortcuts and the button order in the bar.
+    const EMOTES = [
+      { id:'wave',   char:'👋' },
+      { id:'heart',  char:'❤️' },
+      { id:'laugh',  char:'😂' },
+      { id:'party',  char:'🎉' },
+      { id:'thumbs', char:'👍' },
+      { id:'fire',   char:'🔥' },
+      { id:'sad',    char:'😢' },
+      { id:'shock',  char:'😮' },
+    ];
+    const EMOTE_CHARS = {};
+    EMOTES.forEach(e => { EMOTE_CHARS[e.id] = e.char; });
+
+    function sendEmote(id) {
+      socket.emit('emote', { emote: id });
+      // On touch the bar overlays the game — auto-collapse it after a pick.
+      if (IS_TOUCH) document.getElementById('emote-bar').classList.remove('open');
+    }
+
+    {
+      const bar = document.getElementById('emote-bar');
+      EMOTES.forEach((e, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'emote-btn';
+        b.setAttribute('aria-label', 'Emote: ' + e.id);
+        b.innerHTML = e.char + '<span class="emote-key">' + (i + 1) + '</span>';
+        // pointerdown (not click) + preventDefault keeps focus on the game canvas.
+        b.addEventListener('pointerdown', ev => { ev.preventDefault(); sendEmote(e.id); });
+        bar.appendChild(b);
+      });
+      document.getElementById('emote-toggle')?.addEventListener('pointerdown', ev => {
+        ev.preventDefault(); bar.classList.toggle('open');
+      });
+    }
+
+    // Number keys 1–8 fire emotes while playing (never while typing in a field).
+    document.addEventListener('keydown', e => {
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= EMOTES.length) { e.preventDefault(); sendEmote(EMOTES[n - 1].id); }
+    });
+
     // ── On-screen touch controls (joystick + action/chat buttons) ──────
     if (IS_TOUCH) {
       // Send / close buttons in the chat bar (mobile keyboards have no Esc key).
@@ -2067,6 +2166,20 @@
           }
         });
 
+        socket.on('playerEmote', ({id, emote}) => {
+          const ch = EMOTE_CHARS[emote];
+          if (!ch) return;
+          if (id === socket.id) {
+            this._showEmoteBubble(this.player, ch, true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showEmoteBubble(entry.sprite, ch, false);
+            }
+          }
+        });
+
         window._gameScene = this;
         _maybeResume();   // scene is ready — safe to auto-rejoin if a token is stored
 
@@ -2375,6 +2488,27 @@
         }).setOrigin(0.5,1).setDepth(1002);
         this.tweens.add({
           targets:bubble, alpha:0, delay:3800, duration:500,
+          onComplete:()=>{ bubble.destroy(); if(isLocal&&this.localBubble===bubble) this.localBubble=null; },
+        });
+        if (isLocal) this.localBubble = bubble;
+        return bubble;
+      }
+
+      // Emote bubbles reuse the chat-bubble slot (this.localBubble /
+      // entry.chatBubble), so every existing follow-the-player positioning path
+      // (update() for the local player, playerMoved for others) keeps working,
+      // and an emote simply replaces any bubble already showing.
+      _showEmoteBubble(sprite, char, isLocal) {
+        if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
+        const yOff  = isLocal ? (this.localCrown ? -95 : -78) : -85;
+        const bubble = this.add.text(sprite.x, sprite.y+yOff, char, {
+          fontSize:'26px', padding:{x:9,y:6},
+          backgroundColor:'#ffffffee', resolution:2,
+        }).setOrigin(0.5,1).setDepth(1002);
+        bubble.setScale(0.4);
+        this.tweens.add({ targets:bubble, scaleX:1, scaleY:1, duration:140, ease:'Back.Out' });
+        this.tweens.add({
+          targets:bubble, alpha:0, delay:2600, duration:400,
           onComplete:()=>{ bubble.destroy(); if(isLocal&&this.localBubble===bubble) this.localBubble=null; },
         });
         if (isLocal) this.localBubble = bubble;
