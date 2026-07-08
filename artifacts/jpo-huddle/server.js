@@ -609,13 +609,66 @@ const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scal
 // mid-match spend block apply to new games automatically. The `rps*` event
 // names are kept for the shared lifecycle events (they predate the roster);
 // payloads carry a `game` field.
-const GAMES      = new Set(["rps", "ttt", "qd"]);
-const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw" };
+const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr"]);
+const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race" };
 const TTT_MOVE_MS   = 20_000;  // per-move clock — the slow side forfeits
 const TTT_LINES     = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const QD_ARM_MIN_MS = 2_000;   // random wait before the DRAW! signal…
 const QD_ARM_MAX_MS = 6_000;   // …lands somewhere in [min, max]
 const QD_LIVE_MS    = 5_000;   // nobody taps within this after the signal → cancel
+const IB_ROUNDS     = 3;       // Icebreakers: best of 3 either/or rounds
+const IB_SUBMIT_MS  = 20_000;  // per-round answer window (mirrors the RPS pick clock)
+const IB_REVEAL_MS  = 5_000;   // reading pause between the reveal and the next round
+const WR_TIME_MS    = 60_000;  // Word Race: nobody solves it in this → draw
+const IB_CHOICES    = new Set(["a", "b"]);
+
+// Icebreaker prompt pool (SERVER-ONLY — the client only ever sees the labels
+// of the rounds it is playing). Work-friendly either/or pairs; a match draws
+// IB_ROUNDS distinct prompts so no repeats within a match.
+const IB_PROMPTS = [
+  { a: "Coffee", b: "Tea" },
+  { a: "Early bird", b: "Night owl" },
+  { a: "Beach", b: "Mountains" },
+  { a: "Dogs", b: "Cats" },
+  { a: "Call", b: "Text" },
+  { a: "Sweet", b: "Salty" },
+  { a: "Summer", b: "Winter" },
+  { a: "Movie night", b: "Game night" },
+  { a: "Cook at home", b: "Order in" },
+  { a: "Window seat", b: "Aisle seat" },
+  { a: "City", b: "Countryside" },
+  { a: "Books", b: "Podcasts" },
+  { a: "Pizza", b: "Tacos" },
+  { a: "Tidy desk", b: "Organized chaos" },
+  { a: "Morning shower", b: "Evening shower" },
+  { a: "Save it", b: "Spend it" },
+  { a: "Plan everything", b: "Wing it" },
+  { a: "Karaoke", b: "Trivia night" },
+  { a: "Big breakfast", b: "Big dinner" },
+  { a: "Stairs", b: "Elevator" },
+  { a: "Silence to focus", b: "Music to focus" },
+  { a: "Hot weather", b: "Cold weather" },
+  { a: "Sneakers", b: "Sandals" },
+  { a: "Road trip", b: "Flight" },
+  { a: "Comedy", b: "Thriller" },
+  { a: "Cake", b: "Ice cream" },
+  { a: "Online shopping", b: "In-store shopping" },
+  { a: "Camping", b: "Hotel" },
+  { a: "Phone call", b: "Email" },
+  { a: "Gym", b: "Home workout" },
+];
+
+// Word Race pool (SERVER-ONLY — the client gets the scramble, never the word,
+// until the match is over). Office-themed, 5–8 letters, all uppercase.
+const WR_WORDS = [
+  "OFFICE", "COFFEE", "MEETING", "KEYBOARD", "MONITOR", "PRINTER", "STAPLER",
+  "FOLDER", "LAPTOP", "DEADLINE", "INVOICE", "PAYROLL", "BUDGET", "REPORT",
+  "MANAGER", "CLIENT", "PROJECT", "CALENDAR", "AGENDA", "BINDER", "PANTRY",
+  "ARCHIVE", "CONTRACT", "TEAMWORK", "SCHEDULE", "PENCIL", "ERASER", "DRAWER",
+  "CUBICLE", "ELEVATOR", "HALLWAY", "FEEDBACK", "TRAINING", "HOLIDAY",
+  "WEEKEND", "OVERTIME", "RECEIPT", "SCANNER", "DESKTOP", "SUPPLIES",
+];
+const WR_WORD_SET = new Set(WR_WORDS);
 let rpsSeq = 0;
 const rpsBySocket = new Map(); // socketId → shared match object (both parties map to the SAME object)
 
@@ -624,6 +677,7 @@ const rpsBySocket = new Map(); // socketId → shared match object (both parties
 function clearMatchTimers(m) {
   clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
   clearTimeout(m.moveTimer);   clearTimeout(m.signalTimer); clearTimeout(m.liveTimer);
+  clearTimeout(m.roundTimer);  clearTimeout(m.revealTimer);
 }
 
 function rpsOtherId(m, id) { return id === m.challengerId ? m.targetId : m.challengerId; }
@@ -825,6 +879,101 @@ function tttBroadcast(m) {
   }
 }
 
+// ── Icebreakers helpers ──────────────────────────────────────────────────────
+// Round state lives on the match object: ibRound (1-based), ibPhase
+// ('answer' | 'reveal'), ibSubs (socketId → {answer, guess}, reset per round),
+// ibScores, ibPrompts (IB_ROUNDS distinct picks made at accept time). All
+// timer callbacks capture the round number and re-check state/game/phase/round
+// at fire time (same fire-time re-check discipline as tttTimeout/qdSignal), so
+// a stale timer can never act on a later round or a cancelled match.
+function ibExtras(m) {
+  return (me, them) => ({ scores: { you: m.ibScores[me], them: m.ibScores[them] } });
+}
+
+function ibStartRound(m) {
+  if (m.state !== "playing" || m.game !== "ib") return;
+  m.ibPhase = "answer";
+  m.ibSubs = {};
+  const round = m.ibRound;
+  const prompt = m.ibPrompts[round - 1];
+  for (const id of [m.challengerId, m.targetId]) {
+    io.to(id).emit("ibRound", {
+      challengeId: m.id, round, rounds: IB_ROUNDS,
+      prompt: { a: prompt.a, b: prompt.b },
+      submitMs: IB_SUBMIT_MS,
+      scores: { you: m.ibScores[id], them: m.ibScores[rpsOtherId(m, id)] },
+    });
+  }
+  m.roundTimer = setTimeout(() => ibRoundTimeout(m, round), IB_SUBMIT_MS);
+}
+
+// Answer-window expiry: exactly one submitted → forfeit win for the submitter
+// (mirrors the RPS pick-timeout); neither → cancel, no coins moved.
+function ibRoundTimeout(m, round) {
+  if (m.state !== "playing" || m.game !== "ib" || m.ibPhase !== "answer" || m.ibRound !== round) return;
+  const submitted = [m.challengerId, m.targetId].filter((id) => m.ibSubs[id]);
+  if (submitted.length === 0) {
+    cancelMatchFor(m.challengerId, "Nobody answered in time — match cancelled, no coins moved.");
+    return;
+  }
+  const winnerId = submitted[0], loserId = rpsOtherId(m, winnerId);
+  finishMatch(m, { winnerId, loserId, forfeit: true, extras: ibExtras(m) })
+    .catch((err) => console.error("ib timeout resolve failed:", err));
+}
+
+// Both answers are in: score the guesses, show the reveal, then (after a
+// reading pause) either start the next round or settle the match.
+function ibReveal(m) {
+  if (m.state !== "playing" || m.game !== "ib" || m.ibPhase !== "answer") return;
+  clearTimeout(m.roundTimer);
+  m.ibPhase = "reveal";
+  const cId = m.challengerId, tId = m.targetId;
+  const round = m.ibRound;
+  const prompt = m.ibPrompts[round - 1];
+  const subC = m.ibSubs[cId], subT = m.ibSubs[tId];
+  if (subC.guess === subT.answer) m.ibScores[cId]++;
+  if (subT.guess === subC.answer) m.ibScores[tId]++;
+  const final = round >= IB_ROUNDS;
+  for (const [me, them] of [[cId, tId], [tId, cId]]) {
+    const mine = m.ibSubs[me], theirs = m.ibSubs[them];
+    io.to(me).emit("ibReveal", {
+      challengeId: m.id, round, rounds: IB_ROUNDS,
+      prompt: { a: prompt.a, b: prompt.b },
+      you:  { answer: mine.answer,   guess: mine.guess,   gotPoint: mine.guess === theirs.answer },
+      them: { answer: theirs.answer, guess: theirs.guess, gotPoint: theirs.guess === mine.answer },
+      scores: { you: m.ibScores[me], them: m.ibScores[them] },
+      final, revealMs: IB_REVEAL_MS,
+    });
+  }
+  m.revealTimer = setTimeout(() => {
+    if (m.state !== "playing" || m.game !== "ib" || m.ibPhase !== "reveal" || m.ibRound !== round) return;
+    if (!final) { m.ibRound++; ibStartRound(m); return; }
+    const a = m.ibScores[cId], b = m.ibScores[tId];
+    const opts = a === b
+      ? { draw: true, extras: ibExtras(m) }
+      : { winnerId: a > b ? cId : tId, loserId: a > b ? tId : cId, extras: ibExtras(m) };
+    finishMatch(m, opts).catch((err) => console.error("ib resolve failed:", err));
+  }, IB_REVEAL_MS);
+}
+
+// ── Word Race helper ─────────────────────────────────────────────────────────
+// Fisher-Yates until the scramble differs from the word AND isn't accidentally
+// another pool word; bounded attempts because repeated-letter words make
+// "shuffle until different" theoretically unbounded.
+function wrScramble(word) {
+  const letters = word.split("");
+  let out = word;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    for (let i = letters.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [letters[i], letters[j]] = [letters[j], letters[i]];
+    }
+    out = letters.join("");
+    if (out !== word && !WR_WORD_SET.has(out)) return out;
+  }
+  return out;
+}
+
 // Passive coin earning (+COIN_TICK_BASE/min per active player, +WORK_BONUS more
 // while seated at a work desk — see isAtWorkSeat). We also flush each
 // email-backed player's position in the same tick, so movement never triggers a
@@ -865,6 +1014,7 @@ io.on("connection", (socket) => {
   const postBucket  = makeBucket(3, 1000);  // guards announcement spam
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
+  const wrBucket    = makeBucket(6, 500);   // Word Race guesses (~2/s sustained, burst of 6)
   const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
   const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
   const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
@@ -1534,6 +1684,42 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (m.game === "ib") {
+      // Best-of-3 either/or rounds; prompts drawn without repeats. Round flow
+      // (ibRound → ibSubmit×2 → ibReveal → pause → next/settle) lives in the
+      // ib helpers above io.on().
+      m.state = "playing";
+      m.ibRound = 1;
+      m.ibScores = { [m.challengerId]: 0, [m.targetId]: 0 };
+      m.ibSubs = {};
+      const pool = IB_PROMPTS.slice();
+      m.ibPrompts = [];
+      for (let i = 0; i < IB_ROUNDS; i++) {
+        m.ibPrompts.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+      }
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     rounds: IB_ROUNDS, submitMs: IB_SUBMIT_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), rounds: IB_ROUNDS, submitMs: IB_SUBMIT_MS });
+      ibStartRound(m);
+      return;
+    }
+
+    if (m.game === "wr") {
+      // One scramble, first correct unscramble wins; the word itself NEVER
+      // leaves the server before game over (wrSubmit adjudicates).
+      m.state = "playing";
+      m.wrWord = WR_WORDS[Math.floor(Math.random() * WR_WORDS.length)];
+      m.wrScrambled = wrScramble(m.wrWord);
+      m.wrStartAt = Date.now();
+      m.roundTimer = setTimeout(() => {
+        if (m.state !== "playing" || m.game !== "wr") return;   // re-check at fire time
+        finishMatch(m, { draw: true, extras: () => ({ word: m.wrWord, unsolved: true }) })
+          .catch((err) => console.error("wr timeout resolve failed:", err));
+      }, WR_TIME_MS);
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     scramble: m.wrScrambled, raceMs: WR_TIME_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), scramble: m.wrScrambled, raceMs: WR_TIME_MS });
+      return;
+    }
+
     m.state = "picking";
     m.pickTimer = setTimeout(() => { rpsResolve(m).catch((err) => console.error("rps resolve failed:", err)); }, RPS_PICK_MS);
     io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     pickMs: RPS_PICK_MS });
@@ -1599,6 +1785,42 @@ io.on("connection", (socket) => {
         winnerId: socket.id, loserId: other,
         extras: () => ({ reactionMs }),
       }).catch((err) => console.error("qd resolve failed:", err));
+    }
+  });
+
+  // Icebreakers submit intent: your own answer + your guess of theirs, both
+  // 'a' | 'b'. First submit locks (like rpsPick); only the FACT of the lock
+  // leaks to the opponent — answers stay secret until BOTH are in.
+  socket.on("ibSubmit", (payload) => {
+    const { challengeId, answer, guess } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "ib" || m.state !== "playing" || m.ibPhase !== "answer") return;
+    if (!IB_CHOICES.has(answer) || !IB_CHOICES.has(guess)) return;
+    if (m.ibSubs[socket.id]) return;   // first submit locks — no take-backs
+    m.ibSubs[socket.id] = { answer, guess };
+    io.to(rpsOtherId(m, socket.id)).emit("ibPeerLocked", { challengeId: m.id });
+    if (m.ibSubs[m.challengerId] && m.ibSubs[m.targetId]) ibReveal(m);
+  });
+
+  // Word Race guess intent. Server-side compare only (the client never knows
+  // the word); wrong guesses get a private wrWrong so the input can shake —
+  // no lockout, but bucketed so a spamming client is just silently dropped.
+  socket.on("wrSubmit", (payload) => {
+    const { challengeId, word } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "wr" || m.state !== "playing") return;
+    if (!takeToken(wrBucket)) return;   // throttle = drop, never disconnect
+    if (typeof word !== "string" || word.length > 32) return;
+    const attempt = word.toUpperCase().replace(/[^A-Z]/g, "");
+    if (!attempt) return;
+    if (attempt === m.wrWord) {
+      const solveMs = Date.now() - m.wrStartAt;
+      finishMatch(m, {
+        winnerId: socket.id, loserId: rpsOtherId(m, socket.id),
+        extras: (me) => ({ word: m.wrWord, solveMs, youSolved: me === socket.id }),
+      }).catch((err) => console.error("wr resolve failed:", err));
+    } else {
+      socket.emit("wrWrong", { challengeId: m.id });
     }
   });
 

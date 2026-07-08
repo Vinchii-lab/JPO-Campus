@@ -740,7 +740,8 @@
     .rps-out.draw { color: #f1c40f; }
 
     /* Game picker (wager modal + arcade) */
-    #rps-game-row { display: flex; gap: 8px; justify-content: center; margin: 4px 0 14px; }
+    #rps-game-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 14px; }
+    #rps-game-row .rps-game { flex: 1 1 30%; min-width: 96px; }
     .rps-game {
       flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
       padding: 10px 4px 8px; font-size: 19px; cursor: pointer;
@@ -777,6 +778,48 @@
       -webkit-tap-highlight-color: transparent; transition: background .08s;
     }
     #qd-zone.live { background: #1f5c33; border-color: #2ecc71; font-size: 26px; }
+
+    /* Icebreakers panel (inside #rps-match) */
+    #ib-panel { display: none; margin: 12px 0 6px; }
+    #ib-panel.show { display: block; }
+    #ib-prompt { font-family: monospace; font-size: 17px; font-weight: bold; color: #eee; margin-bottom: 8px; }
+    .ib-sec { font-family: monospace; font-size: 10px; color: #a78bfa; text-transform: uppercase; letter-spacing: .6px; margin: 10px 0 4px; }
+    .ib-row { display: flex; gap: 8px; justify-content: center; }
+    .ib-opt {
+      flex: 1; padding: 9px 6px; font-family: monospace; font-size: 13px; color: #eee;
+      background: #26263c; border: 2px solid #444; border-radius: 10px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ib-opt:hover { border-color: #6c63ff; }
+    .ib-opt.picked { border-color: #6c63ff; background: #2c2650; }
+    #ib-panel.locked .ib-opt { pointer-events: none; opacity: .7; }
+    #ib-panel.locked .ib-opt:not(.picked) { opacity: .35; }
+    #ib-reveal { display: none; font-family: monospace; font-size: 13px; color: #ddd; margin-top: 8px; }
+    #ib-panel.reveal .ib-row, #ib-panel.reveal .ib-sec { display: none; }
+    #ib-panel.reveal #ib-reveal { display: block; }
+    #ib-reveal-you, #ib-reveal-them { margin: 4px 0; }
+    #ib-reveal-score { margin-top: 8px; font-weight: bold; color: #a78bfa; }
+
+    /* Word Race panel (inside #rps-match) */
+    #wr-panel { display: none; margin: 14px 0 6px; }
+    #wr-panel.show { display: block; }
+    #wr-scramble {
+      font-family: monospace; font-size: 26px; font-weight: bold; letter-spacing: 6px;
+      color: #f1c40f; margin-bottom: 12px; user-select: none; -webkit-user-select: none;
+    }
+    #wr-input {
+      width: 100%; box-sizing: border-box; padding: 10px; border-radius: 10px;
+      border: 2px solid #444; background: #191926; color: #eee;
+      font-family: monospace; font-size: 16px; text-transform: uppercase;
+      text-align: center; letter-spacing: 3px;
+    }
+    #wr-input:focus { border-color: #6c63ff; outline: none; }
+    #wr-input.shake { animation: wrShake .3s; border-color: #e74c3c; }
+    @keyframes wrShake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); } 50% { transform: translateX(6px); }
+      75% { transform: translateX(-4px); }
+    }
 
     /* ⚔️ quick-challenge: last slot in the emote bar + a dedicated touch button */
     .emote-btn.challenge { margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.18); border-radius: 0 8px 8px 0; }
@@ -1089,6 +1132,8 @@
         <button class="rps-game picked" data-game="rps" type="button">✊✋✌️<span>Rock·Paper·Scissors</span></button>
         <button class="rps-game" data-game="ttt" type="button">❌⭕<span>Tic-Tac-Toe</span></button>
         <button class="rps-game" data-game="qd" type="button">🤠<span>Quick Draw</span></button>
+        <button class="rps-game" data-game="ib" type="button">🧊<span>Icebreakers</span></button>
+        <button class="rps-game" data-game="wr" type="button">🔤<span>Word Race</span></button>
       </div>
       <div id="rps-wager-fields">
         <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
@@ -1127,6 +1172,28 @@
       </div>
       <div id="ttt-board"></div>
       <div id="qd-panel"><button id="qd-zone" type="button">Wait for it…</button></div>
+      <div id="ib-panel">
+        <div id="ib-prompt"></div>
+        <div class="ib-sec">Your answer</div>
+        <div class="ib-row">
+          <button class="ib-opt" data-kind="answer" data-choice="a" type="button"></button>
+          <button class="ib-opt" data-kind="answer" data-choice="b" type="button"></button>
+        </div>
+        <div class="ib-sec">Your guess — what did they pick?</div>
+        <div class="ib-row">
+          <button class="ib-opt" data-kind="guess" data-choice="a" type="button"></button>
+          <button class="ib-opt" data-kind="guess" data-choice="b" type="button"></button>
+        </div>
+        <div id="ib-reveal">
+          <div id="ib-reveal-you"></div>
+          <div id="ib-reveal-them"></div>
+          <div id="ib-reveal-score"></div>
+        </div>
+      </div>
+      <div id="wr-panel">
+        <div id="wr-scramble"></div>
+        <input id="wr-input" type="text" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Type the word + Enter" />
+      </div>
       <div id="rps-match-status"></div>
       <div id="rps-result" style="display:none">
         <div id="rps-result-picks"></div>
@@ -2906,12 +2973,17 @@
     let _rpsArcadeMode = false;    // wager modal doubling as the arcade's game picker
     let _tttMyMark = '?';
     let _tttMyTurn = false;
+    let _ibAnswer = null;          // Icebreakers: my answer this round ('a'|'b')
+    let _ibGuess = null;           // Icebreakers: my guess of THEIR answer
+    let _ibLocked = false;         // both chosen → submitted, no take-backs
     const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
     // Ids MUST match the server's GAMES allowlist in server.js.
     const GAME_META = {
       rps: { icon: '✊✋✌️', label: 'Rock·Paper·Scissors' },
       ttt: { icon: '❌⭕',   label: 'Tic-Tac-Toe' },
       qd:  { icon: '🤠',     label: 'Quick Draw' },
+      ib:  { icon: '🧊',     label: 'Icebreakers' },
+      wr:  { icon: '🔤',     label: 'Word Race' },
     };
     // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
     const CHALLENGE_RANGE_PX = 480;
@@ -2954,6 +3026,10 @@
       rpsEl('rps-match').classList.remove('open');
       rpsEl('ttt-board').classList.remove('show', 'myturn');
       rpsEl('qd-panel').classList.remove('show');
+      rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('wr-panel').classList.remove('show');
+      rpsEl('wr-input').blur();   // blur re-enables Phaser key capture
+      _ibAnswer = null; _ibGuess = null; _ibLocked = false;
       _rpsHideMenu();
       if (_rpsUiOpen) {
         _rpsUiOpen = false;
@@ -3254,6 +3330,50 @@
       if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _qdFire(); }
     });
 
+    // ── Icebreakers panel ──
+    // Pick your own answer AND a guess of theirs; the moment both are chosen
+    // the pair submits and locks (first submit locks server-side too).
+    function _ibResetRound() {
+      _ibAnswer = null; _ibGuess = null; _ibLocked = false;
+      rpsEl('ib-panel').classList.remove('locked', 'reveal');
+      document.querySelectorAll('.ib-opt').forEach((x) => x.classList.remove('picked'));
+    }
+    document.querySelectorAll('.ib-opt').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'ib' || _ibLocked) return;
+        const kind = b.dataset.kind, choice = b.dataset.choice;
+        if (kind === 'answer') _ibAnswer = choice; else _ibGuess = choice;
+        document.querySelectorAll('.ib-opt[data-kind="' + kind + '"]')
+          .forEach((x) => x.classList.toggle('picked', x === b));
+        if (_ibAnswer && _ibGuess) {
+          _ibLocked = true;
+          rpsEl('ib-panel').classList.add('locked');
+          socket.emit('ibSubmit', { challengeId: _rpsChallengeId, answer: _ibAnswer, guess: _ibGuess });
+          rpsEl('rps-match-status').textContent = 'Locked in — waiting for them…';
+        }
+      });
+    });
+
+    // ── Word Race input ──
+    // Same key isolation as the owner-password input: stop propagation so the
+    // C/Tab/emote hotkeys never fire while typing, and suspend Phaser's global
+    // key capture while focused.
+    {
+      const wrIn = rpsEl('wr-input');
+      wrIn.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (_rpsPhase !== 'wr') return;
+          const w = wrIn.value.trim();
+          if (w) socket.emit('wrSubmit', { challengeId: _rpsChallengeId, word: w });
+        }
+      });
+      wrIn.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      wrIn.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    }
+
     // ── RPS socket events ──
     socket.on('rpsChallengeFailed', (payload) => {
       const { message } = payload || {};
@@ -3281,7 +3401,7 @@
       rpsEl('rps-incoming-text').textContent = arcade
         ? '🕹️ ' + (fromName || '?') + ' wants to play ' + meta.icon + ' ' + meta.label + ' at the arcade! (friendly)'
         : (fromName || '?') + ' challenges you to ' + meta.icon + ' ' + meta.label + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
-      rpsEl('rps-accept').textContent = 'Accept ' + (game === 'ttt' ? '⭕' : game === 'qd' ? '🤠' : '✊');
+      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤' }[game] || '✊');
       rpsEl('rps-incoming').classList.add('open');
       _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
     });
@@ -3291,7 +3411,8 @@
       _rpsToast(reason || 'Match cancelled.');
     });
     socket.on('rpsStart', (payload) => {
-      const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs } = payload || {};
+      const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs,
+              rounds, scramble, raceMs } = payload || {};
       closeAllRps();
       if (_chatOpen) closeChat();
       if (_dmOpen) closeDM();
@@ -3317,6 +3438,23 @@
         z.textContent = 'Wait for it…';
         rpsEl('qd-panel').classList.add('show');
         rpsEl('rps-match-status').textContent = 'Tap only AFTER it turns green — early = instant loss!';
+      } else if (g === 'ib') {
+        _rpsPhase = 'ib';
+        _ibResetRound();
+        rpsEl('ib-prompt').textContent = 'Get ready…';
+        document.querySelectorAll('.ib-opt').forEach((x) => { x.textContent = ''; });
+        rpsEl('ib-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          'Best of ' + (rounds || 3) + ' — guess THEIR answer to score!';
+      } else if (g === 'wr') {
+        _rpsPhase = 'wr';
+        const wrIn = rpsEl('wr-input');
+        wrIn.value = ''; wrIn.classList.remove('shake');
+        rpsEl('wr-scramble').textContent = scramble || '?';
+        rpsEl('wr-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent = 'Unscramble the office word — first correct answer wins!';
+        _rpsCountdown(rpsEl('rps-match-count'), raceMs || 60000, 'Race ends in ');
+        if (!IS_TOUCH) setTimeout(() => wrIn.focus(), 30);
       } else {
         _rpsPhase = 'picking';
         rpsEl('rps-match-status').textContent = 'Make your pick!';
@@ -3345,9 +3483,55 @@
         ? 'Both locked in…'
         : 'Opponent locked in — your turn!';
     });
+    socket.on('ibRound', (payload) => {
+      const { challengeId, round, rounds, prompt, submitMs, scores } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId) return;
+      _ibResetRound();
+      const a = (prompt && prompt.a) || '?', b = (prompt && prompt.b) || '?';
+      rpsEl('ib-prompt').textContent = a + ' or ' + b + '?';
+      document.querySelectorAll('.ib-opt').forEach((x) => {
+        x.textContent = x.dataset.choice === 'a' ? a : b;
+      });
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('rps-match-status').textContent =
+        'Round ' + (round || 1) + ' of ' + (rounds || 3) + ' · You ' + sy + ' – ' + st + ' Them';
+      _rpsCountdown(rpsEl('rps-match-count'), submitMs || 20000, 'Answers lock in ');
+    });
+    socket.on('ibPeerLocked', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId || _ibLocked) return;
+      rpsEl('rps-match-status').textContent = "They've locked in — your turn!";
+    });
+    socket.on('ibReveal', (payload) => {
+      const { challengeId, prompt, you, them, scores, final } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId) return;
+      _rpsStopCount();
+      rpsEl('rps-match-count').textContent = '';
+      const lab = (c) => (prompt && prompt[c]) || '?';
+      const y = you || {}, t = them || {};
+      rpsEl('ib-reveal-you').textContent =
+        'You: ' + lab(y.answer) + ' · guessed ' + lab(y.guess) + (y.gotPoint ? ' ✅ +1' : ' ❌');
+      rpsEl('ib-reveal-them').textContent =
+        'Them: ' + lab(t.answer) + ' · guessed ' + lab(t.guess) + (t.gotPoint ? ' ✅ +1' : ' ❌');
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('ib-reveal-score').textContent = 'Score: You ' + sy + ' – ' + st + ' Them';
+      rpsEl('ib-panel').classList.add('reveal');
+      rpsEl('rps-match-status').textContent = final ? 'Final tally…' : 'Next round coming up…';
+    });
+    socket.on('wrWrong', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'wr' || challengeId !== _rpsChallengeId) return;
+      const inp = rpsEl('wr-input');
+      inp.value = '';
+      inp.classList.remove('shake');
+      void inp.offsetWidth;   // restart the CSS animation
+      inp.classList.add('shake');
+      rpsEl('rps-match-status').textContent = 'Nope — keep trying!';
+    });
     socket.on('rpsResult', (payload) => {
       const { game, outcome, yourPick, theirPick, coinsDelta, forfeit,
-              board, reactionMs, early, youFiredEarly } = payload || {};
+              board, reactionMs, early, youFiredEarly,
+              scores, word, solveMs, unsolved } = payload || {};
       _rpsStopCount();
       clearTimeout(_rpsResultTimer);
       const g = GAME_META[game] ? game : 'rps';
@@ -3355,6 +3539,9 @@
       rpsEl('rps-match').classList.add('open');
       rpsEl('rps-pick-row').style.display = 'none';
       rpsEl('qd-panel').classList.remove('show');
+      rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('wr-panel').classList.remove('show');
+      rpsEl('wr-input').blur();
       rpsEl('rps-match-count').textContent = '';
 
       let picksLine = '', statusLine = '';
@@ -3376,6 +3563,19 @@
           statusLine = 'Firing early is an instant loss.';
         } else {
           picksLine = typeof reactionMs === 'number' ? '⚡ Winning reaction: ' + reactionMs + ' ms' : '';
+        }
+      } else if (g === 'ib') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = 'Final score — You ' + sy + ' · Them ' + st;
+        statusLine = forfeit
+          ? (outcome === 'win' ? "They didn't answer in time — forfeit." : "You didn't answer in time — forfeit.")
+          : (outcome === 'draw' ? 'You read each other equally well!' : '');
+      } else if (g === 'wr') {
+        picksLine = word ? 'The word was ' + word : '';
+        if (unsolved) statusLine = 'Nobody solved it in time.';
+        else if (typeof solveMs === 'number') {
+          statusLine = (outcome === 'win' ? '⚡ You solved it in ' : '⚡ They solved it in ') +
+                       (solveMs / 1000).toFixed(1) + 's';
         }
       } else {
         picksLine =
