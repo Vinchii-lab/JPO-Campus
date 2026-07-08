@@ -166,9 +166,61 @@ function verifyToken(token) {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!data || typeof data.email !== "string" || !data.email) return null;
     if (!Number.isFinite(data.iat) || Date.now() - data.iat > TOKEN_MAX_AGE_MS) return null;
-    return { email: data.email };
+    return { email: data.email, iat: data.iat };
   } catch { return null; }
 }
+
+// ── Password hashing (scrypt, no external deps) ──────────────────────────────
+// Stored as "scrypt:<saltB64url>:<hashB64url>". Async so a hash never blocks the
+// event loop. NULL password_hash = legacy passwordless account: the first
+// register with that email claims it by setting a password (TOFU — same trust
+// level as the old email-only model, but it upgrades security over time).
+const scryptAsync = (pw, salt) =>
+  new Promise((resolve, reject) =>
+    crypto.scrypt(pw, salt, 64, (err, buf) => (err ? reject(err) : resolve(buf))));
+
+async function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  const hash = await scryptAsync(pw, salt);
+  return `scrypt:${salt.toString("base64url")}:${hash.toString("base64url")}`;
+}
+
+async function verifyPassword(pw, stored) {
+  if (typeof stored !== "string") return false;
+  const [scheme, saltB64, hashB64] = stored.split(":");
+  if (scheme !== "scrypt" || !saltB64 || !hashB64) return false;
+  const expected = Buffer.from(hashB64, "base64url");
+  const actual = await scryptAsync(pw, Buffer.from(saltB64, "base64url"));
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+// Per-EMAIL auth attempt limiter (module-level — a per-socket bucket would reset
+// on every reconnect). Checked BEFORE any scrypt call so a flood can't exhaust
+// the libuv threadpool. Lazy expiry: stale entries are dropped on next touch.
+const AUTH_MAX_ATTEMPTS = 5;
+const AUTH_WINDOW_MS = 30_000;
+const authAttempts = new Map(); // email -> { count, windowStart }
+
+function authAllowed(email) {
+  const now = Date.now();
+  const e = authAttempts.get(email);
+  if (!e || now - e.windowStart > AUTH_WINDOW_MS) {
+    authAttempts.set(email, { count: 1, windowStart: now });
+    return true;
+  }
+  if (e.count >= AUTH_MAX_ATTEMPTS) return false;
+  e.count++;
+  return true;
+}
+// Keep the map from growing unboundedly under a many-email flood.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of authAttempts) {
+    if (now - v.windowStart > AUTH_WINDOW_MS) authAttempts.delete(k);
+  }
+}, 5 * 60_000).unref();
+
+const PASSWORD_MIN = 6, PASSWORD_MAX = 100;
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -177,7 +229,11 @@ function verifyToken(token) {
 function rowToPlayerState(row) {
   return {
     x: row.x, y: row.y, dir: row.dir, anim: row.anim === "sit" ? "sit" : "idle",
-    name:      row.name,
+    // `name` is the in-game DISPLAY name (nickname first) — every consumer
+    // (nametags, chat, announcements, grace snapshot) reads this field.
+    // `fullName` keeps the real name for the admin panel.
+    name:      row.nickname || row.first_name || row.name,
+    fullName:  row.name,
     email:     row.email,
     character: row.character,
     hairIdx:   row.hair_idx,
@@ -196,12 +252,13 @@ function rowToPlayerState(row) {
 async function upsertPlayerProfile(reg) {
   const { rows } = await pool.query(
     `INSERT INTO jpo_players
-       (email, first_name, last_name, name, character, hair_idx, skin_idx, shirt_idx, pants_idx)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       (email, first_name, last_name, name, nickname, character, hair_idx, skin_idx, shirt_idx, pants_idx)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (email) DO UPDATE SET
        first_name = EXCLUDED.first_name,
        last_name  = EXCLUDED.last_name,
        name       = EXCLUDED.name,
+       nickname   = EXCLUDED.nickname,
        character  = EXCLUDED.character,
        hair_idx   = EXCLUDED.hair_idx,
        skin_idx   = EXCLUDED.skin_idx,
@@ -209,7 +266,7 @@ async function upsertPlayerProfile(reg) {
        pants_idx  = EXCLUDED.pants_idx,
        updated_at = now()
      RETURNING *`,
-    [reg.email, reg.firstName, reg.lastName, reg.name, reg.character,
+    [reg.email, reg.firstName, reg.lastName, reg.name, reg.nickname, reg.character,
      reg.hairIdx, reg.skinIdx, reg.shirtIdx, reg.pantsIdx],
   );
   return rows[0];
@@ -364,17 +421,27 @@ io.on("connection", (socket) => {
     .catch((err) => console.error("announcements load failed:", err));
 
   // ── Registration ─────────────────────────────────────────────────────
+  // Auth rules (email-backed):
+  //   • Existing row WITH a password → the supplied password must verify BEFORE
+  //     we touch the row or drop any live session (a wrong password must not be
+  //     able to overwrite a profile or disconnect the real player).
+  //   • Existing row WITHOUT a password (legacy) → the first register claims it
+  //     by setting the password, atomically (WHERE password_hash IS NULL).
+  //   • New email → row is created with the password. Everyone waits for
+  //     approval as before; approved emails restore straight into the office.
   socket.on("register", async (payload) => {
     try {
-      const { firstName, lastName, email, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx } = payload || {};
+      const { firstName, lastName, nickname, email, password, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx } = payload || {};
       const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
       const ln   = (lastName  || "").trim().slice(0, 20);
+      const nick = (nickname  || "").trim().slice(0, 16) || fn;
       const em   = (email     || "").trim().slice(0, 80).toLowerCase();
+      const pw   = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
       const char = ["adam","alex","amelia","bob"].includes(character) ? character : "adam";
       const name = ln ? `${fn} ${ln}` : fn;
 
       const reg = {
-        firstName: fn, lastName: ln, email: em, character: char, name,
+        firstName: fn, lastName: ln, email: em, character: char, name, nickname: nick,
         hairIdx:  clampIdx(hairIdx, 8),
         skinIdx:  clampIdx(skinIdx, 6),
         // Legacy clients send a single clothesIdx for both — fall back to it when split fields are absent.
@@ -394,10 +461,84 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // One live session per email.
+      if (pw.length < PASSWORD_MIN) {
+        socket.emit("authFailed", { message: `Password must be at least ${PASSWORD_MIN} characters.` });
+        return;
+      }
+      if (!authAllowed(em)) {
+        socket.emit("authFailed", { message: "Too many attempts — wait 30 seconds and try again." });
+        return;
+      }
+
+      const { rows: existingRows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+      const existing = existingRows[0];
+
+      if (existing && existing.password_hash) {
+        // Established account: verify BEFORE any mutation or live-session drop.
+        const ok = await verifyPassword(pw, existing.password_hash);
+        if (!ok) {
+          socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+          console.log(`Auth failed (register): <${em}>`);
+          return;
+        }
+      } else if (existing) {
+        // Legacy passwordless account: claim it atomically. If another socket
+        // wins the race, fall back to verifying against the winner's hash.
+        const hash = await hashPassword(pw);
+        const { rows: claimed } = await pool.query(
+          `UPDATE jpo_players
+              SET password_hash = $2, password_set_at = now(), updated_at = now()
+            WHERE email = $1 AND password_hash IS NULL
+            RETURNING email`,
+          [em, hash],
+        );
+        if (!claimed[0]) {
+          const { rows: rr } = await pool.query(`SELECT password_hash FROM jpo_players WHERE email = $1`, [em]);
+          const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
+          if (!ok) {
+            socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+            return;
+          }
+        } else {
+          console.log(`Password set (claimed legacy account): <${em}>`);
+        }
+      }
+
+      // Authenticated (or brand-new email) from here on.
       dropLiveByEmail(em, socket.id);
 
-      const row = await upsertPlayerProfile(reg);
+      let row;
+      if (existing) {
+        row = await upsertPlayerProfile(reg);
+      } else {
+        // New account: create profile + password in one insert. A concurrent
+        // first-register of the same email resolves via ON CONFLICT in
+        // upsertPlayerProfile-like semantics: keep it simple — insert, and on
+        // conflict fall back to the claim/verify path by re-running register
+        // logic is overkill for a first-touch race; the profile upsert plus an
+        // atomic passwordless claim covers it.
+        const hash = await hashPassword(pw);
+        row = await upsertPlayerProfile(reg);
+        const { rows: claimed } = await pool.query(
+          `UPDATE jpo_players
+              SET password_hash = $2, password_set_at = now(), updated_at = now()
+            WHERE email = $1 AND password_hash IS NULL
+            RETURNING *`,
+          [em, hash],
+        );
+        if (claimed[0]) {
+          row = claimed[0];
+        } else {
+          // Lost a same-instant race: someone else set a password first — verify.
+          const { rows: rr } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+          const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
+          if (!ok) {
+            socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+            return;
+          }
+          row = rr[0];
+        }
+      }
 
       // Known + approved email → restore straight into the office (this is the
       // "resume where they left off" path). Everyone else waits for approval.
@@ -413,7 +554,58 @@ io.on("connection", (socket) => {
       }
     } catch (err) {
       console.error("register failed:", err);
-      socket.emit("registrationPending");
+      socket.emit("authFailed", { message: "Something went wrong — try again." });
+    }
+  });
+
+  // ── Sign in (returning player with a password) ────────────────────────
+  // No profile changes here — it only authenticates and restores.
+  socket.on("login", async ({ email, password } = {}) => {
+    try {
+      const em = (email || "").trim().slice(0, 80).toLowerCase();
+      const pw = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
+      if (!em || !pw) { socket.emit("loginFailed", { message: "Email and password are required." }); return; }
+      if (!authAllowed(em)) {
+        socket.emit("loginFailed", { message: "Too many attempts — wait 30 seconds and try again." });
+        return;
+      }
+
+      const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+      const row = rows[0];
+      if (!row) { socket.emit("loginFailed", { message: "No account with that email — use Join to register." }); return; }
+      if (!row.password_hash) {
+        socket.emit("loginFailed", { message: "This account has no password yet — use Join once to set one." });
+        return;
+      }
+      const ok = await verifyPassword(pw, row.password_hash);
+      if (!ok) {
+        socket.emit("loginFailed", { message: "Wrong password." });
+        console.log(`Auth failed (login): <${em}>`);
+        return;
+      }
+
+      // Authenticated: now it's safe to drop any older live session.
+      dropLiveByEmail(em, socket.id);
+
+      if (row.approved) {
+        await restorePlayer(socket, row);
+        _notifyAdmins();
+        console.log(`Signed in: ${row.name} <${em}>`);
+      } else {
+        cancelGrace(em);
+        pending[socket.id] = {
+          firstName: row.first_name, lastName: row.last_name, email: row.email,
+          character: row.character, name: row.name, nickname: row.nickname,
+          hairIdx: row.hair_idx, skinIdx: row.skin_idx,
+          shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
+        };
+        socket.emit("registrationPending");
+        _notifyAdmins();
+        console.log(`Signed in (pending approval): ${row.name} <${em}>`);
+      }
+    } catch (err) {
+      console.error("login failed:", err);
+      socket.emit("loginFailed", { message: "Something went wrong — try again." });
     }
   });
 
@@ -427,12 +619,21 @@ io.on("connection", (socket) => {
       if (!data) { socket.emit("resumeFailed"); return; }
       const em = data.email;
 
-      // One live session per email — drop any stale live duplicate first.
-      dropLiveByEmail(em, socket.id);
-
       const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
       const row = rows[0];
       if (!row) { socket.emit("resumeFailed"); return; }
+
+      // Tokens are session credentials now: any token issued BEFORE the account's
+      // password was (re)set is void — a pre-password bystander token (or a
+      // reset-out attacker's token) can't bypass the password gate. Checked
+      // BEFORE dropLiveByEmail so a voided token can't disconnect the real player.
+      if (row.password_set_at && data.iat < new Date(row.password_set_at).getTime()) {
+        socket.emit("resumeFailed");
+        return;
+      }
+
+      // One live session per email — drop any stale live duplicate.
+      dropLiveByEmail(em, socket.id);
 
       if (row.approved) {
         await restorePlayer(socket, row);
@@ -444,7 +645,7 @@ io.on("connection", (socket) => {
         cancelGrace(em);
         pending[socket.id] = {
           firstName: row.first_name, lastName: row.last_name, email: row.email,
-          character: row.character, name: row.name,
+          character: row.character, name: row.name, nickname: row.nickname,
           hairIdx: row.hair_idx, skinIdx: row.skin_idx,
           shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
         };
@@ -478,7 +679,8 @@ io.on("connection", (socket) => {
       if (!reg.email) {
         const state = {
           x: 1080, y: 840, dir: "down", anim: "idle",
-          name: reg.name, email: "", character: reg.character,
+          name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
+          email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
           coins: 50, cosmetics: [], isAnnouncer: false,
         };
@@ -562,6 +764,38 @@ io.on("connection", (socket) => {
       _notifyAdmins();
       console.log(`Announcer ${canPost ? "granted" : "revoked"}: ${p.name}`);
     } catch (err) { console.error("setAnnouncer failed:", err); }
+  });
+
+  // Admin clears an account's password (recovery for a forgotten password or a
+  // wrongly-claimed legacy account). password_set_at = now() voids every resume
+  // token issued before this moment, and any live session for the email is
+  // dropped — so whoever held the account is fully signed out. The next
+  // register with this email sets a fresh password (same claim rule as legacy).
+  socket.on("adminResetPassword", async ({ email } = {}) => {
+    if (!admins.has(socket.id)) return;
+    const em = (email || "").trim().slice(0, 80).toLowerCase();
+    if (!em) { socket.emit("resetPasswordDone", { ok: false, message: "Email is required." }); return; }
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET password_hash = NULL, password_set_at = now(), updated_at = now()
+          WHERE email = $1
+          RETURNING name`,
+        [em],
+      );
+      if (!rows[0]) {
+        socket.emit("resetPasswordDone", { ok: false, message: "No account with that email." });
+        return;
+      }
+      dropLiveByEmail(em, null);
+      cancelGrace(em);
+      _notifyAdmins();
+      socket.emit("resetPasswordDone", { ok: true, message: `Password cleared for ${em}. They set a new one on their next Join.` });
+      console.log(`Password reset by admin: <${em}>`);
+    } catch (err) {
+      console.error("adminResetPassword failed:", err);
+      socket.emit("resetPasswordDone", { ok: false, message: "Something went wrong — try again." });
+    }
   });
 
   // ── Game events ──────────────────────────────────────────────────────
@@ -752,12 +986,17 @@ function _notifyAdmins() {
 }
 
 function _pendingList() {
-  return Object.entries(pending).map(([id, p]) => ({ id, name: p.name, email: p.email, character: p.character }));
+  // `name` here is the FULL name (approval decisions need real identity);
+  // nickname is shown alongside it in the admin panel.
+  return Object.entries(pending).map(([id, p]) => ({
+    id, name: p.name, nickname: p.nickname || "", email: p.email, character: p.character,
+  }));
 }
 
 function _playerList() {
+  // `name` = in-game display name (nickname); `fullName` = real name for admins.
   return Object.entries(players).map(([id, p]) => ({
-    id, name: p.name, coins: p.coins, cosmetics: p.cosmetics,
+    id, name: p.name, fullName: p.fullName || p.name, coins: p.coins, cosmetics: p.cosmetics,
     email: p.email || "", isAnnouncer: !!p.isAnnouncer,
   }));
 }

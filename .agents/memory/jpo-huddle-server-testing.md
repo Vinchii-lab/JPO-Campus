@@ -20,6 +20,16 @@ cannot verify its real behaviour with `curl`. To integration-test it headlessly:
   `approvePlayer` → `buyCosmetic` → `postAnnouncement`, then **restart the
   workflow** and reconnect with the same email to confirm the player is auto-restored
   (approved, coins, cosmetics, announcer status, announcements all survive).
+- Auth-era additions to the loop: `register` now needs a `password` (min 6) and
+  optionally `nickname`; failures come back as `authFailed`/`loginFailed`
+  `{message}` events, success is `approved`. Two test traps:
+  1. The per-email limiter counts SUCCESSFUL auths too (5/30s) — a multi-step
+     test reusing one email must sleep ~31s mid-run or it locks itself out and
+     misreads the lockout as a bug.
+  2. Tests are not idempotent: a leftover approved row makes the next
+     `register` restore instead of emitting `registrationPending`. DELETE the
+     test row before AND after each run (use `pg` from the artifact's own
+     node_modules — the workspace root and /tmp both lack it).
 
 **Why:** this loop is the only way to catch regressions in the DB-as-source-of-truth
 wiring; unit-level checks miss the socket payload shapes the un-editable client depends on.

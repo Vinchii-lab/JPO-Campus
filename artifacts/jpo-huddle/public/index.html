@@ -423,12 +423,32 @@
         </div>
         <div class="form-row">
           <div class="form-field">
+            <label>Nickname <span style="font-weight:normal;color:#999;">(shown in game)</span></label>
+            <input id="inp-nick" type="text" placeholder="Janey" maxlength="16" autocomplete="nickname" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
             <label>Email</label>
             <input id="inp-email" type="email" placeholder="jane@company.com" maxlength="80" autocomplete="email" />
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label>Password <span style="font-weight:normal;color:#999;">(min 6 characters)</span></label>
+            <input id="inp-password" type="password" placeholder="••••••••" maxlength="100" autocomplete="new-password" />
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;margin:10px 0 0;cursor:pointer;">
+          <input id="inp-remember" type="checkbox" checked style="accent-color:#6c63ff;" />
+          Remember me on this device
+        </label>
         <div class="error-msg" id="reg-error"></div>
         <button class="join-btn" id="next-to-builder-btn">Build your character →</button>
+        <p style="font-size:13px;color:#777;margin-top:14px;">
+          Already have an account?
+          <a href="#" id="show-login-link" style="color:#6c63ff;font-weight:600;text-decoration:none;">Sign in</a>
+        </p>
       </div>
 
       <!-- ═══ Steps 1-4: Character builder ═══ -->
@@ -485,6 +505,34 @@
           <button class="nav-btn primary" id="btn-next">Next →</button>
         </div>
       </div>
+    </div>
+
+    <!-- Sign in (returning player with a password) -->
+    <div class="join-card hidden" id="card-login">
+      <h2>🏢 JPO Huddle</h2>
+      <p>Sign in to jump back into the office</p>
+      <div class="form-row">
+        <div class="form-field">
+          <label>Email</label>
+          <input id="login-email" type="email" placeholder="jane@company.com" maxlength="80" autocomplete="email" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label>Password</label>
+          <input id="login-password" type="password" placeholder="••••••••" maxlength="100" autocomplete="current-password" />
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;margin:10px 0 0;cursor:pointer;">
+        <input id="login-remember" type="checkbox" checked style="accent-color:#6c63ff;" />
+        Remember me on this device
+      </label>
+      <div class="error-msg" id="login-error"></div>
+      <button class="join-btn" id="login-btn">Sign in →</button>
+      <p style="font-size:13px;color:#777;margin-top:14px;">
+        New here?
+        <a href="#" id="show-register-link" style="color:#6c63ff;font-weight:600;text-decoration:none;">Register</a>
+      </p>
     </div>
 
     <!-- Auto-rejoin: reconnecting a returning browser -->
@@ -603,6 +651,16 @@
         <p style="font-size:12px;color:#888;margin:0 0 10px">Announcements are posted by walking up to a room's board in-game and pressing E. This list shows every room's posts so you can remove any.</p>
         <div id="op-ann-list" class="op-ann-list"></div>
       </div>
+      <div class="owner-section">
+        <h3>Reset a Password</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Clears the password for an email (works even if they're offline). They'll set a new one the next time they register with that email.</p>
+        <div style="display:flex;gap:8px;">
+          <input id="op-reset-email" type="email" placeholder="person@company.com" maxlength="80"
+                 style="flex:1;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-reject" style="padding:8px 14px;" onclick="ownerResetPassword()">Reset</button>
+        </div>
+        <div id="op-reset-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
     </div>
   </div>
 
@@ -631,10 +689,29 @@
     const socket = io();
 
     // ── Resume tokens: lightweight auto-rejoin (see server.js) ──────────
+    // "Remember me" picks the storage: localStorage survives closing the
+    // browser; sessionStorage only survives a refresh of THIS tab. Saving to
+    // one always clears the other so a stale copy can't linger.
     const TOKEN_KEY = 'jpo_session_token';
-    function _saveToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch {} }
-    function _loadToken()  { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } }
-    function _clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch {} }
+    let _rememberMe = true;   // set at submit time from the active form's checkbox
+    function _saveToken(t) {
+      try {
+        if (_rememberMe) { localStorage.setItem(TOKEN_KEY, t); sessionStorage.removeItem(TOKEN_KEY); }
+        else             { sessionStorage.setItem(TOKEN_KEY, t); localStorage.removeItem(TOKEN_KEY); }
+      } catch {}
+    }
+    function _loadToken() {
+      try {
+        const fromLocal = localStorage.getItem(TOKEN_KEY);
+        if (fromLocal) { _rememberMe = true; return fromLocal; }
+        const fromSession = sessionStorage.getItem(TOKEN_KEY);
+        if (fromSession) { _rememberMe = false; return fromSession; }
+        return '';
+      } catch { return ''; }
+    }
+    function _clearToken() {
+      try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch {}
+    }
 
     function _showRegisterForm() {
       document.getElementById('card-reconnecting')?.classList.add('hidden');
@@ -1223,9 +1300,11 @@
     function goToBuilder() {
       const first = document.getElementById('inp-first').value.trim();
       const email = document.getElementById('inp-email').value.trim();
+      const pw    = document.getElementById('inp-password').value;
       const errEl = document.getElementById('reg-error');
       if (!first) { errEl.textContent = 'First name is required.'; return; }
       if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      if (pw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
       errEl.textContent = '';
       document.getElementById('info-section').style.display = 'none';
       document.getElementById('builder-section').classList.add('active');
@@ -1237,26 +1316,39 @@
       e.stopPropagation();
       if (e.key === 'Enter') goToBuilder();
     }
-    document.getElementById('inp-first').addEventListener('keydown', _stopAndEnter);
-    document.getElementById('inp-last').addEventListener('keydown',  _stopAndEnter);
-    document.getElementById('inp-email').addEventListener('keydown', _stopAndEnter);
+    ['inp-first','inp-last','inp-nick','inp-email','inp-password'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('keydown', _stopAndEnter);
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
     document.getElementById('next-to-builder-btn').addEventListener('click', goToBuilder);
 
-    ['inp-first','inp-last','inp-email'].forEach(id => {
-      document.getElementById(id).addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
-      document.getElementById(id).addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    // ── Register ↔ Sign-in card toggle ─────────────────────────────────
+    document.getElementById('show-login-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-login').classList.remove('hidden');
+    });
+    document.getElementById('show-register-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('card-login').classList.add('hidden');
+      document.getElementById('card-register').classList.remove('hidden');
     });
 
     // ── Registration submit ────────────────────────────────────────────
     function tryRegister() {
       const first = document.getElementById('inp-first').value.trim();
       const last  = document.getElementById('inp-last').value.trim();
+      const nick  = document.getElementById('inp-nick').value.trim();
       const email = document.getElementById('inp-email').value.trim();
+      const pw    = document.getElementById('inp-password').value;
+      _rememberMe  = document.getElementById('inp-remember').checked;
       _playerEmail = email;   // remembered so we can skip a stale copy of OURSELVES
 
       document.getElementById('btn-next').disabled = true;
       socket.emit('register', {
-        firstName: first, lastName: last, email,
+        firstName: first, lastName: last, nickname: nick, email, password: pw,
         character:   _playerChar,
         hairIdx:     _playerHairIdx,
         skinIdx:     _playerSkinIdx,
@@ -1265,9 +1357,57 @@
       });
     }
 
+    // Register was refused (bad password / rate limit / server error): put the
+    // user back on the info step with the reason, ready to retry.
+    socket.on('authFailed', ({ message } = {}) => {
+      document.getElementById('btn-next').disabled = false;
+      document.getElementById('builder-section').classList.remove('active');
+      document.getElementById('info-section').style.display = '';
+      document.getElementById('reg-error').textContent = message || 'Registration failed — try again.';
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-login')?.classList.add('hidden');
+      document.getElementById('card-register').classList.remove('hidden');
+    });
+
+    // ── Sign-in submit ─────────────────────────────────────────────────
+    function tryLogin() {
+      const email = document.getElementById('login-email').value.trim();
+      const pw    = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      if (!pw) { errEl.textContent = 'Password is required.'; return; }
+      errEl.textContent = '';
+      _rememberMe  = document.getElementById('login-remember').checked;
+      _playerEmail = email;
+      document.getElementById('login-btn').disabled = true;
+      socket.emit('login', { email, password: pw });
+    }
+    function _loginStopAndEnter(e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') tryLogin();
+    }
+    ['login-email','login-password'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('keydown', _loginStopAndEnter);
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+    document.getElementById('login-btn').addEventListener('click', tryLogin);
+
+    socket.on('loginFailed', ({ message } = {}) => {
+      document.getElementById('login-btn').disabled = false;
+      document.getElementById('login-error').textContent = message || 'Sign in failed — try again.';
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-register')?.classList.add('hidden');
+      document.getElementById('card-login').classList.remove('hidden');
+    });
+
     // ── Registration lifecycle ────────────────────────────────────────
     socket.on('registrationPending', () => {
       document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-login')?.classList.add('hidden');
       document.getElementById('card-reconnecting')?.classList.add('hidden');
       document.getElementById('card-pending').classList.remove('hidden');
     });
@@ -1281,7 +1421,7 @@
     socket.on('kicked', () => {
       _clearToken();   // revoked: must re-register, not auto-resume
       // Hide all overlay cards and show the kicked card
-      ['card-register','card-reconnecting','card-pending','card-rejected'].forEach(id => {
+      ['card-register','card-login','card-reconnecting','card-pending','card-rejected'].forEach(id => {
         document.getElementById(id)?.classList.add('hidden');
       });
       document.getElementById('card-kicked').classList.remove('hidden');
@@ -1628,7 +1768,7 @@
       if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
-          <td>${esc(p.name)}</td>
+          <td>${esc(p.name)}${p.nickname && p.nickname !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.nickname)}”</span>` : ''}</td>
           <td style="font-size:11px;color:#888">${esc(p.email)}</td>
           <td><span class="char-tag">${esc(p.character)}</span></td>
           <td>
@@ -1644,7 +1784,7 @@
       if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="5">No players online</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
-          <td><span class="online-dot"></span>${esc(p.name)}</td>
+          <td><span class="online-dot"></span>${esc(p.fullName || p.name)}${p.fullName && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
           <td>💰 ${p.coins}</td>
           <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
           <td><button class="o-btn ${p.isAnnouncer ? 'o-btn-approve' : 'o-btn-reject'}" ${p.email ? '' : 'disabled'} title="${p.isAnnouncer ? 'Can post announcements — click to revoke' : 'Allow this person to post announcements'}" onclick="ownerToggleAnnouncer('${esc(p.id)}', ${p.isAnnouncer ? 'false' : 'true'})">📢</button></td>
@@ -1656,6 +1796,28 @@
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
     function ownerKick(id)    { socket.emit('kickPlayer',    id); }
     function ownerToggleAnnouncer(id, canPost) { socket.emit('setAnnouncer', { targetId: id, canPost }); }
+
+    function ownerResetPassword() {
+      const inp = document.getElementById('op-reset-email');
+      const msg = document.getElementById('op-reset-msg');
+      const email = inp.value.trim();
+      if (!email || !email.includes('@')) { msg.style.color = '#e74c3c'; msg.textContent = 'Enter a valid email.'; return; }
+      msg.style.color = '#888';
+      msg.textContent = 'Resetting…';
+      socket.emit('adminResetPassword', { email });
+    }
+    socket.on('resetPasswordDone', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-reset-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (ok) document.getElementById('op-reset-email').value = '';
+    });
+    (() => {
+      const inp = document.getElementById('op-reset-email');
+      inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ownerResetPassword(); });
+      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }

@@ -11,6 +11,15 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   firstName: text("first_name").notNull().default(""),
   lastName: text("last_name").notNull().default(""),
   name: text("name").notNull(),
+  // In-game display name (shown on nametags/chat/announcements). Falls back to
+  // firstName when empty; `name` stays the real full name for admins.
+  nickname: text("nickname").notNull().default(""),
+  // scrypt:<saltB64>:<hashB64>. NULL = legacy passwordless account: the first
+  // register with this email claims it by setting a password (TOFU).
+  passwordHash: text("password_hash"),
+  // When the password was (re)set. Resume tokens issued BEFORE this moment are
+  // rejected, so pre-password tokens can't bypass the new password gate.
+  passwordSetAt: timestamp("password_set_at", { withTimezone: true }),
   character: text("character").notNull().default("adam"),
   hairIdx: integer("hair_idx").notNull().default(0),
   skinIdx: integer("skin_idx").notNull().default(0),
