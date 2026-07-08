@@ -168,7 +168,15 @@ const RENDER_SCALE = 3;
 // (Tiled stores flips in the top bits of the gid). Used by the cigarette's
 // "outside on the grass only" rule.
 const GID_MASK = 0x1FFFFFFF;
-const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR } = (() => {
+// Work-seat GIDs on the Furniture layer: 606 = workstation chair (shares its
+// cell with a monitor), 975 / 980 = the baked-in chair cell of the blue / green
+// manager desks (the cell the sit action snaps the avatar onto — matches the
+// client's DESK_FAMILIES chair cells). Sitting on one of these earns the work
+// bonus; sofas/benches/wooden chairs don't. MUST stay in lockstep with the
+// client's "desk-type seat" rule (_deskPoseAt: gid 606 or deskChairAt hit),
+// which is what shows the 💼 chip.
+const WORK_SEAT_GIDS = new Set([606, 975, 980]);
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "Office.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
@@ -184,13 +192,21 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR } = (() => {
       } else {
         console.error("outdoor mask unavailable (no Floor layer or tilesets) — smoking disabled");
       }
-      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor };
+      // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
+      let workSeats = null;
+      const furn = tmj.layers?.find((l) => l.name === "Furniture" && Array.isArray(l.data));
+      if (furn) {
+        workSeats = furn.data.map((g) => WORK_SEAT_GIDS.has(g & GID_MASK));
+      } else {
+        console.error("work-seat mask unavailable (no Furniture layer) — work bonus disabled");
+      }
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, WORK_SEATS: workSeats };
     }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
-  // Fallback: 63×36 tiles · 16px · scale 3, no outdoor mask (smoking disabled).
-  return { WORLD_W: 3024, WORLD_H: 1728, MAP_W: 63, MAP_H: 36, OUTDOOR: null };
+  // Fallback: 63×36 tiles · 16px · scale 3, no outdoor/work masks (smoking + work bonus disabled).
+  return { WORLD_W: 3024, WORLD_H: 1728, MAP_W: 63, MAP_H: 36, OUTDOOR: null, WORK_SEATS: null };
 })();
 
 // Is this player position outdoors? Uses the FEET tile — the sprite origin is
@@ -204,6 +220,31 @@ function isOutdoors(x, y) {
   if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return false;
   return !!OUTDOOR[row * MAP_W + col];
 }
+
+// ── Work bonus (earn extra coins while seated at a computer/desk) ────────────
+// A player is "working" when their reported anim is 'sit' AND the seat tile
+// under them is a work seat (WORK_SEAT_GIDS). The seat cell is recovered from
+// the seated sprite position with the SAME rounding math as the client's
+// _deskPoseAt (sitting snaps the sprite to seatCol*48+24, seatRow*48+24-BODY_DY,
+// so Math.round inverts it exactly). Rate: COIN_TICK_BASE + WORK_BONUS per
+// minute while working. The client shows the 💼 chip from its own desk-seat
+// detection (the same rule), so no extra socket traffic is needed.
+const COIN_TICK_BASE = 2;   // passive coins per minute (the historical +2/min)
+const WORK_BONUS     = 1;   // extra coins per minute while seated at a work desk
+function isAtWorkSeat(p) {
+  if (!WORK_SEATS || p.anim !== "sit") return false;
+  const col = Math.round(((p.x ?? 0) - TILE_PX / 2) / TILE_PX);
+  const row = Math.round(((p.y ?? 0) - TILE_PX / 2 + BODY_DY) / TILE_PX);
+  if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return false;
+  return !!WORK_SEATS[row * MAP_W + col];
+}
+
+// Once-per-calendar-day login bonus (server/DB date, UTC). Granted on the first
+// successful entry into the office each day via restorePlayer — the atomic
+// conditional UPDATE below is the farm-proofing: re-login, refresh, resume, or
+// concurrent duplicate connections all hit the same WHERE guard, so at most one
+// grant per email per day no matter how many times they reconnect.
+const DAILY_BONUS = 10;
 
 // ── Rate limiting (basic per-socket abuse protection) ────────────────────────
 // A tiny token bucket throttles bursty events WITHOUT disconnecting the player:
@@ -484,6 +525,32 @@ async function restorePlayer(socket, row) {
   for (const pid in players) {
     if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
   }
+
+  // Once-per-calendar-day login bonus. Atomic conditional UPDATE: the WHERE
+  // guard makes the FIRST office entry of the day (register/login/resume/
+  // approve all route through here) the only one that pays out — a same-day
+  // re-login, refresh, or concurrent duplicate connection matches zero rows.
+  // Session-only (no-email) players get nothing: there's no durable row to
+  // gate on, so paying them would be freely farmable via reconnects.
+  if (state.email) {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins + $2, last_daily_bonus = CURRENT_DATE, updated_at = now()
+          WHERE email = $1
+            AND (last_daily_bonus IS NULL OR last_daily_bonus < CURRENT_DATE)
+          RETURNING coins`,
+        [state.email, DAILY_BONUS],
+      );
+      if (rows[0]) {
+        state.coins = rows[0].coins;
+        socket.emit("coinUpdate", { coins: state.coins });
+        socket.emit("dailyBonus", { amount: DAILY_BONUS });
+      }
+    } catch (err) {
+      console.error("daily bonus failed:", err);   // non-fatal: they're already in the office
+    }
+  }
 }
 
 // ── Rock-paper-scissors challenges (ephemeral, in-session only) ──────────────
@@ -723,29 +790,31 @@ function tttBroadcast(m) {
   }
 }
 
-// Passive coin earning (+2/min per active player). We also flush each
+// Passive coin earning (+COIN_TICK_BASE/min per active player, +WORK_BONUS more
+// while seated at a work desk — see isAtWorkSeat). We also flush each
 // email-backed player's position in the same tick, so movement never triggers a
 // per-move DB write. Coins are incremented atomically in SQL and read back, so
 // concurrent purchases can't lose or double-count.
 setInterval(async () => {
   for (const id in players) {
     const p = players[id];
+    const rate = COIN_TICK_BASE + (isAtWorkSeat(p) ? WORK_BONUS : 0);
     if (p.email) {
       try {
         const { rows } = await pool.query(
           `UPDATE jpo_players
-              SET coins = coins + 2, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
+              SET coins = coins + $6, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
             WHERE email = $1
             RETURNING coins`,
-          [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
+          [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
         );
         if (rows[0]) p.coins = rows[0].coins;
       } catch (err) {
         console.error("coin/position tick failed:", err);
-        p.coins = (p.coins || 0) + 2;
+        p.coins = (p.coins || 0) + rate;
       }
     } else {
-      p.coins = (p.coins || 0) + 2;
+      p.coins = (p.coins || 0) + rate;
     }
     io.to(id).emit("coinUpdate", { coins: p.coins });
   }

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, timestamp, jsonb, date } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -33,6 +33,10 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // Usable/consumable items: itemId → remaining uses (e.g. {"cigarette": 4,
   // "coffee": 1}). Unlike cosmetics (permanent, worn), these deplete on use.
   items: jsonb("items").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+  // Last calendar day (server/DB date, UTC) this player received the once-daily
+  // login bonus. NULL = never granted. The grant is an atomic conditional UPDATE
+  // (WHERE last_daily_bonus IS NULL OR < CURRENT_DATE) so re-logging can't farm it.
+  lastDailyBonus: date("last_daily_bonus"),
   approved: boolean("approved").notNull().default(false),
   isAnnouncer: boolean("is_announcer").notNull().default(false),
   x: integer("x").notNull().default(1080),

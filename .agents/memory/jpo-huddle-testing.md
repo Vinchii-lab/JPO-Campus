@@ -68,10 +68,14 @@ works, stop debugging game code and drive a browser directly:
   a 2-browser register+matches run exceeds a 2-min foreground shell limit.
 - `page.goto` MUST use `waitUntil: "domcontentloaded"` — the socket.io
   connection keeps the page from ever reaching `networkidle2` (30s timeout).
-- Do NOT teleport the sprite (`body.reset`) to skip walking: the server's
-  movement validation silently rejects the impossible jump, its position
-  stays at the restored spawn, and `interact` fails with "Walk a little
-  closer" even though the client shows the prompt. Walk legitimately.
+- Do NOT teleport the sprite (`body.reset`) across the map to skip walking:
+  the server's movement validation silently rejects the impossible jump, its
+  position stays at the restored spawn, and `interact` fails with "Walk a
+  little closer" even though the client shows the prompt. Walk legitimately —
+  EXCEPT small hops: after idling, a teleport within one move budget
+  (~55–300px, e.g. `player.body.reset(1320, 820)` from spawn onto the chair
+  tile next door) IS accepted server-side and is the fastest way to reach an
+  adjacent interactable.
 - Naive greedy arrow-walking gets stuck on furniture. BFS-pathfind in
   `page.evaluate`: find TilemapLayers via
   `scene.children.list.filter(o => o.type === 'TilemapLayer')`, identify by
@@ -80,6 +84,25 @@ works, stop debugging game code and drive a browser directly:
   `floor(x/48), floor((y+27)/48)` (feet offset); waypoint world px =
   `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
   ~(dist/220)*1000 ms per waypoint. Works first try.
+
+# Sitting a test player: stand ON/next to the chair tile first
+
+The interact scan keys off the FEET tile (`floor(x/48), floor((y+27)/48)`) and
+the spawn tile is NOT adjacent to any chair — pressing E at spawn silently does
+nothing. Small-hop `body.reset` onto a chair tile (see above), wait ~800ms so a
+`playerMove` lands, then `page.keyboard.press('KeyE')` sits reliably (puppeteer
+key delivery verified via `keyE.isDown` while held). Gotcha: `eHint.text` keeps
+its last/default string while hidden — detect an available interaction with
+`eHint.visible`, never the text. `_gameScene`, `_playerCoins`, `tryRegister()`,
+`tryLogin()` are reachable from `page.evaluate`; the socket itself is not
+(top-level `const`).
+
+# Before committing: check for unrelated opengraph.jpg drift
+
+`public/opengraph.jpg` has twice shown up as an unexplained few-byte
+working-tree change after dev-server runs. Restore it before committing
+(`git show HEAD:artifacts/jpo-huddle/public/opengraph.jpg > <same path>`) to
+keep commits focused.
 
 # Real users may be online during e2e — never assert global world state
 

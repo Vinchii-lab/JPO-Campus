@@ -464,6 +464,19 @@
     /* The DM log lives at the same corner — nudge it down while the chip is up. */
     #boost-chip.on ~ #dm-log { top: 96px; }
 
+    /* ── Work-bonus chip (💼, shown while seated at a computer/desk). Stacks
+       under the boost chip when both are up; #dm-log nudges below whichever
+       chips are visible (sibling order: boost-chip, work-chip, dm-log). ── */
+    #work-chip {
+      display: none; position: fixed; top: 58px; right: 14px; z-index: 300;
+      background: rgba(0,0,0,0.72); border-radius: 8px; padding: 6px 12px;
+      font-family: monospace; color: #7ce38b; font-size: 13px;
+    }
+    #work-chip.on { display: block; }
+    #boost-chip.on ~ #work-chip.on { top: 96px; }
+    #work-chip.on ~ #dm-log { top: 96px; }
+    #boost-chip.on ~ #work-chip.on ~ #dm-log { top: 134px; }
+
     /* ── DM (whisper) composer ── */
     #dm-bar {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -691,6 +704,15 @@
     }
     #rps-toast.open { display: block; }
 
+    /* ── Daily login bonus toast (top-center, green accent) ── */
+    #daily-toast {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000;
+      display: none; background: rgba(18,44,26,0.96); border: 1px solid #27ae60;
+      border-radius: 8px; padding: 9px 16px; font-family: monospace; font-size: 13px; color: #a9f0bd;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width: 90vw;
+    }
+    #daily-toast.open { display: block; }
+
     @media (max-width: 560px) {
       .rps-card { min-width: 0; width: calc(100vw - 32px); max-width: 380px; padding: 22px 16px; }
       .rps-pick { width: 78px; }
@@ -911,9 +933,11 @@
     <button id="dm-send" class="chat-touch-btn" type="button" aria-label="Send DM">➤</button>
     <button id="dm-close" class="chat-touch-btn" type="button" aria-label="Close DM">✕</button>
   </div>
-  <!-- ── Coffee-boost countdown — MUST stay a preceding sibling of #dm-log so
-       the `#boost-chip.on ~ #dm-log` rule can nudge the log down while it's up. -->
+  <!-- ── Coffee-boost countdown + work-bonus chip — MUST stay preceding siblings
+       of #dm-log IN THIS ORDER (boost-chip, work-chip, dm-log) so the `.on ~`
+       sibling rules can stack the chips and nudge the log down while they're up. -->
   <div id="boost-chip"></div>
+  <div id="work-chip">💼 Working · +1 coin/min</div>
   <div id="dm-log"></div>
 
   <!-- ── Rock-Paper-Scissors challenges ── -->
@@ -978,6 +1002,7 @@
   </div>
 
   <div id="rps-toast"></div>
+  <div id="daily-toast"></div>
 
   <!-- ── On-screen touch controls (mobile) ── -->
   <div id="touch-controls">
@@ -1931,6 +1956,20 @@
       document.querySelector('canvas')?.focus();
     });
 
+    // Once-a-day login bonus: the server grants it atomically on the first
+    // office entry of the calendar day; the matching coinUpdate arrives
+    // separately, this is just the celebratory toast.
+    let _dailyToastTimer = null;
+    socket.on('dailyBonus', (data) => {
+      const amount = (data || {}).amount || 0;
+      if (!amount) return;
+      const t = document.getElementById('daily-toast');
+      t.textContent = `🎁 Daily login bonus! +${amount} coins`;
+      t.classList.add('open');
+      clearTimeout(_dailyToastTimer);
+      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), 5000);
+    });
+
     socket.on('coinUpdate', ({ coins }) => {
       _playerCoins = coins;
       document.getElementById('coin-count').textContent = coins;
@@ -2047,6 +2086,14 @@
       tick();
       chip.classList.add('on');
       _boostTimer = setInterval(tick, 500);
+    }
+
+    // 💼 chip while seated at a computer/desk. Driven by the scene's own
+    // desk-seat detection (_deskPose non-null == the server's work-seat rule),
+    // so it appears the moment you sit — the server pays the bonus on its
+    // once-per-minute coin tick from the same seat-tile check.
+    function _setWorkChip(on) {
+      document.getElementById('work-chip').classList.toggle('on', !!on);
     }
 
     // ── Shop ──────────────────────────────────────────────────────────
@@ -4039,6 +4086,7 @@
           if (this.sitting) {
             this.sitting = false;
             this._deskPose = null;
+            _setWorkChip(false);
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = [];
             player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
@@ -4072,6 +4120,9 @@
             this._deskPose = seatGid === 606 ? { pose: 'stand' }
                            : deskInfo        ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : null;
+            // Desk-type seats (workstations + manager desks) earn the work
+            // bonus — same rule as the server's WORK_SEAT_GIDS check.
+            _setWorkChip(!!this._deskPose);
             this.lastDir = this._deskPose ? 'down' : interact.dir;
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
