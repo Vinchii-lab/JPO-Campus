@@ -91,6 +91,41 @@ const COFFEE_MULT     = 1.4;     // walk-speed multiplier — MUST match client 
 const COFFEE_MS       = 45_000;  // boost duration — MUST match client (client gets it in the coffeeBoost event)
 const BOOST_GRACE_MS  = 2_500;   // extra server-side slack past expiry so latency can't reject a legit last step
 
+// ── Interactive office objects ────────────────────────────────────────────
+// Fixed stations on the map you can use with E. Coords are scaled world px
+// (tile*48, same space as player x/y) and MUST match OFFICE_OBJECTS in
+// public/index.html. r = max distance from the object's centre to the player's
+// sprite origin. The client only ever sends an intent; proximity, cooldowns,
+// and rate limits are all enforced here.
+const OBJECTS = {
+  coffee_machine: { x: 1056, y: 864, r: 150 },   // vending-machine bank, IT kitchenette corner (c21-22, r17-18)
+  water_cooler:   { x: 2832, y: 408, r: 150 },   // water dispenser, Operations (c58-59, r7-9)
+  arcade:         { x: 720,  y: 720, r: 170 },   // twin TV screens, IT lounge (c13-16, r14-15)
+};
+// Free coffee is on a LONG per-person refill so the 10-coin shop coffee
+// (instant, usable anywhere, stockpilable) stays worth buying.
+const COFFEE_MACHINE_COOLDOWN_MS = 10 * 60_000;
+const WATER_COOLDOWN_MS = 4_000;   // one sip (and one flavor line) per few seconds
+const WATER_LINES = [
+  "Crisp. Refreshing. Corporate.",
+  "You feel 2% more hydrated.",
+  "The cooler gurgles approvingly.",
+  "Ice cold — someone refilled it. A hero.",
+  "Tastes like a productive afternoon.",
+  "Glug glug glug. Perfect form.",
+  "Hydration is a competitive advantage.",
+  "You briefly consider this water's long journey.",
+];
+let waterLineIdx = 0;
+// Cooldowns are keyed by email (fallback: socket id) and live in memory only —
+// a server restart forgives them, which is fine for flavor perks.
+const coffeeMachineReadyAt = new Map();  // key → ts when the next free coffee unlocks
+const waterReadyAt = new Map();          // key → ts of the next allowed sip
+function pruneCooldowns(map, now) {      // opportunistic sweep so the maps can't grow unbounded
+  if (map.size < 500) return;
+  for (const [k, t] of map) if (t <= now) map.delete(k);
+}
+
 // Fixed emote allowlist — ids only, the client maps them to emoji. MUST match
 // the EMOTES list in public/index.html.
 const EMOTES = new Set(["wave", "heart", "laugh", "party", "thumbs", "fire", "sad", "shock"]);
@@ -467,6 +502,29 @@ function cancelMatchFor(id, reason) {
   io.to(m.targetId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
 }
 
+// Create a pending challenge and notify both sides. Shared by the direct
+// rpsChallenge handler and the arcade cabinet (which starts a friendly,
+// 0-wager match). Callers must have already validated: both players exist,
+// neither is in rpsBySocket, and the wager is affordable if > 0.
+function startRpsChallenge(challengerId, targetId, wager, viaArcade = false) {
+  const me = players[challengerId], target = players[targetId];
+  if (!me || !target) return;
+  const m = {
+    id: ++rpsSeq, challengerId, targetId, wager,
+    state: "pending", picks: {}, pickTimer: null,
+    acceptTimer: setTimeout(() => cancelMatchFor(challengerId, "Challenge expired."), RPS_ACCEPT_MS),
+  };
+  rpsBySocket.set(challengerId, m);
+  rpsBySocket.set(targetId, m);
+  io.to(targetId).emit("rpsChallengeIncoming", {
+    challengeId: m.id, fromId: challengerId, fromName: me.name, wager, timeoutMs: RPS_ACCEPT_MS, arcade: viaArcade,
+  });
+  io.to(challengerId).emit("rpsChallengeSent", {
+    challengeId: m.id, toId: targetId, toName: target.name, wager, arcade: viaArcade,
+  });
+  console.log(`RPS challenge${viaArcade ? " (arcade)" : ""}: ${me.name} → ${target.name} (${wager} coins)`);
+}
+
 // Move the wager loser→winner. Email players settle in SQL with the same
 // atomic relative pattern as buyCosmetic; session-only players settle in
 // memory. Mixed matches do the SQL side FIRST and touch memory only after it
@@ -624,6 +682,7 @@ io.on("connection", (socket) => {
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
   const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
+  const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -1152,18 +1211,7 @@ io.on("connection", (socket) => {
     if (w > 0 && me.coins < w)     { socket.emit("rpsChallengeFailed", { message: "You don't have that many coins." }); return; }
     if (w > 0 && target.coins < w) { socket.emit("rpsChallengeFailed", { message: `${target.name} doesn't have that many coins.` }); return; }
 
-    const m = {
-      id: ++rpsSeq, challengerId: socket.id, targetId, wager: w,
-      state: "pending", picks: {}, pickTimer: null,
-      acceptTimer: setTimeout(() => cancelMatchFor(socket.id, "Challenge expired."), RPS_ACCEPT_MS),
-    };
-    rpsBySocket.set(socket.id, m);
-    rpsBySocket.set(targetId, m);
-    io.to(targetId).emit("rpsChallengeIncoming", {
-      challengeId: m.id, fromId: socket.id, fromName: me.name, wager: w, timeoutMs: RPS_ACCEPT_MS,
-    });
-    socket.emit("rpsChallengeSent", { challengeId: m.id, toId: targetId, toName: target.name, wager: w });
-    console.log(`RPS challenge: ${me.name} → ${target.name} (${w} coins)`);
+    startRpsChallenge(socket.id, targetId, w);
   });
 
   socket.on("rpsRespond", (payload) => {
@@ -1401,6 +1449,74 @@ io.on("connection", (socket) => {
       p.boostUntil = now + COFFEE_MS;
       io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
       console.log(`${p.name} drank a coffee (+${Math.round((COFFEE_MULT - 1) * 100)}% for ${COFFEE_MS / 1000}s)`);
+    }
+  });
+
+  // ── Interactive office objects ───────────────────────────────────────
+  // Coffee machine (free boost, long refill), water cooler (flavor text),
+  // arcade (starts a friendly RPS match with whoever else is standing there).
+  // The bucket is consumed BEFORE any validation, like every other handler.
+  socket.on("interact", (payload) => {
+    const { object } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(interactBucket)) return;   // silently drop spam
+    // hasOwn (not a bare lookup) so "__proto__"/"constructor" can't match.
+    if (typeof object !== "string" || !Object.hasOwn(OBJECTS, object)) return;
+    const obj = OBJECTS[object];
+    const dx = (p.x ?? 0) - obj.x, dy = (p.y ?? 0) - obj.y;
+    if (dx * dx + dy * dy > obj.r * obj.r) {
+      socket.emit("interactError", { message: "Walk a little closer." });
+      return;
+    }
+    const now = Date.now();
+
+    if (object === "coffee_machine") {
+      if (p.boostUntil && now < p.boostUntil) {
+        socket.emit("interactError", { message: "You're already buzzing from the last cup!" });
+        return;
+      }
+      const key = p.email || socket.id;
+      const readyAt = coffeeMachineReadyAt.get(key) || 0;
+      if (now < readyAt) {
+        const mins = Math.ceil((readyAt - now) / 60_000);
+        socket.emit("interactError", { message: `The machine is still refilling — about ${mins} min. (The shop sells instant cups!)` });
+        return;
+      }
+      pruneCooldowns(coffeeMachineReadyAt, now);
+      coffeeMachineReadyAt.set(key, now + COFFEE_MACHINE_COOLDOWN_MS);
+      p.boostUntil = now + COFFEE_MS;
+      io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
+      console.log(`${p.name} brewed a free coffee at the machine`);
+
+    } else if (object === "water_cooler") {
+      const key = p.email || socket.id;
+      if (now < (waterReadyAt.get(key) || 0)) return;   // just sipped — quietly ignore
+      pruneCooldowns(waterReadyAt, now);
+      waterReadyAt.set(key, now + WATER_COOLDOWN_MS);
+      const line = WATER_LINES[waterLineIdx++ % WATER_LINES.length];
+      socket.emit("waterCooler", { line });
+      io.emit("objectEffect", { id: socket.id, kind: "water" });
+
+    } else if (object === "arcade") {
+      if (rpsBySocket.has(socket.id)) {
+        socket.emit("interactError", { message: "You're already in a match." });
+        return;
+      }
+      // Needs a second player standing at the cabinet; the nearest free one
+      // gets the invite and the normal accept/decline flow takes over.
+      let bestId = null, bestD = Infinity;
+      for (const [oid, op] of Object.entries(players)) {
+        if (oid === socket.id || rpsBySocket.has(oid)) continue;
+        const ox = (op.x ?? 0) - obj.x, oy = (op.y ?? 0) - obj.y;
+        const d = ox * ox + oy * oy;
+        if (d <= obj.r * obj.r && d < bestD) { bestId = oid; bestD = d; }
+      }
+      if (!bestId) {
+        socket.emit("interactError", { message: "The arcade needs two players — wave someone over! 🕹️" });
+        return;
+      }
+      startRpsChallenge(socket.id, bestId, 0, true);   // friendly (0-wager) match
     }
   });
 

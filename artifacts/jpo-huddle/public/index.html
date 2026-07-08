@@ -1155,6 +1155,19 @@
       1042,1043,1058,1059,
       1045,1046,1061,1062,
     ]);
+    // ── Interactive office objects ─────────────────────────────────────
+    // Fixed stations you can use with E / the touch action button. Coords are
+    // scaled world px (tile*48) and MUST match OBJECTS in server.js — the
+    // server re-checks proximity and owns every cooldown. hl = the rectangle
+    // (world px) that pulses over the object while you're in range.
+    const OFFICE_OBJECTS = [
+      { id:'coffee_machine', x:1056, y:864, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:21*48, y:17*48, w:2*48, h:2*48 } },   // vending-machine bank, IT kitchenette corner
+      { id:'water_cooler',   x:2832, y:408, r:150, label:'Grab some water',  touch:'Drink',
+        hl:{ x:58*48, y:7*48,  w:2*48, h:3*48 } },   // water dispenser, Operations
+      { id:'arcade',         x:720,  y:720, r:170, label:'Play arcade (2P)', touch:'Play',
+        hl:{ x:13*48, y:14*48, w:4*48, h:2*48 } },   // twin TV screens, IT lounge
+    ];
     // ── Rooms ──────────────────────────────────────────────────────────
     // Each announcement board belongs to a room; posting at a board only shows on
     // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
@@ -1896,6 +1909,31 @@
       }
     });
 
+    // ── Interactive office objects: feedback ──────────────────────────
+    socket.on('interactError', (payload) => {
+      const { message } = payload || {};
+      _rpsToast(message || "Can't do that right now.");
+    });
+    // Water cooler: the sipper gets a rotating flavor line; everyone sees a 🥤 bubble.
+    socket.on('waterCooler', (payload) => {
+      const { line } = payload || {};
+      if (line) _rpsToast('💧 ' + line);
+    });
+    socket.on('objectEffect', (payload) => {
+      const { id, kind } = payload || {};
+      const scene = window._gameScene;
+      if (!scene || kind !== 'water') return;
+      if (id === socket.id) {
+        if (scene.player) scene._showEmoteBubble(scene.player, '🥤', true);
+      } else {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, '🥤', false);
+        }
+      }
+    });
+
     // Countdown chip under the coin HUD while the boost is live.
     let _boostTimer = null;
     function _startBoostChip() {
@@ -2490,22 +2528,24 @@
       _rpsToast(message || 'Challenge failed.');
     });
     socket.on('rpsChallengeSent', (payload) => {
-      const { challengeId, toName, wager } = payload || {};
+      const { challengeId, toName, wager, arcade } = payload || {};
       _rpsChallengeId = challengeId;
       _rpsPhase = 'waiting';
-      rpsEl('rps-waiting-text').textContent =
-        'Challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
+      rpsEl('rps-waiting-text').textContent = arcade
+        ? '🕹️ Invited ' + (toName || '?') + ' to the arcade — waiting…'
+        : 'Challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
       rpsEl('rps-waiting').classList.add('open');
     });
     socket.on('rpsChallengeIncoming', (payload) => {
-      const { challengeId, fromName, wager, timeoutMs } = payload || {};
+      const { challengeId, fromName, wager, timeoutMs, arcade } = payload || {};
       // The server's busy-check guarantees we're not mid-match — any RPS UI
       // still open here (e.g. a half-typed wager) is stale; reset first.
       closeAllRps();
       _rpsChallengeId = challengeId;
       _rpsPhase = 'incoming';
-      rpsEl('rps-incoming-text').textContent =
-        (fromName || '?') + ' challenges you to ✊✋✌️' + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
+      rpsEl('rps-incoming-text').textContent = arcade
+        ? '🕹️ ' + (fromName || '?') + ' wants to play ✊✋✌️ at the arcade! (friendly)'
+        : (fromName || '?') + ' challenges you to ✊✋✌️' + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
       rpsEl('rps-incoming').classList.add('open');
       _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
     });
@@ -2925,6 +2965,16 @@
         })();
 
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
+
+        // Soft pulsing highlight over each interactive office object, shown
+        // only while the local player is in range (see update()).
+        this._objHl = {};
+        for (const o of OFFICE_OBJECTS) {
+          const rect = this.add.rectangle(o.hl.x + o.hl.w/2, o.hl.y + o.hl.h/2, o.hl.w, o.hl.h, 0xffe066, 0.14)
+            .setStrokeStyle(2, 0xffe066, 0.85).setDepth(400).setVisible(false);
+          this.tweens.add({ targets: rect, alpha: { from: 1, to: 0.35 }, duration: 800, yoyo: true, repeat: -1 });
+          this._objHl[o.id] = rect;
+        }
 
         this.otherPlayers    = {};
         this.player          = null;
@@ -3512,6 +3562,15 @@
         this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey, occluders };
       }
 
+      // Show the pulsing highlight only for the active object id (null = hide all).
+      _setObjHighlight(activeId) {
+        if (!this._objHl) return;
+        for (const o of OFFICE_OBJECTS) {
+          const rect = this._objHl[o.id];
+          if (rect) rect.setVisible(activeId === o.id);
+        }
+      }
+
       // Keep the on-screen action button's label + enabled state in sync with the "[E]" prompt.
       _updateTouchActionBtn(interact, forceDisabled) {
         if (!IS_TOUCH) return;
@@ -3522,6 +3581,7 @@
         else if (this.sitting)               { label = 'Stand'; avail = true; }
         else if (interact?.type === 'board') { label = 'Read';  avail = true; }
         else if (interact?.type === 'sit')   { label = 'Sit';   avail = true; }
+        else if (interact?.type === 'object'){ label = interact.obj.touch; avail = true; }
         if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
         if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
       }
@@ -3544,6 +3604,7 @@
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
           this.eHint.setVisible(false);
+          this._setObjHighlight(null);
           touchAction.queued = false;
           this._updateTouchActionBtn(null, true);
           this._sendTimer += delta;
@@ -3594,9 +3655,23 @@
           }
         }
 
+        // Interactive office objects: distance-based (not tile-adjacency) so the
+        // whole "stand near it" zone works. Seats/boards win when both apply —
+        // step one tile over if you want the object instead.
+        let objNear = null;
+        if (!this.sitting && !interact) {
+          for (const o of OFFICE_OBJECTS) {
+            const odx = player.x - o.x, ody = player.y - o.y;
+            if (odx*odx + ody*ody <= o.r*o.r) { objNear = o; break; }
+          }
+          if (objNear) interact = { type:'object', obj: objNear };
+        }
+        this._setObjHighlight(objNear && objNear.id);
+
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
         this._updateTouchActionBtn(interact);
 
@@ -3617,6 +3692,8 @@
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
+          } else if (interact?.type === 'object') {
+            socket.emit('interact', { object: interact.obj.id });
           } else if (interact?.type === 'sit') {
             const s = interact.seat;
             this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on
