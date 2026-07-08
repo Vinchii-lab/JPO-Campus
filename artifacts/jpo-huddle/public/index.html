@@ -211,6 +211,15 @@
     .buy-btn.wearing { background: #27ae60; }
     .buy-btn.wearing:hover { background: #219653; }
     .buy-btn.poor    { background: #c9c6f0; cursor: not-allowed; }
+    #shop-wardrobe { border-top: 1px solid #eee; margin-top: 4px; padding-top: 12px; }
+    .wardrobe-title { font-weight: bold; font-size: 14px; }
+    .wardrobe-sub   { font-size: 12px; color: #888; margin: 2px 0 8px; }
+    .wardrobe-label { font-size: 12px; font-weight: bold; color: #555; margin: 8px 0 4px; }
+    .wardrobe-grid  { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cloth-swatch { width: 22px; height: 22px; border-radius: 5px; border: 2px solid #d8d8d8; cursor: pointer; padding: 0; }
+    .cloth-swatch.orig { background: repeating-linear-gradient(45deg, #f5f5f5 0 4px, #d0d0d0 4px 8px); }
+    .cloth-swatch.sel  { border-color: #333; transform: scale(1.12); }
+    #wardrobe-apply { margin-top: 10px; width: 100%; }
     #shop-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #e74c3c; }
     #shop-close-btn {
       width: 100%; margin-top: 16px; padding: 9px;
@@ -1123,6 +1132,18 @@
           <div class="shop-item-cost">10 coins — +40% walk speed for 45s, single cup</div>
         </div>
         <button class="buy-btn" onclick="buyUsable('coffee')">Buy</button>
+      </div>
+      <!-- ── Wardrobe: paid shirt/trouser colour changes ──
+           Swatches are generated from CLOTH_COLORS; the 25-coin label is
+           display-only (the server's WARDROBE_PRICE is authoritative). -->
+      <div id="shop-wardrobe">
+        <div class="wardrobe-title">👕 Wardrobe</div>
+        <div class="wardrobe-sub">Change your shirt and/or trouser colours — 25 coins per change</div>
+        <div class="wardrobe-label">Shirt</div>
+        <div id="wardrobe-shirt" class="wardrobe-grid"></div>
+        <div class="wardrobe-label">Trousers</div>
+        <div id="wardrobe-pants" class="wardrobe-grid"></div>
+        <button id="wardrobe-apply" class="buy-btn" onclick="applyOutfit()">Apply</button>
       </div>
       <div id="shop-msg"></div>
       <button id="shop-close-btn" onclick="closeShop()">Close</button>
@@ -2062,6 +2083,25 @@
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
     });
 
+    // Wardrobe purchase confirmed: the server already took the coins
+    // (coinUpdate arrives separately); adopt the new colours and re-render.
+    socket.on('outfitSuccess', (data) => {
+      const { shirtIdx, pantsIdx } = data || {};
+      _playerShirtIdx = shirtIdx; _playerPantsIdx = pantsIdx;
+      _wardrobeShirtSel = shirtIdx; _wardrobePantsSel = pantsIdx;
+      _refreshShopUI();
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = 'New outfit on! 👕';
+      window._gameScene?._applyLocalOutfit();
+    });
+
+    // Someone (possibly on another screen) changed outfit: rebuild their
+    // palette-swapped sheets. Self is handled by outfitSuccess above.
+    socket.on('playerOutfitUpdate', (data) => {
+      if (!data || data.id === socket.id) return;
+      window._gameScene?._applyRemoteOutfit(data.id, data);
+    });
+
     socket.on('shopError', (msg) => {
       document.getElementById('shop-msg').style.color = '#e74c3c';
       document.getElementById('shop-msg').textContent = msg;
@@ -2175,6 +2215,8 @@
 
     // ── Shop ──────────────────────────────────────────────────────────
     function openShop() {
+      _wardrobeShirtSel = _playerShirtIdx;   // wardrobe picks start at what you're wearing
+      _wardrobePantsSel = _playerPantsIdx;
       _refreshShopUI();
       document.getElementById('shop-msg').textContent = '';
       document.getElementById('shop-modal').classList.add('open');
@@ -2225,6 +2267,41 @@
         row.append(icon, info, btn);
         box.append(row);
       }
+      _renderWardrobe();
+    }
+    // Wardrobe UI: two swatch grids (shirt / trousers) + one Apply button.
+    // WARDROBE_PRICE here is a display label only — the server enforces the
+    // real price. Selection is pending until Apply; openShop() resets it to
+    // what you're currently wearing.
+    const WARDROBE_PRICE = 25;
+    let _wardrobeShirtSel = 0, _wardrobePantsSel = 0;
+    function _renderWardrobe() {
+      const mk = (boxId, selIdx, curIdx, onPick) => {
+        const box = document.getElementById(boxId);
+        box.textContent = '';
+        CLOTH_COLORS.forEach((c, i) => {
+          const b = document.createElement('button');
+          b.className = 'cloth-swatch';
+          b.title = i === curIdx ? `${c.label} (wearing)` : c.label;
+          if (c.css) b.style.background = c.css; else b.classList.add('orig');
+          if (i === selIdx) b.classList.add('sel');
+          b.onclick = () => onPick(i);
+          box.append(b);
+        });
+      };
+      mk('wardrobe-shirt', _wardrobeShirtSel, _playerShirtIdx, (i) => { _wardrobeShirtSel = i; _renderWardrobe(); });
+      mk('wardrobe-pants', _wardrobePantsSel, _playerPantsIdx, (i) => { _wardrobePantsSel = i; _renderWardrobe(); });
+      const btn  = document.getElementById('wardrobe-apply');
+      const noop = _wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx;
+      btn.classList.toggle('poor', noop || _playerCoins < WARDROBE_PRICE);
+      btn.textContent = noop ? 'Pick new colours' : `Apply — ${WARDROBE_PRICE} coins`;
+    }
+    // Greyed states still emit (same pattern as cosmetic Buy buttons): the
+    // server answers with the authoritative shopError; only the true no-op
+    // (nothing changed) short-circuits locally.
+    function applyOutfit() {
+      if (_wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx) return;
+      socket.emit('changeOutfit', { shirtIdx: _wardrobeShirtSel, pantsIdx: _wardrobePantsSel });
     }
     // Items bar: a row shows only while you own that item; the whole bar hides
     // when you own nothing usable. Ids must match the server's USABLE_ITEMS.
@@ -3959,6 +4036,36 @@
           entry.cosmetic = this.add.text(entry.sprite.x, entry.sprite.y-68, emoji,
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
+      }
+
+      // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
+      // paid outfit change. update() re-derives every anim key from
+      // playerTexKey each frame (walk/sit keys change with it, and the desk
+      // 'stand' pose setTextures every frame), so moving/seated poses
+      // self-correct; only the standing-idle path needs an explicit
+      // setTexture here (its setFrame never swaps the texture).
+      _applyLocalOutfit() {
+        if (!this.player) return;
+        const key = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        this.playerTexKey = key;
+        if (!this.sitting) {
+          this.player.setTexture(key);
+          this.player.anims.stop();
+          this.player.setFrame(DIR_START[this.lastDir] ?? DIR_START.down);
+        }
+      }
+
+      // Wardrobe: another player changed outfit. Build their new sheets and
+      // swap entry.texKey; the 50ms playerMoved stream re-renders every pose
+      // from entry.texKey (the anim-key guards compare keys built from it,
+      // and the idle / desk-stand branches setTexture unconditionally), so
+      // the new colours appear on the next tick — no re-posing needed here.
+      _applyRemoteOutfit(id, data) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        const shirt = data.shirtIdx ?? data.clothesIdx ?? 0;
+        const pants = data.pantsIdx ?? data.clothesIdx ?? 0;
+        entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants);
       }
 
       _makeNameTag(x, y, name) {

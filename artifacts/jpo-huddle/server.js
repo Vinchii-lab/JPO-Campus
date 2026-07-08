@@ -94,6 +94,11 @@ const SHOP = {
   guitar:       90,
 };
 
+// Wardrobe: one flat price to change shirt and/or trouser colours (either or
+// both in a single change). The server is authoritative — the client's price
+// label is display-only. Indexes are validated against CLOTH_MAX.
+const WARDROBE_PRICE = 25;
+
 // ── Usable (consumable) items ────────────────────────────────────────────────
 // Unlike SHOP cosmetics (permanent, worn), these are bought in packs of `uses`
 // and deplete when used. Ownership lives in jpo_players.items (jsonb: itemId →
@@ -1635,6 +1640,65 @@ io.on("connection", (socket) => {
       socket.emit("equipUpdate", { equipped: p.equipped });
       io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped });
     } catch (err) { console.error("equipCosmetic failed:", err); }
+  });
+
+  // ── Wardrobe: pay to change shirt/trouser colours ────────────────────────
+  // One flat WARDROBE_PRICE per change (either or both colours in the same
+  // purchase). Same money rules as buyCosmetic: atomic coins-guard SQL for
+  // email-backed players, blocked mid-match (it spends coins), shares the
+  // buy-spam throttle. Invalid indexes are rejected outright (NOT clamped —
+  // clamping would silently charge for a colour the buyer didn't pick).
+  // Picking exactly the colours already worn is a no-op and charges nothing.
+  socket.on("changeOutfit", async (payload) => {
+    const { shirtIdx, pantsIdx } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!Number.isInteger(shirtIdx) || shirtIdx < 0 || shirtIdx > CLOTH_MAX) return;
+    if (!Number.isInteger(pantsIdx) || pantsIdx < 0 || pantsIdx > CLOTH_MAX) return;
+    if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
+    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (shirtIdx === p.shirtIdx && pantsIdx === p.pantsIdx) {
+      socket.emit("shopError", "You're already wearing those colours!");
+      return;
+    }
+
+    // Session-only players (no email): memory-only change.
+    if (!p.email) {
+      if (p.coins < WARDROBE_PRICE) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins -= WARDROBE_PRICE;
+      p.shirtIdx = shirtIdx;
+      p.pantsIdx = pantsIdx;
+      socket.emit("coinUpdate",    { coins: p.coins });
+      socket.emit("outfitSuccess", { shirtIdx, pantsIdx });
+      io.emit("playerOutfitUpdate", {
+        id: socket.id, character: p.character,
+        hairIdx: p.hairIdx, skinIdx: p.skinIdx, shirtIdx, pantsIdx,
+      });
+      console.log(`${p.name} changed outfit (session-only)`);
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins - $2, shirt_idx = $3, pants_idx = $4, updated_at = now()
+          WHERE email = $1 AND coins >= $2
+          RETURNING coins, shirt_idx, pants_idx`,
+        [p.email, WARDROBE_PRICE, shirtIdx, pantsIdx],
+      );
+      if (rows.length === 0) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins    = rows[0].coins;
+      p.shirtIdx = rows[0].shirt_idx;
+      p.pantsIdx = rows[0].pants_idx;
+      socket.emit("coinUpdate",    { coins: p.coins });
+      socket.emit("outfitSuccess", { shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx });
+      io.emit("playerOutfitUpdate", {
+        id: socket.id, character: p.character,
+        hairIdx: p.hairIdx, skinIdx: p.skinIdx,
+        shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
+      });
+      console.log(`${p.name} changed outfit (shirt ${p.shirtIdx}, pants ${p.pantsIdx})`);
+    } catch (err) { console.error("changeOutfit failed:", err); }
   });
 
   // ── Usable items: buy ────────────────────────────────────────────────
