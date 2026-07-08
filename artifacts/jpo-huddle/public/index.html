@@ -539,6 +539,63 @@
     .dm-msg.out .dm-who { color: #a3a0bf; }
     .dm-msg.err { border-left-color: #e74c3c; color: #f5b7b1; }
 
+    /* ── Chat history log (session-only — nothing stored anywhere) ──
+       Top-left corner: the only unclaimed HUD corner (coin HUD/chips/DM feed
+       are top-right, emote/item bars bottom-left, touch controls right). */
+    #chatlog-btn {
+      display: none; position: fixed; top: 14px; left: 14px; z-index: 300;
+      width: 42px; height: 42px; border-radius: 10px; cursor: pointer;
+      align-items: center; justify-content: center; font-size: 19px;
+      background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.16);
+      color: #fff;
+      touch-action: manipulation; -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.playing #chatlog-btn { display: flex; }
+    #chatlog-btn:hover { background: rgba(20,20,40,0.85); }
+    #chatlog-btn.active { background: rgba(108,99,255,0.85); border-color: rgba(255,255,255,0.45); }
+    #chatlog-badge {
+      display: none; position: absolute; top: -6px; right: -7px;
+      min-width: 18px; height: 18px; border-radius: 9px; padding: 0 4px;
+      background: #e74c3c; color: #fff; font: bold 11px/18px monospace;
+      pointer-events: none;
+    }
+    #chatlog-badge.on { display: block; }
+    #chatlog-panel {
+      display: none; position: fixed; top: 64px; left: 14px; z-index: 299;
+      width: 330px; max-width: calc(100vw - 28px);
+      flex-direction: column; overflow: hidden;
+      background: rgba(18,18,32,0.92); border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 12px; backdrop-filter: blur(4px);
+      font-family: monospace; box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+    #chatlog-panel.open { display: flex; }
+    #chatlog-head {
+      display: flex; align-items: center; gap: 7px; padding: 9px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      color: #ddd; font-size: 12px; font-weight: bold;
+    }
+    #chatlog-head .cl-sub { flex: 1; color: rgba(255,255,255,0.32); font-weight: normal; font-size: 10px; }
+    #chatlog-x {
+      background: none; border: none; color: #888; font-size: 17px; line-height: 1;
+      cursor: pointer; padding: 0 2px; -webkit-tap-highlight-color: transparent;
+    }
+    #chatlog-x:hover { color: #eee; }
+    #chatlog-empty { padding: 16px 14px; color: rgba(255,255,255,0.3); font-size: 11px; text-align: center; }
+    #chatlog-scroll {
+      overflow-y: auto; max-height: 38vh; padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 5px; overscroll-behavior: contain;
+    }
+    .cl-msg { font-size: 12px; line-height: 1.45; color: #e6e6f0; word-break: break-word; }
+    .cl-time { color: rgba(255,255,255,0.32); font-size: 10px; margin-right: 6px; }
+    .cl-name { color: #8ec9ff; font-weight: bold; }
+    .cl-msg.me .cl-name { color: #ffd166; }
+    .cl-msg.whisper { color: #e9d5ff; }
+    .cl-msg.whisper .cl-name { color: #c4b5fd; }
+    /* Touch while typing: the keyboard owns the screen — hide it like the other HUD. */
+    body.touch-device.playing.chatting #chatlog-btn { display: none; }
+    body.touch-device.playing.chatting #chatlog-panel.open { display: none; }
+
     /* Touch: DM button in the right-side column (above the emote toggle);
        the emote bar opens above it. */
     #touch-dm { display: none; }
@@ -921,7 +978,7 @@
     <button id="chat-send" class="chat-touch-btn" type="button" aria-label="Send">➤</button>
     <button id="chat-close" class="chat-touch-btn" type="button" aria-label="Close">✕</button>
   </div>
-  <div id="chat-hint">[T] chat · [Tab] DM</div>
+  <div id="chat-hint">[T] chat · [Tab] DM · [C] log</div>
 
   <!-- ── DM (whisper) composer + log feed ── -->
   <div id="dm-bar">
@@ -939,6 +996,14 @@
   <div id="boost-chip"></div>
   <div id="work-chip">💼 Working · +1 coin/min</div>
   <div id="dm-log"></div>
+
+  <!-- ── Chat history log (session-only — messages since you joined) ── -->
+  <button id="chatlog-btn" type="button" aria-label="Chat history" title="Chat log [C]">💬<span id="chatlog-badge"></span></button>
+  <div id="chatlog-panel">
+    <div id="chatlog-head">💬 Chat log<span class="cl-sub">since you joined</span><button id="chatlog-x" type="button" aria-label="Close chat log">✕</button></div>
+    <div id="chatlog-empty">Nothing yet — messages people send while you're here will show up.</div>
+    <div id="chatlog-scroll"></div>
+  </div>
 
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
@@ -2440,6 +2505,7 @@
       const { fromId, fromName, message } = payload || {};
       if (typeof message !== 'string' || !message) return;
       _dmLogAdd('in', fromName || '?', message, fromId);
+      _chatLogAdd('whisper', fromName || '?', message, { dir: 'in' });   // history log (private, only we see it)
       // Also show a purple whisper bubble over the sender's avatar if visible.
       if (fromId && window._gameScene) window._gameScene._showWhisperBubble(fromId, message);
     });
@@ -2447,6 +2513,7 @@
       const { toName, message } = payload || {};
       if (typeof message !== 'string' || !message) return;
       _dmLogAdd('out', toName || '?', message);
+      _chatLogAdd('whisper', toName || '?', message, { dir: 'out' });   // history log
     });
     socket.on('whisperFailed', (payload) => {
       const { message } = payload || {};
@@ -2484,6 +2551,103 @@
       if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendDM(); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDM(); }
       e.stopPropagation();
+    });
+
+    // ── Chat history log (session-only, purely client-side) ──────────
+    // A top-left 💬 panel that logs every public chat message (and your own
+    // whispers, marked private) since the page loaded. Nothing is stored on
+    // the server or in the DB — refresh/rejoin starts an empty log. This is
+    // a PASSIVE panel (no input field), so it never joins the 'chatting'
+    // mutual-exclusion seams and never blocks movement or other UI.
+    let _logOpen = false;
+    let _logUnread = 0;
+    const CHATLOG_MAX = 200;   // cap the DOM buffer so long sessions stay light
+    const clBtn    = document.getElementById('chatlog-btn');
+    const clBadge  = document.getElementById('chatlog-badge');
+    const clPanel  = document.getElementById('chatlog-panel');
+    const clScroll = document.getElementById('chatlog-scroll');
+    const clEmpty  = document.getElementById('chatlog-empty');
+
+    function _clBadgeRender() {
+      clBadge.textContent = _logUnread > 9 ? '9+' : String(_logUnread);
+      clBadge.classList.toggle('on', _logUnread > 0 && !_logOpen);
+    }
+    function openChatLog() {
+      _logOpen = true;
+      clPanel.classList.add('open');
+      clBtn.classList.add('active');
+      _logUnread = 0; _clBadgeRender();
+      clScroll.scrollTop = clScroll.scrollHeight;
+    }
+    function closeChatLog() {
+      _logOpen = false;
+      clPanel.classList.remove('open');
+      clBtn.classList.remove('active');
+    }
+    function toggleChatLog() { _logOpen ? closeChatLog() : openChatLog(); }
+
+    function _clTime() {
+      const d = new Date();
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    // kind: 'chat' | 'whisper'. opts: { me } for own public messages,
+    // { dir: 'in'|'out' } for whispers. Names/text via textContent — never innerHTML.
+    function _chatLogAdd(kind, who, text, opts) {
+      const o = opts || {};
+      const div = document.createElement('div');
+      div.className = 'cl-msg' + (kind === 'whisper' ? ' whisper' : '') + (o.me ? ' me' : '');
+      const t = document.createElement('span');
+      t.className = 'cl-time';
+      t.textContent = _clTime();
+      div.appendChild(t);
+      const n = document.createElement('span');
+      n.className = 'cl-name';
+      n.textContent = kind === 'whisper'
+        ? (o.dir === 'out' ? `(to ${who}): ` : `(whisper) ${who}: `)
+        : `${who}: `;
+      div.appendChild(n);
+      div.appendChild(document.createTextNode(text));
+      // Only auto-scroll when the reader is already at (or near) the bottom —
+      // measured BEFORE appending so scrolling up to re-read is never yanked away.
+      const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
+      clEmpty.style.display = 'none';
+      clScroll.appendChild(div);
+      while (clScroll.children.length > CHATLOG_MAX) clScroll.removeChild(clScroll.firstChild);
+      if (!_logOpen) { _logUnread++; _clBadgeRender(); }
+      else if (nearBottom) clScroll.scrollTop = clScroll.scrollHeight;
+    }
+
+    // Additional DOM-level listener (socket.io supports multiple listeners —
+    // same pattern as the _online roster). The scene's own 'chatMessage'
+    // listener keeps rendering bubbles; this one only feeds the log.
+    socket.on('chatMessage', (payload) => {
+      const p = payload || {};
+      if (typeof p.message !== 'string' || !p.message) return;
+      _chatLogAdd('chat', p.name || '?', p.message, { me: p.id === socket.id });
+    });
+
+    // pointerdown + preventDefault (not click) keeps focus on the game canvas.
+    clBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleChatLog(); });
+    document.getElementById('chatlog-x').addEventListener('pointerdown', (e) => { e.preventDefault(); closeChatLog(); });
+
+    // C toggles the log while playing — never while typing in any field.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'c' && e.key !== 'C') return;
+      if (!document.body.classList.contains('playing')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      toggleChatLog();
+    });
+    // Esc closes the log only when nothing modal is up (those own Esc already).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !_logOpen) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) return;
+      if (document.getElementById('shop-modal').classList.contains('open')) return;
+      if (document.getElementById('owner-pwd-modal').classList.contains('open')) return;
+      closeChatLog();
     });
 
     // ── On-screen touch controls (joystick + action/chat buttons) ──────
