@@ -119,6 +119,7 @@ const OBJECTS = {
   coffee_machine: { x: 1056, y: 864, r: 150 },   // vending-machine bank, IT kitchenette corner (c21-22, r17-18)
   water_cooler:   { x: 1800, y: 1272, r: 150 },  // water dispenser, Pantry (c37, r25-26, beside the potted plant)
   arcade:         { x: 720,  y: 720, r: 170 },   // twin TV screens, IT lounge (c13-16, r14-15)
+  fridge:         { x: 1344, y: 1584, r: 190 },  // white kitchen/fridge unit, Pantry (c24-31, r31-33)
 };
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee
 // (instant, usable anywhere, stockpilable) stays worth buying.
@@ -135,10 +136,27 @@ const WATER_LINES = [
   "You briefly consider this water's long journey.",
 ];
 let waterLineIdx = 0;
+// Fridge snacks: pure flavor (no buff, no coins). The eater gets the line as a
+// toast; everyone nearby sees the snack emoji bubble over their head.
+const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between snacks
+const SNACKS = [
+  { emoji: "🍕", line: "Cold pizza from Friday. Still elite." },
+  { emoji: "🥪", line: "A mystery sandwich. It was labeled. You ignored the label." },
+  { emoji: "🍎", line: "An apple a day keeps the standup short." },
+  { emoji: "🍩", line: "Someone brought donuts. That someone is a hero." },
+  { emoji: "🥗", line: "A responsible little salad. Your future self says thanks." },
+  { emoji: "🍫", line: "Emergency chocolate. This qualifies as an emergency." },
+  { emoji: "🧀", line: "A cheeky cube of cheese. Quality control, obviously." },
+  { emoji: "🍜", line: "Instant noodles — the official fuel of shipping features." },
+  { emoji: "🍦", line: "Freezer ice cream. Eat fast, type faster." },
+  { emoji: "🥡", line: "Leftover takeout. Finders keepers is office law." },
+];
+let snackIdx = 0;
 // Cooldowns are keyed by email (fallback: socket id) and live in memory only —
 // a server restart forgives them, which is fine for flavor perks.
 const coffeeMachineReadyAt = new Map();  // key → ts when the next free coffee unlocks
 const waterReadyAt = new Map();          // key → ts of the next allowed sip
+const fridgeReadyAt = new Map();         // key → ts when the next snack unlocks
 function pruneCooldowns(map, now) {      // opportunistic sweep so the maps can't grow unbounded
   if (map.size < 500) return;
   for (const [k, t] of map) if (t <= now) map.delete(k);
@@ -1777,6 +1795,19 @@ io.on("connection", (socket) => {
       const line = WATER_LINES[waterLineIdx++ % WATER_LINES.length];
       socket.emit("waterCooler", { line });
       io.emit("objectEffect", { id: socket.id, kind: "water" });
+
+    } else if (object === "fridge") {
+      const key = p.email || socket.id;
+      const readyAt = fridgeReadyAt.get(key) || 0;
+      if (now < readyAt) {
+        socket.emit("interactError", { message: "You're full! The fridge will forgive you in a bit. 🫃" });
+        return;
+      }
+      pruneCooldowns(fridgeReadyAt, now);
+      fridgeReadyAt.set(key, now + FRIDGE_COOLDOWN_MS);
+      const s = SNACKS[snackIdx++ % SNACKS.length];
+      socket.emit("fridgeSnack", { line: s.line });
+      io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
 
     } else if (object === "arcade") {
       if (rpsBySocket.has(socket.id)) {

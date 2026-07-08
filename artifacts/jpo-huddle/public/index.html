@@ -1298,14 +1298,14 @@
     const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
 
     // Furniture tile GIDs that are ACTUAL wall-mounted announcement boards:
-    //   - colorful cork bulletin boards        682-685 / 698-701 / 714-717
     //   - colorful notice/bulletin boards       1013/1014 top, 1029/1030 base
     //   - green chalkboard (on stand)           1042/1043 top, 1058/1059 base
     //   - blackboard                            1045/1046 top, 1061/1062 base
     // Desks, monitors, lockers (1044/1060), thin wall trim (1031/1047/1063) and
-    // shelves/plants are NOT boards.
+    // shelves/plants are NOT boards. GIDs 682-717 (the white kitchen unit /
+    // fridges in the Pantry, c24-31 r31-33) were once misclassified as cork
+    // boards — they're the 'fridge' interactive object below, NOT a board.
     const BOARD_GIDS = new Set([
-      682,683,684,685,698,699,700,701,714,715,716,717,
       1013,1014,1029,1030,
       1042,1043,1058,1059,
       1045,1046,1061,1062,
@@ -1322,6 +1322,8 @@
         hl:{ x:37*48, y:25*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r25-26), Pantry
       { id:'arcade',         x:720,  y:720, r:170, label:'Play arcade (2P)', touch:'Play',
         hl:{ x:13*48, y:14*48, w:4*48, h:2*48 } },   // twin TV screens, IT lounge
+      { id:'fridge',         x:1344, y:1584, r:190, label:'Eat a snack', touch:'Eat',
+        hl:{ x:24*48, y:31*48, w:8*48, h:3*48 } },   // white kitchen/fridge unit, Pantry (c24-31, r31-33)
     ];
     // ── Rooms ──────────────────────────────────────────────────────────
     // Each announcement board belongs to a room; posting at a board only shows on
@@ -2119,17 +2121,27 @@
       const { line } = payload || {};
       if (line) _rpsToast('💧 ' + line);
     });
+    // Fridge: the eater gets a rotating snack line; everyone sees the snack emoji bubble.
+    socket.on('fridgeSnack', (payload) => {
+      const { line } = payload || {};
+      if (typeof line === 'string' && line) _rpsToast('🧊 ' + line.slice(0, 120));
+    });
     socket.on('objectEffect', (payload) => {
-      const { id, kind } = payload || {};
+      const { id, kind, emoji } = payload || {};
       const scene = window._gameScene;
-      if (!scene || kind !== 'water') return;
+      const EFFECT_EMOJI = { water: '🥤', snack: '🍪' };   // default bubble per effect kind
+      if (!scene || !Object.hasOwn(EFFECT_EMOJI, kind)) return;
+      // 'snack' carries the specific snack emoji from the server's rotation;
+      // sanity-cap the length and fall back to the default on anything odd.
+      const bubble = (kind === 'snack' && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8)
+        ? emoji : EFFECT_EMOJI[kind];
       if (id === socket.id) {
-        if (scene.player) scene._showEmoteBubble(scene.player, '🥤', true);
+        if (scene.player) scene._showEmoteBubble(scene.player, bubble, true);
       } else {
         const entry = scene.otherPlayers[id];
         if (entry) {
           if (entry.chatBubble) entry.chatBubble.destroy();
-          entry.chatBubble = scene._showEmoteBubble(entry.sprite, '🥤', false);
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, bubble, false);
         }
       }
     });
