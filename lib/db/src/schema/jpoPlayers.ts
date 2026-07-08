@@ -33,6 +33,10 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // Usable/consumable items: itemId → remaining uses (e.g. {"cigarette": 4,
   // "coffee": 1}). Unlike cosmetics (permanent, worn), these deplete on use.
   items: jsonb("items").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+  // Which JustPressOne department this person belongs to ('' = not set yet —
+  // legacy accounts pick one from their own profile card, once). Validated
+  // server-side against a fixed allowlist shared with the client.
+  department: text("department").notNull().default(""),
   // Last calendar day (server/DB date, UTC) this player received the once-daily
   // login bonus. NULL = never granted. The grant is an atomic conditional UPDATE
   // (WHERE last_daily_bonus IS NULL OR < CURRENT_DATE) so re-logging can't farm it.

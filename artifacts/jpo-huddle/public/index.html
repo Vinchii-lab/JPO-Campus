@@ -53,6 +53,12 @@
       border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.15s;
     }
     .form-field input:focus { border-color: #6c63ff; }
+    .form-field select {
+      width: 100%; padding: 8px 11px; font-size: 14px; font-family: monospace;
+      border: 2px solid #ddd; border-radius: 8px; outline: none; background: #fff;
+      transition: border-color 0.15s; cursor: pointer;
+    }
+    .form-field select:focus { border-color: #6c63ff; }
 
     /* ── Builder steps ── */
     #builder-section { display: none; }
@@ -638,6 +644,30 @@
       align-items: center; justify-content: center; background: rgba(0,0,0,0.6);
     }
     #rps-wager-modal.open, #rps-match.open { display: flex; }
+
+    /* ── Player profile card ── (below the rps modals so an incoming challenge stays visible) */
+    #profile-modal {
+      position: fixed; inset: 0; z-index: 8400; display: none;
+      align-items: center; justify-content: center; background: rgba(0,0,0,0.55);
+    }
+    #profile-modal.open { display: flex; }
+    .pf-rows { text-align: left; margin: 14px 0 2px; }
+    .pf-row {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 18px;
+      padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px;
+    }
+    .pf-row:last-child { border-bottom: none; }
+    .pf-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; flex-shrink: 0; }
+    .pf-row span:last-child { word-break: break-all; text-align: right; }
+    #pf-dept-pick { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.12); }
+    #pf-dept-pick.show { display: block; }
+    #pf-dept-select {
+      width: 100%; padding: 9px 12px; font-size: 14px; font-family: monospace;
+      background: #111; border: 2px solid #444; border-radius: 8px; color: #eee;
+      outline: none; cursor: pointer; margin-bottom: 4px;
+    }
+    #pf-dept-select:focus { border-color: #6c63ff; }
+    #pf-error { font-size: 12px; color: #e74c3c; min-height: 16px; margin: 4px 0 6px; }
     .rps-card {
       background: #1e1e30; border: 1px solid #3a3a5e; border-radius: 14px;
       padding: 26px 30px; font-family: monospace; color: #eee; text-align: center;
@@ -845,6 +875,12 @@
         </div>
         <div class="form-row">
           <div class="form-field">
+            <label>Department</label>
+            <select id="inp-dept"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
             <label>Password <span style="font-weight:normal;color:#999;">(min 6 characters)</span></label>
             <input id="inp-password" type="password" placeholder="••••••••" maxlength="100" autocomplete="new-password" />
           </div>
@@ -1016,8 +1052,33 @@
 
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
+    <button id="rps-menu-profile" type="button">👤 View profile</button>
     <button id="rps-menu-dm" type="button">💬 Whisper</button>
     <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
+  </div>
+
+  <!-- ── Player profile card (non-blocking; values set via textContent only) ── -->
+  <div id="profile-modal">
+    <div class="rps-card" id="profile-card">
+      <h3 id="pf-name"></h3>
+      <p class="rps-sub" id="pf-fullname"></p>
+      <div class="pf-rows">
+        <div class="pf-row"><span class="pf-label">Department</span><span id="pf-dept"></span></div>
+        <div class="pf-row"><span class="pf-label">Email</span><span id="pf-email"></span></div>
+        <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
+        <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
+        <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
+      </div>
+      <div id="pf-dept-pick">
+        <label class="rps-wager-label" for="pf-dept-select">Pick your department — this is set once</label>
+        <select id="pf-dept-select"></select>
+        <div id="pf-error"></div>
+        <button id="pf-dept-save" class="rps-btn primary" type="button">Save department</button>
+      </div>
+      <div class="rps-btn-row">
+        <button id="pf-close" class="rps-btn" type="button">Close</button>
+      </div>
+    </div>
   </div>
 
   <div id="rps-wager-modal">
@@ -1180,9 +1241,9 @@
       <div class="owner-section">
         <h3>Online Players <span class="owner-badge green" id="op-player-count">0</span></h3>
         <table class="owner-table">
-          <thead><tr><th>Name</th><th>Coins</th><th>Items</th><th>Post</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Dept</th><th>Coins</th><th>Items</th><th>Post</th><th></th></tr></thead>
           <tbody id="op-player-tbody">
-            <tr><td class="owner-empty" colspan="5">No players online</td></tr>
+            <tr><td class="owner-empty" colspan="6">No players online</td></tr>
           </tbody>
         </table>
       </div>
@@ -1525,6 +1586,11 @@
       { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 90, desc: 'office rockstar' },
     ];
     const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
+
+    // Department allowlist — MUST stay identical (same values, same order) to
+    // the server's DEPARTMENTS in server.js. Feeds BOTH the registration
+    // dropdown and the profile card's one-time legacy picker.
+    const DEPARTMENTS = ['HR', 'IT', 'Operations', 'Front Desk', 'CMA', 'QA', 'L&D', 'Claims', 'Accounting'];
     let _playerItems    = {};   // usable items: itemId → remaining uses (server-authoritative)
     let _boostUntil     = 0;    // coffee boost end (client mirror; the server enforces its own copy)
 
@@ -1884,10 +1950,12 @@
     function goToBuilder() {
       const first = document.getElementById('inp-first').value.trim();
       const email = document.getElementById('inp-email').value.trim();
+      const dept  = document.getElementById('inp-dept').value;
       const pw    = document.getElementById('inp-password').value;
       const errEl = document.getElementById('reg-error');
       if (!first) { errEl.textContent = 'First name is required.'; return; }
       if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      if (!DEPARTMENTS.includes(dept)) { errEl.textContent = 'Please pick your department.'; return; }
       if (pw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
       errEl.textContent = '';
       document.getElementById('info-section').style.display = 'none';
@@ -1906,6 +1974,22 @@
       el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
       el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
     });
+
+    // Department dropdown: options come from the ONE shared DEPARTMENTS list.
+    (() => {
+      const sel = document.getElementById('inp-dept');
+      const ph = document.createElement('option');
+      ph.value = ''; ph.textContent = 'Select your department…';
+      sel.appendChild(ph);
+      DEPARTMENTS.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d; o.textContent = d;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('keydown', (e) => e.stopPropagation());
+      sel.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      sel.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
     document.getElementById('next-to-builder-btn').addEventListener('click', goToBuilder);
 
     // ── Register ↔ Sign-in card toggle ─────────────────────────────────
@@ -1933,6 +2017,7 @@
       document.getElementById('btn-next').disabled = true;
       socket.emit('register', {
         firstName: first, lastName: last, nickname: nick, email, password: pw,
+        department:  document.getElementById('inp-dept').value,
         character:   _playerChar,
         hairIdx:     _playerHairIdx,
         skinIdx:     _playerSkinIdx,
@@ -2881,7 +2966,7 @@
       _rpsMenuTargetId = playerId;
       _rpsMenuAt = Date.now();
       rpsMenu.style.left = Math.max(6, Math.min(px, innerWidth - 170)) + 'px';
-      rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 110)) + 'px';
+      rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 150)) + 'px';
       rpsMenu.classList.add('open');
     }
     function _rpsHideMenu() { rpsMenu.classList.remove('open'); _rpsMenuTargetId = null; }
@@ -2902,6 +2987,89 @@
       e.preventDefault(); e.stopPropagation();
       const id = _rpsMenuTargetId; _rpsHideMenu();
       if (id) openRpsWager(id);
+    });
+    rpsEl('rps-menu-profile').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openProfile(id);
+    });
+
+    // ── Player profile card ────────────────────────────────────────────
+    // Non-blocking (movement stays live, like the rps waiting/incoming cards —
+    // it deliberately does NOT join the chatting/_rpsUiOpen mutual-exclusion
+    // seams) and rendered with textContent ONLY — never innerHTML.
+    const pfEl = (id) => document.getElementById(id);
+    function openProfile(targetId) {
+      socket.emit('getProfile', { targetId });
+    }
+    window._openProfile = openProfile;   // called from the Phaser own-avatar click
+    function closeProfile() {
+      pfEl('profile-modal').classList.remove('open');
+    }
+    pfEl('pf-close').addEventListener('click', closeProfile);
+    pfEl('profile-modal').addEventListener('pointerdown', (e) => {
+      if (e.target === pfEl('profile-modal')) closeProfile();
+    });
+
+    // One-time legacy department picker — options from the ONE shared list.
+    (() => {
+      const sel = pfEl('pf-dept-select');
+      const ph = document.createElement('option');
+      ph.value = ''; ph.textContent = 'Select your department…';
+      sel.appendChild(ph);
+      DEPARTMENTS.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d; o.textContent = d;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('keydown', (e) => e.stopPropagation());
+      sel.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      sel.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
+    pfEl('pf-dept-save').addEventListener('click', () => {
+      const dept = pfEl('pf-dept-select').value;
+      if (!DEPARTMENTS.includes(dept)) { pfEl('pf-error').textContent = 'Pick a department first.'; return; }
+      pfEl('pf-error').textContent = '';
+      socket.emit('setDepartment', { department: dept });
+    });
+
+    function _pfJoinedText(ts) {
+      if (!ts || !Number.isFinite(ts)) return '—';
+      const dateStr = new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      const days = Math.floor((Date.now() - ts) / 86400000);
+      const ago = days <= 0 ? 'today'
+                : days === 1 ? '1 day'
+                : days < 60 ? days + ' days'
+                : days < 365 ? Math.floor(days / 30) + ' months'
+                : (days / 365).toFixed(1) + ' years';
+      return dateStr + ' · ' + ago;
+    }
+
+    socket.on('profileData', (d) => {
+      if (!d) return;
+      if (!d.ok) { _rpsToast(d.message || "They're not in the office right now."); return; }
+      pfEl('pf-name').textContent = '👤 ' + (d.name || '?') + (d.self ? ' (you)' : '');
+      pfEl('pf-fullname').textContent = (d.fullName && d.fullName !== d.name) ? d.fullName : '';
+      pfEl('pf-dept').textContent = d.department || 'Not set';
+      pfEl('pf-email').textContent = d.email || '—';
+      pfEl('pf-coins').textContent = '🪙 ' + (Number.isFinite(d.coins) ? d.coins : 0);
+      const worn = COSMETICS.find(c => c.id === d.equipped);
+      pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
+      pfEl('pf-joined').textContent = _pfJoinedText(d.joinedAt);
+      pfEl('pf-error').textContent = '';
+      // One-time picker: only on YOUR OWN card, only while unset.
+      pfEl('pf-dept-pick').classList.toggle('show', !!d.self && !d.department);
+      pfEl('profile-modal').classList.add('open');
+    });
+    socket.on('departmentSet', (d) => {
+      const dept = (d && d.department) || '';
+      pfEl('pf-dept-pick').classList.remove('show');
+      if (pfEl('profile-modal').classList.contains('open')) {
+        pfEl('pf-dept').textContent = dept || 'Not set';
+      }
+    });
+    socket.on('profileError', (d) => {
+      pfEl('pf-error').textContent = (d && d.message) || 'Something went wrong.';
     });
 
     // Game picker (shared by direct challenges and the arcade cabinet).
@@ -3409,10 +3577,11 @@
     socket.on('playerList', (list) => {
       document.getElementById('op-player-count').textContent = list.length;
       const tbody = document.getElementById('op-player-tbody');
-      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="5">No players online</td></tr>'; return; }
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="6">No players online</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
         <tr>
           <td><span class="online-dot"></span>${esc(p.fullName || p.name)}${p.fullName && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
+          <td>${esc(p.department || '—')}</td>
           <td>💰 ${p.coins}</td>
           <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
           <td><button class="o-btn ${p.isAnnouncer ? 'o-btn-approve' : 'o-btn-reject'}" ${p.email ? '' : 'disabled'} title="${p.isAnnouncer ? 'Can post announcements — click to revoke' : 'Allow this person to post announcements'}" onclick="ownerToggleAnnouncer('${esc(p.id)}', ${p.isAnnouncer ? 'false' : 'true'})">📢</button></td>
@@ -3914,6 +4083,17 @@
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
 
         this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
+
+        // Clicking YOUR OWN avatar opens your profile card (others get the
+        // Whisper/Challenge/Profile menu from _addOtherPlayer). Same gate as
+        // the other-avatar click so it never fires under an open panel.
+        this.player.setInteractive({ useHandCursor: true });
+        this.player.on('pointerdown', () => {
+          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen) {
+            window._openProfile(socket.id);
+          }
+        });
 
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd    = this.input.keyboard.addKeys({

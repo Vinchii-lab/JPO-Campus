@@ -389,6 +389,11 @@ setInterval(() => {
 
 const PASSWORD_MIN = 6, PASSWORD_MAX = 100;
 
+// Department allowlist — MUST stay identical (same values, same order) to the
+// client's DEPARTMENTS array in public/index.html. '' = not set (legacy
+// accounts pick one, once, from their own profile card).
+const DEPARTMENTS = ["HR", "IT", "Operations", "Front Desk", "CMA", "QA", "L&D", "Claims", "Accounting"];
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 // Map a jpo_players row (snake_case columns) to the in-memory / client-facing
@@ -412,6 +417,9 @@ function rowToPlayerState(row) {
     equipped:  row.equipped_cosmetic || "",
     items:     row.items || {},
     isAnnouncer: row.is_announcer,
+    department:  row.department || "",
+    // Epoch ms of account creation, for the profile card's "joined" line.
+    createdAt:   row.created_at ? new Date(row.created_at).getTime() : null,
   };
 }
 
@@ -421,8 +429,8 @@ function rowToPlayerState(row) {
 async function upsertPlayerProfile(reg) {
   const { rows } = await pool.query(
     `INSERT INTO jpo_players
-       (email, first_name, last_name, name, nickname, character, hair_idx, skin_idx, shirt_idx, pants_idx)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       (email, first_name, last_name, name, nickname, character, hair_idx, skin_idx, shirt_idx, pants_idx, department)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      ON CONFLICT (email) DO UPDATE SET
        first_name = EXCLUDED.first_name,
        last_name  = EXCLUDED.last_name,
@@ -433,10 +441,14 @@ async function upsertPlayerProfile(reg) {
        skin_idx   = EXCLUDED.skin_idx,
        shirt_idx  = EXCLUDED.shirt_idx,
        pants_idx  = EXCLUDED.pants_idx,
+       -- Never let a department-less register wipe an already-set department
+       -- (e.g. a legacy client omitting the field on a re-register).
+       department = CASE WHEN EXCLUDED.department <> '' THEN EXCLUDED.department
+                         ELSE jpo_players.department END,
        updated_at = now()
      RETURNING *`,
     [reg.email, reg.firstName, reg.lastName, reg.name, reg.nickname, reg.character,
-     reg.hairIdx, reg.skinIdx, reg.shirtIdx, reg.pantsIdx],
+     reg.hairIdx, reg.skinIdx, reg.shirtIdx, reg.pantsIdx, reg.department],
   );
   return rows[0];
 }
@@ -854,6 +866,7 @@ io.on("connection", (socket) => {
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
   const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
+  const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
   const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
@@ -875,7 +888,7 @@ io.on("connection", (socket) => {
   //     approval as before; approved emails restore straight into the office.
   socket.on("register", async (payload) => {
     try {
-      const { firstName, lastName, nickname, email, password, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx } = payload || {};
+      const { firstName, lastName, nickname, email, password, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx, department } = payload || {};
       const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
       const ln   = (lastName  || "").trim().slice(0, 20);
       const nick = (nickname  || "").trim().slice(0, 16) || fn;
@@ -891,6 +904,10 @@ io.on("connection", (socket) => {
         // Legacy clients send a single clothesIdx for both — fall back to it when split fields are absent.
         shirtIdx: clampIdx(shirtIdx ?? clothesIdx, CLOTH_MAX),
         pantsIdx: clampIdx(pantsIdx ?? clothesIdx, CLOTH_MAX),
+        // Unknown/missing department → '' (never stored); the upsert keeps any
+        // previously-set department when '' comes in, so a forged value can't
+        // clear it either.
+        department: DEPARTMENTS.includes(department) ? department : "",
       };
 
       // No email → we can't persist (email is the identity key). Fall back to a
@@ -1134,6 +1151,7 @@ io.on("connection", (socket) => {
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
           coins: 50, cosmetics: [], equipped: "", items: {}, isAnnouncer: false,
+          department: reg.department || "", createdAt: Date.now(),
         };
         players[targetId] = state;
         io.to(targetId).emit("approved", {
@@ -1353,6 +1371,78 @@ io.on("connection", (socket) => {
     }
     io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, message: text });
     socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
+  });
+
+  // ── Player profiles ───────────────────────────────────────────────────
+  // Lookups are by LIVE socket id (like whispers) — the profile card reads
+  // from the in-memory state, which is DB-restored and kept current (coins
+  // from RETURNING values, department from set-once below). The email lands
+  // on other people's cards by design: this is an internal team office.
+  socket.on("getProfile", (payload) => {
+    const { targetId } = payload || {};
+    if (!players[socket.id]) return;                 // must be in the office yourself
+    if (!takeToken(profileBucket)) return;           // silently drop open-spam
+    if (typeof targetId !== "string") return;
+    const p = players[targetId];
+    if (!p) {
+      socket.emit("profileData", { ok: false, message: "They're not in the office right now." });
+      return;
+    }
+    socket.emit("profileData", {
+      ok: true,
+      id:         targetId,
+      self:       targetId === socket.id,
+      name:       p.name,
+      fullName:   p.fullName || p.name,
+      department: p.department || "",
+      email:      p.email || "",
+      coins:      p.coins,
+      equipped:   p.equipped || "",
+      joinedAt:   p.createdAt || null,
+    });
+  });
+
+  // Set-once department picker for legacy accounts (free, validated,
+  // rate-limited). The WHERE clause makes it atomic: only an empty/legacy
+  // department can be claimed, so a raced or replayed set can't overwrite.
+  // Admins could re-clear the column later if ever needed — not built now.
+  socket.on("setDepartment", async (payload) => {
+    const { department } = payload || {};
+    const me = players[socket.id];
+    if (!me) return;
+    if (!takeToken(profileBucket)) return;           // shares the profile throttle
+    if (!DEPARTMENTS.includes(department)) return;   // forged/unknown value → drop
+    if (!me.email) {
+      // Session-only player: nothing durable to write; set in memory only.
+      if (!me.department) {
+        me.department = department;
+        socket.emit("departmentSet", { department });
+        _notifyAdmins();
+      } else {
+        socket.emit("profileError", { message: "Your department is already set." });
+      }
+      return;
+    }
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET department = $2, updated_at = now()
+          WHERE email = $1 AND department = ''
+          RETURNING department`,
+        [me.email, department],
+      );
+      if (!rows[0]) {
+        socket.emit("profileError", { message: "Your department is already set." });
+        return;
+      }
+      me.department = rows[0].department;
+      socket.emit("departmentSet", { department: me.department });
+      _notifyAdmins();
+      console.log(`Department set: ${me.name} → ${me.department}`);
+    } catch (err) {
+      console.error("setDepartment failed:", err);
+      socket.emit("profileError", { message: "Something went wrong — try again." });
+    }
   });
 
   // ── Rock-paper-scissors challenges ───────────────────────────────────
@@ -1967,7 +2057,7 @@ function _playerList() {
   // `name` = in-game display name (nickname); `fullName` = real name for admins.
   return Object.entries(players).map(([id, p]) => ({
     id, name: p.name, fullName: p.fullName || p.name, coins: p.coins, cosmetics: p.cosmetics,
-    email: p.email || "", isAnnouncer: !!p.isAnnouncer,
+    email: p.email || "", isAnnouncer: !!p.isAnnouncer, department: p.department || "",
   }));
 }
 
