@@ -189,6 +189,7 @@
       background: #fff; border-radius: 16px; padding: 32px 36px;
       font-family: monospace; color: #222; min-width: 300px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+      max-height: 85vh; overflow-y: auto;   /* the cosmetics catalog is tall */
     }
     #shop-card h3 { font-size: 20px; margin-bottom: 6px; }
     #shop-balance { font-size: 14px; color: #666; margin-bottom: 20px; }
@@ -203,7 +204,13 @@
       font-family: monospace; font-size: 13px; transition: background 0.15s;
     }
     .buy-btn:hover { background: #574fd6; }
-    .buy-btn.owned { background: #27ae60; cursor: default; }
+    /* Owned but not worn → "Wear" (neutral); owned and worn → "Wearing ✓"
+       (green, click to take off). Both stay clickable. */
+    .buy-btn.wear    { background: #f0f0f0; color: #444; }
+    .buy-btn.wear:hover { background: #e2e2e2; }
+    .buy-btn.wearing { background: #27ae60; }
+    .buy-btn.wearing:hover { background: #219653; }
+    .buy-btn.poor    { background: #c9c6f0; cursor: not-allowed; }
     #shop-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #e74c3c; }
     #shop-close-btn {
       width: 100%; margin-top: 16px; padding: 9px;
@@ -1008,14 +1015,9 @@
     <div id="shop-card">
       <h3>🛒 Shop</h3>
       <div id="shop-balance">💰 Coins: <span id="shop-coin-display">0</span></div>
-      <div class="shop-item">
-        <div class="shop-item-icon">👑</div>
-        <div class="shop-item-info">
-          <div class="shop-item-name">Crown</div>
-          <div class="shop-item-cost">30 coins — wears above your head</div>
-        </div>
-        <button class="buy-btn" id="buy-crown" onclick="buyItem('crown')">Buy</button>
-      </div>
+      <!-- Cosmetic rows are generated from the COSMETICS catalog (must stay in
+           lockstep with the server SHOP ids). Usable items stay hardcoded below. -->
+      <div id="shop-cosmetics"></div>
       <div class="shop-item">
         <div class="shop-item-icon">🚬</div>
         <div class="shop-item-info">
@@ -1392,6 +1394,24 @@
     let _playerPantsIdx = 0;
     let _playerCoins    = 0;
     let _ownedItems     = [];
+    let _equippedCosmetic = '';   // which owned cosmetic is worn ('' = none); server-authoritative
+
+    // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
+    // SHOP map in server.js — the server rejects unknown ids and enforces the
+    // real price, so drift here only breaks the UI (row that can't be bought
+    // or a wrong price label). The emoji is what floats above the wearer.
+    const COSMETICS = [
+      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 15, desc: 'instant cool' },
+      { id: 'book',         emoji: '📖', name: 'Book',          cost: 20, desc: 'for the office bookworm' },
+      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 30, desc: 'wears above your head' },
+      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 35, desc: 'lost in the music' },
+      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 40, desc: 'ooh là là' },
+      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 45, desc: 'kitchen royalty' },
+      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 60, desc: 'always snapping' },
+      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 75, desc: 'certified gamer' },
+      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 90, desc: 'office rockstar' },
+    ];
+    const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
     let _playerItems    = {};   // usable items: itemId → remaining uses (server-authoritative)
     let _boostUntil     = 0;    // coffee boost end (client mirror; the server enforces its own copy)
 
@@ -1889,6 +1909,8 @@
       _playerShirtIdx = data.shirtIdx ?? data.clothesIdx ?? 0;
       _playerPantsIdx = data.pantsIdx ?? data.clothesIdx ?? 0;
       _playerCoins    = data.coins;
+      _ownedItems     = data.cosmetics || [];
+      _equippedCosmetic = data.equipped || '';
       _playerItems    = data.items || {};
       _renderItemBar();
 
@@ -1913,14 +1935,25 @@
       _playerCoins = coins;
       document.getElementById('coin-count').textContent = coins;
       document.getElementById('shop-coin-display').textContent = coins;
+      // Affordability (the greyed "Buy" state) depends on the balance.
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
     });
 
-    socket.on('shopSuccess', ({ item }) => {
-      _ownedItems.push(item);
+    socket.on('shopSuccess', ({ item, equipped }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedCosmetic = equipped ?? item;   // buying auto-equips
       _refreshShopUI();
+      const meta = COSMETICS.find(c => c.id === item);
       document.getElementById('shop-msg').style.color = '#27ae60';
-      document.getElementById('shop-msg').textContent = `${item.charAt(0).toUpperCase()+item.slice(1)} equipped!`;
-      window._gameScene?._setLocalCrown(true);
+      document.getElementById('shop-msg').textContent = `${meta ? meta.name : item} equipped!`;
+      window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+    });
+
+    // Free wear/take-off confirmation (no purchase involved).
+    socket.on('equipUpdate', ({ equipped }) => {
+      _equippedCosmetic = equipped || '';
+      _refreshShopUI();
+      window._gameScene?._setLocalCosmetic(_equippedCosmetic);
     });
 
     socket.on('shopError', (msg) => {
@@ -1928,8 +1961,8 @@
       document.getElementById('shop-msg').textContent = msg;
     });
 
-    socket.on('playerCosmeticUpdate', ({ id, cosmetics }) => {
-      window._gameScene?._updatePlayerCosmetics(id, cosmetics);
+    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped }) => {
+      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped);
     });
 
     // ── Usable items (cigarettes, coffee) ─────────────────────────────
@@ -2027,16 +2060,46 @@
       document.querySelector('canvas')?.focus();
     }
     function buyItem(item) { socket.emit('buyCosmetic', { item }); }
+    function equipItem(item) { socket.emit('equipCosmetic', { item }); }   // '' = take off
     function buyUsable(item) { socket.emit('buyUsable', { item }); }
     function useItem(item) {
       socket.emit('useItem', { item });
       document.querySelector('canvas')?.focus();   // give movement keys back after the click
     }
+    // Rebuild the cosmetic rows from the catalog + current ownership state.
+    // Three button states: Buy (not owned), Wear (owned, not worn — free),
+    // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
-      const btn = document.getElementById('buy-crown');
-      if (_ownedItems.includes('crown')) {
-        btn.textContent = '✓ Owned'; btn.classList.add('owned'); btn.onclick = null;
+      const box = document.getElementById('shop-cosmetics');
+      box.textContent = '';
+      for (const c of COSMETICS) {
+        const row = document.createElement('div');
+        row.className = 'shop-item';
+        const icon = document.createElement('div');
+        icon.className = 'shop-item-icon'; icon.textContent = c.emoji;
+        const info = document.createElement('div');
+        info.className = 'shop-item-info';
+        const nm = document.createElement('div');
+        nm.className = 'shop-item-name'; nm.textContent = c.name;
+        const ct = document.createElement('div');
+        ct.className = 'shop-item-cost'; ct.textContent = `${c.cost} coins — ${c.desc}`;
+        info.append(nm, ct);
+        const btn = document.createElement('button');
+        btn.className = 'buy-btn';
+        if (!_ownedItems.includes(c.id)) {
+          btn.textContent = 'Buy';
+          if (_playerCoins < c.cost) btn.classList.add('poor');
+          btn.onclick = () => buyItem(c.id);
+        } else if (_equippedCosmetic === c.id) {
+          btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
+          btn.onclick = () => equipItem('');       // take it off
+        } else {
+          btn.textContent = 'Wear'; btn.classList.add('wear');
+          btn.onclick = () => equipItem(c.id);     // switch, free
+        }
+        row.append(icon, info, btn);
+        box.append(row);
       }
     }
     // Items bar: a row shows only while you own that item; the whole bar hides
@@ -3269,7 +3332,7 @@
         this.otherPlayers    = {};
         this.player          = null;
         this.localNameTag    = null;
-        this.localCrown      = null;
+        this.localCosmetic   = null;
         this.localBubble     = null;
         this._seatOccluders  = [];
         this.sitting         = false;
@@ -3348,7 +3411,7 @@
           }
           if (data.anim !== 'sit' && entry.occluders) { this._clearOccluders(entry.occluders); entry.occluders = null; }
           entry.nameTag.setPosition(data.x, data.y-40);
-          if (entry.crown)      entry.crown.setPosition(data.x, data.y-68);
+          if (entry.cosmetic)   entry.cosmetic.setPosition(data.x, data.y-68);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
         });
 
@@ -3567,6 +3630,7 @@
         ]);
 
         this.cameras.main.startFollow(this.player);
+        this._setLocalCosmetic(_equippedCosmetic);   // restore the worn cosmetic on (re)join
 
         if (this._pendingPlayers) {
           Object.entries(this._pendingPlayers).forEach(([id,pdata]) => {
@@ -3652,23 +3716,25 @@
       }
       _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
 
-      _setLocalCrown(show) {
-        if (this.localCrown) { this.localCrown.destroy(); this.localCrown = null; }
-        if (show && this.player) {
-          this.localCrown = this.add.text(this.player.x, this.player.y-68, '👑',
+      // Worn-cosmetic overlay: ONE emoji floats above the wearer (the server's
+      // `equipped` field; '' = nothing). Ownership lists don't render anything.
+      _setLocalCosmetic(equipped) {
+        if (this.localCosmetic) { this.localCosmetic.destroy(); this.localCosmetic = null; }
+        const emoji = COSMETIC_EMOJI[equipped];
+        if (emoji && this.player) {
+          this.localCosmetic = this.add.text(this.player.x, this.player.y-68, emoji,
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
       }
 
-      _updatePlayerCosmetics(id, cosmetics) {
+      _updatePlayerCosmetics(id, cosmetics, equipped) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
-        const hasCrown = cosmetics.includes('crown');
-        if (hasCrown && !entry.crown) {
-          entry.crown = this.add.text(entry.sprite.x, entry.sprite.y-68, '👑',
+        if (entry.cosmetic) { entry.cosmetic.destroy(); entry.cosmetic = null; }
+        const emoji = COSMETIC_EMOJI[equipped];
+        if (emoji) {
+          entry.cosmetic = this.add.text(entry.sprite.x, entry.sprite.y-68, emoji,
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
-        } else if (!hasCrown && entry.crown) {
-          entry.crown.destroy(); entry.crown = null;
         }
       }
 
@@ -3681,7 +3747,7 @@
 
       _showChatBubble(sprite, message, isLocal, isWhisper) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
-        const yOff  = isLocal ? (this.localCrown ? -95 : -78) : -85;
+        const yOff  = isLocal ? (this.localCosmetic ? -95 : -78) : -85;
         const bubble = this.add.text(sprite.x, sprite.y+yOff, message, {
           fontSize:'14px', fontFamily:'monospace',
           color: isWhisper ? '#e9d5ff' : '#111',
@@ -3731,7 +3797,7 @@
       // and an emote simply replaces any bubble already showing.
       _showEmoteBubble(sprite, char, isLocal) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
-        const yOff  = isLocal ? (this.localCrown ? -95 : -78) : -85;
+        const yOff  = isLocal ? (this.localCosmetic ? -95 : -78) : -85;
         const bubble = this.add.text(sprite.x, sprite.y+yOff, char, {
           fontSize:'26px', padding:{x:9,y:6},
           backgroundColor:'#ffffffee', resolution:2,
@@ -3776,7 +3842,7 @@
         const e = this.otherPlayers[id];
         if (!e) return;
         e.sprite.destroy(); e.nameTag.destroy();
-        if (e.crown)      e.crown.destroy();
+        if (e.cosmetic)   e.cosmetic.destroy();
         if (e.chatBubble) e.chatBubble.destroy();
         this._clearOccluders(e.occluders);
         delete this.otherPlayers[id];
@@ -3844,13 +3910,14 @@
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
-        let crown = null;
-        if (data.cosmetics?.includes('crown')) {
-          crown = this.add.text(data.x, data.y-68, '👑',
+        let cosmetic = null;
+        const wornEmoji = COSMETIC_EMOJI[data.equipped];
+        if (wornEmoji) {
+          cosmetic = this.add.text(data.x, data.y-68, wornEmoji,
             {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
         }
 
-        this.otherPlayers[id] = { sprite, nameTag, crown, chatBubble:null, character:char, texKey, occluders };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, chatBubble:null, character:char, texKey, occluders };
       }
 
       // Show the pulsing highlight only for the active object id (null = hide all).
@@ -3887,8 +3954,8 @@
         const idleKey = `idle_${texKey}`;
 
         if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
-        if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
-        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCrown?-95:-78));
+        if (this.localCosmetic) this.localCosmetic.setPosition(player.x, player.y-68);
+        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCosmetic?-95:-78));
 
         if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {
           player.setVelocity(0,0);

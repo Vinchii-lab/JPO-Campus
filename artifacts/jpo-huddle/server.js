@@ -74,7 +74,25 @@ const admins  = new Set();   // socketIds authenticated as admin this session (n
 const graceByEmail = {};
 const GRACE_MS = 10_000;
 
-const SHOP = { crown: 30 };
+// ── Cosmetics catalog ────────────────────────────────────────────────────────
+// Permanent, worn items: buy once, own forever, wear ONE at a time (the
+// equipped choice lives in jpo_players.equipped_cosmetic; '' = nothing worn).
+// Buying auto-equips; `equipCosmetic` switches or takes off without repurchase.
+// Ids MUST match the client COSMETICS catalog in public/index.html (it maps
+// ids to emoji/names for the shop UI and the overhead overlay).
+// Prices are balanced against the +2/min earn rate: cheapest reachable in one
+// session (players start with 50), fanciest takes a few days of hanging out.
+const SHOP = {
+  sunglasses:   15,
+  book:         20,
+  crown:        30,
+  headphones:   35,
+  beret:        40,
+  chefhat:      45,
+  camera:       60,
+  gamerheadset: 75,
+  guitar:       90,
+};
 
 // ── Usable (consumable) items ────────────────────────────────────────────────
 // Unlike SHOP cosmetics (permanent, worn), these are bought in packs of `uses`
@@ -327,6 +345,7 @@ function rowToPlayerState(row) {
     pantsIdx:  row.pants_idx,
     coins:     row.coins,
     cosmetics: row.cosmetics || [],
+    equipped:  row.equipped_cosmetic || "",
     items:     row.items || {},
     isAnnouncer: row.is_announcer,
   };
@@ -447,6 +466,7 @@ async function restorePlayer(socket, row) {
     pantsIdx:  state.pantsIdx,
     coins:     state.coins,
     cosmetics: state.cosmetics,
+    equipped:  state.equipped || "",
     items:     state.items || {},
     x:         state.x,
     y:         state.y,
@@ -1021,13 +1041,13 @@ io.on("connection", (socket) => {
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
-          coins: 50, cosmetics: [], items: {}, isAnnouncer: false,
+          coins: 50, cosmetics: [], equipped: "", items: {}, isAnnouncer: false,
         };
         players[targetId] = state;
         io.to(targetId).emit("approved", {
           name: state.name, character: state.character,
           hairIdx: state.hairIdx, skinIdx: state.skinIdx, shirtIdx: state.shirtIdx, pantsIdx: state.pantsIdx,
-          coins: state.coins, cosmetics: state.cosmetics, items: state.items,
+          coins: state.coins, cosmetics: state.cosmetics, equipped: state.equipped, items: state.items,
         });
         io.to(targetId).emit("currentPlayers", players);
         io.to(targetId).emit("announcerStatus", { canPost: false });
@@ -1457,9 +1477,10 @@ io.on("connection", (socket) => {
       if (p.coins < cost) { socket.emit("shopError", "Not enough coins!"); return; }
       p.coins -= cost;
       p.cosmetics.push(item);
+      p.equipped = item;   // buying auto-equips
       socket.emit("coinUpdate",  { coins: p.coins });
-      socket.emit("shopSuccess", { item });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics });
+      socket.emit("shopSuccess", { item, equipped: p.equipped });
+      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped });
       console.log(`${p.name} bought ${item} (session-only)`);
       return;
     }
@@ -1467,13 +1488,15 @@ io.on("connection", (socket) => {
     try {
       // One atomic statement guards both "enough coins" and "not already owned",
       // so a coin tick or a double-click can't produce an inconsistent balance.
+      // Buying auto-equips the new item (players can switch afterwards for free).
       const { rows } = await pool.query(
         `UPDATE jpo_players
             SET coins = coins - $2,
                 cosmetics = array_append(cosmetics, $3),
+                equipped_cosmetic = $3,
                 updated_at = now()
           WHERE email = $1 AND coins >= $2 AND NOT ($3 = ANY(cosmetics))
-          RETURNING coins, cosmetics`,
+          RETURNING coins, cosmetics, equipped_cosmetic`,
         [p.email, cost, item],
       );
       if (rows.length === 0) {
@@ -1483,11 +1506,48 @@ io.on("connection", (socket) => {
       }
       p.coins = rows[0].coins;
       p.cosmetics = rows[0].cosmetics || [];
+      p.equipped = rows[0].equipped_cosmetic || "";
       socket.emit("coinUpdate",  { coins: p.coins });
-      socket.emit("shopSuccess", { item });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics });
+      socket.emit("shopSuccess", { item, equipped: p.equipped });
+      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped });
       console.log(`${p.name} bought ${item}`);
     } catch (err) { console.error("buyCosmetic failed:", err); }
+  });
+
+  // ── Cosmetics: switch which owned item is worn ('' = take it off) ────────
+  // Free (no coin movement), so it is NOT blocked mid-match and doesn't touch
+  // the wager invariant. Ownership is enforced in the same statement that
+  // writes the choice, so a never-owned id can't be equipped.
+  socket.on("equipCosmetic", async (payload) => {
+    const raw = (payload || {}).item;
+    const item = typeof raw === "string" ? raw : null;
+    const p = players[socket.id];
+    if (!p || item === null) return;
+    if (item !== "" && !SHOP[item]) return;          // unknown cosmetic id
+    if (!takeToken(buyBucket)) return;               // shares the shop's spam throttle
+    if (p.equipped === item) return;                 // no-op
+
+    if (!p.email) {
+      if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
+      p.equipped = item;
+      socket.emit("equipUpdate", { equipped: p.equipped });
+      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET equipped_cosmetic = $2, updated_at = now()
+          WHERE email = $1 AND ($2 = '' OR $2 = ANY(cosmetics))
+          RETURNING equipped_cosmetic`,
+        [p.email, item],
+      );
+      if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
+      p.equipped = rows[0].equipped_cosmetic || "";
+      socket.emit("equipUpdate", { equipped: p.equipped });
+      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped });
+    } catch (err) { console.error("equipCosmetic failed:", err); }
   });
 
   // ── Usable items: buy ────────────────────────────────────────────────

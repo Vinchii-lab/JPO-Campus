@@ -80,3 +80,24 @@ works, stop debugging game code and drive a browser directly:
   `floor(x/48), floor((y+27)/48)` (feet offset); waypoint world px =
   `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
   ~(dist/220)*1000 ms per waypoint. Works first try.
+
+# Real users may be online during e2e — never assert global world state
+
+The dev server is live for the actual JPO team; a real player can be walking
+around (and using the feature under test!) while your two-browser run executes.
+An assertion like "NO other player has X" can fail legitimately.
+
+**Rule:** scope every observer-side assertion to the specific test player's
+socket id (`await pageA.evaluate(() => socket.id)`, then check
+`otherPlayers[aid]` on B) — never scan all of `otherPlayers` for presence or
+absence of something.
+
+# Backgrounded test runs get reaped — run foreground with a timeout
+
+`nohup … &` AND `setsid nohup … & disown` both died silently (empty log, no
+process) when the bash tool session ended — the sandbox reaps them despite the
+earlier note that nohup worked. A full 2-browser cosmetics run fits in ~60s.
+
+**How to apply:** prefer foreground `timeout 110 node test.cjs` (under the
+2-min shell cap); only if a run truly exceeds that, split the test into
+phases that each fit foreground.

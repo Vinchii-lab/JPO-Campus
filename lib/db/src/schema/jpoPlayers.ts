@@ -27,6 +27,9 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   pantsIdx: integer("pants_idx").notNull().default(0),
   coins: integer("coins").notNull().default(50),
   cosmetics: text("cosmetics").array().notNull().default(sql`'{}'::text[]`),
+  // Which owned cosmetic is currently worn/displayed ('' = none). Players own
+  // many cosmetics but wear exactly one at a time.
+  equippedCosmetic: text("equipped_cosmetic").notNull().default(""),
   // Usable/consumable items: itemId → remaining uses (e.g. {"cigarette": 4,
   // "coffee": 1}). Unlike cosmetics (permanent, worn), these deplete on use.
   items: jsonb("items").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
