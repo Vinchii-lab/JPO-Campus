@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -27,6 +27,9 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   pantsIdx: integer("pants_idx").notNull().default(0),
   coins: integer("coins").notNull().default(50),
   cosmetics: text("cosmetics").array().notNull().default(sql`'{}'::text[]`),
+  // Usable/consumable items: itemId → remaining uses (e.g. {"cigarette": 4,
+  // "coffee": 1}). Unlike cosmetics (permanent, worn), these deplete on use.
+  items: jsonb("items").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
   approved: boolean("approved").notNull().default(false),
   isAnnouncer: boolean("is_announcer").notNull().default(false),
   x: integer("x").notNull().default(1080),

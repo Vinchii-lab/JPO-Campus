@@ -423,6 +423,40 @@
     body.touch-device.playing.chatting #emote-toggle { display: none; }
     #emote-toggle:active { background: rgba(0,0,0,0.8); }
 
+    /* ── Usable-items bar (only visible while you own something usable) ── */
+    #item-bar {
+      position: fixed; bottom: 78px; left: 24px; z-index: 240;
+      display: none; flex-direction: column; gap: 6px;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(4px);
+      font-family: monospace; color: #fff; font-size: 13px;
+    }
+    body.playing #item-bar.has-items { display: flex; }
+    body.playing.chatting #item-bar { display: none; }
+    .item-row { display: none; align-items: center; gap: 8px; }
+    .item-row.owned { display: flex; }
+    .item-row .item-icon { font-size: 20px; line-height: 1; }
+    .item-row .item-count { color: rgba(255,255,255,0.7); min-width: 30px; }
+    .use-btn {
+      padding: 3px 12px; font-size: 12px; font-family: monospace;
+      background: #6c63ff; color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; transition: background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .use-btn:hover { background: #574fd6; }
+    /* Touch: the joystick owns the bottom-left corner — lift the bar above it. */
+    body.touch-device #item-bar { bottom: 210px; }
+
+    /* ── Coffee-boost countdown chip (under the coin HUD, left of the DM log) ── */
+    #boost-chip {
+      display: none; position: fixed; top: 58px; right: 14px; z-index: 300;
+      background: rgba(0,0,0,0.72); border-radius: 8px; padding: 6px 12px;
+      font-family: monospace; color: #ffd166; font-size: 13px;
+    }
+    #boost-chip.on { display: block; }
+    /* The DM log lives at the same corner — nudge it down while the chip is up. */
+    #boost-chip.on ~ #dm-log { top: 96px; }
+
     /* ── DM (whisper) composer ── */
     #dm-bar {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -817,6 +851,9 @@
     <button id="dm-send" class="chat-touch-btn" type="button" aria-label="Send DM">➤</button>
     <button id="dm-close" class="chat-touch-btn" type="button" aria-label="Close DM">✕</button>
   </div>
+  <!-- ── Coffee-boost countdown — MUST stay a preceding sibling of #dm-log so
+       the `#boost-chip.on ~ #dm-log` rule can nudge the log down while it's up. -->
+  <div id="boost-chip"></div>
   <div id="dm-log"></div>
 
   <!-- ── Rock-Paper-Scissors challenges ── -->
@@ -885,6 +922,18 @@
   <button id="emote-toggle" type="button" aria-label="Emotes">😀</button>
   <div id="emote-bar"></div>
 
+  <!-- ── Usable items bar (rows toggle on when you own the item) ── -->
+  <div id="item-bar">
+    <div class="item-row" id="item-row-cigarette">
+      <span class="item-icon">🚬</span><span class="item-count" id="item-count-cigarette">×0</span>
+      <button class="use-btn" type="button" onclick="useItem('cigarette')">Smoke</button>
+    </div>
+    <div class="item-row" id="item-row-coffee">
+      <span class="item-icon">☕</span><span class="item-count" id="item-count-coffee">×0</span>
+      <button class="use-btn" type="button" onclick="useItem('coffee')">Drink</button>
+    </div>
+  </div>
+
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
     💰 <span id="coin-count">0</span>
@@ -903,6 +952,22 @@
           <div class="shop-item-cost">30 coins — wears above your head</div>
         </div>
         <button class="buy-btn" id="buy-crown" onclick="buyItem('crown')">Buy</button>
+      </div>
+      <div class="shop-item">
+        <div class="shop-item-icon">🚬</div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Cigarette pack <span style="font-weight:normal;color:#888">×5</span></div>
+          <div class="shop-item-cost">20 coins — smoke break, outside on the grass only</div>
+        </div>
+        <button class="buy-btn" onclick="buyUsable('cigarette')">Buy</button>
+      </div>
+      <div class="shop-item">
+        <div class="shop-item-icon">☕</div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Coffee</div>
+          <div class="shop-item-cost">10 coins — +40% walk speed for 45s, single cup</div>
+        </div>
+        <button class="buy-btn" onclick="buyUsable('coffee')">Buy</button>
       </div>
       <div id="shop-msg"></div>
       <button id="shop-close-btn" onclick="closeShop()">Close</button>
@@ -1056,6 +1121,9 @@
     const WORLD_W = 3024;  // 63 tiles * 16px * 3 scale
     const WORLD_H = 1728;  // 36 tiles * 16px * 3 scale
     const SPEED   = 150;
+    // Coffee walk-speed multiplier — MUST match COFFEE_MULT in server.js (the
+    // server widens its per-move budget by exactly this while a boost is live).
+    const COFFEE_MULT = 1.4;
     // World-px from the sprite origin (center) down to its arcade body center. The
     // body is setSize(12,10).setOffset(2,20) on a 16x32 frame at scale 3, so the
     // feet-body sits 27px below the sprite center. Used for tile lookups and to snap
@@ -1248,6 +1316,8 @@
     let _playerPantsIdx = 0;
     let _playerCoins    = 0;
     let _ownedItems     = [];
+    let _playerItems    = {};   // usable items: itemId → remaining uses (server-authoritative)
+    let _boostUntil     = 0;    // coffee boost end (client mirror; the server enforces its own copy)
 
     let _builderStep   = 0;
     let _phaserKbd     = null;
@@ -1743,6 +1813,8 @@
       _playerShirtIdx = data.shirtIdx ?? data.clothesIdx ?? 0;
       _playerPantsIdx = data.pantsIdx ?? data.clothesIdx ?? 0;
       _playerCoins    = data.coins;
+      _playerItems    = data.items || {};
+      _renderItemBar();
 
       const overlay = document.getElementById('join-overlay');
       if (overlay) {                 // null after the first approval removed it — a blip resume re-fires 'approved'
@@ -1784,6 +1856,65 @@
       window._gameScene?._updatePlayerCosmetics(id, cosmetics);
     });
 
+    // ── Usable items (cigarettes, coffee) ─────────────────────────────
+    socket.on('usableBought', ({ item, items }) => {
+      _playerItems = items || {};
+      _renderItemBar();
+      const label = item === 'cigarette' ? 'Cigarette pack' : 'Coffee';
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${label} added — use it from the items bar!`;
+    });
+
+    socket.on('itemsUpdate', ({ items }) => {
+      _playerItems = items || {};
+      _renderItemBar();
+    });
+
+    socket.on('itemError', ({ message }) => {
+      _rpsToast(message || "Can't use that right now.");
+    });
+
+    // Smoke puffs over whoever lit up — visible to everyone.
+    socket.on('smokeStart', ({ id, durationMs }) => {
+      window._gameScene?._startSmoke(id, durationMs || 10000);
+    });
+
+    // Coffee: the drinker speeds up locally (the server widens its movement
+    // budget in lockstep); everyone else just sees a ☕ bubble over their head.
+    socket.on('coffeeBoost', ({ id, durationMs }) => {
+      const scene = window._gameScene;
+      if (id === socket.id) {
+        _boostUntil = Date.now() + (durationMs || 45000);
+        _startBoostChip();
+        if (scene?.player) scene._showEmoteBubble(scene.player, '☕', true);
+      } else if (scene) {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, '☕', false);
+        }
+      }
+    });
+
+    // Countdown chip under the coin HUD while the boost is live.
+    let _boostTimer = null;
+    function _startBoostChip() {
+      const chip = document.getElementById('boost-chip');
+      clearInterval(_boostTimer);
+      const tick = () => {
+        const left = _boostUntil - Date.now();
+        if (left <= 0) {
+          chip.classList.remove('on');
+          clearInterval(_boostTimer); _boostTimer = null;
+          return;
+        }
+        chip.textContent = `☕ +40% speed · ${Math.ceil(left / 1000)}s`;
+      };
+      tick();
+      chip.classList.add('on');
+      _boostTimer = setInterval(tick, 500);
+    }
+
     // ── Shop ──────────────────────────────────────────────────────────
     function openShop() {
       _refreshShopUI();
@@ -1795,12 +1926,29 @@
       document.querySelector('canvas')?.focus();
     }
     function buyItem(item) { socket.emit('buyCosmetic', { item }); }
+    function buyUsable(item) { socket.emit('buyUsable', { item }); }
+    function useItem(item) {
+      socket.emit('useItem', { item });
+      document.querySelector('canvas')?.focus();   // give movement keys back after the click
+    }
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
       const btn = document.getElementById('buy-crown');
       if (_ownedItems.includes('crown')) {
         btn.textContent = '✓ Owned'; btn.classList.add('owned'); btn.onclick = null;
       }
+    }
+    // Items bar: a row shows only while you own that item; the whole bar hides
+    // when you own nothing usable. Ids must match the server's USABLE_ITEMS.
+    function _renderItemBar() {
+      let any = false;
+      for (const id of ['cigarette', 'coffee']) {
+        const n = _playerItems[id] || 0;
+        document.getElementById('item-row-' + id).classList.toggle('owned', n > 0);
+        document.getElementById('item-count-' + id).textContent = '×' + n;
+        if (n > 0) any = true;
+      }
+      document.getElementById('item-bar').classList.toggle('has-items', any);
     }
 
     // ── Touch / shared input state ────────────────────────────────────
@@ -3257,6 +3405,32 @@
         return bubble;
       }
 
+      // Smoke break: little 💨 puffs that spawn over the smoker's head and
+      // drift up while fading. Deliberately NOT the shared chat-bubble slot —
+      // a 10s smoke shouldn't eat chat/emote bubbles (or be eaten by them).
+      // The spawner re-resolves the sprite every puff and stops quietly if the
+      // player leaves mid-smoke.
+      _startSmoke(id, durationMs) {
+        const isLocal = id === socket.id;
+        const puffEveryMs = 700;
+        const puffs = Math.max(1, Math.floor(durationMs / puffEveryMs));
+        const ev = this.time.addEvent({
+          delay: puffEveryMs, repeat: puffs - 1, startAt: puffEveryMs - 10,  // first puff ~immediately
+          callback: () => {
+            const sprite = isLocal ? this.player : this.otherPlayers[id]?.sprite;
+            if (!sprite || !sprite.active) { ev.remove(); return; }
+            const puff = this.add.text(
+              sprite.x + Phaser.Math.Between(-4, 12), sprite.y - 52, '💨',
+              { fontSize:'16px', resolution:2 },
+            ).setOrigin(0.5, 1).setDepth(1001).setAlpha(0.9);
+            this.tweens.add({
+              targets: puff, y: puff.y - 34, alpha: 0, scaleX: 1.4, scaleY: 1.4,
+              duration: 1400, ease: 'Sine.Out', onComplete: () => puff.destroy(),
+            });
+          },
+        });
+      }
+
       _removeOtherPlayer(id) {
         const e = this.otherPlayers[id];
         if (!e) return;
@@ -3504,11 +3678,15 @@
           }
         } else {
           player.setVelocity(0,0);
-          if (left)       player.setVelocityX(-SPEED);
-          else if (right) player.setVelocityX( SPEED);
-          if (up)         player.setVelocityY(-SPEED);
-          else if (down)  player.setVelocityY( SPEED);
-          if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(SPEED);
+          // Coffee boost: walk faster while it's live. The server's movement
+          // budget is widened by the same multiplier for the same window, so
+          // boosted steps aren't rejected as speed hacks.
+          const spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
+          if (left)       player.setVelocityX(-spd);
+          else if (right) player.setVelocityX( spd);
+          if (up)         player.setVelocityY(-spd);
+          else if (down)  player.setVelocityY( spd);
+          if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
 
           player.setFlipX(false);
           const moving = left || right || up || down;

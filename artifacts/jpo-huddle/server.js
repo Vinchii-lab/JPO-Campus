@@ -76,6 +76,21 @@ const GRACE_MS = 10_000;
 
 const SHOP = { crown: 30 };
 
+// ── Usable (consumable) items ────────────────────────────────────────────────
+// Unlike SHOP cosmetics (permanent, worn), these are bought in packs of `uses`
+// and deplete when used. Ownership lives in jpo_players.items (jsonb: itemId →
+// remaining uses) for email-backed players, in-memory for session-only ones.
+// Buying again adds `uses` more. Adding a new item = add an entry here + a
+// client-side shop row / effect handler.
+const USABLE_ITEMS = {
+  cigarette: { cost: 20, uses: 5 },   // pack of 5 smokes — outdoors on the grass only
+  coffee:    { cost: 10, uses: 1 },   // single cup — +40% walk speed for 45s
+};
+const SMOKE_MS        = 10_000;  // how long the smoke-puff effect plays (also the "one at a time" cooldown)
+const COFFEE_MULT     = 1.4;     // walk-speed multiplier — MUST match client COFFEE_MULT in public/index.html
+const COFFEE_MS       = 45_000;  // boost duration — MUST match client (client gets it in the coffeeBoost event)
+const BOOST_GRACE_MS  = 2_500;   // extra server-side slack past expiry so latency can't reject a legit last step
+
 // Fixed emote allowlist — ids only, the client maps them to emoji. MUST match
 // the EMOTES list in public/index.html.
 const EMOTES = new Set(["wave", "heart", "laugh", "party", "thumbs", "fire", "sad", "shock"]);
@@ -94,17 +109,48 @@ const CLOTH_MAX = 22;
 // in public/index.html — the map file stores tile counts/sizes, not the on-screen
 // render scale. Falls back to the current 63×36 map if the file can't be read.
 const RENDER_SCALE = 3;
-const { WORLD_W, WORLD_H } = (() => {
+// Outdoor mask: OUTDOOR[row*MAP_W + col] === true where the Floor tile comes
+// from the exterior tileset (grass/pavement). Ext is the map's LAST tileset, so
+// any Floor gid >= its firstgid is outdoor. Flip-flag bits are masked off
+// (Tiled stores flips in the top bits of the gid). Used by the cigarette's
+// "outside on the grass only" rule.
+const GID_MASK = 0x1FFFFFFF;
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "Office.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
     const h = tmj.height * tmj.tileheight * RENDER_SCALE;
-    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return { WORLD_W: w, WORLD_H: h };
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      let outdoor = null;
+      const floor = tmj.layers?.find((l) => l.name === "Floor" && Array.isArray(l.data));
+      const extGid = tmj.tilesets?.length
+        ? Math.max(...tmj.tilesets.map((t) => t.firstgid || 0))
+        : null;
+      if (floor && extGid) {
+        outdoor = floor.data.map((g) => (g & GID_MASK) >= extGid);
+      } else {
+        console.error("outdoor mask unavailable (no Floor layer or tilesets) — smoking disabled");
+      }
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor };
+    }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
-  return { WORLD_W: 3024, WORLD_H: 1728 };  // 63×36 tiles · 16px · scale 3
+  // Fallback: 63×36 tiles · 16px · scale 3, no outdoor mask (smoking disabled).
+  return { WORLD_W: 3024, WORLD_H: 1728, MAP_W: 63, MAP_H: 36, OUTDOOR: null };
 })();
+
+// Is this player position outdoors? Uses the FEET tile — the sprite origin is
+// the character's center, and the tile a player occupies is derived from
+// y + BODY_DY (27px at scale 3), exactly like the client's tile lookups.
+const TILE_PX = 16 * RENDER_SCALE;
+const BODY_DY = 27;
+function isOutdoors(x, y) {
+  if (!OUTDOOR) return false;
+  const col = Math.floor(x / TILE_PX), row = Math.floor((y + BODY_DY) / TILE_PX);
+  if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return false;
+  return !!OUTDOOR[row * MAP_W + col];
+}
 
 // ── Rate limiting (basic per-socket abuse protection) ────────────────────────
 // A tiny token bucket throttles bursty events WITHOUT disconnecting the player:
@@ -246,6 +292,7 @@ function rowToPlayerState(row) {
     pantsIdx:  row.pants_idx,
     coins:     row.coins,
     cosmetics: row.cosmetics || [],
+    items:     row.items || {},
     isAnnouncer: row.is_announcer,
   };
 }
@@ -365,6 +412,7 @@ async function restorePlayer(socket, row) {
     pantsIdx:  state.pantsIdx,
     coins:     state.coins,
     cosmetics: state.cosmetics,
+    items:     state.items || {},
     x:         state.x,
     y:         state.y,
   });
@@ -575,6 +623,7 @@ io.on("connection", (socket) => {
   const postBucket  = makeBucket(3, 1000);  // guards announcement spam
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
+  const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -853,13 +902,13 @@ io.on("connection", (socket) => {
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
-          coins: 50, cosmetics: [], isAnnouncer: false,
+          coins: 50, cosmetics: [], items: {}, isAnnouncer: false,
         };
         players[targetId] = state;
         io.to(targetId).emit("approved", {
           name: state.name, character: state.character,
           hairIdx: state.hairIdx, skinIdx: state.skinIdx, shirtIdx: state.shirtIdx, pantsIdx: state.pantsIdx,
-          coins: state.coins, cosmetics: state.cosmetics,
+          coins: state.coins, cosmetics: state.cosmetics, items: state.items,
         });
         io.to(targetId).emit("currentPlayers", players);
         io.to(targetId).emit("announcerStatus", { canPost: false });
@@ -1012,7 +1061,14 @@ io.on("connection", (socket) => {
     // bounded to ~MOVE_SPEED (walk speed); only a real sit/stand adds snapBonus.
     if (lastMoveAt) {
       const elapsed = Math.min(now - lastMoveAt, MOVE_ELAPSED_CAP_MS) / 1000;
-      const maxDist = MOVE_SPEED * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
+      // Coffee boost: while active the client legitimately walks at
+      // SPEED × COFFEE_MULT, so the per-move budget must grow in lockstep or
+      // every boosted step gets rejected. BOOST_GRACE_MS of slack past expiry
+      // absorbs latency on the final boosted frames; after that the budget
+      // snaps back to walk speed (expiry is authoritative here, server-side).
+      const boosted = me.boostUntil && now < me.boostUntil + BOOST_GRACE_MS;
+      const speed = boosted ? MOVE_SPEED * COFFEE_MULT : MOVE_SPEED;
+      const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
       if (dx * dx + dy * dy > maxDist * maxDist) return;   // teleport / speed hack (silently dropped)
     }
@@ -1233,6 +1289,119 @@ io.on("connection", (socket) => {
       io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics });
       console.log(`${p.name} bought ${item}`);
     } catch (err) { console.error("buyCosmetic failed:", err); }
+  });
+
+  // ── Usable items: buy ────────────────────────────────────────────────
+  // Adds a pack of `uses` to the player's item balance. Same money rules as
+  // buyCosmetic: atomic coins-guard SQL for email-backed players, and NO
+  // spending while in an RPS match (that invariant is what keeps the RPS
+  // accept-time wager check exact through settlement).
+  socket.on("buyUsable", async (payload) => {
+    const { item } = payload || {};
+    const p = players[socket.id], def = USABLE_ITEMS[item];
+    if (!p || !def) return;
+    if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
+    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+
+    // Session-only players (no email): memory-only purchase.
+    if (!p.email) {
+      if ((p.coins || 0) < def.cost) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins -= def.cost;
+      p.items = p.items || {};
+      p.items[item] = (p.items[item] || 0) + def.uses;
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("usableBought", { item, items: p.items });
+      console.log(`${p.name} bought ${item} ×${def.uses} (session-only)`);
+      return;
+    }
+
+    try {
+      // Atomic: the coins guard and the jsonb counter bump happen in one
+      // statement, so a concurrent coin tick / double-click can't overspend.
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins - $2,
+                items = jsonb_set(COALESCE(items, '{}'::jsonb), ARRAY[$3::text],
+                                  to_jsonb(COALESCE((items->>$3)::int, 0) + $4::int), true),
+                updated_at = now()
+          WHERE email = $1 AND coins >= $2
+          RETURNING coins, items`,
+        [p.email, def.cost, item, def.uses],
+      );
+      if (rows.length === 0) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins = rows[0].coins;
+      p.items = rows[0].items || {};
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("usableBought", { item, items: p.items });
+      console.log(`${p.name} bought ${item} ×${def.uses}`);
+    } catch (err) { console.error("buyUsable failed:", err); }
+  });
+
+  // ── Usable items: use ────────────────────────────────────────────────
+  // Consumes one use (SQL-first decrement with a remaining>0 guard, so two
+  // sessions racing the same account can't double-spend the last use) and then
+  // applies the effect. Item use is allowed mid-RPS — it spends ITEMS, not
+  // coins, so the wager invariant is untouched.
+  socket.on("useItem", async (payload) => {
+    const { item } = payload || {};
+    const p = players[socket.id];
+    if (!p || !USABLE_ITEMS[item]) return;
+    if (!takeToken(itemBucket)) return;   // silently drop use-spam
+    const now = Date.now();
+
+    // Effect gates BEFORE consuming, so a rejected use never wastes a charge.
+    if (item === "cigarette") {
+      if (p.smokeUntil && now < p.smokeUntil) {
+        socket.emit("itemError", { message: "You're already smoking!" });
+        return;
+      }
+      if (!isOutdoors(p.x ?? 0, p.y ?? 0)) {
+        socket.emit("itemError", { message: "No smoking inside! Head out to the grass. 🌿" });
+        return;
+      }
+    } else if (item === "coffee") {
+      if (p.boostUntil && now < p.boostUntil) {
+        socket.emit("itemError", { message: "You're already buzzing from the last cup!" });
+        return;
+      }
+    }
+
+    // Consume one use.
+    if (!p.email) {
+      const have = (p.items && p.items[item]) || 0;
+      if (have <= 0) { socket.emit("itemError", { message: "You don't have any — grab one in the shop." }); return; }
+      p.items[item] = have - 1;
+    } else {
+      try {
+        const { rows } = await pool.query(
+          `UPDATE jpo_players
+              SET items = jsonb_set(items, ARRAY[$2::text], to_jsonb((items->>$2)::int - 1)),
+                  updated_at = now()
+            WHERE email = $1 AND COALESCE((items->>$2)::int, 0) > 0
+            RETURNING items`,
+          [p.email, item],
+        );
+        if (rows.length === 0) {
+          socket.emit("itemError", { message: "You don't have any — grab one in the shop." });
+          return;
+        }
+        p.items = rows[0].items || {};
+      } catch (err) { console.error("useItem failed:", err); return; }
+    }
+    socket.emit("itemsUpdate", { items: p.items });
+
+    // Apply the effect. Timers live only in memory (p.smokeUntil/p.boostUntil):
+    // a refresh drops the visual/boost but the charge was spent — accepted, the
+    // durations are short and this keeps restore logic untouched.
+    if (item === "cigarette") {
+      p.smokeUntil = now + SMOKE_MS;
+      io.emit("smokeStart", { id: socket.id, durationMs: SMOKE_MS });
+      console.log(`${p.name} lit a cigarette (${(p.items && p.items.cigarette) || 0} left)`);
+    } else if (item === "coffee") {
+      p.boostUntil = now + COFFEE_MS;
+      io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
+      console.log(`${p.name} drank a coffee (+${Math.round((COFFEE_MULT - 1) * 100)}% for ${COFFEE_MS / 1000}s)`);
+    }
   });
 
   // ── Disconnect ───────────────────────────────────────────────────────

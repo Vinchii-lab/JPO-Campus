@@ -47,3 +47,10 @@ Additional traps learned while testing RPS challenges:
   blocks with ~2.1s sleeps per extra emit or bursts misread as rate-limit bugs.
 - Assertions on coins need tick slack: the +2/min coin tick can land mid-test, so
   assert `n >= base && (n - base) % 2 === 0` with a small cap, not exact equality.
+- Movement-budget assertions: the FIRST playerMove after approve is a bounds-only
+  baseline (free teleport — use it to place the player, e.g. onto grass). After an
+  idle, the per-move budget caps at `MOVE_SPEED · (cap 1.5s) · 1.6 + 12` px — pick a
+  jump distance between the normal and boosted caps (e.g. 430px for ×1.4 coffee:
+  normal max 372, boosted max 516) to prove a speed change both ways. Rejected moves
+  are SILENT drops — assert via a second observer socket that a matching
+  `playerMoved` broadcast does/doesn't arrive within a timeout, never via an error event.
