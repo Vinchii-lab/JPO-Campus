@@ -312,6 +312,10 @@ function liveSocketsForEmail(email, exceptId) {
 // (a later task) will build on.
 function dropLiveByEmail(email, exceptId) {
   for (const id of liveSocketsForEmail(email, exceptId)) {
+    // Cancel any RPS match the dropped session was in. Usually the disconnect
+    // below triggers this anyway, but if the socket object is already gone
+    // there is no disconnect event — this call is the safety net.
+    cancelMatchFor(id, "They left the office — match cancelled, no coins moved.");
     if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
@@ -379,6 +383,160 @@ async function restorePlayer(socket, row) {
   }
 }
 
+// ── Rock-paper-scissors challenges (ephemeral, in-session only) ──────────────
+// A match references LIVE SOCKETS (one live session per email means a socket id
+// uniquely identifies a session). No match state is persisted: coins only move
+// at RESOLUTION time in one atomic statement, so a crash/restart/disconnect at
+// any earlier point moves nothing (no escrow, no refund paths). The one
+// invariant that makes the accept-time balance check exact: a player in a match
+// cannot spend coins (buyCosmetic is blocked while in rpsBySocket) — the only
+// concurrent coin mutation left is the +2/min tick, which only ADDS.
+const RPS_PICKS     = new Set(["rock", "paper", "scissors"]);
+const RPS_BEATS     = { rock: "scissors", paper: "rock", scissors: "paper" };  // key beats value
+const RPS_ACCEPT_MS = 30_000;  // challenged player has this long to accept/decline
+const RPS_PICK_MS   = 20_000;  // both players must pick within this window
+const RPS_WAGER_MAX = 10_000;
+const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scale 3
+let rpsSeq = 0;
+const rpsBySocket = new Map(); // socketId → shared match object (both parties map to the SAME object)
+
+function rpsOtherId(m, id) { return id === m.challengerId ? m.targetId : m.challengerId; }
+
+// Cancel any pending/picking match involving this socket id, notifying both
+// sides. Keyed off rpsBySocket — NOT players[] — because dropLiveByEmail
+// deletes players[id] before disconnecting the stale socket, and kickPlayer
+// never disconnects the target at all. A match already settling is left alone
+// (picks were locked; the result stands even if someone disconnects mid-settle).
+function cancelMatchFor(id, reason) {
+  const m = rpsBySocket.get(id);
+  if (!m || (m.state !== "pending" && m.state !== "picking")) return;
+  m.state = "done";
+  clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
+  rpsBySocket.delete(m.challengerId);
+  rpsBySocket.delete(m.targetId);
+  const msg = reason || "Match cancelled — no coins moved.";
+  io.to(m.challengerId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
+  io.to(m.targetId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
+}
+
+// Move the wager loser→winner. Email players settle in SQL with the same
+// atomic relative pattern as buyCosmetic; session-only players settle in
+// memory. Mixed matches do the SQL side FIRST and touch memory only after it
+// succeeds, so a partial transfer is impossible. Returns coins actually moved.
+async function rpsSettle(winnerId, loserId, wager) {
+  const w = players[winnerId], l = players[loserId];
+  if (!w || !l || !(wager > 0)) return 0;
+  if (w.email && l.email) {
+    const { rows } = await pool.query(
+      `WITH debit AS (
+         UPDATE jpo_players SET coins = coins - $3, updated_at = now()
+          WHERE email = $2 AND coins >= $3
+          RETURNING coins
+       )
+       UPDATE jpo_players SET coins = coins + $3, updated_at = now()
+        WHERE email = $1 AND EXISTS (SELECT 1 FROM debit)
+        RETURNING coins, (SELECT coins FROM debit) AS loser_coins`,
+      [w.email, l.email, wager],
+    );
+    if (!rows[0]) return 0;
+    w.coins = rows[0].coins;
+    l.coins = rows[0].loser_coins;
+    return wager;
+  }
+  if (!w.email && !l.email) {
+    if (l.coins < wager) return 0;
+    l.coins -= wager; w.coins += wager;
+    return wager;
+  }
+  if (l.email) {  // email loser pays a session-only winner
+    const { rows } = await pool.query(
+      `UPDATE jpo_players SET coins = coins - $2, updated_at = now()
+        WHERE email = $1 AND coins >= $2 RETURNING coins`,
+      [l.email, wager],
+    );
+    if (!rows[0]) return 0;
+    l.coins = rows[0].coins;
+    w.coins += wager;
+    return wager;
+  }
+  // session-only loser pays an email winner: check memory before the SQL credit
+  if (l.coins < wager) return 0;
+  const { rows } = await pool.query(
+    `UPDATE jpo_players SET coins = coins + $2, updated_at = now()
+      WHERE email = $1 RETURNING coins`,
+    [w.email, wager],
+  );
+  if (!rows[0]) return 0;
+  l.coins -= wager;
+  w.coins = rows[0].coins;
+  return wager;
+}
+
+// Resolve a picking-phase match: called when both picks are in OR the pick
+// timer expires. One picked → forfeit win; none → cancel (no coins move).
+async function rpsResolve(m) {
+  if (m.state !== "picking") return;   // double-fire guard (pick race vs timer)
+  m.state = "settling";
+  clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
+  const { challengerId: cId, targetId: tId, wager } = m;
+  const done = () => { m.state = "done"; rpsBySocket.delete(cId); rpsBySocket.delete(tId); };
+
+  const pc = m.picks[cId], pt = m.picks[tId];
+  if (!pc && !pt) {
+    const msg = "Nobody picked in time — match cancelled, no coins moved.";
+    io.to(cId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
+    io.to(tId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
+    done();
+    return;
+  }
+
+  let winnerId, loserId, draw = false;
+  if (pc && pt) {
+    if (pc === pt) draw = true;
+    else if (RPS_BEATS[pc] === pt) { winnerId = cId; loserId = tId; }
+    else { winnerId = tId; loserId = cId; }
+  } else if (pc) { winnerId = cId; loserId = tId; }
+  else { winnerId = tId; loserId = cId; }
+
+  if (draw) {
+    for (const [me, them] of [[cId, tId], [tId, cId]]) {
+      io.to(me).emit("rpsResult", {
+        challengeId: m.id, outcome: "draw", forfeit: false,
+        yourPick: m.picks[me], theirPick: m.picks[them], wager, coinsDelta: 0,
+      });
+    }
+    io.emit("rpsIndicator", { draw: true, aId: cId, bId: tId });
+    done();
+    return;
+  }
+
+  let transferred = 0;
+  if (wager > 0) {
+    try {
+      transferred = await rpsSettle(winnerId, loserId, wager);
+    } catch (err) {
+      console.error("rps settle failed:", err);
+    }
+  }
+  const forfeit = !(pc && pt);
+  const wp = players[winnerId], lp = players[loserId];
+  io.to(winnerId).emit("rpsResult", {
+    challengeId: m.id, outcome: "win", forfeit,
+    yourPick: m.picks[winnerId] || null, theirPick: m.picks[loserId] || null,
+    wager, coinsDelta: transferred,
+  });
+  io.to(loserId).emit("rpsResult", {
+    challengeId: m.id, outcome: "lose", forfeit,
+    yourPick: m.picks[loserId] || null, theirPick: m.picks[winnerId] || null,
+    wager, coinsDelta: -transferred,
+  });
+  if (wp) io.to(winnerId).emit("coinUpdate", { coins: wp.coins });
+  if (lp) io.to(loserId).emit("coinUpdate", { coins: lp.coins });
+  io.emit("rpsIndicator", { draw: false, winnerId, loserId });
+  console.log(`RPS: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
+  done();
+}
+
 // Passive coin earning (+2/min per active player). We also flush each
 // email-backed player's position in the same tick, so movement never triggers a
 // per-move DB write. Coins are incremented atomically in SQL and read back, so
@@ -416,6 +574,7 @@ io.on("connection", (socket) => {
   const buyBucket   = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
   const postBucket  = makeBucket(3, 1000);  // guards announcement spam
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
+  const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -745,6 +904,9 @@ io.on("connection", (socket) => {
     if (!admins.has(socket.id)) return;
     const p = players[targetId];
     if (!p) return;
+    // kickPlayer never disconnects the target socket, so the disconnect-based
+    // match cleanup would not fire — cancel their match explicitly.
+    cancelMatchFor(targetId, "Match cancelled — no coins moved.");
     delete players[targetId];
     io.to(targetId).emit("kicked");
     io.emit("playerLeft", targetId);
@@ -906,6 +1068,91 @@ io.on("connection", (socket) => {
     socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
   });
 
+  // ── Rock-paper-scissors challenges ───────────────────────────────────
+  // Server-authoritative: the client only ever sends intents; validity (who's
+  // live, busy, in range, can afford the wager), timing, pick secrecy, and the
+  // coin transfer are all decided here. See the RPS section above io.on().
+  socket.on("rpsChallenge", (payload) => {
+    const { targetId, wager } = payload || {};
+    const me = players[socket.id];
+    if (!me) return;
+    if (!takeToken(rpsBucket)) { socket.emit("rpsChallengeFailed", { message: "Slow down a moment." }); return; }
+    const w = (Number.isInteger(wager) && wager >= 0 && wager <= RPS_WAGER_MAX) ? wager : null;
+    if (w === null) { socket.emit("rpsChallengeFailed", { message: "Invalid wager." }); return; }
+    if (typeof targetId !== "string" || targetId === socket.id) {
+      socket.emit("rpsChallengeFailed", { message: "Pick someone to challenge." });
+      return;
+    }
+    const target = players[targetId];
+    if (!target) { socket.emit("rpsChallengeFailed", { message: "They're not in the office right now." }); return; }
+    if (rpsBySocket.has(socket.id)) { socket.emit("rpsChallengeFailed", { message: "You're already in a challenge." }); return; }
+    if (rpsBySocket.has(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is busy in another match.` }); return; }
+    const dx = (me.x ?? 0) - (target.x ?? 0), dy = (me.y ?? 0) - (target.y ?? 0);
+    if (dx * dx + dy * dy > RPS_RANGE_PX * RPS_RANGE_PX) {
+      socket.emit("rpsChallengeFailed", { message: "Walk closer to challenge them." });
+      return;
+    }
+    // Soft pre-check for instant feedback; the authoritative check re-runs at accept time.
+    if (w > 0 && me.coins < w)     { socket.emit("rpsChallengeFailed", { message: "You don't have that many coins." }); return; }
+    if (w > 0 && target.coins < w) { socket.emit("rpsChallengeFailed", { message: `${target.name} doesn't have that many coins.` }); return; }
+
+    const m = {
+      id: ++rpsSeq, challengerId: socket.id, targetId, wager: w,
+      state: "pending", picks: {}, pickTimer: null,
+      acceptTimer: setTimeout(() => cancelMatchFor(socket.id, "Challenge expired."), RPS_ACCEPT_MS),
+    };
+    rpsBySocket.set(socket.id, m);
+    rpsBySocket.set(targetId, m);
+    io.to(targetId).emit("rpsChallengeIncoming", {
+      challengeId: m.id, fromId: socket.id, fromName: me.name, wager: w, timeoutMs: RPS_ACCEPT_MS,
+    });
+    socket.emit("rpsChallengeSent", { challengeId: m.id, toId: targetId, toName: target.name, wager: w });
+    console.log(`RPS challenge: ${me.name} → ${target.name} (${w} coins)`);
+  });
+
+  socket.on("rpsRespond", (payload) => {
+    const { challengeId, accept } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    // Stale/forged responses (wrong id, wrong role, already started) are dropped.
+    if (!m || m.id !== challengeId || m.state !== "pending" || socket.id !== m.targetId) return;
+    if (!accept) { cancelMatchFor(socket.id, "Challenge declined."); return; }
+    const ch = players[m.challengerId], tg = players[m.targetId];
+    if (!ch || !tg) { cancelMatchFor(socket.id, "Match cancelled — someone left."); return; }
+    // Authoritative accept-time wager check for BOTH sides. Exact because a
+    // player in a match can't spend (shop blocked) and the tick only adds.
+    if (m.wager > 0 && (ch.coins < m.wager || tg.coins < m.wager)) {
+      cancelMatchFor(socket.id, "Not enough coins on one side — match cancelled.");
+      return;
+    }
+    m.state = "picking";
+    clearTimeout(m.acceptTimer);
+    m.pickTimer = setTimeout(() => { rpsResolve(m).catch((err) => console.error("rps resolve failed:", err)); }, RPS_PICK_MS);
+    io.to(m.challengerId).emit("rpsStart", { challengeId: m.id, opponentId: m.targetId,     opponentName: tg.name, wager: m.wager, pickMs: RPS_PICK_MS });
+    io.to(m.targetId).emit("rpsStart",     { challengeId: m.id, opponentId: m.challengerId, opponentName: ch.name, wager: m.wager, pickMs: RPS_PICK_MS });
+  });
+
+  socket.on("rpsPick", (payload) => {
+    const { challengeId, pick } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.state !== "picking") return;
+    if (typeof pick !== "string" || !RPS_PICKS.has(pick)) return;
+    if (m.picks[socket.id]) return;   // first pick locks — no take-backs
+    m.picks[socket.id] = pick;
+    // Only the FACT that they picked leaks to the opponent — never the pick itself.
+    io.to(rpsOtherId(m, socket.id)).emit("rpsOpponentPicked", { challengeId: m.id });
+    if (m.picks[m.challengerId] && m.picks[m.targetId]) {
+      rpsResolve(m).catch((err) => console.error("rps resolve failed:", err));
+    }
+  });
+
+  // Challenger withdraws a not-yet-answered challenge.
+  socket.on("rpsCancel", (payload) => {
+    const { challengeId } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.state !== "pending" || socket.id !== m.challengerId) return;
+    cancelMatchFor(socket.id, "Challenge withdrawn.");
+  });
+
   // ── Announcements (admin / designated announcers post, broadcast to all) ──
   socket.on("postAnnouncement", async (payload) => {
     const { text, board } = payload || {};
@@ -944,6 +1191,10 @@ io.on("connection", (socket) => {
     const p = players[socket.id], cost = SHOP[item];
     if (!p || !cost) return;
     if (!takeToken(buyBucket)) return;   // throttle rapid buy attempts
+    // No spending while in an RPS challenge/match: this is what keeps the
+    // accept-time wager check exact all the way to settlement (the coin tick
+    // only ever ADDS coins).
+    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
 
     // Session-only players (no email): memory-only purchase.
     if (!p.email) {
@@ -986,6 +1237,10 @@ io.on("connection", (socket) => {
 
   // ── Disconnect ───────────────────────────────────────────────────────
   socket.on("disconnect", async () => {
+    // A mid-match refresh/blip cancels the match immediately (no coins move) —
+    // even though the PLAYER gets a ~10s grace window, the MATCH does not:
+    // leaving an opponent staring at a hung pick screen is worse than a re-challenge.
+    cancelMatchFor(socket.id, "They left the office — match cancelled, no coins moved.");
     if (pending[socket.id]) {
       console.log(`Pending disconnected: ${pending[socket.id].name}`);
       delete pending[socket.id];

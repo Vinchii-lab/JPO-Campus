@@ -499,6 +499,109 @@
     body.touch-device.playing.chatting #touch-dm { display: none; }
     #touch-dm:active { background: rgba(0,0,0,0.8); }
 
+    /* ── Rock-Paper-Scissors challenges ── */
+    #rps-menu {
+      position: fixed; z-index: 260; display: none; flex-direction: column;
+      background: rgba(30,30,48,0.97); border: 1px solid #3a3a5e; border-radius: 10px;
+      overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5); min-width: 150px;
+    }
+    #rps-menu.open { display: flex; }
+    #rps-menu button {
+      background: none; border: none; text-align: left; cursor: pointer;
+      padding: 13px 18px; color: #eee; font-family: monospace; font-size: 14px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #rps-menu button:hover { background: rgba(108,99,255,0.25); }
+
+    #rps-wager-modal, #rps-match {
+      position: fixed; inset: 0; z-index: 8500; display: none;
+      align-items: center; justify-content: center; background: rgba(0,0,0,0.6);
+    }
+    #rps-wager-modal.open, #rps-match.open { display: flex; }
+    .rps-card {
+      background: #1e1e30; border: 1px solid #3a3a5e; border-radius: 14px;
+      padding: 26px 30px; font-family: monospace; color: #eee; text-align: center;
+      min-width: 300px; max-width: 420px; box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+    .rps-card h3 { font-size: 17px; margin-bottom: 4px; }
+    .rps-sub { font-size: 12px; color: #888; margin-bottom: 16px; }
+    .rps-wager-label {
+      display: block; font-size: 11px; color: #888; text-transform: uppercase;
+      letter-spacing: .5px; margin-bottom: 6px;
+    }
+    #rps-wager-input {
+      width: 130px; padding: 9px 12px; font-size: 16px; font-family: monospace; text-align: center;
+      background: #111; border: 2px solid #444; border-radius: 8px; color: #eee; outline: none;
+    }
+    #rps-wager-input:focus { border-color: #6c63ff; }
+    #rps-wager-error { font-size: 12px; color: #e74c3c; min-height: 16px; margin: 8px 0 2px; }
+    .rps-btn-row { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+    .rps-btn {
+      padding: 11px 18px; font-family: monospace; font-size: 14px; border-radius: 8px;
+      border: 2px solid #444; background: #26263c; color: #ccc; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .rps-btn:hover { background: #303050; }
+    .rps-btn.primary { background: #6c63ff; border-color: #6c63ff; color: #fff; font-weight: bold; }
+    .rps-btn.primary:hover { background: #574fd6; }
+
+    #rps-waiting {
+      position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); z-index: 205;
+      display: none; align-items: center; gap: 12px;
+      background: rgba(30,30,48,0.92); border: 1px solid #3a3a5e; border-radius: 10px;
+      padding: 10px 16px; font-family: monospace; color: #ccc; font-size: 13px; max-width: 92vw;
+    }
+    #rps-waiting.open { display: flex; }
+    #rps-waiting button {
+      padding: 8px 12px; font-family: monospace; font-size: 12px; border-radius: 6px;
+      border: 1px solid #555; background: #26263c; color: #ccc; cursor: pointer; flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #rps-incoming {
+      position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); z-index: 230;
+      display: none; flex-direction: column; gap: 8px; text-align: center;
+      background: rgba(30,30,48,0.96); border: 1px solid #6c63ff; border-radius: 12px;
+      padding: 14px 20px; font-family: monospace; color: #eee; font-size: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.55); max-width: 92vw;
+    }
+    #rps-incoming.open { display: flex; }
+    #rps-incoming-count { font-size: 11px; color: #888; }
+
+    #rps-pick-row { display: flex; gap: 12px; justify-content: center; margin: 14px 0 6px; }
+    .rps-pick {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      width: 86px; padding: 12px 6px 10px; font-size: 34px; cursor: pointer;
+      background: #26263c; border: 2px solid #444; border-radius: 12px; color: #eee;
+      font-family: monospace; transition: transform .1s, border-color .12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .rps-pick span { font-size: 11px; color: #aaa; }
+    .rps-pick:hover { transform: scale(1.06); border-color: #6c63ff; }
+    .rps-pick.picked { border-color: #6c63ff; background: #2c2650; }
+    .rps-pick.disabled { opacity: .35; pointer-events: none; }
+    #rps-match-count { font-size: 12px; color: #a78bfa; min-height: 16px; }
+    #rps-match-status { font-size: 12px; color: #888; min-height: 16px; margin-top: 4px; }
+    #rps-result { margin-top: 10px; }
+    #rps-result-picks { font-size: 14px; margin-bottom: 8px; }
+    .rps-out { font-size: 17px; font-weight: bold; margin-bottom: 10px; }
+    .rps-out.win { color: #2ecc71; }
+    .rps-out.lose { color: #e74c3c; }
+    .rps-out.draw { color: #f1c40f; }
+
+    #rps-toast {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000;
+      display: none; background: rgba(30,30,48,0.96); border: 1px solid #3a3a5e;
+      border-radius: 8px; padding: 9px 16px; font-family: monospace; font-size: 13px; color: #eee;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width: 90vw;
+    }
+    #rps-toast.open { display: block; }
+
+    @media (max-width: 560px) {
+      .rps-card { min-width: 0; width: calc(100vw - 32px); max-width: 380px; padding: 22px 16px; }
+      .rps-pick { width: 78px; }
+    }
+
     /* Chat send/close buttons — only shown on touch devices */
     .chat-touch-btn {
       display: none; align-items: center; justify-content: center;
@@ -716,6 +819,60 @@
   </div>
   <div id="dm-log"></div>
 
+  <!-- ── Rock-Paper-Scissors challenges ── -->
+  <div id="rps-menu">
+    <button id="rps-menu-dm" type="button">💬 Whisper</button>
+    <button id="rps-menu-challenge" type="button">✊ Challenge</button>
+  </div>
+
+  <div id="rps-wager-modal">
+    <div class="rps-card">
+      <h3 id="rps-wager-title">Challenge</h3>
+      <p class="rps-sub">Rock · Paper · Scissors</p>
+      <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
+      <input id="rps-wager-input" type="number" min="0" step="1" value="0" inputmode="numeric" autocomplete="off" />
+      <div id="rps-wager-error"></div>
+      <div class="rps-btn-row">
+        <button id="rps-wager-send" class="rps-btn primary" type="button">Send challenge</button>
+        <button id="rps-wager-cancel" class="rps-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rps-waiting">
+    <span id="rps-waiting-text"></span>
+    <button id="rps-waiting-cancel" type="button">Withdraw</button>
+  </div>
+
+  <div id="rps-incoming">
+    <div id="rps-incoming-text"></div>
+    <div id="rps-incoming-count"></div>
+    <div class="rps-btn-row">
+      <button id="rps-accept" class="rps-btn primary" type="button">Accept ✊</button>
+      <button id="rps-decline" class="rps-btn" type="button">Decline</button>
+    </div>
+  </div>
+
+  <div id="rps-match">
+    <div class="rps-card">
+      <h3 id="rps-match-title"></h3>
+      <div id="rps-match-count"></div>
+      <div id="rps-pick-row">
+        <button class="rps-pick" data-pick="rock" type="button">✊<span>Rock</span></button>
+        <button class="rps-pick" data-pick="paper" type="button">✋<span>Paper</span></button>
+        <button class="rps-pick" data-pick="scissors" type="button">✌️<span>Scissors</span></button>
+      </div>
+      <div id="rps-match-status"></div>
+      <div id="rps-result" style="display:none">
+        <div id="rps-result-picks"></div>
+        <div id="rps-result-outcome"></div>
+        <button id="rps-result-ok" class="rps-btn primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rps-toast"></div>
+
   <!-- ── On-screen touch controls (mobile) ── -->
   <div id="touch-controls">
     <div id="touch-joystick"><div id="touch-knob"></div></div>
@@ -881,7 +1038,13 @@
       socket.emit('resumeSession', { token: t });
     }
     socket.on('connect',    () => { _connected = true;  _maybeResume(); });
-    socket.on('disconnect', () => { _connected = false; _resumeSent = false; });
+    socket.on('disconnect', () => {
+      _connected = false; _resumeSent = false;
+      // A mid-match connection blip cancels the match server-side, but that
+      // rpsCancelled goes to the dead socket — close any RPS UI here so the
+      // player isn't left frozen in the pick modal until a refresh.
+      closeAllRps();
+    });
 
     socket.on('sessionToken', ({ token }) => { if (token) _saveToken(token); });
 
@@ -1678,7 +1841,7 @@
     }
 
     document.addEventListener('keydown', e => {
-      if ((e.key === 't' || e.key === 'T') && !_chatOpen && !_dmOpen
+      if ((e.key === 't' || e.key === 'T') && !_chatOpen && !_dmOpen && !_rpsUiOpen
           && !document.getElementById('shop-modal').classList.contains('open')
           && document.activeElement.tagName !== 'INPUT') {
         e.preventDefault(); openChat();
@@ -1922,7 +2085,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab') return;
       if (!document.body.classList.contains('playing')) return;
-      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) return;
       if (document.getElementById('shop-modal').classList.contains('open')) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -2010,6 +2173,245 @@
         stick.addEventListener('lostpointercapture', release);
       }
     }
+
+    // ── Rock-Paper-Scissors challenges ─────────────────────────────────
+    // Session-only and fully server-authoritative — the client just renders
+    // phases: wager composing → waiting → (opponent: incoming) → picking →
+    // result. _rpsUiOpen gates movement (update()) + Tab/T + avatar clicks for
+    // the two BLOCKING surfaces (wager modal, match modal). The waiting and
+    // incoming cards intentionally do NOT freeze you: being challenged must
+    // never lock someone's avatar in place (that would be a griefing tool).
+    let _rpsUiOpen = false;
+    let _rpsPhase = null;          // 'wager' | 'waiting' | 'incoming' | 'picking' | 'result'
+    let _rpsChallengeId = null;
+    let _rpsWagerTargetId = null;
+    let _rpsMyPick = null;
+    let _rpsCountTimer = null;     // the ONE live countdown interval (incoming XOR picking)
+    let _rpsResultTimer = null;
+    let _rpsToastTimer = null;
+    let _rpsMenuTargetId = null;
+    let _rpsMenuAt = 0;
+    const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+
+    const rpsMenu = document.getElementById('rps-menu');
+    const rpsEl = (id) => document.getElementById(id);
+
+    function _rpsToast(msg) {
+      const t = rpsEl('rps-toast');
+      t.textContent = msg;
+      t.classList.add('open');
+      clearTimeout(_rpsToastTimer);
+      _rpsToastTimer = setTimeout(() => t.classList.remove('open'), 3500);
+    }
+
+    function _rpsStopCount() { if (_rpsCountTimer) { clearInterval(_rpsCountTimer); _rpsCountTimer = null; } }
+    function _rpsCountdown(el, ms, prefix) {
+      _rpsStopCount();
+      const end = Date.now() + ms;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        el.textContent = prefix + left + 's';
+        if (left <= 0) _rpsStopCount();   // display only — the server enforces the real deadline
+      };
+      tick();
+      _rpsCountTimer = setInterval(tick, 250);
+    }
+
+    // Single teardown for EVERY RPS surface + timer — all rpsCancelled/result/
+    // close paths funnel through here so no countdown interval can leak.
+    function closeAllRps() {
+      _rpsStopCount();
+      clearTimeout(_rpsResultTimer);
+      _rpsPhase = null; _rpsChallengeId = null; _rpsWagerTargetId = null; _rpsMyPick = null;
+      rpsEl('rps-wager-modal').classList.remove('open');
+      rpsEl('rps-waiting').classList.remove('open');
+      rpsEl('rps-incoming').classList.remove('open');
+      rpsEl('rps-match').classList.remove('open');
+      _rpsHideMenu();
+      if (_rpsUiOpen) {
+        _rpsUiOpen = false;
+        if (!IS_TOUCH) document.querySelector('canvas')?.focus();
+      }
+    }
+
+    // Context menu on avatar click: 💬 Whisper / ✊ Challenge.
+    function _rpsShowMenu(playerId, px, py) {
+      _rpsMenuTargetId = playerId;
+      _rpsMenuAt = Date.now();
+      rpsMenu.style.left = Math.max(6, Math.min(px, innerWidth - 170)) + 'px';
+      rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 110)) + 'px';
+      rpsMenu.classList.add('open');
+    }
+    function _rpsHideMenu() { rpsMenu.classList.remove('open'); _rpsMenuTargetId = null; }
+    window._rpsShowMenu = _rpsShowMenu;   // called from the Phaser avatar pointerdown
+    document.addEventListener('pointerdown', (e) => {
+      // The SAME canvas pointerdown that opened the menu bubbles up to here —
+      // the timestamp guard keeps it from insta-dismissing itself.
+      if (!rpsMenu.classList.contains('open')) return;
+      if (Date.now() - _rpsMenuAt < 80) return;
+      if (!rpsMenu.contains(e.target)) _rpsHideMenu();
+    });
+    rpsEl('rps-menu-dm').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openDM(id);
+    });
+    rpsEl('rps-menu-challenge').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openRpsWager(id);
+    });
+
+    function openRpsWager(targetId) {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      const p = _online[targetId];
+      if (!p) { _rpsToast("They're not in the office right now."); return; }
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      _rpsWagerTargetId = targetId;
+      _rpsPhase = 'wager'; _rpsUiOpen = true;
+      rpsEl('rps-wager-title').textContent = 'Challenge ' + p.name;
+      rpsEl('rps-wager-error').textContent = '';
+      const inp = rpsEl('rps-wager-input');
+      inp.value = '0';
+      rpsEl('rps-wager-modal').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      if (!IS_TOUCH) { inp.focus(); inp.select(); }
+    }
+
+    function _rpsSendChallenge() {
+      const inp = rpsEl('rps-wager-input');
+      const err = rpsEl('rps-wager-error');
+      const w = parseInt(inp.value, 10);
+      if (!Number.isInteger(w) || w < 0) { err.textContent = 'Wager must be 0 or more.'; return; }
+      if (w > _playerCoins) { err.textContent = 'You only have ' + _playerCoins + ' 🪙.'; return; }
+      const targetId = _rpsWagerTargetId;
+      closeAllRps();
+      _rpsPhase = 'waiting';   // hold the slot until rpsChallengeSent/Failed answers
+      socket.emit('rpsChallenge', { targetId, wager: w });
+    }
+    rpsEl('rps-wager-send').addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSendChallenge(); });
+    rpsEl('rps-wager-cancel').addEventListener('pointerdown', (e) => { e.preventDefault(); closeAllRps(); });
+    rpsEl('rps-wager-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); _rpsSendChallenge(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeAllRps(); return; }
+      e.stopPropagation();
+    });
+
+    rpsEl('rps-waiting-cancel').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      socket.emit('rpsCancel', { challengeId: _rpsChallengeId });   // server echoes rpsCancelled → closeAllRps
+    });
+    rpsEl('rps-accept').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase !== 'incoming') return;
+      socket.emit('rpsRespond', { challengeId: _rpsChallengeId, accept: true });
+      rpsEl('rps-incoming').classList.remove('open');   // rpsStart (or rpsCancelled) follows
+      _rpsStopCount();
+    });
+    rpsEl('rps-decline').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase !== 'incoming') return;
+      socket.emit('rpsRespond', { challengeId: _rpsChallengeId, accept: false });
+      closeAllRps();
+    });
+    document.querySelectorAll('.rps-pick').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'picking' || _rpsMyPick) return;   // first pick locks — no take-backs
+        _rpsMyPick = b.dataset.pick;
+        socket.emit('rpsPick', { challengeId: _rpsChallengeId, pick: _rpsMyPick });
+        document.querySelectorAll('.rps-pick').forEach((x) => {
+          x.classList.toggle('picked', x === b);
+          if (x !== b) x.classList.add('disabled');
+        });
+        rpsEl('rps-match-status').textContent = 'Locked in — waiting for opponent…';
+      });
+    });
+    rpsEl('rps-result-ok').addEventListener('pointerdown', (e) => { e.preventDefault(); closeAllRps(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (_rpsPhase === 'wager' || _rpsPhase === 'result') { e.preventDefault(); closeAllRps(); }
+      else if (rpsMenu.classList.contains('open')) _rpsHideMenu();
+    });
+
+    // ── RPS socket events ──
+    socket.on('rpsChallengeFailed', (payload) => {
+      const { message } = payload || {};
+      closeAllRps();
+      _rpsToast(message || 'Challenge failed.');
+    });
+    socket.on('rpsChallengeSent', (payload) => {
+      const { challengeId, toName, wager } = payload || {};
+      _rpsChallengeId = challengeId;
+      _rpsPhase = 'waiting';
+      rpsEl('rps-waiting-text').textContent =
+        'Challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
+      rpsEl('rps-waiting').classList.add('open');
+    });
+    socket.on('rpsChallengeIncoming', (payload) => {
+      const { challengeId, fromName, wager, timeoutMs } = payload || {};
+      // The server's busy-check guarantees we're not mid-match — any RPS UI
+      // still open here (e.g. a half-typed wager) is stale; reset first.
+      closeAllRps();
+      _rpsChallengeId = challengeId;
+      _rpsPhase = 'incoming';
+      rpsEl('rps-incoming-text').textContent =
+        (fromName || '?') + ' challenges you to ✊✋✌️' + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
+      rpsEl('rps-incoming').classList.add('open');
+      _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
+    });
+    socket.on('rpsCancelled', (payload) => {
+      const { reason } = payload || {};
+      closeAllRps();
+      _rpsToast(reason || 'Match cancelled.');
+    });
+    socket.on('rpsStart', (payload) => {
+      const { challengeId, opponentName, wager, pickMs } = payload || {};
+      closeAllRps();
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      _rpsChallengeId = challengeId;
+      _rpsPhase = 'picking'; _rpsUiOpen = true; _rpsMyPick = null;
+      rpsEl('rps-match-title').textContent =
+        '✊✋✌️ vs ' + (opponentName || '?') + (wager ? ' · ' + wager + ' 🪙' : '');
+      rpsEl('rps-match-status').textContent = 'Make your pick!';
+      rpsEl('rps-result').style.display = 'none';
+      rpsEl('rps-pick-row').style.display = 'flex';
+      document.querySelectorAll('.rps-pick').forEach((x) => x.classList.remove('picked', 'disabled'));
+      rpsEl('rps-match').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      _rpsCountdown(rpsEl('rps-match-count'), pickMs || 20000, 'Picks lock in ');
+    });
+    socket.on('rpsOpponentPicked', () => {
+      if (_rpsPhase !== 'picking') return;
+      rpsEl('rps-match-status').textContent = _rpsMyPick
+        ? 'Both locked in…'
+        : 'Opponent locked in — your turn!';
+    });
+    socket.on('rpsResult', (payload) => {
+      const { outcome, yourPick, theirPick, coinsDelta, forfeit } = payload || {};
+      _rpsStopCount();
+      clearTimeout(_rpsResultTimer);
+      _rpsPhase = 'result'; _rpsUiOpen = true;
+      rpsEl('rps-match').classList.add('open');
+      rpsEl('rps-pick-row').style.display = 'none';
+      rpsEl('rps-match-count').textContent = '';
+      rpsEl('rps-result-picks').textContent =
+        'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
+        '  ·  Them: ' + (theirPick ? RPS_EMOJI[theirPick] + ' ' + theirPick : '(no pick)');
+      const out = rpsEl('rps-result-outcome');
+      if (outcome === 'draw')     { out.textContent = "It's a draw — no coins moved."; out.className = 'rps-out draw'; }
+      else if (outcome === 'win') { out.textContent = 'You win!'  + (coinsDelta ? ' +' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out win'; }
+      else                        { out.textContent = 'You lose.' + (coinsDelta ? ' ' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out lose'; }
+      rpsEl('rps-match-status').textContent =
+        forfeit ? (outcome === 'win' ? "They didn't pick in time — forfeit." : "You didn't pick in time — forfeit.") : '';
+      rpsEl('rps-result').style.display = 'block';
+      _rpsResultTimer = setTimeout(() => { if (_rpsPhase === 'result') closeAllRps(); }, 8000);
+    });
+    socket.on('rpsIndicator', (payload) => {
+      if (payload && window._gameScene) window._gameScene._showRpsIndicator(payload);
+    });
 
     // ── F8 Owner panel ────────────────────────────────────────────────
     let _adminAuthed    = false;
@@ -2815,6 +3217,25 @@
         entry.chatBubble = this._showChatBubble(entry.sprite, '🤫 ' + message, false, true);
       }
 
+      // RPS match-result indicator over BOTH heads, visible to bystanders too:
+      // 🏆 winner, 😵 loser, 🤝 both on a draw. Reuses the emote-bubble helper
+      // (and thus the shared chat-bubble slot) so follow-the-player positioning
+      // keeps working unchanged.
+      _showRpsIndicator(d) {
+        const show = (pid, char) => {
+          if (pid === socket.id) {
+            if (this.player) this._showEmoteBubble(this.player, char, true);
+          } else {
+            const entry = this.otherPlayers[pid];
+            if (!entry) return;
+            if (entry.chatBubble) entry.chatBubble.destroy();
+            entry.chatBubble = this._showEmoteBubble(entry.sprite, char, false);
+          }
+        };
+        if (d.draw) { show(d.aId, '🤝'); show(d.bId, '🤝'); }
+        else { show(d.winnerId, '🏆'); show(d.loserId, '😵'); }
+      }
+
       // Emote bubbles reuse the chat-bubble slot (this.localBubble /
       // entry.chatBubble), so every existing follow-the-player positioning path
       // (update() for the local player, playerMoved for others) keeps working,
@@ -2895,12 +3316,15 @@
           sprite.setFrame(DIR_START[dir]);
         }
 
-        // Clicking someone opens the DM composer pre-addressed to them.
+        // Clicking someone opens a small action menu (💬 Whisper / ✊ Challenge).
         // Listener dies with the sprite on destroy — no cleanup bookkeeping.
         sprite.setInteractive({ useHandCursor: true });
-        sprite.on('pointerdown', () => {
+        sprite.on('pointerdown', (pointer) => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen) openDM(id);
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen) {
+            const ev = pointer && pointer.event;
+            window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
+          }
         });
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
@@ -2941,7 +3365,7 @@
         if (this.localCrown)   this.localCrown.setPosition(player.x, player.y-68);
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCrown?-95:-78));
 
-        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen) {
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {
           player.setVelocity(0,0);
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }

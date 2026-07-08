@@ -33,3 +33,17 @@ cannot verify its real behaviour with `curl`. To integration-test it headlessly:
 
 **Why:** this loop is the only way to catch regressions in the DB-as-source-of-truth
 wiring; unit-level checks miss the socket payload shapes the un-editable client depends on.
+
+Additional traps learned while testing RPS challenges:
+- **Attach `once()` listeners BEFORE awaiting any other event.** The server often
+  emits to two sockets back-to-back (e.g. incoming-to-target before echo-to-sender);
+  if you `await` the first, the second arrives while nobody listens and is lost.
+  Create all the promises first, then emit, then await.
+- Fresh players start with **50 coins** (DB default) — an "insufficient coins" test
+  must wager above that. To test funded wagers, disconnect (final flush lands),
+  `UPDATE jpo_players SET coins=…`, then re-login so restore re-reads the DB.
+- Per-socket action buckets (e.g. the RPS challenge bucket, 3 tokens / +1 per 2s)
+  are consumed BEFORE validation, so even rejected emits burn tokens — pace test
+  blocks with ~2.1s sleeps per extra emit or bursts misread as rate-limit bugs.
+- Assertions on coins need tick slack: the +2/min coin tick can land mid-test, so
+  assert `n >= base && (n - base) % 2 === 0` with a small cap, not exact equality.
