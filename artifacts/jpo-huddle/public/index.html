@@ -166,7 +166,8 @@
     #chat-input::placeholder { color: rgba(255,255,255,0.35); }
     #chat-hint {
       position: fixed; bottom: 10px; right: 14px; z-index: 99;
-      font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.25); pointer-events: none;
+      font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.85); pointer-events: none;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.6);
     }
 
     /* ── Coin HUD ── */
@@ -2966,7 +2967,7 @@
     const TUTORIAL_STEPS = [
       { title: "Welcome to JPO Huddle! 👋", target: null,
         text: "Use WASD or the arrow keys to walk around the office. Here's a quick tour of what you can do." },
-      { title: "Chat with people nearby 💬", target: '#chat-hint',
+      { title: "Chat with people nearby 💬", target: ['#chat-hint', '#touch-chat'],
         text: "Press T to open chat and say something everyone nearby can see. Press Tab (or the 🤫 touch button) to whisper privately to one person." },
       { title: "Catch up on chat", target: '#chatlog-btn',
         text: "Missed something? Click here — or press C — to see everything said in public chat since you joined." },
@@ -2974,7 +2975,7 @@
         text: "You earn +2 coins a minute just by walking around — sit at any computer for +3/min instead. Your first login each day also gives a one-time +10 bonus." },
       { title: "Visit the Shop 🛍️", target: '#shop-btn',
         text: "Spend coins on cosmetics (sunglasses, crowns, and more), outfit colors in the Wardrobe, coffee, and cigarettes." },
-      { title: "Emotes & challenges ⚔️", target: '#emote-toggle',
+      { title: "Emotes & challenges ⚔️", target: ['#emote-bar', '#emote-toggle'],
         text: "Click here (or press 1–8) to react with an emote. The last slot, ⚔️, challenges the nearest player to a friendly game — or click any avatar and choose Challenge." },
       { title: "Explore the office ☕", target: null,
         text: "Look for the coffee machine, water cooler, fridge, and arcade around the office — walk up and press E to interact." },
@@ -3019,7 +3020,17 @@
 
       const highlight = document.getElementById('tut-highlight');
       const card = document.getElementById('tut-card');
-      const targetEl = step.target ? document.querySelector(step.target) : null;
+      // A step's target can list multiple selectors (e.g. desktop vs. touch
+      // layouts show different elements for the same feature) — use the
+      // first one that's actually visible right now, not just present in the DOM.
+      let targetEl = null;
+      if (step.target) {
+        const selectors = Array.isArray(step.target) ? step.target : [step.target];
+        for (const sel of selectors) {
+          const el = document.querySelector(sel);
+          if (el && el.offsetParent !== null) { targetEl = el; break; }
+        }
+      }
       const vw = window.innerWidth, vh = window.innerHeight;
 
       if (targetEl) {
