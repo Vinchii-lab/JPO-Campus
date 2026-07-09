@@ -1104,10 +1104,7 @@
   <div id="profile-modal">
     <div class="rps-card" id="profile-card">
       <h3 id="pf-name"></h3>
-      <p class="rps-sub" id="pf-fullname"></p>
       <div class="pf-rows">
-        <div class="pf-row"><span class="pf-label">Department</span><span id="pf-dept"></span></div>
-        <div class="pf-row"><span class="pf-label">Email</span><span id="pf-email"></span></div>
         <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
         <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
         <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
@@ -3125,9 +3122,6 @@
       if (!d) return;
       if (!d.ok) { _rpsToast(d.message || "They're not in the office right now."); return; }
       pfEl('pf-name').textContent = '👤 ' + (d.name || '?') + (d.self ? ' (you)' : '');
-      pfEl('pf-fullname').textContent = (d.fullName && d.fullName !== d.name) ? d.fullName : '';
-      pfEl('pf-dept').textContent = d.department || 'Not set';
-      pfEl('pf-email').textContent = d.email || '—';
       pfEl('pf-coins').textContent = '🪙 ' + (Number.isFinite(d.coins) ? d.coins : 0);
       const worn = COSMETICS.find(c => c.id === d.equipped);
       pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
@@ -3138,11 +3132,7 @@
       pfEl('profile-modal').classList.add('open');
     });
     socket.on('departmentSet', (d) => {
-      const dept = (d && d.department) || '';
       pfEl('pf-dept-pick').classList.remove('show');
-      if (pfEl('profile-modal').classList.contains('open')) {
-        pfEl('pf-dept').textContent = dept || 'Not set';
-      }
     });
     socket.on('profileError', (d) => {
       pfEl('pf-error').textContent = (d && d.message) || 'Something went wrong.';
