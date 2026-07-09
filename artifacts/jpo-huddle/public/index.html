@@ -625,6 +625,48 @@
     #logout-btn:hover { background: rgba(231,76,60,0.85); border-color: rgba(255,255,255,0.45); }
     body.touch-device.playing.chatting #logout-btn { display: none; }
 
+    /* Help / replay the first-timer tutorial — third button in the top-left row. */
+    #help-btn {
+      display: none; position: fixed; top: 14px; left: 114px; z-index: 300;
+      width: 42px; height: 42px; border-radius: 10px; cursor: pointer;
+      align-items: center; justify-content: center; font-size: 18px; font-weight: bold;
+      background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.16);
+      color: #fff;
+      touch-action: manipulation; -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.playing #help-btn { display: flex; }
+    #help-btn:hover { background: rgba(20,20,40,0.85); }
+    body.touch-device.playing.chatting #help-btn { display: none; }
+
+    /* ── First-timer tutorial: dimmed backdrop + a spotlight ring around the
+       current target element + a caption card with a pointer arrow. Reuses
+       .rps-card/.rps-btn for visual consistency with the rest of the UI. ── */
+    #tut-overlay {
+      display: none; position: fixed; inset: 0; z-index: 6000;
+      background: rgba(0,0,0,0.6);
+    }
+    #tut-overlay.open { display: block; }
+    #tut-highlight {
+      display: none; position: fixed; z-index: 6001; border-radius: 12px;
+      border: 3px solid #6c63ff; box-shadow: 0 0 0 4000px rgba(0,0,0,0.6), 0 0 24px rgba(108,99,255,0.75);
+      pointer-events: none; transition: top .2s ease, left .2s ease, width .2s ease, height .2s ease;
+    }
+    #tut-highlight.show { display: block; }
+    #tut-card {
+      display: none; position: fixed; z-index: 6002; width: 300px; max-width: calc(100vw - 32px);
+      padding: 20px 22px; text-align: left; transition: top .2s ease, left .2s ease;
+    }
+    #tut-card.open { display: block; }
+    #tut-card h4 { font-size: 15px; margin: 0 0 6px; color: #fff; }
+    #tut-card p { font-size: 12.5px; line-height: 1.55; color: #ccc; margin: 0 0 14px; }
+    #tut-step-count { font-size: 11px; color: #777; }
+    #tut-card .rps-btn-row { justify-content: space-between; align-items: center; }
+    #tut-nav-buttons { display: flex; gap: 8px; }
+    @media (max-width: 480px) {
+      #tut-card { width: calc(100vw - 32px); }
+    }
+
     /* Touch: DM button in the right-side column (above the emote toggle);
        the emote bar opens above it. */
     #touch-dm { display: none; }
@@ -1102,6 +1144,7 @@
   <!-- ── Chat history log (session-only — messages since you joined) ── -->
   <button id="chatlog-btn" type="button" aria-label="Chat history" title="Chat log [C]">💬<span id="chatlog-badge"></span></button>
   <button id="logout-btn" type="button" aria-label="Log out" title="Log out">🚪</button>
+  <button id="help-btn" type="button" aria-label="Help" title="How to play">?</button>
   <div id="chatlog-panel">
     <div id="chatlog-head">💬 Chat log<span class="cl-sub">since you joined</span><button id="chatlog-x" type="button" aria-label="Close chat log">✕</button></div>
     <div id="chatlog-empty">Nothing yet — messages people send while you're here will show up.</div>
@@ -1362,6 +1405,24 @@
   </div>
 
   <div id="owner-hint">[F8] settings</div>
+
+  <!-- ── First-timer tutorial: dimmed backdrop, a spotlight ring, and a caption
+       card that walks new players through chat, coins, the shop, emotes, and
+       logging out. Shown once automatically, replayable anytime via the ❓
+       button (top-left). ── -->
+  <div id="tut-overlay"></div>
+  <div id="tut-highlight"></div>
+  <div id="tut-card" class="rps-card">
+    <h4 id="tut-title"></h4>
+    <p id="tut-text"></p>
+    <div class="rps-btn-row">
+      <span id="tut-step-count"></span>
+      <div id="tut-nav-buttons">
+        <button id="tut-skip" class="rps-btn" type="button">Skip</button>
+        <button id="tut-next" class="rps-btn primary" type="button">Next</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -2195,6 +2256,7 @@
       if (overlay) {                 // null after the first approval removed it — a blip resume re-fires 'approved'
         overlay.classList.add('hidden');
         setTimeout(() => overlay.remove(), 300);
+        maybeStartTutorial();
       }
 
       document.body.classList.add('playing');
@@ -2892,6 +2954,110 @@
       _clearToken();
       socket.disconnect();
       window.location.reload();
+    });
+
+    // ── First-timer tutorial: a short guided tour with a spotlight ring +
+    // caption card. Shown once automatically after the very first approval
+    // (localStorage flag — survives refresh, not tied to remember-me), and
+    // replayable anytime via the ❓ button. Steps with target:null are plain
+    // centered cards (no on-screen element to point at, e.g. movement keys
+    // or in-world objects like the coffee machine). ──
+    const TUT_SEEN_KEY = 'jpo_tutorial_seen';
+    const TUTORIAL_STEPS = [
+      { title: "Welcome to JPO Huddle! 👋", target: null,
+        text: "Use WASD or the arrow keys to walk around the office. Here's a quick tour of what you can do." },
+      { title: "Chat with people nearby 💬", target: '#chat-hint',
+        text: "Press T to open chat and say something everyone nearby can see. Press Tab (or the 🤫 touch button) to whisper privately to one person." },
+      { title: "Catch up on chat", target: '#chatlog-btn',
+        text: "Missed something? Click here — or press C — to see everything said in public chat since you joined." },
+      { title: "Earn coins 🪙", target: '#coin-hud',
+        text: "You earn +2 coins a minute just by walking around — sit at any computer for +3/min instead. Your first login each day also gives a one-time +10 bonus." },
+      { title: "Visit the Shop 🛍️", target: '#shop-btn',
+        text: "Spend coins on cosmetics (sunglasses, crowns, and more), outfit colors in the Wardrobe, coffee, and cigarettes." },
+      { title: "Emotes & challenges ⚔️", target: '#emote-toggle',
+        text: "Click here (or press 1–8) to react with an emote. The last slot, ⚔️, challenges the nearest player to a friendly game — or click any avatar and choose Challenge." },
+      { title: "Explore the office ☕", target: null,
+        text: "Look for the coffee machine, water cooler, fridge, and arcade around the office — walk up and press E to interact." },
+      { title: "Logging out 🚪", target: '#logout-btn',
+        text: "Done for the day? Click here to sign out safely — it won't affect anyone else in the office. Have fun!" },
+    ];
+    let _tutStep = 0;
+    let _tutResizeHandler = null;
+
+    function maybeStartTutorial() {
+      if (localStorage.getItem(TUT_SEEN_KEY) === '1') return;
+      startTutorial();
+    }
+
+    function startTutorial() {
+      _tutStep = 0;
+      document.getElementById('tut-overlay').classList.add('open');
+      document.getElementById('tut-card').classList.add('open');
+      _renderTutStep();
+      if (!_tutResizeHandler) {
+        _tutResizeHandler = () => _renderTutStep();
+        window.addEventListener('resize', _tutResizeHandler);
+      }
+    }
+
+    function endTutorial() {
+      localStorage.setItem(TUT_SEEN_KEY, '1');
+      document.getElementById('tut-overlay').classList.remove('open');
+      document.getElementById('tut-card').classList.remove('open');
+      document.getElementById('tut-highlight').classList.remove('show');
+      if (_tutResizeHandler) { window.removeEventListener('resize', _tutResizeHandler); _tutResizeHandler = null; }
+    }
+
+    function _renderTutStep() {
+      const step = TUTORIAL_STEPS[_tutStep];
+      if (!step) { endTutorial(); return; }
+
+      document.getElementById('tut-title').textContent = step.title;
+      document.getElementById('tut-text').textContent = step.text;
+      document.getElementById('tut-step-count').textContent = `${_tutStep + 1} / ${TUTORIAL_STEPS.length}`;
+      document.getElementById('tut-next').textContent = (_tutStep === TUTORIAL_STEPS.length - 1) ? 'Got it' : 'Next';
+
+      const highlight = document.getElementById('tut-highlight');
+      const card = document.getElementById('tut-card');
+      const targetEl = step.target ? document.querySelector(step.target) : null;
+      const vw = window.innerWidth, vh = window.innerHeight;
+
+      if (targetEl) {
+        const r = targetEl.getBoundingClientRect();
+        const pad = 8;
+        highlight.style.top    = (r.top - pad) + 'px';
+        highlight.style.left   = (r.left - pad) + 'px';
+        highlight.style.width  = (r.width  + pad * 2) + 'px';
+        highlight.style.height = (r.height + pad * 2) + 'px';
+        highlight.classList.add('show');
+
+        // Prefer placing the card below the target; flip above if there's
+        // not enough room, and clamp horizontally so it stays on-screen.
+        const cardW = card.offsetWidth || 300;
+        let top  = r.bottom + pad + 12;
+        if (top + 160 > vh) top = Math.max(12, r.top - pad - 12 - 200);
+        let left = r.left;
+        if (left + cardW > vw - 12) left = vw - cardW - 12;
+        if (left < 12) left = 12;
+        card.style.top  = top + 'px';
+        card.style.left = left + 'px';
+        card.style.transform = 'none';
+      } else {
+        highlight.classList.remove('show');
+        card.style.top  = '50%';
+        card.style.left = '50%';
+        card.style.transform = 'translate(-50%, -50%)';
+      }
+    }
+
+    document.getElementById('tut-next').addEventListener('click', () => {
+      _tutStep++;
+      _renderTutStep();
+    });
+    document.getElementById('tut-skip').addEventListener('click', endTutorial);
+    document.getElementById('help-btn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      startTutorial();
     });
 
     // C toggles the log while playing — never while typing in any field.
@@ -4032,8 +4198,6 @@
           cam.setZoom(Phaser.Math.Clamp(cam.zoom+(dy<0?0.1:-0.1),0.5,4));
         });
 
-        this.debugText = this.add.text(12,12,'',{fontSize:'13px',fontFamily:'monospace',color:'#fff',backgroundColor:'#00000099',padding:{x:6,y:4}}).setScrollFactor(0).setDepth(999);
-
         socket.on('currentPlayers', (allPlayers) => {
           if (!this.player) { this._pendingPlayers = allPlayers; return; }
           // Reconcile against the authoritative list: add/refresh everyone present,
@@ -4878,9 +5042,6 @@
           const animState = this.sitting ? 'sit' : (this._moving ? 'walk' : 'idle');
           socket.emit('playerMove', {x:player.x, y:player.y, dir:this.lastDir, anim:animState});
         }
-
-        const count = Object.keys(this.otherPlayers).length + 1;
-        this.debugText.setText(`pos:     ${Math.round(player.x)}, ${Math.round(player.y)}\nplayers: ${count} online`);
       }
     }
 
