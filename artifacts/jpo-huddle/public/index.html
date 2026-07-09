@@ -611,6 +611,20 @@
     body.touch-device.playing.chatting #chatlog-btn { display: none; }
     body.touch-device.playing.chatting #chatlog-panel.open { display: none; }
 
+    /* Log out — sits right next to the chat-log button, same corner/size language. */
+    #logout-btn {
+      display: none; position: fixed; top: 14px; left: 64px; z-index: 300;
+      width: 42px; height: 42px; border-radius: 10px; cursor: pointer;
+      align-items: center; justify-content: center; font-size: 18px;
+      background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.16);
+      color: #fff;
+      touch-action: manipulation; -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.playing #logout-btn { display: flex; }
+    #logout-btn:hover { background: rgba(231,76,60,0.85); border-color: rgba(255,255,255,0.45); }
+    body.touch-device.playing.chatting #logout-btn { display: none; }
+
     /* Touch: DM button in the right-side column (above the emote toggle);
        the emote bar opens above it. */
     #touch-dm { display: none; }
@@ -1087,6 +1101,7 @@
 
   <!-- ── Chat history log (session-only — messages since you joined) ── -->
   <button id="chatlog-btn" type="button" aria-label="Chat history" title="Chat log [C]">💬<span id="chatlog-badge"></span></button>
+  <button id="logout-btn" type="button" aria-label="Log out" title="Log out">🚪</button>
   <div id="chatlog-panel">
     <div id="chatlog-head">💬 Chat log<span class="cl-sub">since you joined</span><button id="chatlog-x" type="button" aria-label="Close chat log">✕</button></div>
     <div id="chatlog-empty">Nothing yet — messages people send while you're here will show up.</div>
@@ -2868,6 +2883,16 @@
     // pointerdown + preventDefault (not click) keeps focus on the game canvas.
     clBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleChatLog(); });
     document.getElementById('chatlog-x').addEventListener('pointerdown', (e) => { e.preventDefault(); closeChatLog(); });
+
+    // ── Log out: clear the auto-rejoin token, drop the socket, and reload
+    // straight back to a clean Join/Sign-in screen. Doesn't touch anyone else. ──
+    document.getElementById('logout-btn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (!confirm('Log out of JPO Huddle?')) return;
+      _clearToken();
+      socket.disconnect();
+      window.location.reload();
+    });
 
     // C toggles the log while playing — never while typing in any field.
     document.addEventListener('keydown', (e) => {
