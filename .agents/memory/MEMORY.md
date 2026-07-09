@@ -4,3 +4,4 @@
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded CHAR_ZONE_COLORS per char (auto-detect fails); independent shirtIdx/pantsIdx w/ clothesIdx fallback; clothes match post-hair/skin snapshot.
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp; full register→approve→buy→restart→restore loop.
 - [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — seed approved row w/ LOWERCASED email; small-hop body.reset onto a chair then KeyE to sit (spawn isn't chair-adjacent); foreground `timeout ≤115` runs; restore stray opengraph.jpg before commit.
+- [Running long processes from the agent](agent-env-long-processes.md) — bash calls kill their process group on exit; use a temporary workflow + workspace log file.

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "loadtest": "node loadtest/loadtest.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

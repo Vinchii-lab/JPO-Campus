@@ -974,12 +974,43 @@ function wrScramble(word) {
   return out;
 }
 
+// ── Opt-in load-test metrics (set LOADTEST_METRICS=1) ─────────────────────
+// Zero overhead when unset: nothing is sampled or logged. The loadtest/
+// harness spawns the server with this flag and parses the [metrics] lines to
+// observe event-loop lag, RSS, connection counts, and coin-tick duration.
+const LT_METRICS = process.env.LOADTEST_METRICS === "1";
+const ltState = { coinTickMs: 0, mvOk: 0, mvThr: 0, mvRej: 0 };   // mv counters are cumulative
+if (LT_METRICS) {
+  const SAMPLE_MS = 100;
+  let lagSamples = [];
+  let lastSample = performance.now();
+  setInterval(() => {
+    const nowP = performance.now();
+    lagSamples.push(Math.max(0, nowP - lastSample - SAMPLE_MS));
+    lastSample = nowP;
+  }, SAMPLE_MS);
+  setInterval(() => {
+    if (!lagSamples.length) return;
+    lagSamples.sort((a, b) => a - b);
+    const q = (p) => lagSamples[Math.min(lagSamples.length - 1, Math.floor(p * lagSamples.length))];
+    const rssMb = process.memoryUsage().rss / 1048576;
+    console.log(
+      `[metrics] clients=${io.engine.clientsCount} players=${Object.keys(players).length}` +
+      ` lag_p50=${q(0.5).toFixed(1)} lag_p99=${q(0.99).toFixed(1)} lag_max=${lagSamples[lagSamples.length - 1].toFixed(1)}` +
+      ` rss_mb=${rssMb.toFixed(0)} coin_tick_ms=${ltState.coinTickMs}` +
+      ` mv_ok=${ltState.mvOk} mv_thr=${ltState.mvThr} mv_rej=${ltState.mvRej}`,
+    );
+    lagSamples = [];
+  }, 5000);
+}
+
 // Passive coin earning (+COIN_TICK_BASE/min per active player, +WORK_BONUS more
 // while seated at a work desk — see isAtWorkSeat). We also flush each
 // email-backed player's position in the same tick, so movement never triggers a
 // per-move DB write. Coins are incremented atomically in SQL and read back, so
 // concurrent purchases can't lose or double-count.
 setInterval(async () => {
+  const ltTickStart = Date.now();
   for (const id in players) {
     const p = players[id];
     const rate = COIN_TICK_BASE + (isAtWorkSeat(p) ? WORK_BONUS : 0);
@@ -1002,6 +1033,7 @@ setInterval(async () => {
     }
     io.to(id).emit("coinUpdate", { coins: p.coins });
   }
+  ltState.coinTickMs = Date.now() - ltTickStart;
 }, 60_000);
 
 io.on("connection", (socket) => {
@@ -1429,8 +1461,10 @@ io.on("connection", (socket) => {
 
     // Throttle: cap how often we accept + rebroadcast movement. The client sends
     // ~20/s (every 50ms); anything faster than MOVE_MIN_INTERVAL_MS is a flood.
+    // (Two legit 50ms-cadence sends can still arrive <33ms apart when TCP
+    // bunches them — that's a by-design cosmetic drop, the next move corrects.)
     const now = Date.now();
-    if (now - lastMoveAt < MOVE_MIN_INTERVAL_MS) return;
+    if (now - lastMoveAt < MOVE_MIN_INTERVAL_MS) { if (LT_METRICS) ltState.mvThr++; return; }
 
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
@@ -1469,7 +1503,7 @@ io.on("connection", (socket) => {
       const speed = boosted ? MOVE_SPEED * COFFEE_MULT : MOVE_SPEED;
       const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
-      if (dx * dx + dy * dy > maxDist * maxDist) return;   // teleport / speed hack (silently dropped)
+      if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return; }   // teleport / speed hack (silently dropped)
     }
 
     me.x = x; me.y = y;
@@ -1477,6 +1511,7 @@ io.on("connection", (socket) => {
     me.anim = data.anim;
     wasSitting = sitting;
     lastMoveAt = now;
+    if (LT_METRICS) ltState.mvOk++;
     socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
   });
 

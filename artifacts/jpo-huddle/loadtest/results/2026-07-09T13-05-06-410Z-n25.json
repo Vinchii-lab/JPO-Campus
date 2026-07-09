@@ -1,0 +1,86 @@
+{
+  "config": {
+    "n": 25,
+    "durationS": 60,
+    "duty": 0.5,
+    "workers": 2,
+    "emailBacked": false,
+    "duels": true,
+    "mode": "spawn"
+  },
+  "clients": {
+    "approved": 25,
+    "failed": 0,
+    "unexpectedDisconnects": 0,
+    "movesSent": 15374,
+    "movedRecvTotal": 368952,
+    "movedRecvPerSec": 6149,
+    "deliveryRatio": 0.9999,
+    "deliveryOfAccepted": 0.9999,
+    "echoLatencyMs": {
+      "count": 15373,
+      "p50": 1,
+      "p90": 3,
+      "p95": 4,
+      "p99": 6,
+      "max": 18
+    },
+    "chat": {
+      "sent": 59,
+      "recv": 1475
+    },
+    "duels": {
+      "started": 4,
+      "resultsSeen": 8
+    }
+  },
+  "server": {
+    "lagP50Worst": 0.4,
+    "lagP99Worst": 17.8,
+    "lagMaxWorst": 17.8,
+    "rssMbMax": 98,
+    "coinTickMsMax": 0,
+    "clientsMax": 26,
+    "moveCounters": {
+      "ok": 14150,
+      "thr": 0,
+      "rej": 0
+    },
+    "moveAcceptRatio": 1,
+    "cpuPctAvg": 6,
+    "cpuPctMax": 13
+  },
+  "checks": [
+    {
+      "name": "all approved",
+      "ok": true,
+      "detail": "25/25"
+    },
+    {
+      "name": "no unexpected disconnects",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "echo p95 < 250ms",
+      "ok": true,
+      "detail": "4ms"
+    },
+    {
+      "name": "delivery of accepted moves > 98%",
+      "ok": true,
+      "detail": "0.9999"
+    },
+    {
+      "name": "no teleport rejects",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "server lag p99 < 200ms",
+      "ok": true,
+      "detail": "17.8ms"
+    }
+  ],
+  "pass": true
+}
