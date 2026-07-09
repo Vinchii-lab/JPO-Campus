@@ -4,8 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <title>JPO Huddle</title>
-  <link rel="icon" href="data:,">
+  <title>JPO HQ</title>
+  <link rel="icon" type="image/png" href="assets/jpo-hq-logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <script>
     // Self-healing cache buster: the server injects __BUILD__ at page-generation time.
     // On load we ping /stamp; if the server has restarted since this page was cached,
@@ -27,21 +30,48 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #1a1a2e; overflow: hidden; }
 
-    /* ── Registration overlay ── */
+    /* ── Registration overlay: orange pixel-grid backdrop with a white card ── */
     #join-overlay {
       position: fixed; inset: 0; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.72); transition: opacity 0.25s;
+      background:
+        repeating-linear-gradient(0deg,  rgba(255,255,255,0.35) 0 2px, transparent 2px 64px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.35) 0 2px, transparent 2px 64px),
+        #FFC046;
+      transition: opacity 0.25s; overflow: hidden;
     }
     #join-overlay.hidden { opacity: 0; pointer-events: none; }
 
-    .join-card {
-      background: #fff; border-radius: 16px; padding: 28px 32px;
-      font-family: monospace; color: #222; text-align: center;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-      min-width: 340px; max-width: 440px; width: 100%;
+    .jpo-deco {
+      position: fixed; font-size: 54px; line-height: 1; user-select: none; pointer-events: none;
+      filter: drop-shadow(3px 4px 0 rgba(92,75,225,0.55));
     }
-    .join-card h2 { font-size: 20px; margin-bottom: 4px; letter-spacing: 1px; }
+    #deco-duck   { top: 8%;  right: 9%;  font-size: 60px; transform: rotate(6deg); }
+    #deco-star   { bottom: 12%; left: 6%; font-size: 52px; transform: rotate(-8deg); }
+    #deco-smiley { bottom: 9%; right: 7%; font-size: 56px; transform: rotate(5deg); }
+    #deco-bolt   { bottom: 4%; left: 46%; font-size: 46px; transform: rotate(-6deg); }
+    @media (max-width: 700px) { .jpo-deco { display: none; } }
+
+    #jpo-footer {
+      position: fixed; right: 18px; bottom: 12px; z-index: 10000;
+      font-family: 'Press Start 2P', monospace; font-size: 10px; color: #6b3f00;
+      opacity: 0.75; letter-spacing: 0.5px;
+    }
+
+    .join-card {
+      background: #fff; border-radius: 18px; padding: 28px 32px;
+      font-family: monospace; color: #222; text-align: center;
+      box-shadow: 0 6px 0 #5C4BE1, 0 10px 30px rgba(0,0,0,0.35);
+      border: 3px solid #2a2a2a;
+      min-width: 340px; max-width: 440px; width: 100%;
+      position: relative; z-index: 1;
+    }
+    .jpo-logo-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 6px; }
+    .jpo-logo-img { width: 72px; height: auto; image-rendering: pixelated; margin-bottom: 4px; }
+    .join-card h2 {
+      font-family: 'Press Start 2P', monospace; font-size: 16px; margin-bottom: 4px;
+      letter-spacing: 1px; color: #5C4BE1; text-shadow: 1px 1px 0 #FFC046;
+    }
     .join-card > p { font-size: 13px; color: #888; margin-bottom: 16px; }
     .join-card.hidden { display: none; }
 
@@ -135,11 +165,11 @@
     .nav-btn:disabled { opacity: 0.4; cursor: default; }
 
     .join-btn {
-      width: 100%; padding: 10px; background: #6c63ff; color: #fff;
+      width: 100%; padding: 10px; background: #5C4BE1; color: #fff;
       border: none; border-radius: 8px; font-size: 14px; font-family: monospace;
       cursor: pointer; font-weight: bold; transition: background 0.15s; margin-top: 8px;
     }
-    .join-btn:hover { background: #574fd6; }
+    .join-btn:hover { background: #4a3ac0; }
     .join-btn:disabled { background: #aaa; cursor: default; }
     .error-msg { color: #e74c3c; font-size: 12px; margin-bottom: 6px; min-height: 16px; }
 
@@ -943,10 +973,15 @@
 </head>
 <body>
 
-  <!-- ── Registration overlay ── -->
+  <!-- ── Registration overlay: orange pixel-grid backdrop with a white card ── -->
   <div id="join-overlay">
+    <span class="jpo-deco" id="deco-duck">🦆</span>
+    <span class="jpo-deco" id="deco-star">⭐</span>
+    <span class="jpo-deco" id="deco-smiley">😊</span>
+    <span class="jpo-deco" id="deco-bolt">⚡</span>
+    <div id="jpo-footer">Developed by Vince Tiglao</div>
     <div class="join-card" id="card-register">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
 
       <!-- ═══ Step 0: Personal info ═══ -->
       <div id="info-section">
@@ -1055,7 +1090,7 @@
 
     <!-- Sign in (returning player with a password) -->
     <div class="join-card hidden" id="card-login">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <p>Sign in to jump back into the office</p>
       <div class="form-row">
         <div class="form-field">
@@ -1083,7 +1118,7 @@
 
     <!-- Auto-rejoin: reconnecting a returning browser -->
     <div class="join-card hidden" id="card-reconnecting">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <p>Welcome back!</p>
       <div class="spinner"></div>
       <p style="font-size:14px;color:#444;">Reconnecting you to the office…</p>
@@ -1091,7 +1126,7 @@
 
     <!-- Step 2: Pending -->
     <div class="join-card hidden" id="card-pending">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <p>Registration submitted!</p>
       <div class="spinner"></div>
       <p style="font-size:14px;color:#444;margin-bottom:8px;">Waiting for admin approval…</p>
@@ -1100,7 +1135,7 @@
 
     <!-- Step 3: Rejected -->
     <div class="join-card hidden" id="card-rejected">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <div style="font-size:40px;margin:20px 0;">🚫</div>
       <p style="font-size:15px;color:#e74c3c;margin-bottom:12px;">Your request was not approved.</p>
       <p style="font-size:12px;color:#999;">Please contact your admin for access.</p>
@@ -1108,7 +1143,7 @@
 
     <!-- Step 4: Kicked / reset -->
     <div class="join-card hidden" id="card-kicked">
-      <h2>🏢 JPO Huddle</h2>
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <div style="font-size:40px;margin:20px 0;">🔄</div>
       <p style="font-size:15px;color:#f39c12;margin-bottom:12px;">Your character was reset by the admin.</p>
       <p style="font-size:12px;color:#999;margin-bottom:20px;">Re-register to pick new colors.</p>
@@ -2951,7 +2986,7 @@
     // straight back to a clean Join/Sign-in screen. Doesn't touch anyone else. ──
     document.getElementById('logout-btn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      if (!confirm('Log out of JPO Huddle?')) return;
+      if (!confirm('Log out of JPO HQ?')) return;
       _clearToken();
       socket.disconnect();
       window.location.reload();
@@ -2965,7 +3000,7 @@
     // or in-world objects like the coffee machine). ──
     const TUT_SEEN_KEY = 'jpo_tutorial_seen';
     const TUTORIAL_STEPS = [
-      { title: "Welcome to JPO Huddle! 👋", target: null,
+      { title: "Welcome to JPO HQ! 👋", target: null,
         text: "Use WASD or the arrow keys to walk around the office. Here's a quick tour of what you can do." },
       { title: "Chat with people nearby 💬", target: ['#chat-hint', '#touch-chat'],
         text: "Press T to open chat and say something everyone nearby can see. Press Tab (or the 🤫 touch button) to whisper privately to one person." },
