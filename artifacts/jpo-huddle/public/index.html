@@ -3058,13 +3058,18 @@
       const card = document.getElementById('tut-card');
       // A step's target can list multiple selectors (e.g. desktop vs. touch
       // layouts show different elements for the same feature) — use the
-      // first one that's actually visible right now, not just present in the DOM.
+      // first one that's actually visible right now, not just present in the
+      // DOM. NOTE: all HUD targets are position:fixed, where offsetParent is
+      // always null — so visibility is checked via the rendered box size
+      // (display:none elements measure 0×0), never via offsetParent.
       let targetEl = null;
       if (step.target) {
         const selectors = Array.isArray(step.target) ? step.target : [step.target];
         for (const sel of selectors) {
           const el = document.querySelector(sel);
-          if (el && el.offsetParent !== null) { targetEl = el; break; }
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) { targetEl = el; break; }
         }
       }
       const vw = window.innerWidth, vh = window.innerHeight;
