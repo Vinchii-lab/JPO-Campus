@@ -3873,8 +3873,17 @@
       document.getElementById('owner-pwd-modal').classList.remove('open');
       document.querySelector('canvas')?.focus();
     }
+    // Memory-only stash of the admin code (never persisted anywhere): a socket
+    // reconnect gets a NEW socket id, and the server's `admins` set is keyed by
+    // socket id — so without a silent re-auth, any connection blip made the
+    // admin panel go stale (no more pendingList/playerList pushes) until a full
+    // page refresh + re-unlock. `_adminPwdPending` holds the attempt until the
+    // server confirms it; only a confirmed-good password is kept for re-auth.
+    let _adminPwdPending = '';
+    let _adminPwd = '';
     function submitOwnerPwd() {
-      socket.emit('adminAuth', { password: document.getElementById('owner-pwd-input').value });
+      _adminPwdPending = document.getElementById('owner-pwd-input').value;
+      socket.emit('adminAuth', { password: _adminPwdPending });
     }
     document.getElementById('owner-pwd-input').addEventListener('keydown', e => {
       e.stopPropagation();
@@ -3891,8 +3900,29 @@
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('adminAuthOk', () => { _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose(); closeOwnerPwd(); openOwnerPanel(); });
-    socket.on('adminAuthFail', () => { document.getElementById('owner-pwd-error').textContent = 'Incorrect password.'; });
+    socket.on('adminAuthOk', () => {
+      // Silent path = automatic re-auth after a reconnect (pwd modal not open):
+      // refresh the flags but do NOT pop the owner panel open mid-game.
+      const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
+      if (_adminPwdPending) { _adminPwd = _adminPwdPending; _adminPwdPending = ''; }
+      _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose();
+      if (manualUnlock) { closeOwnerPwd(); openOwnerPanel(); }
+    });
+    socket.on('adminAuthFail', () => {
+      _adminPwdPending = ''; _adminPwd = '';
+      // Modal closed = this was a silent reconnect re-auth that failed (e.g.
+      // ADMIN_PASSWORD rotated server-side): drop admin state so the gear/F8
+      // reopens the unlock prompt instead of a stale, push-less panel.
+      if (!document.getElementById('owner-pwd-modal').classList.contains('open')) _adminAuthed = false;
+      document.getElementById('owner-pwd-error').textContent = 'Incorrect password.';
+    });
+    // Re-assert admin status on every (re)connect — the server's admins set is
+    // per-socket-id and in-memory, so both a connection blip and a server
+    // restart silently drop it. Additional 'connect' listener by design
+    // (socket.io multi-listener, same pattern as the resume-token replay).
+    socket.on('connect', () => {
+      if (_adminAuthed && _adminPwd) socket.emit('adminAuth', { password: _adminPwd });
+    });
 
     // ── Announcement boards ───────────────────────────────────────────
     let _boardPanelOpen = false;
@@ -4004,7 +4034,17 @@
       });
     })();
 
+    // Toast the admin when someone NEW shows up in the pending queue (keyed by
+    // email when present — socket ids change on every reconnect and would
+    // false-alarm). null = first list after unlock, never toast on that one.
+    let _knownPendingKeys = null;
     socket.on('pendingList', (list) => {
+      const keys = new Set(list.map(p => p.email || p.id));
+      if (_knownPendingKeys && document.body.classList.contains('playing')) {
+        const fresh = list.filter(p => !_knownPendingKeys.has(p.email || p.id));
+        if (fresh.length) _rpsToast(`🔔 ${fresh.map(p => p.name).join(', ')} ${fresh.length === 1 ? 'is' : 'are'} waiting for approval`);
+      }
+      _knownPendingKeys = keys;
       document.getElementById('op-pending-count').textContent = list.length;
       const tbody = document.getElementById('op-pending-tbody');
       if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
