@@ -1374,7 +1374,14 @@
   <div id="owner-pwd-modal">
     <div id="owner-pwd-card">
       <h3>🔐 Owner Settings</h3>
-      <input id="owner-pwd-input" type="password" placeholder="Admin password" autocomplete="current-password" />
+      <!-- Deliberately NOT type="password": this is the shared office admin code,
+           not a personal login. A real password field here makes the browser's
+           password manager treat the page as a login form — and because this
+           input lives permanently in the DOM, a lingering value made Chrome pop
+           "Save password?" (pairing it with chat text as the username) on every
+           chat send. type="text" + -webkit-text-security keeps the dots look
+           while fully opting out of password-manager heuristics. -->
+      <input id="owner-pwd-input" type="text" placeholder="Admin password" autocomplete="off" spellcheck="false" autocapitalize="off" style="-webkit-text-security: disc; text-security: disc;" />
       <div id="owner-pwd-error"></div>
       <button id="owner-pwd-submit" onclick="submitOwnerPwd()">Unlock</button>
       <button id="owner-pwd-cancel" onclick="closeOwnerPwd()">Cancel</button>
@@ -3859,6 +3866,10 @@
       setTimeout(() => document.getElementById('owner-pwd-input').focus(), 30);
     }
     function closeOwnerPwd() {
+      // Always wipe the typed admin code on close (unlock success, cancel, Esc):
+      // a value left in this always-in-the-DOM field is what triggered the
+      // browser's repeated "Save password?" prompts during normal chatting.
+      document.getElementById('owner-pwd-input').value = '';
       document.getElementById('owner-pwd-modal').classList.remove('open');
       document.querySelector('canvas')?.focus();
     }
