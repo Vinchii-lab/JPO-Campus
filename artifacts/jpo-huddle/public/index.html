@@ -1199,6 +1199,7 @@
     <div class="rps-card" id="profile-card">
       <h3 id="pf-name"></h3>
       <div class="pf-rows">
+        <div class="pf-row"><span class="pf-label">Department</span><span id="pf-dept"></span></div>
         <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
         <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
         <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
@@ -3359,6 +3360,7 @@
       if (!d) return;
       if (!d.ok) { _rpsToast(d.message || "They're not in the office right now."); return; }
       pfEl('pf-name').textContent = '👤 ' + (d.name || '?') + (d.self ? ' (you)' : '');
+      pfEl('pf-dept').textContent = d.department || '—';
       pfEl('pf-coins').textContent = '🪙 ' + (Number.isFinite(d.coins) ? d.coins : 0);
       const worn = COSMETICS.find(c => c.id === d.equipped);
       pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
@@ -3370,6 +3372,7 @@
     });
     socket.on('departmentSet', (d) => {
       pfEl('pf-dept-pick').classList.remove('show');
+      if (d && d.department) pfEl('pf-dept').textContent = d.department;
     });
     socket.on('profileError', (d) => {
       pfEl('pf-error').textContent = (d && d.message) || 'Something went wrong.';
