@@ -60,6 +60,78 @@ app.get('/stamp', (_req, res) => {
   res.json({ stamp: BUILD_STAMP });
 });
 
+// ── Admin office reset ───────────────────────────────────────────────────────
+// POST /admin/purge  { password, keepEmail }
+// Deletes ALL announcements and ALL player accounts EXCEPT keepEmail, then
+// kicks every live session that isn't the kept account. Gated by
+// ADMIN_PASSWORD (constant-time compare, same trust level as the in-game
+// admin panel) plus a small attempt limiter so it can't be brute-forced.
+// This exists as an HTTP endpoint because production DB access is read-only
+// from tooling — a full office reset has to run inside the deployed server.
+let purgeAttempts = { count: 0, windowStart: 0 };
+app.post("/admin/purge", express.json(), async (req, res) => {
+  const now = Date.now();
+  if (now - purgeAttempts.windowStart > 10 * 60_000) purgeAttempts = { count: 0, windowStart: now };
+  if (++purgeAttempts.count > 5) return res.status(429).json({ error: "Too many attempts — try again later." });
+
+  const { password, keepEmail } = req.body || {};
+  const a = Buffer.from(String(password || ""));
+  const b = Buffer.from(ADMIN_PASSWORD);
+  // timingSafeEqual throws on length mismatch — guard first (same pattern as verifyToken).
+  if (!ADMIN_PASSWORD || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(403).json({ error: "Bad admin password." });
+  }
+
+  const keep = String(keepEmail || "").trim().toLowerCase();
+  if (!keep) return res.status(400).json({ error: "keepEmail is required." });
+
+  try {
+    // Refuse to run if the kept account doesn't exist — a typo here must not
+    // wipe the whole office including the requester.
+    const { rows: keepRows } = await pool.query("SELECT email FROM jpo_players WHERE email = $1", [keep]);
+    if (keepRows.length === 0) return res.status(404).json({ error: `No account found for ${keep} — nothing was deleted.` });
+
+    const client = await pool.connect();
+    let announcementsDeleted, playersDeleted;
+    try {
+      await client.query("BEGIN");
+      announcementsDeleted = (await client.query("DELETE FROM jpo_announcements")).rowCount;
+      playersDeleted = (await client.query("DELETE FROM jpo_players WHERE email <> $1", [keep])).rowCount;
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Every live session except the kept account now references a deleted row —
+    // kick them exactly like the admin-panel kick (client clears its resume
+    // token and shows the kicked screen). No forced socket disconnect, same as
+    // kickPlayer: with players[id] deleted, every game handler ignores them.
+    for (const [id, p] of Object.entries(players)) {
+      if (p.email === keep) continue;
+      cancelMatchFor(id, "Match cancelled — no coins moved.");
+      delete players[id];
+      io.to(id).emit("kicked");
+      io.emit("playerLeft", id);
+    }
+    for (const id of Object.keys(pending)) {
+      delete pending[id];
+      io.to(id).emit("rejected");
+    }
+    for (const em of Object.keys(graceByEmail)) if (em !== keep) cancelGrace(em);
+    io.emit("announcementsUpdate", await fetchAnnouncements());
+    _notifyAdmins();
+
+    console.log(`Office purge: kept ${keep}, deleted ${playersDeleted} players and ${announcementsDeleted} announcements`);
+    return res.json({ ok: true, kept: keep, playersDeleted, announcementsDeleted });
+  } catch (err) {
+    console.error("Purge failed:", err);
+    return res.status(500).json({ error: "Purge failed — no partial deletes (transactional)." });
+  }
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // ── Live-connection cache (ephemeral, per server process) ────────────────────
