@@ -164,6 +164,11 @@ const SHOP = {
   camera:       60,
   gamerheadset: 75,
   guitar:       90,
+  // Sprite wearables — drawn ON the body client-side (real pixel art, not a
+  // floating emoji). Same buy/equip mechanics as every other cosmetic.
+  shades:       150,
+  cap:          200,
+  chain:        250,
 };
 
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or
@@ -178,13 +183,19 @@ const WARDROBE_PRICE = 25;
 // Buying again adds `uses` more. Adding a new item = add an entry here + a
 // client-side shop row / effect handler.
 const USABLE_ITEMS = {
-  cigarette: { cost: 20, uses: 5 },   // pack of 5 smokes — outdoors on the grass only
-  coffee:    { cost: 10, uses: 1 },   // single cup — +40% walk speed for 45s
+  cigarette:    { cost: 20,  uses: 5 },   // pack of 5 smokes — outdoors on the grass only
+  coffee:       { cost: 10,  uses: 1 },   // single cup — +40% walk speed for 45s
+  coffee_round: { cost: 40,  uses: 1 },   // a round of coffees — boosts everyone nearby (incl. you)
+  confetti:     { cost: 30,  uses: 1 },   // party popper — visual burst everyone can see
+  fireworks:    { cost: 75,  uses: 1 },   // sky show — bigger, longer visual burst
+  pizza_party:  { cost: 150, uses: 1 },   // pizza for everyone nearby — longer boost + 🍕 bubbles
 };
 const SMOKE_MS        = 10_000;  // how long the smoke-puff effect plays (also the "one at a time" cooldown)
 const COFFEE_MULT     = 1.4;     // walk-speed multiplier — MUST match client COFFEE_MULT in public/index.html
 const COFFEE_MS       = 45_000;  // boost duration — MUST match client (client gets it in the coffeeBoost event)
+const PIZZA_MS        = 90_000;  // pizza-party boost duration (same mult as coffee — the move budget only knows one multiplier)
 const BOOST_GRACE_MS  = 2_500;   // extra server-side slack past expiry so latency can't reject a legit last step
+const GROUP_RADIUS    = 420;     // "everyone nearby" radius for group consumables, scaled px (~9 tiles)
 
 // ── Interactive office objects ────────────────────────────────────────────
 // Fixed stations on the map you can use with E. Coords are scaled world px
@@ -314,6 +325,22 @@ function isOutdoors(x, y) {
   const col = Math.floor(x / TILE_PX), row = Math.floor((y + BODY_DY) / TILE_PX);
   if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return false;
   return !!OUTDOOR[row * MAP_W + col];
+}
+
+// Live socket ids within `radius` px of the given player (always includes the
+// player themselves). Used by group consumables — live-connection only by
+// design: grace-window (briefly disconnected) players don't get boosts.
+function nearbyIds(socketId, radius) {
+  const p = players[socketId];
+  if (!p) return [socketId];
+  const out = [];
+  const r2 = radius * radius;
+  for (const [id, q] of Object.entries(players)) {
+    if (id === socketId) { out.push(id); continue; }
+    const dx = (q.x ?? 0) - (p.x ?? 0), dy = (q.y ?? 0) - (p.y ?? 0);
+    if (dx * dx + dy * dy <= r2) out.push(id);
+  }
+  return out;
 }
 
 // ── Work bonus (earn extra coins while seated at a computer/desk) ────────────
@@ -681,8 +708,8 @@ const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scal
 // mid-match spend block apply to new games automatically. The `rps*` event
 // names are kept for the shared lifecycle events (they predate the roster);
 // payloads carry a `game` field.
-const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr"]);
-const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race" };
+const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4"]);
+const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race", trivia: "Trivia Duel", c4: "Connect Four" };
 const TTT_MOVE_MS   = 20_000;  // per-move clock — the slow side forfeits
 const TTT_LINES     = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const QD_ARM_MIN_MS = 2_000;   // random wait before the DRAW! signal…
@@ -693,6 +720,12 @@ const IB_SUBMIT_MS  = 20_000;  // per-round answer window (mirrors the RPS pick 
 const IB_REVEAL_MS  = 5_000;   // reading pause between the reveal and the next round
 const WR_TIME_MS    = 60_000;  // Word Race: nobody solves it in this → draw
 const IB_CHOICES    = new Set(["a", "b"]);
+const TRIV_ROUNDS    = 3;       // Trivia Duel: best of 3 questions
+const TRIV_ANSWER_MS = 10_000;  // per-question clock — no answer counts as wrong
+const TRIV_REVEAL_MS = 4_000;   // reading pause between the reveal and the next question
+const C4_COLS    = 7;           // Connect Four board
+const C4_ROWS    = 6;
+const C4_MOVE_MS = 20_000;      // per-move clock — the slow side forfeits (mirrors TTT)
 
 // Icebreaker prompt pool (SERVER-ONLY — the client only ever sees the labels
 // of the rounds it is playing). Work-friendly either/or pairs; a match draws
@@ -763,6 +796,78 @@ const WR_WORDS = [
   "WEEKEND", "OVERTIME", "RECEIPT", "SCANNER", "DESKTOP", "SUPPLIES",
 ];
 const WR_WORD_SET = new Set(WR_WORDS);
+
+// Trivia Duel pool (SERVER-ONLY — the correct index NEVER leaves the server
+// before the reveal). Easy/medium general knowledge, 4 options each; a match
+// draws TRIV_ROUNDS distinct questions so no repeats within a match.
+// { q, opts: [4 strings], c: correct index 0-3 }
+const TRIV_QS = [
+  { q: "How many continents are there?", opts: ["5", "6", "7", "8"], c: 2 },
+  { q: "What is the largest planet in our solar system?", opts: ["Earth", "Saturn", "Neptune", "Jupiter"], c: 3 },
+  { q: "Which ocean is the largest?", opts: ["Atlantic", "Pacific", "Indian", "Arctic"], c: 1 },
+  { q: "How many minutes are in a full day?", opts: ["1240", "1380", "1440", "1560"], c: 2 },
+  { q: "What color do you get by mixing blue and yellow?", opts: ["Purple", "Green", "Orange", "Brown"], c: 1 },
+  { q: "Which animal is the tallest in the world?", opts: ["Elephant", "Giraffe", "Ostrich", "Camel"], c: 1 },
+  { q: "How many sides does a hexagon have?", opts: ["5", "6", "7", "8"], c: 1 },
+  { q: "What is the capital of Japan?", opts: ["Osaka", "Kyoto", "Tokyo", "Seoul"], c: 2 },
+  { q: "Which planet is known as the Red Planet?", opts: ["Venus", "Mars", "Mercury", "Jupiter"], c: 1 },
+  { q: "What is H2O more commonly known as?", opts: ["Salt", "Oxygen", "Water", "Hydrogen"], c: 2 },
+  { q: "How many legs does a spider have?", opts: ["6", "8", "10", "12"], c: 1 },
+  { q: "Which is the smallest prime number?", opts: ["0", "1", "2", "3"], c: 2 },
+  { q: "What does 'www' stand for?", opts: ["World Wide Web", "Web World Wide", "Wide World Web", "World Web Wide"], c: 0 },
+  { q: "How many colors are in a rainbow?", opts: ["5", "6", "7", "8"], c: 2 },
+  { q: "Which country is famous for the Eiffel Tower?", opts: ["Italy", "France", "Spain", "Germany"], c: 1 },
+  { q: "What is the fastest land animal?", opts: ["Lion", "Horse", "Cheetah", "Leopard"], c: 2 },
+  { q: "How many days are in a leap year?", opts: ["364", "365", "366", "367"], c: 2 },
+  { q: "Which fruit is famous for keeping the doctor away?", opts: ["Banana", "Apple", "Orange", "Mango"], c: 1 },
+  { q: "What is the largest mammal on Earth?", opts: ["Elephant", "Blue whale", "Hippo", "Giraffe"], c: 1 },
+  { q: "How many strings does a standard guitar have?", opts: ["4", "5", "6", "7"], c: 2 },
+  { q: "Which month has 28 days in a common year?", opts: ["January", "February", "April", "June"], c: 1 },
+  { q: "What do bees make?", opts: ["Milk", "Silk", "Honey", "Wax paper"], c: 2 },
+  { q: "Which shape has three sides?", opts: ["Square", "Triangle", "Circle", "Pentagon"], c: 1 },
+  { q: "What is the boiling point of water at sea level (°C)?", opts: ["50", "90", "100", "120"], c: 2 },
+  { q: "Which is the longest river in the world?", opts: ["Amazon", "Nile", "Yangtze", "Mississippi"], c: 1 },
+  { q: "How many players are on a basketball court per team?", opts: ["4", "5", "6", "7"], c: 1 },
+  { q: "What is the currency of the United States?", opts: ["Peso", "Euro", "Dollar", "Pound"], c: 2 },
+  { q: "Which bird is known for mimicking human speech?", opts: ["Eagle", "Parrot", "Owl", "Penguin"], c: 1 },
+  { q: "What is 9 × 8?", opts: ["64", "72", "81", "96"], c: 1 },
+  { q: "Which sea creature has eight arms?", opts: ["Squid", "Jellyfish", "Octopus", "Starfish"], c: 2 },
+  { q: "What is the capital of the Philippines?", opts: ["Cebu", "Davao", "Manila", "Quezon City"], c: 2 },
+  { q: "Which of these is NOT a primary color of light?", opts: ["Red", "Green", "Blue", "Yellow"], c: 3 },
+  { q: "How many hours are in three days?", opts: ["48", "60", "72", "84"], c: 2 },
+  { q: "Which planet is closest to the sun?", opts: ["Venus", "Earth", "Mercury", "Mars"], c: 2 },
+  { q: "What is the largest desert in the world?", opts: ["Gobi", "Sahara", "Antarctica", "Arabian"], c: 2 },
+  { q: "How many keys does a standard piano have?", opts: ["66", "76", "88", "99"], c: 2 },
+  { q: "Which language has the most native speakers?", opts: ["English", "Mandarin", "Spanish", "Hindi"], c: 1 },
+  { q: "What does a thermometer measure?", opts: ["Speed", "Weight", "Temperature", "Pressure"], c: 2 },
+  { q: "Which of these animals hibernates in winter?", opts: ["Bear", "Lion", "Zebra", "Giraffe"], c: 0 },
+  { q: "How many zeros are in one million?", opts: ["5", "6", "7", "8"], c: 1 },
+  { q: "What is the main ingredient of bread?", opts: ["Rice", "Corn", "Flour", "Sugar"], c: 2 },
+  { q: "Which sport uses a shuttlecock?", opts: ["Tennis", "Badminton", "Squash", "Cricket"], c: 1 },
+  { q: "What is the tallest mountain in the world?", opts: ["K2", "Kilimanjaro", "Everest", "Fuji"], c: 2 },
+  { q: "How many bones does an adult human have?", opts: ["106", "186", "206", "306"], c: 2 },
+  { q: "Which gas do plants absorb from the air?", opts: ["Oxygen", "Nitrogen", "Carbon dioxide", "Helium"], c: 2 },
+  { q: "What is 15% of 200?", opts: ["20", "25", "30", "35"], c: 2 },
+  { q: "Which instrument has black and white keys?", opts: ["Violin", "Piano", "Drum", "Flute"], c: 1 },
+  { q: "How many sides does a stop sign have?", opts: ["6", "7", "8", "9"], c: 2 },
+  { q: "Which country invented pizza?", opts: ["France", "Greece", "Italy", "Spain"], c: 2 },
+  { q: "What do caterpillars turn into?", opts: ["Bees", "Moths or butterflies", "Beetles", "Dragonflies"], c: 1 },
+  { q: "How many weeks are in a year?", opts: ["48", "50", "52", "54"], c: 2 },
+  { q: "Which organ pumps blood around the body?", opts: ["Lungs", "Brain", "Heart", "Liver"], c: 2 },
+  { q: "What is the freezing point of water (°C)?", opts: ["-10", "0", "5", "10"], c: 1 },
+  { q: "Which of these is a NOT a mammal?", opts: ["Dolphin", "Bat", "Whale", "Shark"], c: 3 },
+  { q: "How many letters are in the English alphabet?", opts: ["24", "25", "26", "27"], c: 2 },
+  { q: "Which direction does the sun rise from?", opts: ["North", "South", "East", "West"], c: 2 },
+  { q: "What is a group of lions called?", opts: ["Pack", "Pride", "Herd", "Flock"], c: 1 },
+  { q: "How many wheels does a tricycle have?", opts: ["2", "3", "4", "6"], c: 1 },
+  { q: "Which meal is typically eaten in the morning?", opts: ["Dinner", "Lunch", "Breakfast", "Supper"], c: 2 },
+  { q: "What is 7 squared?", opts: ["14", "21", "49", "77"], c: 2 },
+  { q: "Which metal is liquid at room temperature?", opts: ["Iron", "Mercury", "Gold", "Silver"], c: 1 },
+  { q: "How many stars are on the flag of the Philippines?", opts: ["1", "2", "3", "4"], c: 2 },
+  { q: "Which key combination is famous for copy?", opts: ["Ctrl+V", "Ctrl+C", "Ctrl+X", "Ctrl+Z"], c: 1 },
+  { q: "What animal is the largest living bird?", opts: ["Eagle", "Ostrich", "Swan", "Albatross"], c: 1 },
+];
+
 let rpsSeq = 0;
 const rpsBySocket = new Map(); // socketId → shared match object (both parties map to the SAME object)
 
@@ -1048,6 +1153,128 @@ function ibReveal(m) {
       : { winnerId: a > b ? cId : tId, loserId: a > b ? tId : cId, extras: ibExtras(m) };
     finishMatch(m, opts).catch((err) => console.error("ib resolve failed:", err));
   }, IB_REVEAL_MS);
+}
+
+// ── Trivia Duel helpers ──────────────────────────────────────────────────────
+// Round state on the match object: trivRound (1-based), trivPhase ('answer' |
+// 'reveal'), trivAns (socketId → {choice, seq, at}, reset per round),
+// trivScores, trivQs (TRIV_ROUNDS distinct picks made at accept time), trivSeq
+// (monotonic arrival counter — adjudicates "fastest correct" by SERVER arrival
+// order, never client timestamps). The correct index NEVER leaves the server
+// before the reveal. Reuses roundTimer/revealTimer (cleared by
+// clearMatchTimers). Unlike Icebreakers, a missing answer is just WRONG — the
+// round is scored and the match moves on (an idle match ends 0-0 = draw, no
+// coins moved, same spirit as Word Race's unsolved draw).
+function trivExtras(m) {
+  return (me, them) => ({ scores: { you: m.trivScores[me], them: m.trivScores[them] } });
+}
+
+function trivStartRound(m) {
+  if (m.state !== "playing" || m.game !== "trivia") return;
+  m.trivPhase = "answer";
+  m.trivAns = {};
+  m.trivRoundStartAt = Date.now();   // for the reveal's "answered in 2.3s" flair
+  const round = m.trivRound;
+  const qq = m.trivQs[round - 1];
+  for (const id of [m.challengerId, m.targetId]) {
+    io.to(id).emit("trivRound", {
+      challengeId: m.id, round, rounds: TRIV_ROUNDS,
+      q: qq.q, options: qq.opts.slice(), answerMs: TRIV_ANSWER_MS,
+      scores: { you: m.trivScores[id], them: m.trivScores[rpsOtherId(m, id)] },
+    });
+  }
+  m.roundTimer = setTimeout(() => {
+    if (m.state !== "playing" || m.game !== "trivia" || m.trivPhase !== "answer" || m.trivRound !== round) return;
+    trivReveal(m);   // clock ran out — score whatever answers are in
+  }, TRIV_ANSWER_MS);
+}
+
+// Score the round and show the reveal. Point goes to the FASTEST CORRECT
+// answer (earliest server arrival among correct picks); none correct → no
+// point. After the reading pause: next round, or settle on score (tie = draw).
+function trivReveal(m) {
+  if (m.state !== "playing" || m.game !== "trivia" || m.trivPhase !== "answer") return;
+  clearTimeout(m.roundTimer);
+  m.trivPhase = "reveal";
+  const cId = m.challengerId, tId = m.targetId;
+  const round = m.trivRound;
+  const qq = m.trivQs[round - 1];
+  const correct = [cId, tId]
+    .filter((id) => m.trivAns[id] && m.trivAns[id].choice === qq.c)
+    .sort((a, b) => m.trivAns[a].seq - m.trivAns[b].seq);
+  const pointTo = correct[0] || null;
+  if (pointTo) m.trivScores[pointTo]++;
+  const final = round >= TRIV_ROUNDS;
+  for (const [me, them] of [[cId, tId], [tId, cId]]) {
+    const mk = (id) => {
+      const a = m.trivAns[id];
+      return {
+        choice: a ? a.choice : null,
+        correct: !!a && a.choice === qq.c,
+        gotPoint: pointTo === id,
+        ms: a ? a.at : null,   // answer time within the round, for the "2.3s" flair
+      };
+    };
+    io.to(me).emit("trivReveal", {
+      challengeId: m.id, round, rounds: TRIV_ROUNDS,
+      correctIdx: qq.c,
+      you: mk(me), them: mk(them),
+      scores: { you: m.trivScores[me], them: m.trivScores[them] },
+      final, revealMs: TRIV_REVEAL_MS,
+    });
+  }
+  m.revealTimer = setTimeout(() => {
+    if (m.state !== "playing" || m.game !== "trivia" || m.trivPhase !== "reveal" || m.trivRound !== round) return;
+    if (!final) { m.trivRound++; trivStartRound(m); return; }
+    const a = m.trivScores[cId], b = m.trivScores[tId];
+    const opts = a === b
+      ? { draw: true, extras: trivExtras(m) }
+      : { winnerId: a > b ? cId : tId, loserId: a > b ? tId : cId, extras: trivExtras(m) };
+    finishMatch(m, opts).catch((err) => console.error("trivia resolve failed:", err));
+  }, TRIV_REVEAL_MS);
+}
+
+// ── Connect Four helpers ─────────────────────────────────────────────────────
+// board = flat array of C4_COLS*C4_ROWS (index = row * C4_COLS + col, row 0 =
+// TOP), cells null | 'R' | 'Y'. Discs fall to the lowest empty row of a
+// column. Mirrors the TTT structure: per-move clock on moveTimer, timeout =
+// forfeit by the slow side, server-authoritative validation, silent drop of
+// bad moves.
+function c4Extras(m) {
+  return (me) => ({ board: m.board.slice(), yourDisc: m.discs[me] });
+}
+function c4Timeout(m) {
+  if (m.state !== "playing" || m.game !== "c4") return;
+  const slow = m.turn, fast = rpsOtherId(m, slow);
+  finishMatch(m, { winnerId: fast, loserId: slow, forfeit: true, extras: c4Extras(m) })
+    .catch((err) => console.error("c4 timeout resolve failed:", err));
+}
+function c4Broadcast(m) {
+  for (const id of [m.challengerId, m.targetId]) {
+    io.to(id).emit("c4State", {
+      challengeId: m.id, board: m.board.slice(),
+      yourTurn: m.state === "playing" && m.turn === id,
+      yourDisc: m.discs[id], moveMs: C4_MOVE_MS,
+      lastDrop: m.c4LastDrop ?? null,   // flat index of the newest disc, for the client's drop pop
+    });
+  }
+}
+// Four-in-a-row scan from the cell just played (the only cell that can
+// complete a line): walk both ways along the 4 axes.
+function c4Winner(board, idx) {
+  const col = idx % C4_COLS, row = Math.floor(idx / C4_COLS);
+  const disc = board[idx];
+  for (const [dc, dr] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+    let n = 1;
+    for (const sign of [1, -1]) {
+      let c = col + dc * sign, r = row + dr * sign;
+      while (c >= 0 && c < C4_COLS && r >= 0 && r < C4_ROWS && board[r * C4_COLS + c] === disc) {
+        n++; c += dc * sign; r += dr * sign;
+      }
+    }
+    if (n >= 4) return true;
+  }
+  return false;
 }
 
 // ── Word Race helper ─────────────────────────────────────────────────────────
@@ -1830,6 +2057,39 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (m.game === "trivia") {
+      // Best-of-3 questions; fastest correct answer wins each round. Round
+      // flow (trivRound → trivAnswer×2/timeout → trivReveal → pause →
+      // next/settle) lives in the trivia helpers above io.on().
+      m.state = "playing";
+      m.trivRound = 1;
+      m.trivSeq = 0;
+      m.trivScores = { [m.challengerId]: 0, [m.targetId]: 0 };
+      m.trivAns = {};
+      const pool = TRIV_QS.slice();
+      m.trivQs = [];
+      for (let i = 0; i < TRIV_ROUNDS; i++) {
+        m.trivQs.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+      }
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     rounds: TRIV_ROUNDS, answerMs: TRIV_ANSWER_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), rounds: TRIV_ROUNDS, answerMs: TRIV_ANSWER_MS });
+      trivStartRound(m);
+      return;
+    }
+
+    if (m.game === "c4") {
+      // Server-authoritative 7×6 board; first mover is random and plays Red.
+      m.state = "playing";
+      m.board = Array(C4_COLS * C4_ROWS).fill(null);
+      m.turn = Math.random() < 0.5 ? m.challengerId : m.targetId;
+      m.discs = { [m.turn]: "R", [rpsOtherId(m, m.turn)]: "Y" };
+      m.c4LastDrop = null;
+      m.moveTimer = setTimeout(() => c4Timeout(m), C4_MOVE_MS);
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     yourDisc: m.discs[m.challengerId], yourTurn: m.turn === m.challengerId, moveMs: C4_MOVE_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), yourDisc: m.discs[m.targetId],     yourTurn: m.turn === m.targetId,     moveMs: C4_MOVE_MS });
+      return;
+    }
+
     if (m.game === "wr") {
       // One scramble, first correct unscramble wins; the word itself NEVER
       // leaves the server before game over (wrSubmit adjudicates).
@@ -1927,6 +2187,55 @@ io.on("connection", (socket) => {
     m.ibSubs[socket.id] = { answer, guess };
     io.to(rpsOtherId(m, socket.id)).emit("ibPeerLocked", { challengeId: m.id });
     if (m.ibSubs[m.challengerId] && m.ibSubs[m.targetId]) ibReveal(m);
+  });
+
+  // Trivia answer intent: choice is an option index 0-3. First answer locks
+  // (like rpsPick); only the FACT of the lock leaks to the opponent — the
+  // pick and its correctness stay secret until the reveal. Arrival order
+  // (trivSeq) adjudicates "fastest correct" — never client timestamps.
+  socket.on("trivAnswer", (payload) => {
+    const { challengeId, choice } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "trivia" || m.state !== "playing" || m.trivPhase !== "answer") return;
+    if (!Number.isInteger(choice) || choice < 0 || choice > 3) return;
+    if (m.trivAns[socket.id]) return;   // first answer locks — no take-backs
+    m.trivAns[socket.id] = { choice, seq: m.trivSeq++, at: Date.now() - (m.trivRoundStartAt || Date.now()) };
+    io.to(rpsOtherId(m, socket.id)).emit("trivPeerLocked", { challengeId: m.id });
+    if (m.trivAns[m.challengerId] && m.trivAns[m.targetId]) trivReveal(m);
+  });
+
+  // Connect Four drop intent. All board/turn validation is server-side; a bad
+  // move is silently dropped (same policy as tttMove).
+  socket.on("c4Drop", (payload) => {
+    const { challengeId, col } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "c4" || m.state !== "playing") return;
+    if (m.turn !== socket.id) return;
+    if (!Number.isInteger(col) || col < 0 || col >= C4_COLS) return;
+    // Find the lowest empty row in that column (row C4_ROWS-1 = bottom).
+    let row = -1;
+    for (let r = C4_ROWS - 1; r >= 0; r--) {
+      if (!m.board[r * C4_COLS + col]) { row = r; break; }
+    }
+    if (row === -1) return;   // column full
+    const idx = row * C4_COLS + col;
+    m.board[idx] = m.discs[socket.id];
+    m.c4LastDrop = idx;
+    clearTimeout(m.moveTimer);
+    const other = rpsOtherId(m, socket.id);
+    const win = c4Winner(m.board, idx);
+    const full = m.board.every(Boolean);
+    if (win || full) {
+      c4Broadcast(m);   // both sides see the final disc land before the result card
+      finishMatch(m, win
+        ? { winnerId: socket.id, loserId: other, extras: c4Extras(m) }
+        : { draw: true, extras: c4Extras(m) },
+      ).catch((err) => console.error("c4 resolve failed:", err));
+      return;
+    }
+    m.turn = other;
+    m.moveTimer = setTimeout(() => c4Timeout(m), C4_MOVE_MS);
+    c4Broadcast(m);
   });
 
   // Word Race guess intent. Server-side compare only (the client never knows
@@ -2250,6 +2559,28 @@ io.on("connection", (socket) => {
       p.boostUntil = now + COFFEE_MS;
       io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
       console.log(`${p.name} drank a coffee (+${Math.round((COFFEE_MULT - 1) * 100)}% for ${COFFEE_MS / 1000}s)`);
+    } else if (item === "coffee_round" || item === "pizza_party") {
+      // Group boost: everyone within GROUP_RADIUS (including the buyer) gets
+      // the same speed boost. boostUntil only ever EXTENDS (max), so a short
+      // boost can never clip a longer one already running server-side; the
+      // client just takes the latest event's duration, which can only make it
+      // walk slower than the server allows — the safe direction.
+      const dur = item === "pizza_party" ? PIZZA_MS : COFFEE_MS;
+      const emoji = item === "pizza_party" ? "🍕" : "☕";
+      const ids = nearbyIds(socket.id, GROUP_RADIUS);
+      for (const rid of ids) {
+        const q = players[rid];
+        if (!q) continue;
+        q.boostUntil = Math.max(q.boostUntil || 0, now + dur);
+        io.emit("coffeeBoost", { id: rid, durationMs: dur, mult: COFFEE_MULT, emoji });
+      }
+      if (item === "pizza_party")
+        io.emit("groupEffect", { effect: "pizza", x: p.x ?? 0, y: p.y ?? 0 });
+      console.log(`${p.name} used ${item} — boosted ${ids.length} player(s) for ${dur / 1000}s`);
+    } else if (item === "confetti" || item === "fireworks") {
+      // Pure visuals, broadcast like smoke puffs (everyone can see the show).
+      io.emit("groupEffect", { effect: item, x: p.x ?? 0, y: p.y ?? 0 });
+      console.log(`${p.name} set off ${item}`);
     }
   });
 

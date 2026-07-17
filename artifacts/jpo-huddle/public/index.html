@@ -224,12 +224,32 @@
     #shop-modal.open { display: flex; }
     #shop-card {
       background: #fff; border-radius: 16px; padding: 32px 36px;
-      font-family: monospace; color: #222; min-width: 300px;
+      font-family: monospace; color: #222;
+      width: 380px; max-width: calc(100vw - 32px); box-sizing: border-box;
       box-shadow: 0 8px 40px rgba(0,0,0,0.35);
-      max-height: 85vh; overflow-y: auto;   /* the cosmetics catalog is tall */
+      max-height: 85vh; overflow-y: auto;
     }
     #shop-card h3 { font-size: 20px; margin-bottom: 6px; }
-    #shop-balance { font-size: 14px; color: #666; margin-bottom: 20px; }
+    #shop-balance { font-size: 14px; color: #666; margin-bottom: 14px; }
+    /* Tab bar: Wearables | Items | Wardrobe. One tab visible at a time. */
+    #shop-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    .shop-tab {
+      flex: 1; padding: 8px 2px; font-family: monospace; font-size: 12px;
+      border: none; border-radius: 8px; background: #f0f0f0; color: #555;
+      cursor: pointer; white-space: nowrap; transition: background 0.15s;
+    }
+    .shop-tab:hover { background: #e2e2e2; }
+    .shop-tab.sel { background: #6c63ff; color: #fff; font-weight: bold; }
+    /* Pager: shown only when the active tab has more than one page. */
+    #shop-pager { display: none; align-items: center; justify-content: center; gap: 14px; margin-top: 10px; }
+    #shop-pager.on { display: flex; }
+    .shop-page-btn {
+      padding: 4px 14px; font-family: monospace; font-size: 14px;
+      border: none; border-radius: 6px; background: #f0f0f0; cursor: pointer;
+    }
+    .shop-page-btn:hover { background: #e2e2e2; }
+    .shop-page-btn:disabled { opacity: 0.35; cursor: default; }
+    #shop-page-label { font-size: 12px; color: #888; min-width: 34px; text-align: center; }
     .shop-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; }
     .shop-item-icon { font-size: 28px; }
     .shop-item-info { flex: 1; }
@@ -248,7 +268,7 @@
     .buy-btn.wearing { background: #27ae60; }
     .buy-btn.wearing:hover { background: #219653; }
     .buy-btn.poor    { background: #c9c6f0; cursor: not-allowed; }
-    #shop-wardrobe { border-top: 1px solid #eee; margin-top: 4px; padding-top: 12px; }
+    #shop-wardrobe { padding-top: 4px; }
     .wardrobe-title { font-weight: bold; font-size: 14px; }
     .wardrobe-sub   { font-size: 12px; color: #888; margin: 2px 0 8px; }
     .wardrobe-label { font-size: 12px; font-weight: bold; color: #555; margin: 8px 0 4px; }
@@ -887,6 +907,46 @@
     #ib-reveal-you, #ib-reveal-them { margin: 4px 0; }
     #ib-reveal-score { margin-top: 8px; font-weight: bold; color: #a78bfa; }
 
+    /* Trivia Duel panel (inside #rps-match) */
+    #triv-panel { display: none; margin: 12px 0 6px; }
+    #triv-panel.show { display: block; }
+    #triv-q { font-family: monospace; font-size: 16px; font-weight: bold; color: #eee; margin-bottom: 10px; }
+    #triv-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .triv-opt {
+      padding: 10px 6px; font-family: monospace; font-size: 13px; color: #eee;
+      background: #26263c; border: 2px solid #444; border-radius: 10px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .triv-opt:hover { border-color: #6c63ff; }
+    .triv-opt.picked { border-color: #6c63ff; background: #2c2650; }
+    #triv-panel.locked .triv-opt { pointer-events: none; opacity: .75; }
+    #triv-panel.locked .triv-opt:not(.picked) { opacity: .4; }
+    #triv-panel.reveal .triv-opt { pointer-events: none; opacity: 1; }
+    .triv-opt.correct { border-color: #2ecc71; background: #1f5c33; }
+    .triv-opt.wrong { border-color: #e74c3c; background: #5c1f1f; }
+    #triv-reveal { display: none; font-family: monospace; font-size: 13px; color: #ddd; margin-top: 10px; }
+    #triv-panel.reveal #triv-reveal { display: block; }
+    #triv-reveal-you, #triv-reveal-them { margin: 4px 0; }
+    #triv-reveal-score { margin-top: 8px; font-weight: bold; color: #a78bfa; }
+
+    /* Connect Four board (inside #rps-match) */
+    #c4-board {
+      display: none; grid-template-columns: repeat(7, 34px); gap: 5px;
+      justify-content: center; margin: 12px auto 6px; padding: 10px;
+      background: #16213f; border: 2px solid #2c3e70; border-radius: 12px; width: fit-content;
+    }
+    #c4-board.show { display: grid; }
+    .c4-cell {
+      width: 34px; height: 34px; border-radius: 50%; padding: 0; cursor: pointer;
+      background: #0d1526; border: 2px solid #223055;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #c4-board.myturn .c4-cell.empty:hover { border-color: #6c63ff; }
+    #c4-board:not(.myturn) .c4-cell { cursor: default; }
+    .c4-cell.r { background: #e74c3c; border-color: #ff8f80; }
+    .c4-cell.y { background: #f1c40f; border-color: #ffe37a; }
+    .c4-cell.last { box-shadow: 0 0 0 3px rgba(255,255,255,.45); }
+
     /* Word Race panel (inside #rps-match) */
     #wr-panel { display: none; margin: 14px 0 6px; }
     #wr-panel.show { display: block; }
@@ -1226,6 +1286,8 @@
         <button class="rps-game" data-game="qd" type="button">🤠<span>Quick Draw</span></button>
         <button class="rps-game" data-game="ib" type="button">🧊<span>Icebreakers</span></button>
         <button class="rps-game" data-game="wr" type="button">🔤<span>Word Race</span></button>
+        <button class="rps-game" data-game="trivia" type="button">🧠<span>Trivia Duel</span></button>
+        <button class="rps-game" data-game="c4" type="button">🔴<span>Connect Four</span></button>
       </div>
       <div id="rps-wager-fields">
         <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
@@ -1286,6 +1348,21 @@
         <div id="wr-scramble"></div>
         <input id="wr-input" type="text" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Type the word + Enter" />
       </div>
+      <div id="triv-panel">
+        <div id="triv-q"></div>
+        <div id="triv-opts">
+          <button class="triv-opt" data-idx="0" type="button"></button>
+          <button class="triv-opt" data-idx="1" type="button"></button>
+          <button class="triv-opt" data-idx="2" type="button"></button>
+          <button class="triv-opt" data-idx="3" type="button"></button>
+        </div>
+        <div id="triv-reveal">
+          <div id="triv-reveal-you"></div>
+          <div id="triv-reveal-them"></div>
+          <div id="triv-reveal-score"></div>
+        </div>
+      </div>
+      <div id="c4-board"></div>
       <div id="rps-match-status"></div>
       <div id="rps-result" style="display:none">
         <div id="rps-result-picks"></div>
@@ -1311,17 +1388,9 @@
   <button id="emote-toggle" type="button" aria-label="Emotes">😀</button>
   <div id="emote-bar"></div>
 
-  <!-- ── Usable items bar (rows toggle on when you own the item) ── -->
-  <div id="item-bar">
-    <div class="item-row" id="item-row-cigarette">
-      <span class="item-icon">🚬</span><span class="item-count" id="item-count-cigarette">×0</span>
-      <button class="use-btn" type="button" onclick="useItem('cigarette')">Smoke</button>
-    </div>
-    <div class="item-row" id="item-row-coffee">
-      <span class="item-icon">☕</span><span class="item-count" id="item-count-coffee">×0</span>
-      <button class="use-btn" type="button" onclick="useItem('coffee')">Drink</button>
-    </div>
-  </div>
+  <!-- ── Usable items bar (rows are generated from the USABLES catalog;
+       a row shows only while you own that item) ── -->
+  <div id="item-bar"></div>
 
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
@@ -1334,36 +1403,33 @@
     <div id="shop-card">
       <h3>🛒 Shop</h3>
       <div id="shop-balance">💰 Coins: <span id="shop-coin-display">0</span></div>
-      <!-- Cosmetic rows are generated from the COSMETICS catalog (must stay in
-           lockstep with the server SHOP ids). Usable items stay hardcoded below. -->
+      <!-- Tabs: Wearables (COSMETICS catalog — lockstep with server SHOP ids),
+           Items (USABLES catalog — lockstep with server USABLE_ITEMS), and the
+           Wardrobe. One tab shows at a time; long tabs paginate (SHOP_PAGE_SIZE). -->
+      <div id="shop-tabs">
+        <button class="shop-tab sel" id="shop-tab-btn-wear"     onclick="shopTab('wear')">🕶️ Wearables</button>
+        <button class="shop-tab"     id="shop-tab-btn-items"    onclick="shopTab('items')">🎒 Items</button>
+        <button class="shop-tab"     id="shop-tab-btn-wardrobe" onclick="shopTab('wardrobe')">👕 Wardrobe</button>
+      </div>
+      <!-- Cosmetic rows are generated from the COSMETICS catalog. -->
       <div id="shop-cosmetics"></div>
-      <div class="shop-item">
-        <div class="shop-item-icon">🚬</div>
-        <div class="shop-item-info">
-          <div class="shop-item-name">Cigarette pack <span style="font-weight:normal;color:#888">×5</span></div>
-          <div class="shop-item-cost">20 coins — smoke break, outside on the grass only</div>
-        </div>
-        <button class="buy-btn" onclick="buyUsable('cigarette')">Buy</button>
-      </div>
-      <div class="shop-item">
-        <div class="shop-item-icon">☕</div>
-        <div class="shop-item-info">
-          <div class="shop-item-name">Coffee</div>
-          <div class="shop-item-cost">10 coins — +40% walk speed for 45s, single cup</div>
-        </div>
-        <button class="buy-btn" onclick="buyUsable('coffee')">Buy</button>
-      </div>
+      <!-- Usable-item rows are generated from the USABLES catalog. -->
+      <div id="shop-usables" style="display:none"></div>
       <!-- ── Wardrobe: paid shirt/trouser colour changes ──
            Swatches are generated from CLOTH_COLORS; the 25-coin label is
            display-only (the server's WARDROBE_PRICE is authoritative). -->
-      <div id="shop-wardrobe">
-        <div class="wardrobe-title">👕 Wardrobe</div>
+      <div id="shop-wardrobe" style="display:none">
         <div class="wardrobe-sub">Change your shirt and/or trouser colours — 25 coins per change</div>
         <div class="wardrobe-label">Shirt</div>
         <div id="wardrobe-shirt" class="wardrobe-grid"></div>
         <div class="wardrobe-label">Trousers</div>
         <div id="wardrobe-pants" class="wardrobe-grid"></div>
         <button id="wardrobe-apply" class="buy-btn" onclick="applyOutfit()">Apply</button>
+      </div>
+      <div id="shop-pager">
+        <button class="shop-page-btn" id="shop-page-prev" onclick="shopPage(-1)">‹</button>
+        <span id="shop-page-label">1/1</span>
+        <button class="shop-page-btn" id="shop-page-next" onclick="shopPage(1)">›</button>
       </div>
       <div id="shop-msg"></div>
       <button id="shop-close-btn" onclick="closeShop()">Close</button>
@@ -1768,8 +1834,40 @@
       { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 60, desc: 'always snapping' },
       { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 75, desc: 'certified gamer' },
       { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 90, desc: 'office rockstar' },
+      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 150, desc: 'real shades, worn ON your face' },
+      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 200, desc: 'pixel cap, worn on your head' },
+      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 250, desc: 'real gold, around your neck' },
     ];
     const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
+
+    // Sprite wearables: cosmetics drawn ON the body as real pixel art (a
+    // Phaser image pinned to the wearer every frame) instead of a floating
+    // emoji. Ids MUST also exist in the server SHOP map and the COSMETICS
+    // catalog above (the emoji there is only the shop-row icon). tex = image
+    // key preloaded from /assets; dy = vertical offset from the sprite origin
+    // in world px; side = extra x-nudge toward the face when facing
+    // left/right (flipX mirrors the art). Hidden while facing 'up' (back view).
+    // NOTE on dy values: the character art only occupies the LOWER ~17px of
+    // its 16x32 frame (origin 0.5,0.5, feet at +27 world px), so the visible
+    // head top is ≈ y-24, eyes ≈ y-12, chin/neck ≈ y0 — NOT the frame top.
+    const WEARABLE_DEFS = {
+      shades: { tex: 'wear_shades', dy: -12, side: 6 },
+      cap:    { tex: 'wear_cap',    dy: -22, side: 3 },
+      chain:  { tex: 'wear_chain',  dy: 4,   side: 3 },
+    };
+
+    // Usable-items catalog: ids MUST stay in lockstep with the server
+    // USABLE_ITEMS map in server.js (the server is authoritative on price and
+    // pack size — these labels are display-only). Rows render in the shop's
+    // Items tab; owned counts show in the bottom-left item bar.
+    const USABLES = [
+      { id: 'cigarette',    emoji: '🚬', name: 'Cigarette pack', pack: '×5', cost: 20,  verb: 'Smoke',  desc: 'smoke break, outside on the grass only' },
+      { id: 'coffee',       emoji: '☕', name: 'Coffee',                     cost: 10,  verb: 'Drink',  desc: '+40% walk speed for 45s, single cup' },
+      { id: 'coffee_round', emoji: '🫖', name: 'Coffee round',               cost: 40,  verb: 'Share',  desc: 'coffee boost for everyone near you' },
+      { id: 'confetti',     emoji: '🎉', name: 'Confetti popper',            cost: 30,  verb: 'Pop',    desc: 'a party burst everyone can see' },
+      { id: 'fireworks',    emoji: '🎆', name: 'Fireworks',                  cost: 75,  verb: 'Launch', desc: 'a proper sky show over the office' },
+      { id: 'pizza_party',  emoji: '🍕', name: 'Pizza party',                cost: 150, verb: 'Party',  desc: '90s speed boost for everyone near you' },
+    ];
 
     // Department allowlist — MUST stay identical (same values, same order) to
     // the server's DEPARTMENTS in server.js. Feeds BOTH the registration
@@ -2385,7 +2483,7 @@
     socket.on('usableBought', ({ item, items }) => {
       _playerItems = items || {};
       _renderItemBar();
-      const label = item === 'cigarette' ? 'Cigarette pack' : 'Coffee';
+      const label = USABLES.find(u => u.id === item)?.name || 'Item';
       document.getElementById('shop-msg').style.color = '#27ae60';
       document.getElementById('shop-msg').textContent = `${label} added — use it from the items bar!`;
     });
@@ -2406,19 +2504,32 @@
 
     // Coffee: the drinker speeds up locally (the server widens its movement
     // budget in lockstep); everyone else just sees a ☕ bubble over their head.
-    socket.on('coffeeBoost', ({ id, durationMs }) => {
+    // Group items reuse this event per recipient with an optional emoji
+    // (🍕 for pizza party) — the boost mechanics are identical.
+    socket.on('coffeeBoost', (payload) => {
+      const { id, durationMs, emoji } = payload || {};
       const scene = window._gameScene;
+      const em = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '☕';
       if (id === socket.id) {
         _boostUntil = Date.now() + (durationMs || 45000);
+        _boostEmoji = em;
         _startBoostChip();
-        if (scene?.player) scene._showEmoteBubble(scene.player, '☕', true);
+        if (scene?.player) scene._showEmoteBubble(scene.player, em, true);
       } else if (scene) {
         const entry = scene.otherPlayers[id];
         if (entry) {
           if (entry.chatBubble) entry.chatBubble.destroy();
-          entry.chatBubble = scene._showEmoteBubble(entry.sprite, '☕', false);
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, em, false);
         }
       }
+    });
+
+    // Group consumable visuals (confetti / fireworks / pizza burst) — pure
+    // flavor at the thrower's world position, visible to everyone (like smoke).
+    socket.on('groupEffect', (payload) => {
+      const { effect, x, y } = payload || {};
+      if (typeof x !== 'number' || typeof y !== 'number') return;
+      window._gameScene?._groupBurst(effect, x, y);
     });
 
     // ── Interactive office objects: feedback ──────────────────────────
@@ -2458,6 +2569,7 @@
 
     // Countdown chip under the coin HUD while the boost is live.
     let _boostTimer = null;
+    let _boostEmoji = '☕';   // what the current boost came from (☕ or 🍕)
     function _startBoostChip() {
       const chip = document.getElementById('boost-chip');
       clearInterval(_boostTimer);
@@ -2468,7 +2580,7 @@
           clearInterval(_boostTimer); _boostTimer = null;
           return;
         }
-        chip.textContent = `☕ +40% speed · ${Math.ceil(left / 1000)}s`;
+        chip.textContent = `${_boostEmoji} +40% speed · ${Math.ceil(left / 1000)}s`;
       };
       tick();
       chip.classList.add('on');
@@ -2502,42 +2614,103 @@
       socket.emit('useItem', { item });
       document.querySelector('canvas')?.focus();   // give movement keys back after the click
     }
-    // Rebuild the cosmetic rows from the catalog + current ownership state.
-    // Three button states: Buy (not owned), Wear (owned, not worn — free),
+    // ── Shop tabs + pagination ──
+    // One tab visible at a time; paged tabs slice their catalog into pages of
+    // SHOP_PAGE_SIZE with ‹ › arrows. Tab switch resets to page 1. All the
+    // existing _refreshShopUI() call sites (coinUpdate, buy/equip acks) keep
+    // working — it re-renders whatever tab is open.
+    const SHOP_PAGE_SIZE = 6;
+    let _shopTab  = 'wear';   // 'wear' | 'items' | 'wardrobe'
+    let _shopPage = 0;
+    function shopTab(t)  { _shopTab = t; _shopPage = 0; _refreshShopUI(); }
+    function shopPage(d) { _shopPage += d; _refreshShopUI(); }
+
+    function _shopRow(c, btn) {
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      const icon = document.createElement('div');
+      icon.className = 'shop-item-icon'; icon.textContent = c.emoji;
+      const info = document.createElement('div');
+      info.className = 'shop-item-info';
+      const nm = document.createElement('div');
+      nm.className = 'shop-item-name';
+      nm.textContent = c.name + (c.pack ? ' ' : '');
+      if (c.pack) {
+        const pk = document.createElement('span');
+        pk.style.cssText = 'font-weight:normal;color:#888';
+        pk.textContent = c.pack;
+        nm.append(pk);
+      }
+      const ct = document.createElement('div');
+      ct.className = 'shop-item-cost'; ct.textContent = `${c.cost} coins — ${c.desc}`;
+      info.append(nm, ct);
+      row.append(icon, info, btn);
+      return row;
+    }
+
+    // Rebuild the active shop tab from its catalog + current ownership state.
+    // Wearables buttons: Buy (not owned), Wear (owned, not worn — free),
     // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
-      const box = document.getElementById('shop-cosmetics');
-      box.textContent = '';
-      for (const c of COSMETICS) {
-        const row = document.createElement('div');
-        row.className = 'shop-item';
-        const icon = document.createElement('div');
-        icon.className = 'shop-item-icon'; icon.textContent = c.emoji;
-        const info = document.createElement('div');
-        info.className = 'shop-item-info';
-        const nm = document.createElement('div');
-        nm.className = 'shop-item-name'; nm.textContent = c.name;
-        const ct = document.createElement('div');
-        ct.className = 'shop-item-cost'; ct.textContent = `${c.cost} coins — ${c.desc}`;
-        info.append(nm, ct);
-        const btn = document.createElement('button');
-        btn.className = 'buy-btn';
-        if (!_ownedItems.includes(c.id)) {
-          btn.textContent = 'Buy';
-          if (_playerCoins < c.cost) btn.classList.add('poor');
-          btn.onclick = () => buyItem(c.id);
-        } else if (_equippedCosmetic === c.id) {
-          btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
-          btn.onclick = () => equipItem('');       // take it off
-        } else {
-          btn.textContent = 'Wear'; btn.classList.add('wear');
-          btn.onclick = () => equipItem(c.id);     // switch, free
-        }
-        row.append(icon, info, btn);
-        box.append(row);
+      for (const t of ['wear', 'items', 'wardrobe'])
+        document.getElementById('shop-tab-btn-' + t).classList.toggle('sel', _shopTab === t);
+      const cosBox  = document.getElementById('shop-cosmetics');
+      const useBox  = document.getElementById('shop-usables');
+      const wardBox = document.getElementById('shop-wardrobe');
+      cosBox.style.display  = _shopTab === 'wear'     ? '' : 'none';
+      useBox.style.display  = _shopTab === 'items'    ? '' : 'none';
+      wardBox.style.display = _shopTab === 'wardrobe' ? '' : 'none';
+
+      // Page window for the active (paged) tab; clamp so a shrinking catalog
+      // or stale page index can never show an empty page.
+      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : null;
+      let pages = 1;
+      if (catalog) {
+        pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
+        _shopPage = Math.min(Math.max(_shopPage, 0), pages - 1);
       }
-      _renderWardrobe();
+      const pager = document.getElementById('shop-pager');
+      pager.classList.toggle('on', !!catalog && pages > 1);
+      if (catalog && pages > 1) {
+        document.getElementById('shop-page-label').textContent = `${_shopPage + 1}/${pages}`;
+        document.getElementById('shop-page-prev').disabled = _shopPage === 0;
+        document.getElementById('shop-page-next').disabled = _shopPage === pages - 1;
+      }
+      const slice = catalog ? catalog.slice(_shopPage * SHOP_PAGE_SIZE, (_shopPage + 1) * SHOP_PAGE_SIZE) : [];
+
+      if (_shopTab === 'wear') {
+        cosBox.textContent = '';
+        for (const c of slice) {
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          if (!_ownedItems.includes(c.id)) {
+            btn.textContent = 'Buy';
+            if (_playerCoins < c.cost) btn.classList.add('poor');
+            btn.onclick = () => buyItem(c.id);
+          } else if (_equippedCosmetic === c.id) {
+            btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
+            btn.onclick = () => equipItem('');       // take it off
+          } else {
+            btn.textContent = 'Wear'; btn.classList.add('wear');
+            btn.onclick = () => equipItem(c.id);     // switch, free
+          }
+          cosBox.append(_shopRow(c, btn));
+        }
+      } else if (_shopTab === 'items') {
+        useBox.textContent = '';
+        for (const c of slice) {
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          const owned = _playerItems[c.id] || 0;
+          btn.textContent = owned > 0 ? `Buy (×${owned})` : 'Buy';
+          if (_playerCoins < c.cost) btn.classList.add('poor');
+          btn.onclick = () => buyUsable(c.id);
+          useBox.append(_shopRow(c, btn));
+        }
+      } else {
+        _renderWardrobe();
+      }
     }
     // Wardrobe UI: two swatch grids (shirt / trousers) + one Apply button.
     // WARDROBE_PRICE here is a display label only — the server enforces the
@@ -2573,14 +2746,31 @@
       if (_wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx) return;
       socket.emit('changeOutfit', { shirtIdx: _wardrobeShirtSel, pantsIdx: _wardrobePantsSel });
     }
-    // Items bar: a row shows only while you own that item; the whole bar hides
-    // when you own nothing usable. Ids must match the server's USABLE_ITEMS.
+    // Items bar: rows are generated once from the USABLES catalog (ids must
+    // match the server's USABLE_ITEMS); a row shows only while you own that
+    // item, and the whole bar hides when you own nothing usable.
+    (function _buildItemBar() {
+      const bar = document.getElementById('item-bar');
+      for (const u of USABLES) {
+        const row = document.createElement('div');
+        row.className = 'item-row'; row.id = 'item-row-' + u.id;
+        const icon = document.createElement('span');
+        icon.className = 'item-icon'; icon.textContent = u.emoji;
+        const count = document.createElement('span');
+        count.className = 'item-count'; count.id = 'item-count-' + u.id; count.textContent = '×0';
+        const btn = document.createElement('button');
+        btn.className = 'use-btn'; btn.type = 'button'; btn.textContent = u.verb || 'Use';
+        btn.onclick = () => useItem(u.id);
+        row.append(icon, count, btn);
+        bar.append(row);
+      }
+    })();
     function _renderItemBar() {
       let any = false;
-      for (const id of ['cigarette', 'coffee']) {
-        const n = _playerItems[id] || 0;
-        document.getElementById('item-row-' + id).classList.toggle('owned', n > 0);
-        document.getElementById('item-count-' + id).textContent = '×' + n;
+      for (const u of USABLES) {
+        const n = _playerItems[u.id] || 0;
+        document.getElementById('item-row-' + u.id).classList.toggle('owned', n > 0);
+        document.getElementById('item-count-' + u.id).textContent = '×' + n;
         if (n > 0) any = true;
       }
       document.getElementById('item-bar').classList.toggle('has-items', any);
@@ -3223,6 +3413,9 @@
     let _ibAnswer = null;          // Icebreakers: my answer this round ('a'|'b')
     let _ibGuess = null;           // Icebreakers: my guess of THEIR answer
     let _ibLocked = false;         // both chosen → submitted, no take-backs
+    let _trivLocked = false;       // Trivia: answered this round, no take-backs
+    let _c4MyTurn = false;         // Connect Four: my drop?
+    let _c4MyDisc = '?';           // Connect Four: 'R' | 'Y'
     const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
     // Ids MUST match the server's GAMES allowlist in server.js.
     const GAME_META = {
@@ -3231,6 +3424,8 @@
       qd:  { icon: '🤠',     label: 'Quick Draw' },
       ib:  { icon: '🧊',     label: 'Icebreakers' },
       wr:  { icon: '🔤',     label: 'Word Race' },
+      trivia: { icon: '🧠',  label: 'Trivia Duel' },
+      c4:  { icon: '🔴',     label: 'Connect Four' },
     };
     // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
     const CHALLENGE_RANGE_PX = 480;
@@ -3276,7 +3471,10 @@
       rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
       rpsEl('wr-panel').classList.remove('show');
       rpsEl('wr-input').blur();   // blur re-enables Phaser key capture
+      rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('c4-board').classList.remove('show', 'myturn');
       _ibAnswer = null; _ibGuess = null; _ibLocked = false;
+      _trivLocked = false; _c4MyTurn = false;
       _rpsHideMenu();
       if (_rpsUiOpen) {
         _rpsUiOpen = false;
@@ -3561,6 +3759,60 @@
         myTurn ? 'Your move locks in ' : 'They must move in ');
     }
 
+    // ── Connect Four board (cells built once; server owns all game logic) ──
+    // 42 buttons in a 7-wide grid; clicking ANY cell in a column drops into
+    // that column (the server finds the landing row).
+    {
+      const bd = rpsEl('c4-board');
+      for (let i = 0; i < 42; i++) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'c4-cell empty';
+        c.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          if (_rpsPhase !== 'c4' || !_c4MyTurn) return;
+          socket.emit('c4Drop', { challengeId: _rpsChallengeId, col: i % 7 });
+        });
+        bd.appendChild(c);
+      }
+    }
+    function _c4Paint(board, lastDrop) {
+      rpsEl('c4-board').querySelectorAll('.c4-cell').forEach((c, i) => {
+        const v = Array.isArray(board) ? board[i] : null;
+        c.className = 'c4-cell' + (v ? (v === 'R' ? ' r' : ' y') : ' empty') +
+                      (Number.isInteger(lastDrop) && i === lastDrop ? ' last' : '');
+      });
+    }
+    function _c4Render(board, myTurn, moveMs, lastDrop) {
+      const bd = rpsEl('c4-board');
+      bd.classList.add('show');
+      bd.classList.toggle('myturn', myTurn);
+      _c4MyTurn = myTurn;
+      _c4Paint(board, lastDrop);
+      rpsEl('rps-match-status').textContent =
+        (myTurn ? 'Your drop' : 'Their drop') + ' — you are ' + (_c4MyDisc === 'R' ? '🔴 Red' : '🟡 Yellow');
+      _rpsCountdown(rpsEl('rps-match-count'), moveMs || 20000,
+        myTurn ? 'Your drop locks in ' : 'They must drop in ');
+    }
+
+    // ── Trivia Duel panel ──
+    function _trivReset() {
+      _trivLocked = false;
+      rpsEl('triv-panel').classList.remove('locked', 'reveal');
+      document.querySelectorAll('.triv-opt').forEach((x) => x.classList.remove('picked', 'correct', 'wrong'));
+    }
+    document.querySelectorAll('.triv-opt').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'trivia' || _trivLocked || !b.textContent) return;
+        _trivLocked = true;
+        b.classList.add('picked');
+        rpsEl('triv-panel').classList.add('locked');
+        socket.emit('trivAnswer', { challengeId: _rpsChallengeId, choice: parseInt(b.dataset.idx, 10) });
+        rpsEl('rps-match-status').textContent = 'Locked in — waiting for them…';
+      });
+    });
+
     // ── Quick Draw panel ──
     function _qdFire() {
       if (_rpsPhase !== 'qd') return;
@@ -3643,7 +3895,7 @@
       rpsEl('rps-incoming-text').textContent = arcade
         ? '🕹️ ' + (fromName || '?') + ' wants to play ' + meta.icon + ' ' + meta.label + ' at the arcade! (friendly)'
         : (fromName || '?') + ' challenges you to ' + meta.icon + ' ' + meta.label + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
-      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤' }[game] || '✊');
+      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤', trivia: '🧠', c4: '🔴' }[game] || '✊');
       rpsEl('rps-incoming').classList.add('open');
       _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
     });
@@ -3654,7 +3906,7 @@
     });
     socket.on('rpsStart', (payload) => {
       const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs,
-              rounds, scramble, raceMs } = payload || {};
+              rounds, scramble, raceMs, yourDisc } = payload || {};
       closeAllRps();
       if (_chatOpen) closeChat();
       if (_dmOpen) closeDM();
@@ -3697,6 +3949,18 @@
         rpsEl('rps-match-status').textContent = 'Unscramble the office word — first correct answer wins!';
         _rpsCountdown(rpsEl('rps-match-count'), raceMs || 60000, 'Race ends in ');
         if (!IS_TOUCH) setTimeout(() => wrIn.focus(), 30);
+      } else if (g === 'trivia') {
+        _rpsPhase = 'trivia';
+        _trivReset();
+        rpsEl('triv-q').textContent = 'Get ready…';
+        document.querySelectorAll('.triv-opt').forEach((x) => { x.textContent = ''; });
+        rpsEl('triv-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          'Best of ' + (rounds || 3) + ' — fastest correct answer scores!';
+      } else if (g === 'c4') {
+        _rpsPhase = 'c4';
+        _c4MyDisc = yourDisc || '?';
+        _c4Render(Array(42).fill(null), !!yourTurn, moveMs, null);
       } else {
         _rpsPhase = 'picking';
         rpsEl('rps-match-status').textContent = 'Make your pick!';
@@ -3710,6 +3974,12 @@
       if (_rpsPhase !== 'ttt' || challengeId !== _rpsChallengeId) return;
       if (yourMark) _tttMyMark = yourMark;
       _tttRender(board, !!yourTurn, moveMs);
+    });
+    socket.on('c4State', (payload) => {
+      const { challengeId, board, yourTurn, yourDisc, moveMs, lastDrop } = payload || {};
+      if (_rpsPhase !== 'c4' || challengeId !== _rpsChallengeId) return;
+      if (yourDisc) _c4MyDisc = yourDisc;
+      _c4Render(board, !!yourTurn, moveMs, lastDrop);
     });
     socket.on('qdSignal', (payload) => {
       const { challengeId } = payload || {};
@@ -3760,6 +4030,44 @@
       rpsEl('ib-panel').classList.add('reveal');
       rpsEl('rps-match-status').textContent = final ? 'Final tally…' : 'Next round coming up…';
     });
+    socket.on('trivRound', (payload) => {
+      const { challengeId, round, rounds, q, options, answerMs, scores } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId) return;
+      _trivReset();
+      rpsEl('triv-q').textContent = q || '?';
+      const opts = Array.isArray(options) ? options : [];
+      document.querySelectorAll('.triv-opt').forEach((x, i) => { x.textContent = opts[i] || ''; });
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('rps-match-status').textContent =
+        'Question ' + (round || 1) + ' of ' + (rounds || 3) + ' · You ' + sy + ' – ' + st + ' Them';
+      _rpsCountdown(rpsEl('rps-match-count'), answerMs || 10000, 'Answers lock in ');
+    });
+    socket.on('trivPeerLocked', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId || _trivLocked) return;
+      rpsEl('rps-match-status').textContent = "They've answered — hurry!";
+    });
+    socket.on('trivReveal', (payload) => {
+      const { challengeId, correctIdx, you, them, scores, final } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId) return;
+      _rpsStopCount();
+      rpsEl('rps-match-count').textContent = '';
+      const y = you || {}, t = them || {};
+      rpsEl('triv-panel').classList.add('reveal');
+      rpsEl('triv-panel').classList.remove('locked');
+      document.querySelectorAll('.triv-opt').forEach((x, i) => {
+        x.classList.toggle('correct', i === correctIdx);
+        x.classList.toggle('wrong', y.choice === i && i !== correctIdx);
+      });
+      const fmt = (r) => r.correct
+        ? ('✅ correct' + (typeof r.ms === 'number' ? ' in ' + (r.ms / 1000).toFixed(1) + 's' : ''))
+        : (r.choice == null ? '⌛ no answer' : '❌ wrong');
+      rpsEl('triv-reveal-you').textContent  = 'You: '  + fmt(y) + (y.gotPoint ? ' · +1 point' : '');
+      rpsEl('triv-reveal-them').textContent = 'Them: ' + fmt(t) + (t.gotPoint ? ' · +1 point' : '');
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('triv-reveal-score').textContent = 'Score: You ' + sy + ' – ' + st + ' Them';
+      rpsEl('rps-match-status').textContent = final ? 'Final tally…' : 'Next question coming up…';
+    });
     socket.on('wrWrong', (payload) => {
       const { challengeId } = payload || {};
       if (_rpsPhase !== 'wr' || challengeId !== _rpsChallengeId) return;
@@ -3784,6 +4092,8 @@
       rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
       rpsEl('wr-panel').classList.remove('show');
       rpsEl('wr-input').blur();
+      rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
+      if (g !== 'c4') rpsEl('c4-board').classList.remove('show', 'myturn');
       rpsEl('rps-match-count').textContent = '';
 
       let picksLine = '', statusLine = '';
@@ -3819,6 +4129,22 @@
           statusLine = (outcome === 'win' ? '⚡ You solved it in ' : '⚡ They solved it in ') +
                        (solveMs / 1000).toFixed(1) + 's';
         }
+      } else if (g === 'trivia') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = 'Final score — You ' + sy + ' · Them ' + st;
+        statusLine = outcome === 'draw' ? 'Evenly matched!' : '';
+      } else if (g === 'c4') {
+        // Keep the final board on screen under the verdict.
+        if (Array.isArray(board)) {
+          const bd = rpsEl('c4-board');
+          bd.classList.add('show'); bd.classList.remove('myturn');
+          _c4MyTurn = false;
+          _c4Paint(board, null);
+        }
+        picksLine = outcome === 'draw' ? 'Board full — dead heat.' : (forfeit ? '' : 'Four in a row!');
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They ran out of time — forfeit.' : 'You ran out of time — forfeit.')
+          : '';
       } else {
         picksLine =
           'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
@@ -4122,6 +4448,9 @@
         // Custom furniture sprite (not part of the Tiled map): the Pantry water
         // cooler, drawn beside the potted plant. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
+        this.load.image('wear_shades', '/assets/wear_shades.png');
+        this.load.image('wear_cap',    '/assets/wear_cap.png');
+        this.load.image('wear_chain',  '/assets/wear_chain.png');
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
@@ -4364,7 +4693,11 @@
           }
           if (data.anim !== 'sit' && entry.occluders) { this._clearOccluders(entry.occluders); entry.occluders = null; }
           entry.nameTag.setPosition(data.x, data.y-40);
-          if (entry.cosmetic)   entry.cosmetic.setPosition(data.x, data.y-68);
+          entry.lastDir = rdir;
+          if (entry.cosmetic) {
+            if (entry.cosmeticDef) this._placeWearable(entry.cosmetic, entry.cosmeticDef, data.x, data.y, rdir);
+            else entry.cosmetic.setPosition(data.x, data.y-68);
+          }
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
         });
 
@@ -4680,26 +5013,55 @@
       }
       _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
 
-      // Worn-cosmetic overlay: ONE emoji floats above the wearer (the server's
-      // `equipped` field; '' = nothing). Ownership lists don't render anything.
+      // Worn-cosmetic overlay: the server's `equipped` field ('' = nothing);
+      // ownership lists don't render anything. Two kinds:
+      //  - emoji cosmetics: ONE emoji floats above the wearer (y-68, depth 1001)
+      //  - sprite wearables (WEARABLE_DEFS): a pixel-art image pinned ON the
+      //    body via _placeWearable. Depth 10: above every player sprite
+      //    (players render at default depth 0 in insertion order — same
+      //    imperfection as overlapping bodies), but BELOW seat occluders
+      //    (900) so desks still crop seated players correctly.
+      // The `cosmeticDef`/`localCosmeticDef` field doubles as the kind flag:
+      // set = sprite wearable (follow the body), null = emoji (float at y-68,
+      // raise the chat bubble).
+      _placeWearable(img, def, x, y, dir) {
+        if (dir === 'up') { img.setVisible(false); return; }   // back view — gear hidden
+        img.setVisible(true);
+        img.setFlipX(dir === 'left');
+        const dx = dir === 'left' ? -def.side : dir === 'right' ? def.side : 0;
+        img.setPosition(x + dx, y + def.dy);
+      }
+
+      _makeCosmetic(equipped, x, y, dir) {
+        const wd = WEARABLE_DEFS[equipped];
+        if (wd) {
+          const img = this.add.image(x, y + wd.dy, wd.tex).setScale(3).setDepth(10);
+          this._placeWearable(img, wd, x, y, dir || 'down');
+          return { obj: img, def: wd };
+        }
+        const emoji = COSMETIC_EMOJI[equipped];
+        if (emoji) {
+          return { obj: this.add.text(x, y-68, emoji,
+            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001), def: null };
+        }
+        return null;
+      }
+
       _setLocalCosmetic(equipped) {
         if (this.localCosmetic) { this.localCosmetic.destroy(); this.localCosmetic = null; }
-        const emoji = COSMETIC_EMOJI[equipped];
-        if (emoji && this.player) {
-          this.localCosmetic = this.add.text(this.player.x, this.player.y-68, emoji,
-            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
-        }
+        this.localCosmeticDef = null;
+        if (!this.player) return;
+        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir);
+        if (made) { this.localCosmetic = made.obj; this.localCosmeticDef = made.def; }
       }
 
       _updatePlayerCosmetics(id, cosmetics, equipped) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
         if (entry.cosmetic) { entry.cosmetic.destroy(); entry.cosmetic = null; }
-        const emoji = COSMETIC_EMOJI[equipped];
-        if (emoji) {
-          entry.cosmetic = this.add.text(entry.sprite.x, entry.sprite.y-68, emoji,
-            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
-        }
+        entry.cosmeticDef = null;
+        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir);
+        if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -4741,7 +5103,7 @@
 
       _showChatBubble(sprite, message, isLocal, isWhisper) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
-        const yOff  = isLocal ? (this.localCosmetic ? -95 : -78) : -85;
+        const yOff  = isLocal ? ((this.localCosmetic && !this.localCosmeticDef) ? -95 : -78) : -85;
         const bubble = this.add.text(sprite.x, sprite.y+yOff, message, {
           fontSize:'14px', fontFamily:'monospace',
           color: isWhisper ? '#e9d5ff' : '#111',
@@ -4791,7 +5153,7 @@
       // and an emote simply replaces any bubble already showing.
       _showEmoteBubble(sprite, char, isLocal) {
         if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
-        const yOff  = isLocal ? (this.localCosmetic ? -95 : -78) : -85;
+        const yOff  = isLocal ? ((this.localCosmetic && !this.localCosmeticDef) ? -95 : -78) : -85;
         const bubble = this.add.text(sprite.x, sprite.y+yOff, char, {
           fontSize:'26px', padding:{x:9,y:6},
           backgroundColor:'#ffffffee', resolution:2,
@@ -4830,6 +5192,41 @@
             });
           },
         });
+      }
+
+      // Group consumable visuals: a burst of emoji particles at a world
+      // position. Confetti pops outward and falls; fireworks launch up and
+      // explode high; pizza is a gentle float-up. Purely cosmetic — the
+      // server's groupEffect event carries only {effect, x, y}.
+      _groupBurst(effect, x, y) {
+        const CFG = {
+          confetti:  { emojis: ['🎉', '🎊', '✨'],       count: 14, up: 90,  spread: 90,  dur: 1600, size: 16 },
+          fireworks: { emojis: ['🎆', '✨', '💥', '🌟'], count: 22, up: 220, spread: 130, dur: 2600, size: 18 },
+          pizza:     { emojis: ['🍕', '🍕', '✨'],       count: 10, up: 70,  spread: 70,  dur: 1800, size: 16 },
+        };
+        const cfg = CFG[effect];
+        if (!cfg) return;
+        for (let i = 0; i < cfg.count; i++) {
+          const em = cfg.emojis[Phaser.Math.Between(0, cfg.emojis.length - 1)];
+          const p = this.add.text(
+            x + Phaser.Math.Between(-14, 14), y - 40,
+            em, { fontSize: cfg.size + 'px', resolution: 2 },
+          ).setOrigin(0.5).setDepth(1002).setAlpha(0.95);
+          const rise = cfg.up + Phaser.Math.Between(0, cfg.up * 0.6);
+          const dx = Phaser.Math.Between(-cfg.spread, cfg.spread);
+          const delay = Phaser.Math.Between(0, effect === 'fireworks' ? 900 : 250);
+          // Up-and-out, then fade while drifting down a touch (confetti feel).
+          this.tweens.chain({
+            targets: p,
+            tweens: [
+              { y: p.y - rise, x: p.x + dx, scaleX: 1.3, scaleY: 1.3,
+                duration: cfg.dur * 0.45, delay, ease: 'Sine.Out' },
+              { y: '+=' + Math.round(rise * 0.35), alpha: 0,
+                duration: cfg.dur * 0.55, ease: 'Sine.In' },
+            ],
+            onComplete: () => p.destroy(),
+          });
+        }
       }
 
       _removeOtherPlayer(id) {
@@ -4904,14 +5301,11 @@
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
-        let cosmetic = null;
-        const wornEmoji = COSMETIC_EMOJI[data.equipped];
-        if (wornEmoji) {
-          cosmetic = this.add.text(data.x, data.y-68, wornEmoji,
-            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001);
-        }
+        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir);
+        const cosmetic = made ? made.obj : null;
+        const cosmeticDef = made ? made.def : null;
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, chatBubble:null, character:char, texKey, occluders };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders };
       }
 
       // Show the pulsing highlight only for the active object id (null = hide all).
@@ -4948,8 +5342,13 @@
         const idleKey = `idle_${texKey}`;
 
         if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
-        if (this.localCosmetic) this.localCosmetic.setPosition(player.x, player.y-68);
-        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+(this.localCosmetic?-95:-78));
+        if (this.localCosmetic) {
+          if (this.localCosmeticDef) this._placeWearable(this.localCosmetic, this.localCosmeticDef, player.x, player.y, this.lastDir);
+          else this.localCosmetic.setPosition(player.x, player.y-68);
+        }
+        // Sprite wearables sit ON the body, so they don't raise the bubble —
+        // only a floating emoji cosmetic does.
+        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
 
         if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {
           player.setVelocity(0,0);

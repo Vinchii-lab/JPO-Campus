@@ -115,6 +115,16 @@ socket id (`await pageA.evaluate(() => socket.id)`, then check
 `otherPlayers[aid]` on B) — never scan all of `otherPlayers` for presence or
 absence of something.
 
+# Two-player puppeteer runs need isolated incognito contexts, not two pages
+
+Two `browser.newPage()` tabs share one profile → shared `localStorage`. Player
+A's resume token auto-resumes on B's fresh tab (tearing down the join form
+mid-test, and one-session-per-email drops A), producing a confusing
+"getElementById(...) is null" failure on the SECOND page only.
+
+**How to apply:** give each simulated player its own
+`browser.createIncognitoBrowserContext()` and open the page from that context.
+
 # Backgrounded test runs get reaped — run foreground with a timeout
 
 `nohup … &` AND `setsid nohup … & disown` both died silently (empty log, no
