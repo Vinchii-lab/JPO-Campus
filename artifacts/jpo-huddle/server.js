@@ -53,6 +53,15 @@ app.get('/', (_req, res) => {
   res.send(html);
 });
 
+// Health probe endpoint — used by the deployment platform's startup/health
+// checks. Deliberately trivial (no DB, no file reads) so a probe can never
+// fail while the process itself is alive; the probe path is configured in
+// .replit-artifact/artifact.toml under [services.production.health.startup].
+app.get('/healthz', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.status(200).json({ ok: true, stamp: BUILD_STAMP });
+});
+
 // Stamp endpoint — always returns the current server's build stamp, never cached.
 // The page checks this on load and force-reloads if it was served from a stale cache.
 app.get('/stamp', (_req, res) => {

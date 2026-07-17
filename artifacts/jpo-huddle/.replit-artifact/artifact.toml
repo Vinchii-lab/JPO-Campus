@@ -26,5 +26,8 @@ args = ["node", "artifacts/jpo-huddle/server.js"]
 PORT = "20158"
 NODE_ENV = "production"
 
+[services.production.health.startup]
+path = "/healthz"
+
 [services.env]
 PORT = "20158"
