@@ -4332,10 +4332,20 @@
     document.getElementById('owner-pwd-input').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
     document.getElementById('owner-pwd-input').addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
 
-    function openOwnerPanel() { _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); }
+    // While the panel is open, poll for fresh lists every few seconds (plus
+    // once on open) — pushes cover the instant case, but a missed push (blip,
+    // zombie socket) must never leave the panel stale until a page refresh.
+    let _adminPollTimer = null;
+    function openOwnerPanel() {
+      _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements();
+      socket.emit('adminRefresh');
+      clearInterval(_adminPollTimer);
+      _adminPollTimer = setInterval(() => { if (socket.connected) socket.emit('adminRefresh'); }, 10000);
+    }
     function closeOwnerPanel() {
       _ownerPanelOpen = false;
       document.getElementById('owner-panel').classList.remove('open');
+      clearInterval(_adminPollTimer); _adminPollTimer = null;
       document.querySelector('canvas')?.focus();
     }
 
@@ -4488,8 +4498,8 @@
       const tbody = document.getElementById('op-pending-tbody');
       if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `
-        <tr>
-          <td>${esc(p.name)}${p.nickname && p.nickname !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.nickname)}”</span>` : ''}</td>
+        <tr${p.offline ? ' style="opacity:.65"' : ''}>
+          <td>${esc(p.name)}${p.nickname && p.nickname !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.nickname)}”</span>` : ''}${p.offline ? ' <span style="color:#aaa;font-size:10px;" title="Registered, then closed the tab while waiting. Approve now and they walk in on their next visit.">(offline)</span>' : ''}</td>
           <td style="font-size:11px;color:#888">${esc(p.email)}</td>
           <td><span class="char-tag">${esc(p.character)}</span></td>
           <td>
@@ -4541,7 +4551,11 @@
       inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
     })();
     function esc(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      // Single quotes MUST be escaped too: pending-list ids can now be
+      // `email:<address>` (attacker-chosen text at register time) and they're
+      // embedded inside onclick='…' attributes — without &#39; that's stored
+      // XSS in the admin panel.
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     // ── Phaser scene ──────────────────────────────────────────────────

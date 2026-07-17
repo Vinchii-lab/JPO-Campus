@@ -47,6 +47,12 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // (WHERE last_daily_bonus IS NULL OR < CURRENT_DATE) so re-logging can't farm it.
   lastDailyBonus: date("last_daily_bonus"),
   approved: boolean("approved").notNull().default(false),
+  // Admin acted on this UNAPPROVED account (rejected the registration, or
+  // kicked/revoked the player): keeps them out of the DB-backed pending queue
+  // until they actively come back (register/sign-in/resume clears the flag).
+  // Without this, the pending list — which survives the registrant closing
+  // their tab — would show every rejected person forever.
+  dismissed: boolean("dismissed").notNull().default(false),
   isAnnouncer: boolean("is_announcer").notNull().default(false),
   x: integer("x").notNull().default(1080),
   y: integer("y").notNull().default(840),

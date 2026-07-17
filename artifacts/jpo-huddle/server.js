@@ -505,6 +505,11 @@ setInterval(() => {
 
 const PASSWORD_MIN = 6, PASSWORD_MAX = 100;
 
+// Strict email shape for register (the email becomes the row's PRIMARY KEY and
+// is embedded in admin-panel markup): lowercase alnum + . _ % + - local part,
+// dotted domain. Deliberately conservative — no quotes, spaces, or HTML chars.
+const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+
 // Department allowlist — MUST stay identical (same values, same order) to the
 // client's DEPARTMENTS array in public/index.html. '' = not set (legacy
 // accounts pick one, once, from their own profile card).
@@ -562,6 +567,9 @@ async function upsertPlayerProfile(reg) {
        -- (e.g. a legacy client omitting the field on a re-register).
        department = CASE WHEN EXCLUDED.department <> '' THEN EXCLUDED.department
                          ELSE jpo_players.department END,
+       -- Actively re-registering = back in the approval queue: clear any
+       -- earlier admin dismissal (reject/kick) so they show as pending again.
+       dismissed  = false,
        updated_at = now()
      RETURNING *`,
     [reg.email, reg.firstName, reg.lastName, reg.name, reg.nickname, reg.character,
@@ -1415,6 +1423,14 @@ io.on("connection", (socket) => {
       const ln   = (lastName  || "").trim().slice(0, 20);
       const nick = (nickname  || "").trim().slice(0, 16) || fn;
       const em   = (email     || "").trim().slice(0, 80).toLowerCase();
+      // The email becomes the PRIMARY KEY and flows into admin-panel markup
+      // (including `email:<address>` pending ids inside onclick attributes) —
+      // enforce a strict shape so quotes/spaces/HTML can never become a PK.
+      // Empty stays allowed (session-only fallback below); invalid is rejected.
+      if (em && !EMAIL_RE.test(em)) {
+        socket.emit("authFailed", { message: "Enter a valid email address." });
+        return;
+      }
       const pw   = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
       const char = ["adam","alex","amelia","bob"].includes(character) ? character : "adam";
       const name = ln ? `${fn} ${ln}` : fn;
@@ -1587,6 +1603,9 @@ io.on("connection", (socket) => {
           hairIdx: row.hair_idx, skinIdx: row.skin_idx,
           shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
         };
+        // Actively coming back = re-enter the approval queue: clear any
+        // earlier admin dismissal so the DB-backed pending list shows them.
+        if (row.dismissed) await pool.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
         socket.emit("registrationPending");
         _notifyAdmins();
         console.log(`Signed in (pending approval): ${row.name} <${em}>`);
@@ -1638,6 +1657,9 @@ io.on("connection", (socket) => {
           hairIdx: row.hair_idx, skinIdx: row.skin_idx,
           shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
         };
+        // Actively coming back = re-enter the approval queue: clear any
+        // earlier admin dismissal so the DB-backed pending list shows them.
+        if (row.dismissed) await pool.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
         socket.emit("registrationPending");
         _notifyAdmins();
         console.log(`Resume pending (not approved): ${row.name} <${em}>`);
@@ -1654,19 +1676,33 @@ io.on("connection", (socket) => {
     if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
     admins.add(socket.id);
     socket.emit("adminAuthOk");
-    socket.emit("pendingList", _pendingList());
+    _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
     socket.emit("playerList",  _playerList());
+  });
+
+  // Pull-based refresh: the open admin panel re-requests both lists every few
+  // seconds (and once on open), so a missed push — connection blip, zombie
+  // socket, anything — can never leave the panel stale until a page refresh.
+  socket.on("adminRefresh", () => {
+    if (!admins.has(socket.id)) return;
+    _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminRefresh failed:", err));
+    socket.emit("playerList", _playerList());
   });
 
   socket.on("approvePlayer", async (targetId) => {
     if (!admins.has(socket.id)) return;
+    if (typeof targetId !== "string") return;
+    // Offline entries from the DB-backed pending list carry an `email:<email>`
+    // id instead of a live socket id — approving one just flips the row; the
+    // person walks straight into the office on their next visit.
     const reg = pending[targetId];
-    if (!reg) return;
-    delete pending[targetId];
+    const offlineEmail = !reg && targetId.startsWith("email:") ? targetId.slice(6) : null;
+    if (!reg && !offlineEmail) return;
+    if (reg) delete pending[targetId];
 
     try {
       // Session-only (no email) registrant: approve into memory only.
-      if (!reg.email) {
+      if (reg && !reg.email) {
         const state = {
           x: 1080, y: 840, dir: "down", anim: "idle",
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
@@ -1692,29 +1728,59 @@ io.on("connection", (socket) => {
         return;
       }
 
+      const em = reg ? reg.email : offlineEmail;
       const { rows } = await pool.query(
-        `UPDATE jpo_players SET approved = true, updated_at = now() WHERE email = $1 RETURNING *`,
-        [reg.email],
+        `UPDATE jpo_players SET approved = true, dismissed = false, updated_at = now() WHERE email = $1 RETURNING *`,
+        [em],
       );
       const row = rows[0];
       if (!row) return;
 
-      const targetSocket = io.sockets.sockets.get(targetId);
+      // Prefer the clicked socket; fall back to ANY live pending socket for
+      // this email (the person may have reconnected under a new socket id
+      // since the admin's list was rendered). No live socket = offline
+      // approval — nothing to restore now, auto-restore handles their return.
+      let targetSocket = reg ? io.sockets.sockets.get(targetId) : null;
+      if (!targetSocket) {
+        for (const [pid, p] of Object.entries(pending)) {
+          if (p.email === em) {
+            targetSocket = io.sockets.sockets.get(pid);
+            if (targetSocket) { delete pending[pid]; break; }
+          }
+        }
+      }
       if (targetSocket) await restorePlayer(targetSocket, row);
       _notifyAdmins();
-      console.log(`Approved: ${row.name}`);
+      console.log(`Approved: ${row.name}${targetSocket ? "" : " (offline — enters on next visit)"}`);
     } catch (err) {
       console.error("approvePlayer failed:", err);
     }
   });
 
-  socket.on("rejectPlayer", (targetId) => {
+  socket.on("rejectPlayer", async (targetId) => {
     if (!admins.has(socket.id)) return;
+    if (typeof targetId !== "string") return;
     const reg = pending[targetId];
-    if (reg) delete pending[targetId];
-    io.to(targetId).emit("rejected");
+    const em = reg?.email || (targetId.startsWith("email:") ? targetId.slice(6) : null);
+    if (reg) { delete pending[targetId]; io.to(targetId).emit("rejected"); }
+    // Also clear any OTHER live pending socket for the same email (the person
+    // may have reconnected under a new id since the admin's list rendered).
+    if (em) {
+      for (const [pid, p] of Object.entries(pending)) {
+        if (p.email === em) { delete pending[pid]; io.to(pid).emit("rejected"); }
+      }
+      // Mark the row dismissed so the DB-backed pending list stops showing
+      // them; actively coming back (register/sign-in/resume) clears the flag
+      // and re-queues them for approval.
+      try {
+        await pool.query(
+          `UPDATE jpo_players SET dismissed = true, updated_at = now() WHERE email = $1 AND approved = false`,
+          [em],
+        );
+      } catch (err) { console.error("rejectPlayer dismiss failed:", err); }
+    }
     _notifyAdmins();
-    console.log(`Rejected: ${reg?.name}`);
+    console.log(`Rejected: ${reg?.name || em || targetId}`);
   });
 
   // Kick = revoke approval. Because an approved email is auto-restored on its
@@ -1732,8 +1798,10 @@ io.on("connection", (socket) => {
     io.emit("playerLeft", targetId);
     if (p.email) {
       try {
+        // dismissed = true keeps the revoked person OUT of the DB-backed
+        // pending queue until they actively come back (which re-queues them).
         await pool.query(
-          `UPDATE jpo_players SET approved = false, updated_at = now() WHERE email = $1`,
+          `UPDATE jpo_players SET approved = false, dismissed = true, updated_at = now() WHERE email = $1`,
           [p.email],
         );
       } catch (err) { console.error("kick revoke failed:", err); }
@@ -2826,18 +2894,47 @@ io.on("connection", (socket) => {
 });
 
 function _notifyAdmins() {
-  admins.forEach(id => {
-    io.to(id).emit("pendingList", _pendingList());
-    io.to(id).emit("playerList",  _playerList());
-  });
+  if (!admins.size) return;
+  _pendingList()
+    .then((pend) => {
+      const plist = _playerList();
+      admins.forEach(id => {
+        io.to(id).emit("pendingList", pend);
+        io.to(id).emit("playerList",  plist);
+      });
+    })
+    .catch((err) => console.error("notifyAdmins failed:", err));
 }
 
-function _pendingList() {
+async function _pendingList() {
   // `name` here is the FULL name (approval decisions need real identity);
   // nickname is shown alongside it in the admin panel.
-  return Object.entries(pending).map(([id, p]) => ({
+  // Live (connected) registrants first — keyed by socket id, as always.
+  const list = Object.entries(pending).map(([id, p]) => ({
     id, name: p.name, nickname: p.nickname || "", email: p.email, character: p.character,
   }));
+  // Plus everyone who registered and then LEFT while waiting (closed the tab,
+  // phone locked…). Their registration is durable in the DB; before this the
+  // queue was memory-only, so they silently vanished from the admin panel the
+  // moment they disconnected. Offline entries use an `email:<email>` id —
+  // approve/reject resolve it back to the row; approval while offline simply
+  // flips the row, and they walk straight in on their next visit.
+  try {
+    const liveEmails = new Set(list.map(p => p.email).filter(Boolean));
+    const { rows } = await pool.query(
+      `SELECT email, name, nickname, character FROM jpo_players
+        WHERE approved = false AND dismissed = false
+        ORDER BY created_at ASC`,
+    );
+    for (const r of rows) {
+      if (liveEmails.has(r.email)) continue;
+      list.push({
+        id: `email:${r.email}`, name: r.name, nickname: r.nickname || "",
+        email: r.email, character: r.character, offline: true,
+      });
+    }
+  } catch (err) { console.error("pending list query failed:", err); }
+  return list;
 }
 
 function _playerList() {
@@ -2846,6 +2943,15 @@ function _playerList() {
     id, name: p.name, fullName: p.fullName || p.name, coins: p.coins, cosmetics: p.cosmetics,
     email: p.email || "", isAnnouncer: !!p.isAnnouncer, department: p.department || "",
   }));
+}
+
+// Self-healing schema nudge: `dismissed` was added after the app went live, so
+// a production database that predates it gets the column on boot (idempotent —
+// a no-op everywhere else). Awaited before listen so no query can race it.
+try {
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
+} catch (err) {
+  console.error("schema nudge (dismissed column) failed:", err);
 }
 
 const port = process.env.PORT || 3000;
