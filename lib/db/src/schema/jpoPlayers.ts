@@ -33,6 +33,11 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // Usable/consumable items: itemId → remaining uses (e.g. {"cigarette": 4,
   // "coffee": 1}). Unlike cosmetics (permanent, worn), these deplete on use.
   items: jsonb("items").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+  // Which owned pet currently follows this player around ('' = none). Pet
+  // OWNERSHIP lives in the cosmetics array (ids prefixed 'pet_' so they can
+  // never collide with wearable ids); this column is only the active choice,
+  // exactly like equipped_cosmetic is for wearables.
+  equippedPet: text("equipped_pet").notNull().default(""),
   // Which JustPressOne department this person belongs to ('' = not set yet —
   // legacy accounts pick one from their own profile card, once). Validated
   // server-side against a fixed allowlist shared with the client.

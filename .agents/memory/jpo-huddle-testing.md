@@ -97,6 +97,18 @@ its last/default string while hidden — detect an available interaction with
 `tryLogin()` are reachable from `page.evaluate`; the socket itself is not
 (top-level `const`).
 
+# Tuning visual offsets: sweep values live via the scene's def object, don't guess
+
+Static geometry notes (e.g. "eyes ≈ y−12") can be wrong when the overlay art has
+its own in-frame padding — the shades wearable needed dy=8, not −12, and two
+blind guesses both looked "in the hair" in screenshots.
+
+**How to apply:** the running scene exposes the live def object
+(`window._gameScene.localCosmeticDef` etc.), so from `page.evaluate` mutate the
+offset in a loop over ~5 candidate values, screenshot each (tight clip around
+the avatar), stitch a comparison strip with PIL, and pick visually. One run
+replaces N guess-edit-restart cycles; then hardcode the winner in the source.
+
 # Before committing: check for unrelated opengraph.jpg drift
 
 `public/opengraph.jpg` has twice shown up as an unexplained few-byte

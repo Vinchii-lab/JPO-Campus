@@ -1409,12 +1409,15 @@
       <div id="shop-tabs">
         <button class="shop-tab sel" id="shop-tab-btn-wear"     onclick="shopTab('wear')">🕶️ Wearables</button>
         <button class="shop-tab"     id="shop-tab-btn-items"    onclick="shopTab('items')">🎒 Items</button>
+        <button class="shop-tab"     id="shop-tab-btn-pets"     onclick="shopTab('pets')">🐾 Pets</button>
         <button class="shop-tab"     id="shop-tab-btn-wardrobe" onclick="shopTab('wardrobe')">👕 Wardrobe</button>
       </div>
       <!-- Cosmetic rows are generated from the COSMETICS catalog. -->
       <div id="shop-cosmetics"></div>
       <!-- Usable-item rows are generated from the USABLES catalog. -->
       <div id="shop-usables" style="display:none"></div>
+      <!-- Pet rows are generated from the PETS catalog. -->
+      <div id="shop-pets" style="display:none"></div>
       <!-- ── Wardrobe: paid shirt/trouser colour changes ──
            Swatches are generated from CLOTH_COLORS; the 25-coin label is
            display-only (the server's WARDROBE_PRICE is authoritative). -->
@@ -1851,7 +1854,10 @@
     // its 16x32 frame (origin 0.5,0.5, feet at +27 world px), so the visible
     // head top is ≈ y-24, eyes ≈ y-12, chin/neck ≈ y0 — NOT the frame top.
     const WEARABLE_DEFS = {
-      shades: { tex: 'wear_shades', dy: -12, side: 6 },
+      // shades dy=8 is EMPIRICAL (screenshot-swept in headless Chrome): the
+      // lens art sits high inside its texture frame, so the eye-line offset
+      // is larger than the head-geometry note above suggests.
+      shades: { tex: 'wear_shades', dy: 8, side: 6 },
       cap:    { tex: 'wear_cap',    dy: -22, side: 3 },
       chain:  { tex: 'wear_chain',  dy: 4,   side: 3 },
     };
@@ -1863,11 +1869,29 @@
     const USABLES = [
       { id: 'cigarette',    emoji: '🚬', name: 'Cigarette pack', pack: '×5', cost: 20,  verb: 'Smoke',  desc: 'smoke break, outside on the grass only' },
       { id: 'coffee',       emoji: '☕', name: 'Coffee',                     cost: 10,  verb: 'Drink',  desc: '+40% walk speed for 45s, single cup' },
-      { id: 'coffee_round', emoji: '🫖', name: 'Coffee round',               cost: 40,  verb: 'Share',  desc: 'coffee boost for everyone near you' },
+      { id: 'coffee_round', emoji: '☕☕', name: 'Coffee round',              cost: 40,  verb: 'Share',  desc: 'coffee boost for everyone near you' },
       { id: 'confetti',     emoji: '🎉', name: 'Confetti popper',            cost: 30,  verb: 'Pop',    desc: 'a party burst everyone can see' },
       { id: 'fireworks',    emoji: '🎆', name: 'Fireworks',                  cost: 75,  verb: 'Launch', desc: 'a proper sky show over the office' },
       { id: 'pizza_party',  emoji: '🍕', name: 'Pizza party',                cost: 150, verb: 'Party',  desc: '90s speed boost for everyone near you' },
     ];
+
+    // Pets catalog: buy-once companions that follow their owner around the
+    // office. Ids MUST stay in lockstep with the server PETS map in server.js
+    // (the server is authoritative on price — these labels are display-only).
+    // Ownership shares _ownedItems (the cosmetics array — 'pet_' ids never
+    // collide with wearable ids); the active pet is _equippedPet ('' = none),
+    // a separate slot from the worn cosmetic.
+    const PETS = [
+      { id: 'pet_duck',   emoji: '🦆', name: 'Duck',        cost: 40,  desc: 'waddles along behind you' },
+      { id: 'pet_cat',    emoji: '🐱', name: 'Office Cat',  cost: 60,  desc: 'follows you, when it feels like it' },
+      { id: 'pet_dog',    emoji: '🐶', name: 'Office Dog',  cost: 60,  desc: 'a very good boy' },
+      { id: 'pet_bunny',  emoji: '🐰', name: 'Bunny',       cost: 80,  desc: 'hops after you everywhere' },
+      { id: 'pet_turtle', emoji: '🐢', name: 'Turtle',      cost: 100, desc: 'takes his sweet time' },
+      { id: 'pet_dragon', emoji: '🐉', name: 'Baby Dragon', cost: 250, desc: 'the ultimate office flex' },
+    ];
+    const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
+    const PET_GAP   = 36;   // px the pet trails behind its owner (follow-at-distance)
+    let _equippedPet = '';  // active pet ('' = none); server-authoritative
 
     // Department allowlist — MUST stay identical (same values, same order) to
     // the server's DEPARTMENTS in server.js. Feeds BOTH the registration
@@ -2391,6 +2415,7 @@
       _playerCoins    = data.coins;
       _ownedItems     = data.cosmetics || [];
       _equippedCosmetic = data.equipped || '';
+      _equippedPet    = data.pet || '';
       _playerItems    = data.items || {};
       _renderItemBar();
 
@@ -2477,6 +2502,29 @@
 
     socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped }) => {
       window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped);
+    });
+
+    // ── Pets ──────────────────────────────────────────────────────────
+    // Purchase confirmed (coins already taken — coinUpdate arrives separately).
+    socket.on('petSuccess', ({ item, pet }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedPet = pet ?? item;   // adopting auto-brings the pet out
+      _refreshShopUI();
+      const meta = PETS.find(p => p.id === item);
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${meta ? meta.name : 'Pet'} adopted! It's following you.`;
+      window._gameScene?._setLocalPet(_equippedPet);
+    });
+
+    // Free bring/send-home confirmation (no purchase involved).
+    socket.on('petUpdate', ({ pet }) => {
+      _equippedPet = pet || '';
+      _refreshShopUI();
+      window._gameScene?._setLocalPet(_equippedPet);
+    });
+
+    socket.on('playerPetUpdate', ({ id, pet }) => {
+      window._gameScene?._updatePlayerPet(id, pet);
     });
 
     // ── Usable items (cigarettes, coffee) ─────────────────────────────
@@ -2610,6 +2658,8 @@
     function buyItem(item) { socket.emit('buyCosmetic', { item }); }
     function equipItem(item) { socket.emit('equipCosmetic', { item }); }   // '' = take off
     function buyUsable(item) { socket.emit('buyUsable', { item }); }
+    function buyPet(item) { socket.emit('buyPet', { item }); }
+    function equipPet(item) { socket.emit('equipPet', { item }); }         // '' = send it home
     function useItem(item) {
       socket.emit('useItem', { item });
       document.querySelector('canvas')?.focus();   // give movement keys back after the click
@@ -2620,7 +2670,7 @@
     // existing _refreshShopUI() call sites (coinUpdate, buy/equip acks) keep
     // working — it re-renders whatever tab is open.
     const SHOP_PAGE_SIZE = 6;
-    let _shopTab  = 'wear';   // 'wear' | 'items' | 'wardrobe'
+    let _shopTab  = 'wear';   // 'wear' | 'items' | 'pets' | 'wardrobe'
     let _shopPage = 0;
     function shopTab(t)  { _shopTab = t; _shopPage = 0; _refreshShopUI(); }
     function shopPage(d) { _shopPage += d; _refreshShopUI(); }
@@ -2653,18 +2703,20 @@
     // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
-      for (const t of ['wear', 'items', 'wardrobe'])
+      for (const t of ['wear', 'items', 'pets', 'wardrobe'])
         document.getElementById('shop-tab-btn-' + t).classList.toggle('sel', _shopTab === t);
       const cosBox  = document.getElementById('shop-cosmetics');
       const useBox  = document.getElementById('shop-usables');
+      const petsBox = document.getElementById('shop-pets');
       const wardBox = document.getElementById('shop-wardrobe');
       cosBox.style.display  = _shopTab === 'wear'     ? '' : 'none';
       useBox.style.display  = _shopTab === 'items'    ? '' : 'none';
+      petsBox.style.display = _shopTab === 'pets'     ? '' : 'none';
       wardBox.style.display = _shopTab === 'wardrobe' ? '' : 'none';
 
       // Page window for the active (paged) tab; clamp so a shrinking catalog
       // or stale page index can never show an empty page.
-      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : null;
+      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : _shopTab === 'pets' ? PETS : null;
       let pages = 1;
       if (catalog) {
         pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
@@ -2707,6 +2759,26 @@
           if (_playerCoins < c.cost) btn.classList.add('poor');
           btn.onclick = () => buyUsable(c.id);
           useBox.append(_shopRow(c, btn));
+        }
+      } else if (_shopTab === 'pets') {
+        // Pets: Adopt (not owned) / Bring (owned, not out — free) /
+        // With you ✓ (out — click to send it home). Mirrors the wearables tab.
+        petsBox.textContent = '';
+        for (const c of slice) {
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          if (!_ownedItems.includes(c.id)) {
+            btn.textContent = 'Adopt';
+            if (_playerCoins < c.cost) btn.classList.add('poor');
+            btn.onclick = () => buyPet(c.id);
+          } else if (_equippedPet === c.id) {
+            btn.textContent = 'With you ✓'; btn.classList.add('wearing');
+            btn.onclick = () => equipPet('');       // send it home
+          } else {
+            btn.textContent = 'Bring'; btn.classList.add('wear');
+            btn.onclick = () => equipPet(c.id);     // switch, free
+          }
+          petsBox.append(_shopRow(c, btn));
         }
       } else {
         _renderWardrobe();
@@ -4928,6 +5000,7 @@
 
         this.cameras.main.startFollow(this.player);
         this._setLocalCosmetic(_equippedCosmetic);   // restore the worn cosmetic on (re)join
+        this._setLocalPet(_equippedPet);             // restore the active pet on (re)join
 
         if (this._pendingPlayers) {
           Object.entries(this._pendingPlayers).forEach(([id,pdata]) => {
@@ -5062,6 +5135,49 @@
         entry.cosmeticDef = null;
         const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir);
         if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
+      }
+
+      // ── Pets ──────────────────────────────────────────────────────────
+      // An emoji companion that trails its owner. Nothing about the pet is
+      // networked beyond WHICH pet is out (playerPetUpdate / the `pet` field
+      // on join payloads): every client derives the pet's motion locally from
+      // its owner's sprite each frame (see _stepPet in update()), so pets
+      // cost zero movement traffic. Depth 2: above the floor and the player
+      // bodies (default 0) but below seat occluders (900) and nametags (990).
+      _makePet(pet, x, y) {
+        const emoji = PET_EMOJI[pet];
+        if (!emoji) return null;
+        return this.add.text(x - PET_GAP, y + 10, emoji, { fontSize: '22px', resolution: 2 })
+          .setOrigin(0.5, 1).setDepth(2);
+      }
+
+      // Follow-at-distance: the pet stands still until its owner is more than
+      // PET_GAP away, then walks to a point PET_GAP behind them — the classic
+      // "pet on a slack leash" feel. A >300px jump (spawn/teleport/grace
+      // restore) snaps instantly so the pet never sprints across the office.
+      _stepPet(petObj, px, py, delta) {
+        const ty = py + 10;                       // anchor beside the feet
+        const dx = petObj.x - px, dy = petObj.y - ty;
+        const dist = Math.hypot(dx, dy) || 1;
+        if (dist > 300) { petObj.setPosition(px - PET_GAP, ty); return; }
+        if (dist > PET_GAP) {
+          const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
+          petObj.x += (px + (dx / dist) * PET_GAP - petObj.x) * k;
+          petObj.y += (ty + (dy / dist) * PET_GAP - petObj.y) * k;
+        }
+      }
+
+      _setLocalPet(pet) {
+        if (this.localPet) { this.localPet.destroy(); this.localPet = null; }
+        if (!this.player) return;
+        this.localPet = this._makePet(pet, this.player.x, this.player.y);
+      }
+
+      _updatePlayerPet(id, pet) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        if (entry.pet) { entry.pet.destroy(); entry.pet = null; }
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y);
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -5234,6 +5350,7 @@
         if (!e) return;
         e.sprite.destroy(); e.nameTag.destroy();
         if (e.cosmetic)   e.cosmetic.destroy();
+        if (e.pet)        e.pet.destroy();
         if (e.chatBubble) e.chatBubble.destroy();
         this._clearOccluders(e.occluders);
         delete this.otherPlayers[id];
@@ -5304,8 +5421,9 @@
         const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir);
         const cosmetic = made ? made.obj : null;
         const cosmeticDef = made ? made.def : null;
+        const pet = this._makePet(data.pet, data.x, data.y);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders };
       }
 
       // Show the pulsing highlight only for the active object id (null = hide all).
@@ -5349,6 +5467,14 @@
         // Sprite wearables sit ON the body, so they don't raise the bubble —
         // only a floating emoji cosmetic does.
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
+
+        // Pets trail their owners — local pet follows us, remote pets follow
+        // their entry's sprite (whose position the playerMoved stream drives).
+        if (this.localPet) this._stepPet(this.localPet, player.x, player.y, delta);
+        for (const oid in this.otherPlayers) {
+          const oe = this.otherPlayers[oid];
+          if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta);
+        }
 
         if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {
           player.setVelocity(0,0);
