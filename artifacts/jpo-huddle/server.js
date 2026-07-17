@@ -1557,7 +1557,9 @@ function roundHandleLeave(id) {
   if (round.state === "joining") {
     round.members.delete(id);
     if (round.members.size === 0) cancelRound("Everyone left before the round began.");
-    else roundEmitMembers("roundLobby", { count: round.members.size });
+    // Broadcast to EVERYONE (count only, leaks nothing) so the invite card's
+    // "N in so far" stays fresh for people who haven't joined yet.
+    else io.emit("roundLobby", { count: round.members.size });
     return;
   }
   if (round.state !== "active") return;   // 'ending' → settlement stands
@@ -3087,7 +3089,9 @@ io.on("connection", (socket) => {
       joinMs: Math.max(0, round.joinEndsAt - Date.now()),
       minPlayers: ROUND_MIN_PLAYERS,
     });
-    roundEmitMembers("roundLobby", { count: round.members.size });
+    // Broadcast to EVERYONE (count only, leaks nothing) so the invite card's
+    // "N in so far" stays fresh for people who haven't joined yet.
+    io.emit("roundLobby", { count: round.members.size });
   });
 
   // The killer's kill intent. Everything is validated HERE: role, aliveness,

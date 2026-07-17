@@ -3898,7 +3898,32 @@
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
     let _roundKillRange = 160, _roundCoolMs = 25000, _roundKillReadyAt = 0, _roundEndsAt = 0;
     let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
+    let _roundInviteMin = 3;
     const _rnEl = (id) => document.getElementById(id);
+
+    // Ghost hiding: while I'm an ALIVE participant, eliminated players vanish
+    // from MY world (they're spectators — they mustn't be seen shadowing the
+    // killer or bodyguarding crew in the dark). Purely client-side rendering:
+    // the server keeps broadcasting their moves (accepted v1, per task spec).
+    // Spectators and non-participants see everyone normally.
+    const _roundHiddenIds = new Set();
+    function _roundGhostVis(id, visible) {
+      const sc = window._gameScene;
+      const e = sc && sc.otherPlayers && sc.otherPlayers[id];
+      if (!e) return;
+      if (e.sprite) e.sprite.setVisible(visible);
+      if (e.nameTag) e.nameTag.setVisible(visible);
+      if (e.cosmetic) e.cosmetic.setVisible(visible);
+      if (e.pet) e.pet.setVisible(visible);
+      if (e.chatBubble && e.chatBubble.setVisible) e.chatBubble.setVisible(visible);
+      if (e.occluders) for (const o of e.occluders) { if (o && o.setVisible) o.setVisible(visible); }
+    }
+    function _roundShowAllGhosts() {
+      for (const id of _roundHiddenIds) _roundGhostVis(id, true);
+      _roundHiddenIds.clear();
+    }
+    window._roundIsHidden = (id) => _roundHiddenIds.has(id);
+    window._roundGhostVis = _roundGhostVis;
 
     function _roundChip(msg) {
       const c = _rnEl('round-chip');
@@ -3912,6 +3937,7 @@
     // connection can never strand someone in the dark.
     function _roundReset() {
       _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
+      _roundShowAllGhosts();
       _roundRoster.clear();
       _roundStopTick();
       clearTimeout(_roundInviteTimer); clearTimeout(_roundRoleTimer);
@@ -3976,6 +4002,9 @@
       let aliveN = 0, all = 0;
       for (const m of _roundRoster.values()) { all++; if (m.alive) aliveN++; }
       _roundChip((_roundAlive ? '🌙 ' : '💀 Watching · ') + clock + ' · ' + aliveN + '/' + all + ' still up');
+      // Re-assert ghost hiding every tick: sit-downs, cosmetic/pet changes and
+      // chat bubbles recreate display objects, so a one-shot hide isn't enough.
+      if (_roundAlive) for (const id of _roundHiddenIds) _roundGhostVis(id, false);
       if (_roundRole === 'killer' && _roundAlive) {
         const cd = Math.ceil((_roundKillReadyAt - Date.now()) / 1000);
         const target = cd <= 0 ? _roundNearestTarget() : null;
@@ -4004,8 +4033,9 @@
         _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
         return;
       }
+      _roundInviteMin = d.minPlayers ?? 3;
       _rnEl('round-invite-text').textContent = `🌙 ${d.starterName || 'Someone'} wants to play Office After Dark — the lights go out, and one of you is… not friendly.`;
-      _rnEl('round-invite-count').textContent = `${d.count ?? 1} in so far · needs ${d.minPlayers ?? 3}+ to start`;
+      _rnEl('round-invite-count').textContent = `${d.count ?? 1} in so far · needs ${_roundInviteMin}+ to start`;
       _rnEl('round-invite').classList.add('open');
       clearTimeout(_roundInviteTimer);
       _roundInviteTimer = setTimeout(() => _rnEl('round-invite').classList.remove('open'), Math.max(1000, d.joinMs ?? 30000));
@@ -4018,7 +4048,13 @@
       clearTimeout(_roundInviteTimer);
       _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
     });
-    socket.on('roundLobby', (d) => { if (d && d.count) _roundLobbyCount = d.count; });
+    socket.on('roundLobby', (d) => {
+      if (!d || !d.count) return;
+      _roundLobbyCount = d.count;
+      // Keep the invite card's count fresh for people who haven't joined yet.
+      if (_rnEl('round-invite').classList.contains('open'))
+        _rnEl('round-invite-count').textContent = `${d.count} in so far · needs ${_roundInviteMin}+ to start`;
+    });
     socket.on('roundCancelled', (d) => { _roundReset(); if (d && d.reason) _rpsToast('🌙 ' + d.reason); });
     socket.on('roundError', (d) => { if (d && d.message) _rpsToast(d.message); });
 
@@ -4051,22 +4087,31 @@
       const m = _roundRoster.get(d.victimId);
       if (m) m.alive = false;
       const sc = window._gameScene;
-      if (sc) {   // 💀 flash over the victim (reuses the emote-bubble slot)
-        if (d.victimId === socket.id) { if (sc.player) sc._showEmoteBubble(sc.player, '💀', true); }
-        else {
-          const e = sc.otherPlayers && sc.otherPlayers[d.victimId];
-          if (e && e.sprite) e.chatBubble = sc._showEmoteBubble(e.sprite, '💀', false);
-        }
-      }
       if (d.victimId === socket.id) {
+        if (sc && sc.player) sc._showEmoteBubble(sc.player, '💀', true);
         _roundAlive = false;
-        document.body.classList.remove('round-dark');   // the fallen see everything
+        document.body.classList.remove('round-dark');   // the fallen see everything…
+        _roundShowAllGhosts();                          // …including the other fallen
         _rpsToast('💀 You were got! Stick around and watch how it ends…');
-      } else if (_roundRole === 'killer' && _roundPhase === 'active' && _roundAlive) {
-        _roundKillReadyAt = Date.now() + _roundCoolMs;  // my kill — restart my cooldown
+      } else if (_roundPhase === 'active' && _roundAlive) {
+        // I'm still in the round: the fallen vanish from my world instantly.
+        if (_roundRole === 'killer') _roundKillReadyAt = Date.now() + _roundCoolMs; // my kill — restart cooldown
+        _roundHiddenIds.add(d.victimId);
+        _roundGhostVis(d.victimId, false);
+        if (m) _rpsToast(`💀 ${m.name} was eliminated…`);
+      } else if (sc) {
+        // I'm a spectator — I get to watch the kill happen. 💀 flash over the victim.
+        const e = sc.otherPlayers && sc.otherPlayers[d.victimId];
+        if (e && e.sprite) e.chatBubble = sc._showEmoteBubble(e.sprite, '💀', false);
       }
     });
-    socket.on('roundLeft', (d) => { if (d && d.id) _roundRoster.delete(d.id); });
+    socket.on('roundLeft', (d) => {
+      if (!d || !d.id) return;
+      _roundRoster.delete(d.id);
+      // A hidden ghost who fully leaves gets un-hidden (their sprite is torn
+      // down by the normal leave flow; a fresh session = fresh socket id).
+      if (_roundHiddenIds.has(d.id)) { _roundGhostVis(d.id, true); _roundHiddenIds.delete(d.id); }
+    });
 
     socket.on('roundEnd', (d) => {
       d = d || {};
@@ -5152,6 +5197,10 @@
             else entry.cosmetic.setPosition(data.x, data.y-68);
           }
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
+          // Round ghost hiding: _placeWearable re-shows sprite wearables and
+          // sit-downs recreate occluders — re-hide on EVERY move update, not
+          // just the 250ms sweep, or a hidden ghost's cosmetic floats visibly.
+          if (window._roundIsHidden && window._roundIsHidden(data.id)) window._roundGhostVis(data.id, false);
         });
 
         socket.on('playerLeft', (id) => { this._removeOtherPlayer(id); });
@@ -5808,6 +5857,10 @@
         const pet = this._makePet(data.pet, data.x, data.y);
 
         this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders };
+        // Eliminated round players stay hidden even across a sprite re-add
+        // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
+        // re-asserts this, but doing it here avoids a one-frame flash.
+        if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
       }
 
       // Show the pulsing highlight only for the active object id (null = hide all).
