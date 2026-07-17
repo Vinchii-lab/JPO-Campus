@@ -985,6 +985,65 @@
     body.touch-device.playing.chatting #touch-challenge { display: none; }
     #touch-challenge:active { background: rgba(0,0,0,0.8); }
 
+    /* ── Office After Dark ──────────────────────────────────────────
+       #darkness is ONE oversized div with a STATIC radial gradient (the
+       light hole). Every frame we only translate/scale it over the player —
+       the gradient itself is never repainted, so it costs ~nothing. Radii
+       are in WORLD px (the scale(zoom) transform keeps them in sync with
+       the camera). z-index 150: above the canvas, below every HUD/card. */
+    #darkness {
+      display: none; position: fixed; left: 0; top: 0; width: 8000px; height: 8000px;
+      pointer-events: none; z-index: 150; transform-origin: 50% 50%; will-change: transform;
+      background: radial-gradient(circle at center,
+        rgba(6,6,18,0) 0px, rgba(6,6,18,0) 140px, rgba(6,6,18,0.85) 230px, rgba(6,6,18,0.97) 300px);
+    }
+    body.round-dark #darkness { display: block; }
+    #round-chip {
+      display: none; position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 300; background: rgba(16,12,40,0.88); border: 1px solid rgba(148,132,255,0.45);
+      border-radius: 8px; padding: 6px 14px; font-family: monospace; color: #cfc8ff;
+      font-size: 13px; text-align: center; white-space: nowrap;
+    }
+    #round-chip.on { display: block; }
+    #round-invite {
+      display: none; position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
+      z-index: 230; background: rgba(16,12,40,0.95); border: 1px solid rgba(148,132,255,0.5);
+      border-radius: 12px; padding: 12px 16px; color: #eee; font-size: 13px;
+      max-width: min(92vw, 380px); text-align: center; line-height: 1.45;
+    }
+    #round-invite.open { display: block; }
+    #round-invite .rn-count { color: rgba(255,255,255,0.5); font-size: 11px; margin: 6px 0 8px; }
+    #round-kill-btn {
+      display: none; position: fixed; right: 26px; bottom: 150px; z-index: 250;
+      width: 66px; height: 66px; border-radius: 50%; border: 2px solid rgba(255,90,90,0.7);
+      background: rgba(120,10,20,0.88); color: #fff; font-size: 24px; line-height: 1;
+      align-items: center; justify-content: center; flex-direction: column; gap: 2px;
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #round-kill-btn.on { display: flex; }
+    #round-kill-btn.cooling { opacity: 0.45; }
+    #round-kill-btn span { font-size: 10px; font-family: monospace; }
+    #round-role {
+      display: none; position: fixed; top: 30%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 8600; background: rgba(10,8,26,0.94); border: 1px solid rgba(148,132,255,0.6);
+      border-radius: 14px; padding: 18px 26px; text-align: center; color: #fff;
+      font-size: 14px; pointer-events: none; max-width: min(92vw, 420px); line-height: 1.5;
+    }
+    #round-role.open { display: block; }
+    #round-role .rn-big { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    #round-end {
+      display: none; position: fixed; inset: 0; z-index: 8600; background: rgba(0,0,0,0.55);
+      align-items: center; justify-content: center;
+    }
+    #round-end.open { display: flex; }
+    #round-end .rn-card {
+      background: #17142e; border: 1px solid rgba(148,132,255,0.5); border-radius: 14px;
+      padding: 22px 26px; max-width: min(92vw, 400px); text-align: center; color: #eee;
+    }
+    #round-end h3 { margin: 0 0 10px; font-size: 18px; }
+    #round-end .rn-body { font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.55; }
+
     #rps-toast {
       position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000;
       display: none; background: rgba(30,30,48,0.96); border: 1px solid #3a3a5e;
@@ -1318,6 +1377,29 @@
     </div>
   </div>
 
+  <!-- ── Office After Dark surfaces ── -->
+  <div id="darkness"></div>
+  <div id="round-chip"></div>
+  <div id="round-invite">
+    <div id="round-invite-text"></div>
+    <div class="rn-count" id="round-invite-count"></div>
+    <div class="rps-btn-row">
+      <button id="round-join" class="rps-btn primary" type="button">🌙 I'm in</button>
+      <button id="round-ignore" class="rps-btn" type="button">Ignore</button>
+    </div>
+  </div>
+  <button id="round-kill-btn" type="button" aria-label="Eliminate nearest player">🔪<span id="round-kill-sub"></span></button>
+  <div id="round-role"><div class="rn-big" id="round-role-big"></div><div id="round-role-sub"></div></div>
+  <div id="round-end">
+    <div class="rn-card">
+      <h3 id="round-end-title"></h3>
+      <div class="rn-body" id="round-end-body"></div>
+      <div class="rps-btn-row" style="margin-top:14px">
+        <button id="round-end-ok" class="rps-btn primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div id="rps-match">
     <div class="rps-card">
       <h3 id="rps-match-title"></h3>
@@ -1610,6 +1692,9 @@
       // rpsCancelled goes to the dead socket — close any RPS UI here so the
       // player isn't left frozen in the pick modal until a refresh.
       closeAllRps();
+      // Same for Office After Dark: the server already dropped us from the
+      // round — clear the darkness/HUD so nobody is stranded in the dark.
+      _roundReset();
     });
 
     socket.on('sessionToken', ({ token }) => { if (token) _saveToken(token); });
@@ -2408,6 +2493,7 @@
     });
 
     socket.on('kicked', () => {
+      _roundReset();
       _clearToken();   // revoked: must re-register, not auto-resume
       // Hide all overlay cards and show the kicked card
       ['card-register','card-login','card-reconnecting','card-pending','card-rejected'].forEach(id => {
@@ -2987,6 +3073,20 @@
         window._quickChallenge?.();
       });
       bar.appendChild(cb);
+      // 🌙 Office After Dark rides in the emote bar too — starts a round
+      // (works the same on touch, so it doesn't need its own floating button).
+      const rb = document.createElement('button');
+      rb.type = 'button';
+      rb.className = 'emote-btn challenge';
+      rb.setAttribute('aria-label', 'Start Office After Dark');
+      rb.title = 'Office After Dark — lights out, find the killer';
+      rb.textContent = '🌙';
+      rb.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        if (IS_TOUCH) bar.classList.remove('open');
+        window._roundStart?.();
+      });
+      bar.appendChild(rb);
       document.getElementById('emote-toggle')?.addEventListener('pointerdown', ev => {
         ev.preventDefault(); bar.classList.toggle('open');
       });
@@ -3441,6 +3541,18 @@
       closeChatLog();
     });
 
+    // K = the killer's strike (no-op unless you're the killer in a live round).
+    // Same guard stack as the C key: playing, no text field focused, no modifiers.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'k' && e.key !== 'K') return;
+      if (!document.body.classList.contains('playing')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (_chatOpen || _dmOpen || _rpsUiOpen) return;
+      _roundTryKill();
+    });
+
     // ── On-screen touch controls (joystick + action/chat buttons) ──────
     if (IS_TOUCH) {
       // Send / close buttons in the chat bar (mobile keyboards have no Esc key).
@@ -3773,6 +3885,218 @@
     window._quickChallenge = quickChallenge;
     document.getElementById('touch-challenge')?.addEventListener('pointerdown', (e) => {
       e.preventDefault(); quickChallenge();
+    });
+
+    // ── Office After Dark (client) ─────────────────────────────────────
+    // The server owns ALL round truth (roles, kills, cooldowns, payout) —
+    // this is presentation only, and every bit of it is session-only.
+    // Darkness rendering: #darkness is one oversized fixed div with a static
+    // radial gradient; _roundFrame (called from the scene's update()) only
+    // moves/scales it with a transform, so per-frame cost is negligible.
+    let _roundPhase = null;          // null | 'lobby' | 'active'
+    let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
+    let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
+    let _roundKillRange = 160, _roundCoolMs = 25000, _roundKillReadyAt = 0, _roundEndsAt = 0;
+    let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
+    const _rnEl = (id) => document.getElementById(id);
+
+    function _roundChip(msg) {
+      const c = _rnEl('round-chip');
+      c.textContent = msg;
+      c.classList.add('on');
+    }
+    function _roundStopTick() { if (_roundTick) { clearInterval(_roundTick); _roundTick = null; } }
+
+    // Single teardown for EVERY round surface (mirrors closeAllRps) — called
+    // on roundEnd/roundCancelled, socket disconnect, and kick, so a dropped
+    // connection can never strand someone in the dark.
+    function _roundReset() {
+      _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
+      _roundRoster.clear();
+      _roundStopTick();
+      clearTimeout(_roundInviteTimer); clearTimeout(_roundRoleTimer);
+      document.body.classList.remove('round-dark');
+      _rnEl('round-chip').classList.remove('on');
+      _rnEl('round-invite').classList.remove('open');
+      _rnEl('round-kill-btn').classList.remove('on');
+      _rnEl('round-role').classList.remove('open');
+    }
+
+    function _roundStart() {
+      if (!document.body.classList.contains('playing')) return;
+      if (_rpsPhase) { _rpsToast('Finish your match first!'); return; }
+      if (_roundPhase) { _rpsToast('A round is already going!'); return; }
+      socket.emit('roundStart');
+    }
+    window._roundStart = _roundStart;
+
+    function _roundLobbyChipStart(count, msLeft) {
+      _roundLobbyCount = count;
+      const end = Date.now() + Math.max(0, msLeft);
+      _roundStopTick();
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        _roundChip(`🌙 Office After Dark — ${_roundLobbyCount} in · lights out in ${left}s`);
+        if (left <= 0) _roundStopTick();   // display only — the server decides
+      };
+      tick();
+      _roundTick = setInterval(tick, 250);
+    }
+
+    // Killer-only helpers. Targeting uses the ROUND ROSTER (not _online / all
+    // sprites), so grace-window ghosts and non-participants can't be targeted.
+    function _roundNearestTarget() {
+      const sc = window._gameScene;
+      if (!sc || !sc.player || !sc.otherPlayers) return null;
+      let bestId = null, bestD = Infinity;
+      for (const [id, m] of _roundRoster) {
+        if (id === socket.id || !m.alive) continue;
+        const spr = sc.otherPlayers[id] && sc.otherPlayers[id].sprite;
+        if (!spr) continue;
+        const dx = spr.x - sc.player.x, dy = spr.y - sc.player.y;
+        const dd = dx * dx + dy * dy;
+        if (dd < bestD) { bestD = dd; bestId = id; }
+      }
+      return (bestId && bestD <= _roundKillRange * _roundKillRange) ? bestId : null;
+    }
+    function _roundTryKill() {
+      if (_roundPhase !== 'active' || _roundRole !== 'killer' || !_roundAlive) return;
+      const now = Date.now();
+      if (now < _roundKillReadyAt) { _rpsToast(`Not yet — ${Math.ceil((_roundKillReadyAt - now) / 1000)}s until you can strike.`); return; }
+      const t = _roundNearestTarget();
+      if (!t) { _rpsToast('No one close enough — get closer…'); return; }
+      socket.emit('roundKill', { targetId: t });
+    }
+
+    // 250ms HUD tick while a round is live: countdown chip + kill button state.
+    function _roundHud() {
+      if (_roundPhase !== 'active') return;
+      const total = Math.max(0, Math.round((_roundEndsAt - Date.now()) / 1000));
+      const clock = Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
+      let aliveN = 0, all = 0;
+      for (const m of _roundRoster.values()) { all++; if (m.alive) aliveN++; }
+      _roundChip((_roundAlive ? '🌙 ' : '💀 Watching · ') + clock + ' · ' + aliveN + '/' + all + ' still up');
+      if (_roundRole === 'killer' && _roundAlive) {
+        const cd = Math.ceil((_roundKillReadyAt - Date.now()) / 1000);
+        const target = cd <= 0 ? _roundNearestTarget() : null;
+        _rnEl('round-kill-btn').classList.toggle('cooling', cd > 0 || !target);
+        _rnEl('round-kill-sub').textContent = cd > 0 ? cd + 's' : (target ? (IS_TOUCH ? 'GO' : 'K') : '…');
+      }
+    }
+
+    // Per-frame darkness positioning, called from the scene's update().
+    // Scale mode is RESIZE (1 game px = 1 CSS px at zoom 1), so screen pos =
+    // (world - cam.worldView) * zoom; scale(zoom) keeps the hole radius true.
+    window._roundFrame = (sc) => {
+      if (_roundPhase !== 'active' || !_roundAlive || !sc.player) return;
+      const cam = sc.cameras.main, z = cam.zoom || 1;
+      const sx = (sc.player.x - cam.worldView.x) * z;
+      const sy = (sc.player.y - cam.worldView.y) * z;
+      _rnEl('darkness').style.transform = `translate(${sx - 4000}px, ${sy - 4000}px) scale(${z})`;
+    };
+
+    socket.on('roundInvite', (d) => {
+      d = d || {};
+      if (!document.body.classList.contains('playing')) return;
+      if (_roundPhase) return;                     // already in — ignore stray invites
+      if (d.starterId === socket.id) {             // the starter goes straight to the lobby
+        _roundPhase = 'lobby';
+        _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
+        return;
+      }
+      _rnEl('round-invite-text').textContent = `🌙 ${d.starterName || 'Someone'} wants to play Office After Dark — the lights go out, and one of you is… not friendly.`;
+      _rnEl('round-invite-count').textContent = `${d.count ?? 1} in so far · needs ${d.minPlayers ?? 3}+ to start`;
+      _rnEl('round-invite').classList.add('open');
+      clearTimeout(_roundInviteTimer);
+      _roundInviteTimer = setTimeout(() => _rnEl('round-invite').classList.remove('open'), Math.max(1000, d.joinMs ?? 30000));
+    });
+
+    socket.on('roundJoined', (d) => {
+      d = d || {};
+      _roundPhase = 'lobby';
+      _rnEl('round-invite').classList.remove('open');
+      clearTimeout(_roundInviteTimer);
+      _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
+    });
+    socket.on('roundLobby', (d) => { if (d && d.count) _roundLobbyCount = d.count; });
+    socket.on('roundCancelled', (d) => { _roundReset(); if (d && d.reason) _rpsToast('🌙 ' + d.reason); });
+    socket.on('roundError', (d) => { if (d && d.message) _rpsToast(d.message); });
+
+    socket.on('roundBegin', (d) => {
+      d = d || {};
+      _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
+      _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
+      _roundKillRange = d.killRangePx || 160;
+      _roundCoolMs = d.killCooldownMs || 25000;
+      _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown
+      _roundEndsAt = Date.now() + (d.durationMs || 180000);
+      clearTimeout(_roundInviteTimer);
+      _rnEl('round-invite').classList.remove('open');
+      document.body.classList.add('round-dark');
+      _rnEl('round-role-big').textContent = _roundRole === 'killer' ? '🔪 You are the killer' : '🌙 The lights go out…';
+      _rnEl('round-role-sub').textContent = _roundRole === 'killer'
+        ? 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.'
+        : `Survive until the lights come back on. One of you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
+      _rnEl('round-role').classList.add('open');
+      clearTimeout(_roundRoleTimer);
+      _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 6000);
+      if (_roundRole === 'killer') _rnEl('round-kill-btn').classList.add('on');
+      _roundStopTick();
+      _roundTick = setInterval(_roundHud, 250);
+      _roundHud();
+    });
+
+    socket.on('roundKilled', (d) => {
+      d = d || {};
+      const m = _roundRoster.get(d.victimId);
+      if (m) m.alive = false;
+      const sc = window._gameScene;
+      if (sc) {   // 💀 flash over the victim (reuses the emote-bubble slot)
+        if (d.victimId === socket.id) { if (sc.player) sc._showEmoteBubble(sc.player, '💀', true); }
+        else {
+          const e = sc.otherPlayers && sc.otherPlayers[d.victimId];
+          if (e && e.sprite) e.chatBubble = sc._showEmoteBubble(e.sprite, '💀', false);
+        }
+      }
+      if (d.victimId === socket.id) {
+        _roundAlive = false;
+        document.body.classList.remove('round-dark');   // the fallen see everything
+        _rpsToast('💀 You were got! Stick around and watch how it ends…');
+      } else if (_roundRole === 'killer' && _roundPhase === 'active' && _roundAlive) {
+        _roundKillReadyAt = Date.now() + _roundCoolMs;  // my kill — restart my cooldown
+      }
+    });
+    socket.on('roundLeft', (d) => { if (d && d.id) _roundRoster.delete(d.id); });
+
+    socket.on('roundEnd', (d) => {
+      d = d || {};
+      _roundReset();
+      const crew = d.outcome === 'crew';
+      _rnEl('round-end-title').textContent = crew ? '☀️ The crew made it!' : '🔪 The killer got everyone…';
+      const bits = [`The killer was ${d.killerName || '???'}.` + (d.forfeit ? ' (They vanished mid-round — automatic crew win.)' : '')];
+      if (d.winners && d.winners.length) bits.push(`${d.winners.join(', ')} win${d.winners.length === 1 ? 's' : ''} ${d.prize || 25} 🪙 each!`);
+      else bits.push('No survivors, no payout. Brutal.');
+      _rnEl('round-end-body').textContent = bits.join(' ');
+      _rnEl('round-end').classList.add('open');
+      clearTimeout(_roundEndTimer);
+      _roundEndTimer = setTimeout(() => _rnEl('round-end').classList.remove('open'), 10000);
+    });
+
+    _rnEl('round-join').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase) { _rpsToast('Finish your match first!'); return; }
+      socket.emit('roundJoin');
+    });
+    _rnEl('round-ignore').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      clearTimeout(_roundInviteTimer);
+      _rnEl('round-invite').classList.remove('open');
+    });
+    _rnEl('round-kill-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); _roundTryKill(); });
+    _rnEl('round-end-ok').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      clearTimeout(_roundEndTimer);
+      _rnEl('round-end').classList.remove('open');
     });
 
     function _rpsSendChallenge() {
@@ -5512,6 +5836,10 @@
 
       update(time, delta) {
         if (!this.player) return;
+
+        // Office After Dark darkness overlay follows the player every frame
+        // (transform-only; no-op unless a round is active for us).
+        window._roundFrame?.(this);
 
         const { cursors, wasd, player } = this;
 

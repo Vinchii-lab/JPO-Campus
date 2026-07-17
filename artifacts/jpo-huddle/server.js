@@ -627,6 +627,7 @@ function dropLiveByEmail(email, exceptId) {
     // below triggers this anyway, but if the socket object is already gone
     // there is no disconnect event — this call is the safety net.
     cancelMatchFor(id, "They left the office — match cancelled, no coins moved.");
+    roundHandleLeave(id);
     if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
@@ -720,6 +721,17 @@ async function restorePlayer(socket, row) {
     } catch (err) {
       console.error("daily bonus failed:", err);   // non-fatal: they're already in the office
     }
+  }
+
+  // If a round lobby is gathering, late arrivals get the invite too (with the
+  // remaining join time) — otherwise a resume/reconnect during the 30s window
+  // would silently miss the round.
+  if (round && round.state === "joining") {
+    socket.emit("roundInvite", {
+      starterId: round.starterId, starterName: round.starterName,
+      joinMs: Math.max(0, round.joinEndsAt - Date.now()),
+      minPlayers: ROUND_MIN_PLAYERS, count: round.members.size,
+    });
   }
 }
 
@@ -1393,6 +1405,172 @@ setInterval(async () => {
   ltState.coinTickMs = Date.now() - ltTickStart;
 }, 60_000);
 
+// ── Office After Dark rounds (ephemeral, in-memory only) ────────────────────
+// One office-wide opt-in round at a time: a ~30s join window, then ONE secret
+// killer vs everyone else ("crew"). Crew wins if anyone survives the round
+// timer; the killer wins by eliminating all crew first. Winners get a small
+// coin prize (atomic relative SQL, same pattern as the daily bonus — it only
+// ADDS coins, so there is no wager-style exactness invariant to protect).
+// Round state references LIVE SOCKETS (same rule as duels): a disconnect or
+// refresh mid-round drops you from the round even though the PLAYER gets the
+// usual grace window — the round must never wait on a ghost. Nothing is
+// persisted: a server restart cancels the round harmlessly (clients clear all
+// round UI on the socket 'disconnect' event, so no stuck darkness).
+// SECRECY RULE: the killer's identity is sent ONLY to the killer (their own
+// `role` in roundBegin) until roundEnd reveals it to all participants. Kill
+// broadcasts carry only the victim. Keep it that way.
+// ROUND_JOIN_MS / ROUND_DURATION_MS accept env overrides — TEST KNOBS ONLY
+// (headless integration tests can't wait 3 real minutes); never set in prod.
+const ROUND_JOIN_MS          = Math.max(3_000,  Number(process.env.ROUND_JOIN_MS) || 30_000);
+const ROUND_DURATION_MS      = Math.max(10_000, Number(process.env.ROUND_DURATION_MS) || 180_000);
+const ROUND_MIN_PLAYERS      = 3;
+const ROUND_KILL_RANGE_PX    = 160;     // ~3.3 tiles at render scale 3 (well under RPS_RANGE_PX)
+const ROUND_KILL_COOLDOWN_MS = 25_000;  // between kills — ALSO the arm delay before the first kill
+const ROUND_PRIZE            = 25;      // per winner
+
+let round = null;
+// { state:'joining'|'active'|'ending', starterId, starterName,
+//   members: Map<socketId, {name, alive}>,     ← includes the killer
+//   killerId, joinTimer, joinEndsAt, endTimer, endsAt, killReadyAt }
+
+function inRound(id)       { return !!round && round.members.has(id); }
+function inActiveRound(id) { return !!round && round.state === "active" && round.members.has(id); }
+
+// Roster sent to EVERY participant (ids/names/alive are not secret — clients
+// need it for the kill affordance, 💀 flashes, and spectator rendering, and it
+// must not include grace-window ghosts the killer could waste a kill on).
+function roundRoster() {
+  return [...round.members].map(([id, m]) => ({ id, name: m.name, alive: m.alive }));
+}
+
+function roundEmitMembers(event, payload) {
+  for (const id of round.members.keys()) io.to(id).emit(event, payload);
+}
+
+function aliveCrewCount() {
+  let n = 0;
+  for (const [id, m] of round.members) if (m.alive && id !== round.killerId) n++;
+  return n;
+}
+
+function cancelRound(reason) {
+  if (!round) return;
+  const r = round;
+  round = null;
+  clearTimeout(r.joinTimer); clearTimeout(r.endTimer);
+  for (const id of r.members.keys()) io.to(id).emit("roundCancelled", { reason });
+  console.log(`Office After Dark: cancelled (${reason})`);
+}
+
+// Join window expired: enough players → assign the killer and go dark.
+function beginRound() {
+  if (!round || round.state !== "joining") return;
+  // Belt-and-braces: drop members whose player entry vanished without a
+  // cleanup call (should not happen — roundHandleLeave covers every seam).
+  for (const id of [...round.members.keys()]) if (!players[id]) round.members.delete(id);
+  if (round.members.size < ROUND_MIN_PLAYERS) {
+    cancelRound(`Not enough players — it takes at least ${ROUND_MIN_PLAYERS} to play.`);
+    return;
+  }
+  const ids = [...round.members.keys()];
+  round.killerId    = ids[Math.floor(Math.random() * ids.length)];
+  round.state       = "active";
+  round.endsAt      = Date.now() + ROUND_DURATION_MS;
+  round.killReadyAt = Date.now() + ROUND_KILL_COOLDOWN_MS;   // arm delay = one cooldown
+  round.endTimer    = setTimeout(() => {
+    endRound("crew").catch((err) => console.error("round timer end failed:", err));
+  }, ROUND_DURATION_MS);
+  const roster = roundRoster();
+  for (const id of ids) {
+    // Identical payload for every crew member — only `role` differs, and only
+    // the killer's says so. Constants (cooldown, prize) leak nothing.
+    io.to(id).emit("roundBegin", {
+      role: id === round.killerId ? "killer" : "crew",
+      durationMs: ROUND_DURATION_MS,
+      killCooldownMs: ROUND_KILL_COOLDOWN_MS,
+      killRangePx: ROUND_KILL_RANGE_PX,
+      players: roster,
+      prize: ROUND_PRIZE,
+    });
+  }
+  console.log(`Office After Dark: round started with ${ids.length} players`);
+}
+
+// The ONLY active → ending transition. The state flip is SYNCHRONOUS (before
+// any await), so a late end timer, a kill, or a leave firing mid-payout are
+// all no-ops — same double-settle discipline as finishMatch. Winner identities
+// (id/name/email) are snapshotted BEFORE the await because players[] entries
+// can vanish while the payout SQL is in flight.
+async function endRound(outcome, { forfeit = false } = {}) {
+  if (!round || round.state !== "active") return;
+  const r = round;
+  r.state = "ending";
+  clearTimeout(r.joinTimer); clearTimeout(r.endTimer);
+  const killerName = r.members.get(r.killerId)?.name || "???";
+  const winnerPairs = outcome === "crew"
+    ? [...r.members].filter(([id, m]) => m.alive && id !== r.killerId)
+    : (r.members.has(r.killerId) ? [[r.killerId, r.members.get(r.killerId)]] : []);
+  const winners = winnerPairs.map(([id, m]) => ({ id, name: m.name, email: players[id]?.email || null }));
+
+  for (const w of winners) {
+    try {
+      if (w.email) {
+        const { rows } = await pool.query(
+          `UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`,
+          [w.email, ROUND_PRIZE],
+        );
+        const p = players[w.id];
+        if (rows[0] && p && p.email === w.email) {
+          p.coins = rows[0].coins;
+          io.to(w.id).emit("coinUpdate", { coins: p.coins });
+        }
+      } else {
+        const p = players[w.id];   // session-only: memory credit (same as their duels)
+        if (p) { p.coins += ROUND_PRIZE; io.to(w.id).emit("coinUpdate", { coins: p.coins }); }
+      }
+    } catch (err) { console.error("round payout failed:", err); }
+  }
+
+  const payload = {
+    outcome, forfeit,
+    killerId: r.killerId, killerName,
+    winners: winners.map((w) => w.name),
+    prize: ROUND_PRIZE,
+  };
+  for (const id of r.members.keys()) io.to(id).emit("roundEnd", payload);
+  if (round === r) round = null;
+  console.log(`Office After Dark: ${outcome === "crew" ? "crew survived" : `the killer (${killerName}) won`}${forfeit ? " (forfeit)" : ""} — ${winners.length} winner(s) × ${ROUND_PRIZE} coins`);
+}
+
+function checkKillerWin() {
+  if (round && round.state === "active" && aliveCrewCount() === 0) {
+    endRound("killer").catch((err) => console.error("round killer-win end failed:", err));
+  }
+}
+
+// Remove a departing socket from the round — the round-side seam mirrored on
+// cancelMatchFor and hooked into the SAME three places (disconnect, kickPlayer,
+// dropLiveByEmail). Keyed off round.members, NOT players[] — dropLiveByEmail
+// deletes players[id] before this runs, and kickPlayer never disconnects.
+function roundHandleLeave(id) {
+  if (!round || !round.members.has(id)) return;
+  if (round.state === "joining") {
+    round.members.delete(id);
+    if (round.members.size === 0) cancelRound("Everyone left before the round began.");
+    else roundEmitMembers("roundLobby", { count: round.members.size });
+    return;
+  }
+  if (round.state !== "active") return;   // 'ending' → settlement stands
+  if (id === round.killerId) {
+    // A vanished killer can't win by hiding offline — instant crew win.
+    endRound("crew", { forfeit: true }).catch((err) => console.error("round killer-leave end failed:", err));
+    return;
+  }
+  round.members.delete(id);               // crew leaver forfeits any prize
+  roundEmitMembers("roundLeft", { id });
+  checkKillerWin();
+}
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
@@ -1407,6 +1585,7 @@ io.on("connection", (socket) => {
   const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
   const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
   const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
+  const roundBucket = makeBucket(4, 1500);     // guards round start/join/kill spam
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -1802,6 +1981,7 @@ io.on("connection", (socket) => {
     // kickPlayer never disconnects the target socket, so the disconnect-based
     // match cleanup would not fire — cancel their match explicitly.
     cancelMatchFor(targetId, "Match cancelled — no coins moved.");
+    roundHandleLeave(targetId);
     delete players[targetId];
     io.to(targetId).emit("kicked");
     io.emit("playerLeft", targetId);
@@ -2068,6 +2248,10 @@ io.on("connection", (socket) => {
     if (!target) { socket.emit("rpsChallengeFailed", { message: "They're not in the office right now." }); return; }
     if (rpsBySocket.has(socket.id)) { socket.emit("rpsChallengeFailed", { message: "You're already in a challenge." }); return; }
     if (rpsBySocket.has(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is busy in another match.` }); return; }
+    // ANY round membership blocks duels — joining too, or a duel accepted
+    // during the 30s lobby would still be running when the lights go out.
+    if (inRound(socket.id)) { socket.emit("rpsChallengeFailed", { message: "No duels during Office After Dark!" }); return; }
+    if (inRound(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is playing Office After Dark.` }); return; }
     const dx = (me.x ?? 0) - (target.x ?? 0), dy = (me.y ?? 0) - (target.y ?? 0);
     if (dx * dx + dy * dy > RPS_RANGE_PX * RPS_RANGE_PX) {
       socket.emit("rpsChallengeFailed", { message: "Walk closer to challenge them." });
@@ -2406,6 +2590,7 @@ io.on("connection", (socket) => {
     // accept-time wager check exact all the way to settlement (the coin tick
     // only ever ADDS coins).
     if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
     if (!p.email) {
@@ -2497,6 +2682,7 @@ io.on("connection", (socket) => {
     if (!p || !cost) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
     if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
     if (!p.email) {
@@ -2589,6 +2775,7 @@ io.on("connection", (socket) => {
     if (!Number.isInteger(pantsIdx) || pantsIdx < 0 || pantsIdx > CLOTH_MAX) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
     if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
     if (shirtIdx === p.shirtIdx && pantsIdx === p.pantsIdx) {
       socket.emit("shopError", "You're already wearing those colours!");
       return;
@@ -2644,6 +2831,7 @@ io.on("connection", (socket) => {
     if (!p || !def) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
     if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
     if (!p.email) {
@@ -2832,11 +3020,15 @@ io.on("connection", (socket) => {
         socket.emit("interactError", { message: "You're already in a match." });
         return;
       }
+      if (inRound(socket.id)) {
+        socket.emit("interactError", { message: "No arcade during Office After Dark!" });
+        return;
+      }
       // Needs a second player standing at the cabinet; the nearest free one
       // gets the invite and the normal accept/decline flow takes over.
       let bestId = null, bestD = Infinity;
       for (const [oid, op] of Object.entries(players)) {
-        if (oid === socket.id || rpsBySocket.has(oid)) continue;
+        if (oid === socket.id || rpsBySocket.has(oid) || inRound(oid)) continue;
         const ox = (op.x ?? 0) - obj.x, oy = (op.y ?? 0) - obj.y;
         const d = ox * ox + oy * oy;
         if (d <= obj.r * obj.r && d < bestD) { bestId = oid; bestD = d; }
@@ -2852,12 +3044,91 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Office After Dark handlers ───────────────────────────────────────
+  // Start a round: anyone approved can, as long as no round is live and they
+  // aren't mid-duel. The starter auto-joins; everyone gets the invite.
+  socket.on("roundStart", () => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(roundBucket)) return;   // silently drop spam
+    if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (round) {
+      socket.emit("roundError", {
+        message: round.state === "joining" ? "A round is already gathering — join that one!" : "A round is already in progress.",
+      });
+      return;
+    }
+    // No await between the round-exists check above and this assignment —
+    // that synchronicity is the double-start guard.
+    round = {
+      state: "joining", starterId: socket.id, starterName: p.name,
+      members: new Map([[socket.id, { name: p.name, alive: true }]]),
+      killerId: null, endsAt: 0, killReadyAt: 0, endTimer: null,
+      joinEndsAt: Date.now() + ROUND_JOIN_MS,
+      joinTimer: setTimeout(beginRound, ROUND_JOIN_MS),
+    };
+    io.emit("roundInvite", {
+      starterId: socket.id, starterName: p.name,
+      joinMs: ROUND_JOIN_MS, minPlayers: ROUND_MIN_PLAYERS, count: 1,
+    });
+    console.log(`Office After Dark: ${p.name} started a round`);
+  });
+
+  socket.on("roundJoin", () => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(roundBucket)) return;
+    if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (!round || round.state !== "joining") { socket.emit("roundError", { message: "No round is gathering right now." }); return; }
+    if (round.members.has(socket.id)) return;   // already in — quietly ignore
+    round.members.set(socket.id, { name: p.name, alive: true });
+    socket.emit("roundJoined", {
+      count: round.members.size,
+      joinMs: Math.max(0, round.joinEndsAt - Date.now()),
+      minPlayers: ROUND_MIN_PLAYERS,
+    });
+    roundEmitMembers("roundLobby", { count: round.members.size });
+  });
+
+  // The killer's kill intent. Everything is validated HERE: role, aliveness,
+  // cooldown, proximity (against server-side positions fed by validated
+  // playerMoves). Non-killer probes are silently dropped — an error reply
+  // would confirm nothing they don't already know, but silence is cheaper.
+  socket.on("roundKill", (payload) => {
+    const { targetId } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(roundBucket)) return;
+    if (!round || round.state !== "active" || socket.id !== round.killerId) return;
+    if (typeof targetId !== "string" || targetId === socket.id) return;
+    const tm = round.members.get(targetId);
+    const tp = players[targetId];
+    if (!tm || !tm.alive || !tp) { socket.emit("roundError", { message: "They slipped away…" }); return; }
+    const now = Date.now();
+    if (now < round.killReadyAt) {
+      socket.emit("roundError", { message: `Not yet — ${Math.ceil((round.killReadyAt - now) / 1000)}s until you can strike.` });
+      return;
+    }
+    const dx = (p.x ?? 0) - (tp.x ?? 0), dy = (p.y ?? 0) - (tp.y ?? 0);
+    if (dx * dx + dy * dy > ROUND_KILL_RANGE_PX * ROUND_KILL_RANGE_PX) {
+      socket.emit("roundError", { message: "Get closer…" });
+      return;
+    }
+    tm.alive = false;
+    round.killReadyAt = now + ROUND_KILL_COOLDOWN_MS;
+    // Victim id/name only — the killer's identity stays secret until roundEnd.
+    roundEmitMembers("roundKilled", { victimId: targetId, victimName: tm.name });
+    console.log(`Office After Dark: ${tm.name} was eliminated`);
+    checkKillerWin();
+  });
+
   // ── Disconnect ───────────────────────────────────────────────────────
   socket.on("disconnect", async () => {
     // A mid-match refresh/blip cancels the match immediately (no coins move) —
     // even though the PLAYER gets a ~10s grace window, the MATCH does not:
     // leaving an opponent staring at a hung pick screen is worse than a re-challenge.
     cancelMatchFor(socket.id, "They left the office — match cancelled, no coins moved.");
+    roundHandleLeave(socket.id);   // same policy: the PLAYER gets grace, the round does not
     if (pending[socket.id]) {
       console.log(`Pending disconnected: ${pending[socket.id].name}`);
       delete pending[socket.id];
