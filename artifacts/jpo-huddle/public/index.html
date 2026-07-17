@@ -1854,12 +1854,15 @@
     // its 16x32 frame (origin 0.5,0.5, feet at +27 world px), so the visible
     // head top is ≈ y-24, eyes ≈ y-12, chin/neck ≈ y0 — NOT the frame top.
     const WEARABLE_DEFS = {
-      // shades dy=8 is EMPIRICAL (screenshot-swept in headless Chrome): the
-      // lens art sits high inside its texture frame, so the eye-line offset
-      // is larger than the head-geometry note above suggests.
-      shades: { tex: 'wear_shades', dy: 8, side: 6 },
-      cap:    { tex: 'wear_cap',    dy: -22, side: 3 },
-      chain:  { tex: 'wear_chain',  dy: 4,   side: 3 },
+      // ALL dy values are EMPIRICAL (screenshot-swept in headless Chrome):
+      // each wearable's art sits differently inside its texture frame, so the
+      // head-geometry note above is only a starting point — never trust it
+      // without an in-game screenshot. Textures are 2-frame sheets (frame 0 =
+      // front, frame 1 = side profile facing right); optional sideDy overrides
+      // dy for the side frame.
+      shades: { tex: 'wear_shades', dy: 8,   side: 6 },
+      cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
+      chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -4520,9 +4523,11 @@
         // Custom furniture sprite (not part of the Tiled map): the Pantry water
         // cooler, drawn beside the potted plant. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
-        this.load.image('wear_shades', '/assets/wear_shades.png');
-        this.load.image('wear_cap',    '/assets/wear_cap.png');
-        this.load.image('wear_chain',  '/assets/wear_chain.png');
+        // Wearables are 2-frame sheets: frame 0 = front (facing down),
+        // frame 1 = side profile drawn facing RIGHT (flipX handles left).
+        this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
 
         CHARACTERS.forEach(char => {
@@ -5100,15 +5105,18 @@
       _placeWearable(img, def, x, y, dir) {
         if (dir === 'up') { img.setVisible(false); return; }   // back view — gear hidden
         img.setVisible(true);
+        const sideways = dir === 'left' || dir === 'right';
+        img.setFrame(sideways ? 1 : 0);                        // frame 1 = side profile
         img.setFlipX(dir === 'left');
         const dx = dir === 'left' ? -def.side : dir === 'right' ? def.side : 0;
-        img.setPosition(x + dx, y + def.dy);
+        const dy = sideways && def.sideDy !== undefined ? def.sideDy : def.dy;
+        img.setPosition(x + dx, y + dy);
       }
 
       _makeCosmetic(equipped, x, y, dir) {
         const wd = WEARABLE_DEFS[equipped];
         if (wd) {
-          const img = this.add.image(x, y + wd.dy, wd.tex).setScale(3).setDepth(10);
+          const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(3).setDepth(10);
           this._placeWearable(img, wd, x, y, dir || 'down');
           return { obj: img, def: wd };
         }
