@@ -3908,7 +3908,7 @@
     let _roundPhase = null;          // null | 'lobby' | 'active'
     let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
-    let _roundKillRange = 200, _roundCoolMs = 25000, _roundKillReadyAt = 0, _roundEndsAt = 0;
+    let _roundKillRange = 200, _roundCoolMs = 12000, _roundKillReadyAt = 0, _roundEndsAt = 0;
     let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
     let _roundInviteMin = 3;
     const _rnEl = (id) => document.getElementById(id);
@@ -4075,7 +4075,7 @@
       _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
       _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
       _roundKillRange = d.killRangePx || 200;
-      _roundCoolMs = d.killCooldownMs || 25000;
+      _roundCoolMs = d.killCooldownMs || 12000;
       _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown
       _roundEndsAt = Date.now() + (d.durationMs || 180000);
       clearTimeout(_roundInviteTimer);

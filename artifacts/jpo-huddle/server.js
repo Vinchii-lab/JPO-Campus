@@ -1431,13 +1431,21 @@ const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well unde
 // the client's own range check legitimately offered gets rejected "Get
 // closer…" mid-chase. The client still targets at ROUND_KILL_RANGE_PX.
 const ROUND_KILL_SLACK_PX    = 80;
-const ROUND_KILL_COOLDOWN_MS = 25_000;  // between kills — ALSO the arm delay before the first kill
+const ROUND_KILL_COOLDOWN_MS = 12_000;  // between kills — ALSO the arm delay before the first kill
 const ROUND_PRIZE            = 25;      // per winner
 
 let round = null;
 // { state:'joining'|'active'|'ending', starterId, starterName,
 //   members: Map<socketId, {name, alive}>,     ← includes the killer
 //   killerId, joinTimer, joinEndsAt, endTimer, endsAt, killReadyAt }
+
+// Who was the killer LAST round (email, or socket id for session-only
+// players). Pure Math.random() picks the same person back-to-back
+// surprisingly often with a small group (1-in-3 with 3 players), which
+// feels rigged — so the previous killer is excluded from the draw whenever
+// at least two other candidates remain. In-memory only: a restart forgets
+// it, which is fine (worst case one repeat after a redeploy).
+let lastKillerKey = null;
 
 function inRound(id)       { return !!round && round.members.has(id); }
 function inActiveRound(id) { return !!round && round.state === "active" && round.members.has(id); }
@@ -1479,7 +1487,13 @@ function beginRound() {
     return;
   }
   const ids = [...round.members.keys()];
-  round.killerId    = ids[Math.floor(Math.random() * ids.length)];
+  // Exclude last round's killer from the draw when enough others remain
+  // (identity keyed by email so reconnects/socket-id churn can't dodge it).
+  const keyOf = (id) => (players[id]?.email || id);
+  const pool = ids.filter((id) => keyOf(id) !== lastKillerKey);
+  const candidates = pool.length >= 2 ? pool : ids;
+  round.killerId    = candidates[Math.floor(Math.random() * candidates.length)];
+  lastKillerKey     = keyOf(round.killerId);
   round.state       = "active";
   round.endsAt      = Date.now() + ROUND_DURATION_MS;
   round.killReadyAt = Date.now() + ROUND_KILL_COOLDOWN_MS;   // arm delay = one cooldown
