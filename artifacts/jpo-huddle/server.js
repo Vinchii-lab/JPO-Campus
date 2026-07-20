@@ -189,12 +189,12 @@ const SHOP = {
 // from equipped_cosmetic, so you can wear shades AND walk your dog. Ids MUST
 // match the client PETS catalog in public/index.html (emoji/names live there).
 const PETS = {
-  pet_duck:   40,
-  pet_cat:    60,
-  pet_dog:    60,
-  pet_bunny:  80,
-  pet_turtle: 100,
-  pet_dragon: 250,
+  pet_duck:   10000,
+  pet_cat:    12500,
+  pet_dog:    12500,
+  pet_bunny:  15000,
+  pet_turtle: 20000,
+  pet_dragon: 30000,
 };
 
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or

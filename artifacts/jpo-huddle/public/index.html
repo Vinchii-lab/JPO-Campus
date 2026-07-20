@@ -1993,12 +1993,12 @@
     // collide with wearable ids); the active pet is _equippedPet ('' = none),
     // a separate slot from the worn cosmetic.
     const PETS = [
-      { id: 'pet_duck',   emoji: '🦆', name: 'Duck',        cost: 40,  desc: 'waddles along behind you' },
-      { id: 'pet_cat',    emoji: '🐱', name: 'Office Cat',  cost: 60,  desc: 'follows you, when it feels like it' },
-      { id: 'pet_dog',    emoji: '🐶', name: 'Office Dog',  cost: 60,  desc: 'a very good boy' },
-      { id: 'pet_bunny',  emoji: '🐰', name: 'Bunny',       cost: 80,  desc: 'hops after you everywhere' },
-      { id: 'pet_turtle', emoji: '🐢', name: 'Turtle',      cost: 100, desc: 'takes his sweet time' },
-      { id: 'pet_dragon', emoji: '🐉', name: 'Baby Dragon', cost: 250, desc: 'the ultimate office flex' },
+      { id: 'pet_duck',   emoji: '🦆', name: 'Duck',        cost: 10000, desc: 'waddles along behind you' },
+      { id: 'pet_cat',    emoji: '🐱', name: 'Office Cat',  cost: 12500, desc: 'follows you, when it feels like it' },
+      { id: 'pet_dog',    emoji: '🐶', name: 'Office Dog',  cost: 12500, desc: 'a very good boy' },
+      { id: 'pet_bunny',  emoji: '🐰', name: 'Bunny',       cost: 15000, desc: 'hops after you everywhere' },
+      { id: 'pet_turtle', emoji: '🐢', name: 'Turtle',      cost: 20000, desc: 'takes his sweet time' },
+      { id: 'pet_dragon', emoji: '🐉', name: 'Baby Dragon', cost: 30000, desc: 'the ultimate office flex' },
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
     const PET_GAP   = 36;   // px the pet trails behind its owner (follow-at-distance)
