@@ -1450,6 +1450,16 @@ let lastKillerKey = null;
 function inRound(id)       { return !!round && round.members.has(id); }
 function inActiveRound(id) { return !!round && round.state === "active" && round.members.has(id); }
 
+// "In the dark": an ALIVE participant of the ACTIVE round (killer included).
+// While a round is live these players must not receive chat/whispers from
+// anyone OUTSIDE the dark (non-participants and eliminated ghosts have the
+// lights on and were calling out positions to players still in the round).
+function inTheDark(id) {
+  if (!round || round.state !== "active") return false;
+  const m = round.members.get(id);
+  return !!m && m.alive;
+}
+
 // Roster sent to EVERY participant (ids/names/alive are not secret — clients
 // need it for the kill affordance, 💀 flashes, and spectator rendering, and it
 // must not include grace-window ghosts the killer could waste a kill on).
@@ -2140,7 +2150,16 @@ io.on("connection", (socket) => {
     if (!takeToken(chatBucket)) return;   // throttle chat spam (silently drop)
     const text = (message || "").trim().slice(0, 120);
     if (!text) return;
-    io.emit("chatMessage", { id: socket.id, name: players[socket.id].name, message: text });
+    const msg = { id: socket.id, name: players[socket.id].name, message: text };
+    // While Office After Dark is live, players in the dark hear ONLY each
+    // other. A message from anyone lit up (outsiders, eliminated ghosts) is
+    // delivered to everyone EXCEPT alive participants, so observers can't
+    // call out positions to people still in the round.
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatMessage", msg);
+    } else {
+      io.emit("chatMessage", msg);
+    }
   });
 
   // ── Emotes (ephemeral reaction bubbles, relayed to everyone) ─────────
@@ -2171,6 +2190,12 @@ io.on("connection", (socket) => {
     const target = players[targetId];
     if (!target) {
       socket.emit("whisperFailed", { message: "They're not in the office right now." });
+      return;
+    }
+    // Same rule as public chat: nobody outside the dark can whisper someone
+    // who's still in the round (position call-outs). Dark→dark is allowed.
+    if (inTheDark(targetId) && !inTheDark(socket.id)) {
+      socket.emit("whisperFailed", { message: "🌙 They're in the dark — wait until the round ends." });
       return;
     }
     io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, message: text });
