@@ -14,17 +14,29 @@
     // On load we ping /stamp; if the server has restarted since this page was cached,
     // stamps won't match and we force a hard reload — bypassing every proxy / iframe cache.
     window.__BUILD__ = '__BUILD_STAMP_TOKEN__';
-    window.addEventListener('load', function() {
+    // Reusable checker: also called on socket RECONNECT (see the additional
+    // 'connect' listener in the game script) so a tab left open for weeks
+    // self-heals the next time the server restarts — without this, only a
+    // fresh page load ever re-checked and long-lived tabs ran stale clients
+    // indefinitely. Reload-loop guard: BUILD_STAMP is per-process (Date.now()),
+    // so multiple autoscale instances answer /stamp with different values —
+    // never reload more than once per 5 minutes per tab.
+    window._checkStamp = function() {
       fetch('/stamp?_=' + Date.now(), { cache: 'no-store' })
         .then(function(r){ return r.json(); })
         .then(function(d){
           if (String(d.stamp) !== String(window.__BUILD__)) {
+            var last = 0;
+            try { last = Number(sessionStorage.getItem('jpo_cb_at') || 0); } catch (e) {}
+            if (Date.now() - last < 5 * 60 * 1000) return;
+            try { sessionStorage.setItem('jpo_cb_at', String(Date.now())); } catch (e) {}
             console.log('[cache-buster] stale page detected — reloading');
             location.href = location.pathname + '?_cb=' + d.stamp;
           }
         })
         .catch(function(){});
-    });
+    };
+    window.addEventListener('load', window._checkStamp);
   </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -3896,7 +3908,7 @@
     let _roundPhase = null;          // null | 'lobby' | 'active'
     let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
-    let _roundKillRange = 160, _roundCoolMs = 25000, _roundKillReadyAt = 0, _roundEndsAt = 0;
+    let _roundKillRange = 200, _roundCoolMs = 25000, _roundKillReadyAt = 0, _roundEndsAt = 0;
     let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
     let _roundInviteMin = 3;
     const _rnEl = (id) => document.getElementById(id);
@@ -4062,7 +4074,7 @@
       d = d || {};
       _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
       _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
-      _roundKillRange = d.killRangePx || 160;
+      _roundKillRange = d.killRangePx || 200;
       _roundCoolMs = d.killCooldownMs || 25000;
       _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown
       _roundEndsAt = Date.now() + (d.durationMs || 180000);
@@ -4740,6 +4752,19 @@
     // (socket.io multi-listener, same pattern as the resume-token replay).
     socket.on('connect', () => {
       if (_adminAuthed && _adminPwd) socket.emit('adminAuth', { password: _adminPwd });
+    });
+    // Stale-client self-heal on RECONNECT: the load-time /stamp check only runs
+    // once, so a tab left open for weeks keeps running an old client forever
+    // (this shipped bugs to users who never closed the game tab). A reconnect
+    // is exactly when the server may have restarted with a new build — re-check
+    // then. Skips the FIRST connect (the load-time check covers it); the
+    // reload-loop guard lives inside _checkStamp. A reload here is safe: the
+    // resume token auto-rejoins the player. Additional 'connect' listener by
+    // design (socket.io multi-listener, same pattern as the admin re-auth above).
+    let _hadFirstConnect = false;
+    socket.on('connect', () => {
+      if (_hadFirstConnect && window._checkStamp) window._checkStamp();
+      _hadFirstConnect = true;
     });
 
     // ── Announcement boards ───────────────────────────────────────────

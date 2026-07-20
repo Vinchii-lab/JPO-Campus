@@ -1424,7 +1424,13 @@ setInterval(async () => {
 const ROUND_JOIN_MS          = Math.max(3_000,  Number(process.env.ROUND_JOIN_MS) || 30_000);
 const ROUND_DURATION_MS      = Math.max(10_000, Number(process.env.ROUND_DURATION_MS) || 180_000);
 const ROUND_MIN_PLAYERS      = 3;
-const ROUND_KILL_RANGE_PX    = 160;     // ~3.3 tiles at render scale 3 (well under RPS_RANGE_PX)
+const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well under RPS_RANGE_PX)
+// Desync slack for the server-side kill check ONLY (never advertised to the
+// client). The killer's server position is fed by throttled playerMoves, so it
+// lags their on-screen position while they're walking; without slack, a kill
+// the client's own range check legitimately offered gets rejected "Get
+// closer…" mid-chase. The client still targets at ROUND_KILL_RANGE_PX.
+const ROUND_KILL_SLACK_PX    = 80;
 const ROUND_KILL_COOLDOWN_MS = 25_000;  // between kills — ALSO the arm delay before the first kill
 const ROUND_PRIZE            = 25;      // per winner
 
@@ -3114,7 +3120,8 @@ io.on("connection", (socket) => {
       return;
     }
     const dx = (p.x ?? 0) - (tp.x ?? 0), dy = (p.y ?? 0) - (tp.y ?? 0);
-    if (dx * dx + dy * dy > ROUND_KILL_RANGE_PX * ROUND_KILL_RANGE_PX) {
+    const maxD = ROUND_KILL_RANGE_PX + ROUND_KILL_SLACK_PX;
+    if (dx * dx + dy * dy > maxD * maxD) {
       socket.emit("roundError", { message: "Get closer…" });
       return;
     }
