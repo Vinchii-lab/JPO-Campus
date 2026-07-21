@@ -1436,16 +1436,25 @@ const ROUND_PRIZE            = 25;      // per winner
 
 let round = null;
 // { state:'joining'|'active'|'ending', starterId, starterName,
-//   members: Map<socketId, {name, alive}>,     ← includes the killer
-//   killerId, joinTimer, joinEndsAt, endTimer, endsAt, killReadyAt }
+//   members: Map<socketId, {name, alive, killReadyAt?}>,  ← includes the killers
+//   killerIds: Set<socketId>, joinTimer, joinEndsAt, endTimer, endsAt }
+// killReadyAt lives PER KILLER on the member record — with several killers a
+// shared cooldown would let one killer's strike lock out the others.
 
-// Who was the killer LAST round (email, or socket id for session-only
+// Killer count scales with the lobby at ~1 per 3 players (user-requested
+// ratio): 3-4 → 1, 5-7 → 2, 8-10 → 3, 11-13 → 4, …
+function killerCountFor(n) {
+  return 1 + Math.floor(Math.max(0, n - 2) / 3);
+}
+
+// Who the killers were LAST round (emails, or socket ids for session-only
 // players). Pure Math.random() picks the same person back-to-back
 // surprisingly often with a small group (1-in-3 with 3 players), which
-// feels rigged — so the previous killer is excluded from the draw whenever
-// at least two other candidates remain. In-memory only: a restart forgets
-// it, which is fine (worst case one repeat after a redeploy).
-let lastKillerKey = null;
+// feels rigged — so previous killers are excluded from the draw whenever
+// enough other candidates remain to keep the pick a real choice. In-memory
+// only: a restart forgets it, which is fine (worst case one repeat after a
+// redeploy).
+let lastKillerKeys = new Set();
 
 function inRound(id)       { return !!round && round.members.has(id); }
 function inActiveRound(id) { return !!round && round.state === "active" && round.members.has(id); }
@@ -1473,7 +1482,7 @@ function roundEmitMembers(event, payload) {
 
 function aliveCrewCount() {
   let n = 0;
-  for (const [id, m] of round.members) if (m.alive && id !== round.killerId) n++;
+  for (const [id, m] of round.members) if (m.alive && !round.killerIds.has(id)) n++;
   return n;
 }
 
@@ -1486,7 +1495,7 @@ function cancelRound(reason) {
   console.log(`Office After Dark: cancelled (${reason})`);
 }
 
-// Join window expired: enough players → assign the killer and go dark.
+// Join window expired: enough players → assign the killers and go dark.
 function beginRound() {
   if (!round || round.state !== "joining") return;
   // Belt-and-braces: drop members whose player entry vanished without a
@@ -1497,25 +1506,42 @@ function beginRound() {
     return;
   }
   const ids = [...round.members.keys()];
-  // Exclude last round's killer from the draw when enough others remain
-  // (identity keyed by email so reconnects/socket-id churn can't dodge it).
+  const killerCount = killerCountFor(ids.length);
+  // Exclude last round's killers from the draw when enough others remain to
+  // keep it a real choice (identity keyed by email so reconnects/socket-id
+  // churn can't dodge it).
   const keyOf = (id) => (players[id]?.email || id);
-  const pool = ids.filter((id) => keyOf(id) !== lastKillerKey);
-  const candidates = pool.length >= 2 ? pool : ids;
-  round.killerId    = candidates[Math.floor(Math.random() * candidates.length)];
-  lastKillerKey     = keyOf(round.killerId);
-  round.state       = "active";
-  round.endsAt      = Date.now() + ROUND_DURATION_MS;
-  round.killReadyAt = Date.now() + ROUND_KILL_COOLDOWN_MS;   // arm delay = one cooldown
-  round.endTimer    = setTimeout(() => {
+  const pool = ids.filter((id) => !lastKillerKeys.has(keyOf(id)));
+  const candidates = pool.length >= killerCount + 1 ? pool : ids;
+  // Fisher-Yates shuffle a copy, take the first killerCount as the killers.
+  const deck = [...candidates];
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  round.killerIds = new Set(deck.slice(0, killerCount));
+  // Name snapshot at draw time: the end-card reveal must name ALL killers,
+  // including any who leave mid-round (leavers vanish from members/killerIds).
+  round.killerNameOf = new Map([...round.killerIds].map((k) => [k, round.members.get(k).name]));
+  lastKillerKeys  = new Set([...round.killerIds].map(keyOf));
+  round.state     = "active";
+  round.endsAt    = Date.now() + ROUND_DURATION_MS;
+  round.endTimer  = setTimeout(() => {
     endRound("crew").catch((err) => console.error("round timer end failed:", err));
   }, ROUND_DURATION_MS);
+  const armAt = Date.now() + ROUND_KILL_COOLDOWN_MS;   // arm delay = one cooldown
+  for (const kid of round.killerIds) round.members.get(kid).killReadyAt = armAt;
   const roster = roundRoster();
   for (const id of ids) {
-    // Identical payload for every crew member — only `role` differs, and only
-    // the killer's says so. Constants (cooldown, prize) leak nothing.
+    // Identical payload for every crew member — only `role` differs (and only
+    // killers additionally get their accomplices, so a killer team never
+    // wastes a kill on each other). Constants (cooldown, prize) leak nothing.
+    const isKiller = round.killerIds.has(id);
     io.to(id).emit("roundBegin", {
-      role: id === round.killerId ? "killer" : "crew",
+      role: isKiller ? "killer" : "crew",
+      accomplices: isKiller
+        ? [...round.killerIds].filter((k) => k !== id).map((k) => ({ id: k, name: round.members.get(k).name }))
+        : undefined,
       durationMs: ROUND_DURATION_MS,
       killCooldownMs: ROUND_KILL_COOLDOWN_MS,
       killRangePx: ROUND_KILL_RANGE_PX,
@@ -1523,7 +1549,10 @@ function beginRound() {
       prize: ROUND_PRIZE,
     });
   }
-  console.log(`Office After Dark: round started with ${ids.length} players`);
+  // Assignment log: lets future "who was the killer" reports be checked
+  // against facts instead of memory.
+  const killerNames = [...round.killerIds].map((k) => round.members.get(k).name);
+  console.log(`Office After Dark: round started with ${ids.length} players — ${killerCount} killer(s): ${killerNames.join(", ")}`);
 }
 
 // The ONLY active → ending transition. The state flip is SYNCHRONOUS (before
@@ -1536,10 +1565,13 @@ async function endRound(outcome, { forfeit = false } = {}) {
   const r = round;
   r.state = "ending";
   clearTimeout(r.joinTimer); clearTimeout(r.endTimer);
-  const killerName = r.members.get(r.killerId)?.name || "???";
+  // Reveal names come from the draw-time snapshot so killers who LEFT are
+  // still named; payouts come from members ∩ killerIds, so a leaver gets no
+  // prize (they forfeited their spot).
+  const killerNames = r.killerNameOf ? [...r.killerNameOf.values()] : [];
   const winnerPairs = outcome === "crew"
-    ? [...r.members].filter(([id, m]) => m.alive && id !== r.killerId)
-    : (r.members.has(r.killerId) ? [[r.killerId, r.members.get(r.killerId)]] : []);
+    ? [...r.members].filter(([id, m]) => m.alive && !r.killerIds.has(id))
+    : [...r.members].filter(([id]) => r.killerIds.has(id));
   const winners = winnerPairs.map(([id, m]) => ({ id, name: m.name, email: players[id]?.email || null }));
 
   for (const w of winners) {
@@ -1563,13 +1595,15 @@ async function endRound(outcome, { forfeit = false } = {}) {
 
   const payload = {
     outcome, forfeit,
-    killerId: r.killerId, killerName,
+    killerIds: r.killerNameOf ? [...r.killerNameOf.keys()] : [...r.killerIds],
+    killerNames,
+    killerName: killerNames.join(" & ") || "???",   // legacy single-name field
     winners: winners.map((w) => w.name),
     prize: ROUND_PRIZE,
   };
   for (const id of r.members.keys()) io.to(id).emit("roundEnd", payload);
   if (round === r) round = null;
-  console.log(`Office After Dark: ${outcome === "crew" ? "crew survived" : `the killer (${killerName}) won`}${forfeit ? " (forfeit)" : ""} — ${winners.length} winner(s) × ${ROUND_PRIZE} coins`);
+  console.log(`Office After Dark: ${outcome === "crew" ? "crew survived" : `the killer(s) (${killerNames.join(", ")}) won`}${forfeit ? " (forfeit)" : ""} — ${winners.length} winner(s) × ${ROUND_PRIZE} coins`);
 }
 
 function checkKillerWin() {
@@ -1593,9 +1627,18 @@ function roundHandleLeave(id) {
     return;
   }
   if (round.state !== "active") return;   // 'ending' → settlement stands
-  if (id === round.killerId) {
-    // A vanished killer can't win by hiding offline — instant crew win.
-    endRound("crew", { forfeit: true }).catch((err) => console.error("round killer-leave end failed:", err));
+  if (round.killerIds.has(id)) {
+    // A vanished killer can't win by hiding offline. With several killers the
+    // round survives losing one — only the LAST killer leaving hands the crew
+    // an instant forfeit win.
+    round.killerIds.delete(id);
+    round.members.delete(id);
+    if (round.killerIds.size === 0) {
+      endRound("crew", { forfeit: true }).catch((err) => console.error("round killer-leave end failed:", err));
+      return;
+    }
+    roundEmitMembers("roundLeft", { id });
+    console.log("Office After Dark: a killer left — the round continues");
     return;
   }
   round.members.delete(id);               // crew leaver forfeits any prize
@@ -3110,7 +3153,7 @@ io.on("connection", (socket) => {
     round = {
       state: "joining", starterId: socket.id, starterName: p.name,
       members: new Map([[socket.id, { name: p.name, alive: true }]]),
-      killerId: null, endsAt: 0, killReadyAt: 0, endTimer: null,
+      killerIds: new Set(), endsAt: 0, endTimer: null,
       joinEndsAt: Date.now() + ROUND_JOIN_MS,
       joinTimer: setTimeout(beginRound, ROUND_JOIN_MS),
     };
@@ -3148,14 +3191,16 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(roundBucket)) return;
-    if (!round || round.state !== "active" || socket.id !== round.killerId) return;
+    if (!round || round.state !== "active" || !round.killerIds.has(socket.id)) return;
     if (typeof targetId !== "string" || targetId === socket.id) return;
+    if (round.killerIds.has(targetId)) { socket.emit("roundError", { message: "They're with you…" }); return; }
+    const me = round.members.get(socket.id);
     const tm = round.members.get(targetId);
     const tp = players[targetId];
     if (!tm || !tm.alive || !tp) { socket.emit("roundError", { message: "They slipped away…" }); return; }
     const now = Date.now();
-    if (now < round.killReadyAt) {
-      socket.emit("roundError", { message: `Not yet — ${Math.ceil((round.killReadyAt - now) / 1000)}s until you can strike.` });
+    if (now < me.killReadyAt) {
+      socket.emit("roundError", { message: `Not yet — ${Math.ceil((me.killReadyAt - now) / 1000)}s until you can strike.` });
       return;
     }
     const dx = (p.x ?? 0) - (tp.x ?? 0), dy = (p.y ?? 0) - (tp.y ?? 0);
@@ -3165,7 +3210,10 @@ io.on("connection", (socket) => {
       return;
     }
     tm.alive = false;
-    round.killReadyAt = now + ROUND_KILL_COOLDOWN_MS;
+    me.killReadyAt = now + ROUND_KILL_COOLDOWN_MS;   // cooldown is PER KILLER
+    // Private cooldown ping to the striking killer only — with several
+    // killers, a broadcast restart would wrongly reset teammates' timers.
+    socket.emit("roundKillCooldown", { cooldownMs: ROUND_KILL_COOLDOWN_MS });
     // Victim id/name only — the killer's identity stays secret until roundEnd.
     roundEmitMembers("roundKilled", { victimId: targetId, victimName: tm.name });
     console.log(`Office After Dark: ${tm.name} was eliminated`);

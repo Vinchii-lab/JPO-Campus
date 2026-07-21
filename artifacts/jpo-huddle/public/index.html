@@ -3908,6 +3908,7 @@
     let _roundPhase = null;          // null | 'lobby' | 'active'
     let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
+    let _roundAccomplices = new Map(); // id -> name (fellow killers; killers only)
     let _roundKillRange = 200, _roundCoolMs = 12000, _roundKillReadyAt = 0, _roundEndsAt = 0;
     let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
     let _roundInviteMin = 3;
@@ -3951,6 +3952,7 @@
       _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
       _roundShowAllGhosts();
       _roundRoster.clear();
+      _roundAccomplices.clear();
       _roundStopTick();
       clearTimeout(_roundInviteTimer); clearTimeout(_roundRoleTimer);
       document.body.classList.remove('round-dark');
@@ -3989,6 +3991,7 @@
       let bestId = null, bestD = Infinity;
       for (const [id, m] of _roundRoster) {
         if (id === socket.id || !m.alive) continue;
+        if (_roundAccomplices.has(id)) continue;   // never target a fellow killer
         const spr = sc.otherPlayers[id] && sc.otherPlayers[id].sprite;
         if (!spr) continue;
         const dx = spr.x - sc.player.x, dy = spr.y - sc.player.y;
@@ -4013,7 +4016,9 @@
       const clock = Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
       let aliveN = 0, all = 0;
       for (const m of _roundRoster.values()) { all++; if (m.alive) aliveN++; }
-      _roundChip((_roundAlive ? '🌙 ' : '💀 Watching · ') + clock + ' · ' + aliveN + '/' + all + ' still up');
+      // Persistent role indicator: killers see 🔪 in the HUD chip for the
+      // whole round, so a missed role card can never leave them guessing.
+      _roundChip((_roundAlive ? (_roundRole === 'killer' ? '🔪 You\'re a killer · ' : '🌙 ') : '💀 Watching · ') + clock + ' · ' + aliveN + '/' + all + ' still up');
       // Re-assert ghost hiding every tick: sit-downs, cosmetic/pet changes and
       // chat bubbles recreate display objects, so a one-shot hide isn't enough.
       if (_roundAlive) for (const id of _roundHiddenIds) _roundGhostVis(id, false);
@@ -4074,6 +4079,7 @@
       d = d || {};
       _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
       _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
+      _roundAccomplices = new Map((d.accomplices || []).map(a => [a.id, a.name]));
       _roundKillRange = d.killRangePx || 200;
       _roundCoolMs = d.killCooldownMs || 12000;
       _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown
@@ -4081,13 +4087,17 @@
       clearTimeout(_roundInviteTimer);
       _rnEl('round-invite').classList.remove('open');
       document.body.classList.add('round-dark');
-      _rnEl('round-role-big').textContent = _roundRole === 'killer' ? '🔪 You are the killer' : '🌙 The lights go out…';
+      const _accNames = [..._roundAccomplices.values()];
+      _rnEl('round-role-big').textContent = _roundRole === 'killer'
+        ? (_accNames.length ? '🔪 You are a killer' : '🔪 You are the killer')
+        : '🌙 The lights go out…';
       _rnEl('round-role-sub').textContent = _roundRole === 'killer'
-        ? 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.'
-        : `Survive until the lights come back on. One of you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
+        ? ((_accNames.length ? `You're in it together with ${_accNames.join(' and ')} — you can't hurt each other. ` : '')
+           + 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.')
+        : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
       _rnEl('round-role').classList.add('open');
       clearTimeout(_roundRoleTimer);
-      _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 6000);
+      _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
       if (_roundRole === 'killer') _rnEl('round-kill-btn').classList.add('on');
       _roundStopTick();
       _roundTick = setInterval(_roundHud, 250);
@@ -4107,7 +4117,8 @@
         _rpsToast('💀 You were got! Stick around and watch how it ends…');
       } else if (_roundPhase === 'active' && _roundAlive) {
         // I'm still in the round: the fallen vanish from my world instantly.
-        if (_roundRole === 'killer') _roundKillReadyAt = Date.now() + _roundCoolMs; // my kill — restart cooldown
+        // (Cooldown restart moved to the private roundKillCooldown ping — with
+        // several killers, a teammate's kill must NOT reset MY timer.)
         _roundHiddenIds.add(d.victimId);
         _roundGhostVis(d.victimId, false);
         if (m) _rpsToast(`💀 ${m.name} was eliminated…`);
@@ -4117,9 +4128,15 @@
         if (e && e.sprite) e.chatBubble = sc._showEmoteBubble(e.sprite, '💀', false);
       }
     });
+    // Private ping to the killer whose strike landed — restarts only THEIR cooldown.
+    socket.on('roundKillCooldown', (d) => {
+      if (_roundPhase !== 'active' || _roundRole !== 'killer') return;
+      _roundKillReadyAt = Date.now() + ((d && d.cooldownMs) || _roundCoolMs);
+    });
     socket.on('roundLeft', (d) => {
       if (!d || !d.id) return;
       _roundRoster.delete(d.id);
+      _roundAccomplices.delete(d.id);
       // A hidden ghost who fully leaves gets un-hidden (their sprite is torn
       // down by the normal leave flow; a fresh session = fresh socket id).
       if (_roundHiddenIds.has(d.id)) { _roundGhostVis(d.id, true); _roundHiddenIds.delete(d.id); }
@@ -4129,8 +4146,12 @@
       d = d || {};
       _roundReset();
       const crew = d.outcome === 'crew';
-      _rnEl('round-end-title').textContent = crew ? '☀️ The crew made it!' : '🔪 The killer got everyone…';
-      const bits = [`The killer was ${d.killerName || '???'}.` + (d.forfeit ? ' (They vanished mid-round — automatic crew win.)' : '')];
+      const kn = (d.killerNames && d.killerNames.length) ? d.killerNames : [d.killerName || '???'];
+      const plural = kn.length > 1;
+      _rnEl('round-end-title').textContent = crew ? '☀️ The crew made it!' : (plural ? '🔪 The killers got everyone…' : '🔪 The killer got everyone…');
+      const kList = kn.length > 1 ? kn.slice(0, -1).join(', ') + ' and ' + kn[kn.length - 1] : kn[0];
+      const bits = [(plural ? `The killers were ${kList}.` : `The killer was ${kList}.`)
+        + (d.forfeit ? (plural ? ' (The last of them vanished mid-round — automatic crew win.)' : ' (They vanished mid-round — automatic crew win.)') : '')];
       if (d.winners && d.winners.length) bits.push(`${d.winners.join(', ')} win${d.winners.length === 1 ? 's' : ''} ${d.prize || 25} 🪙 each!`);
       else bits.push('No survivors, no payout. Brutal.');
       _rnEl('round-end-body').textContent = bits.join(' ');
