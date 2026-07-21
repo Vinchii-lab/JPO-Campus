@@ -4051,7 +4051,7 @@
         return;
       }
       _roundInviteMin = d.minPlayers ?? 3;
-      _rnEl('round-invite-text').textContent = `🌙 ${d.starterName || 'Someone'} wants to play Office After Dark — the lights go out, and one of you is… not friendly.`;
+      _rnEl('round-invite-text').textContent = `🌙 ${d.starterName || 'Someone'} wants to play Office After Dark — the lights go out, and someone among you is… not friendly.`;
       _rnEl('round-invite-count').textContent = `${d.count ?? 1} in so far · needs ${_roundInviteMin}+ to start`;
       _rnEl('round-invite').classList.add('open');
       clearTimeout(_roundInviteTimer);
