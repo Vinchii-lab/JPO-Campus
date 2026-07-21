@@ -2740,10 +2740,18 @@
           clearInterval(_boostTimer); _boostTimer = null;
           return;
         }
+        // Office After Dark: an alive crew member's boost is suppressed while
+        // the round is live (the server clamps their move budget to base
+        // speed) — hide the chip too, but keep the timer running so the boost
+        // and its chip come back if the timer outlasts the round.
+        if (_roundPhase === 'active' && _roundAlive && _roundRole !== 'killer') {
+          chip.classList.remove('on');
+          return;
+        }
+        chip.classList.add('on');
         chip.textContent = `${_boostEmoji} +40% speed · ${Math.ceil(left / 1000)}s`;
       };
       tick();
-      chip.classList.add('on');
       _boostTimer = setInterval(tick, 500);
     }
 
@@ -3910,6 +3918,10 @@
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
     let _roundAccomplices = new Map(); // id -> name (fellow killers; killers only)
     let _roundKillRange = 200, _roundCoolMs = 12000, _roundKillReadyAt = 0, _roundEndsAt = 0;
+    // Killer-only speed edge, from the PRIVATE roundBegin payload (1 = none).
+    // Never hardcoded here — the server owns the value, like every other
+    // round constant. Crew never receive it and stay at 1.
+    let _roundSpeedMult = 1;
     let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
     let _roundInviteMin = 3;
     const _rnEl = (id) => document.getElementById(id);
@@ -3950,6 +3962,7 @@
     // connection can never strand someone in the dark.
     function _roundReset() {
       _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
+      _roundSpeedMult = 1;
       _roundShowAllGhosts();
       _roundRoster.clear();
       _roundAccomplices.clear();
@@ -4078,6 +4091,9 @@
     socket.on('roundBegin', (d) => {
       d = d || {};
       _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
+      // Speed edge arrives only in the killers' payload; sanity-clamp so a
+      // malformed value can never slow the killer below base or go wild.
+      _roundSpeedMult = (_roundRole === 'killer' && Number(d.speedMult) > 1) ? Math.min(Number(d.speedMult), 2) : 1;
       _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
       _roundAccomplices = new Map((d.accomplices || []).map(a => [a.id, a.name]));
       _roundKillRange = d.killRangePx || 200;
@@ -6129,7 +6145,16 @@
           // Coffee boost: walk faster while it's live. The server's movement
           // budget is widened by the same multiplier for the same window, so
           // boosted steps aren't rejected as speed hacks.
-          const spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
+          // Office After Dark overrides (MUST mirror the server's playerMove
+          // budget rule): alive killers use the LARGER of their private edge
+          // and a live coffee boost (never the product); alive crew are
+          // clamped to base speed — any boost timer resumes after the round.
+          let spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
+          if (_roundPhase === 'active' && _roundAlive) {
+            spd = _roundRole === 'killer'
+              ? SPEED * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)
+              : SPEED;
+          }
           if (left)       player.setVelocityX(-spd);
           else if (right) player.setVelocityX( spd);
           if (up)         player.setVelocityY(-spd);

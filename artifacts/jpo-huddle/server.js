@@ -216,6 +216,9 @@ const USABLE_ITEMS = {
   fireworks:    { cost: 75,  uses: 1 },   // sky show — bigger, longer visual burst
   pizza_party:  { cost: 150, uses: 1 },   // pizza for everyone nearby — longer boost + 🍕 bubbles
 };
+// The speed-boost-granting subset of USABLE_ITEMS — these are refused for
+// everyone in the dark during Office After Dark (see the useItem gate).
+const BOOST_ITEMS     = new Set(["coffee", "coffee_round", "pizza_party"]);
 const SMOKE_MS        = 10_000;  // how long the smoke-puff effect plays (also the "one at a time" cooldown)
 const COFFEE_MULT     = 1.4;     // walk-speed multiplier — MUST match client COFFEE_MULT in public/index.html
 const COFFEE_MS       = 45_000;  // boost duration — MUST match client (client gets it in the coffeeBoost event)
@@ -1433,6 +1436,16 @@ const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well unde
 const ROUND_KILL_SLACK_PX    = 80;
 const ROUND_KILL_COOLDOWN_MS = 12_000;  // between kills — ALSO the arm delay before the first kill
 const ROUND_PRIZE            = 25;      // per winner
+// Killer speed edge: alive killers of the ACTIVE round walk this much faster
+// than base speed, so they can close a chase. Delivered ONLY in the killers'
+// private roundBegin payload (never broadcast — a public value would out them).
+// Combines with a coffee boost by taking the LARGER multiplier, never the
+// product; the client uses the same rule. Alive participants can't gain NEW
+// boosts while the round is live (boost items + coffee machine are refused
+// with the SAME message for crew and killers, so a refusal can't out anyone;
+// group boosts skip everyone in the dark) and alive CREW have their move
+// budget clamped to base speed — a pre-round coffee can't erase the edge.
+const ROUND_KILLER_SPEED_MULT = 1.15;
 
 let round = null;
 // { state:'joining'|'active'|'ending', starterId, starterName,
@@ -1542,6 +1555,9 @@ function beginRound() {
       accomplices: isKiller
         ? [...round.killerIds].filter((k) => k !== id).map((k) => ({ id: k, name: round.members.get(k).name }))
         : undefined,
+      // Killer-only: the speed edge multiplier (private, like `accomplices` —
+      // crew must never receive it or the payload difference would leak).
+      speedMult: isKiller ? ROUND_KILLER_SPEED_MULT : undefined,
       durationMs: ROUND_DURATION_MS,
       killCooldownMs: ROUND_KILL_COOLDOWN_MS,
       killRangePx: ROUND_KILL_RANGE_PX,
@@ -2171,8 +2187,20 @@ io.on("connection", (socket) => {
       // every boosted step gets rejected. BOOST_GRACE_MS of slack past expiry
       // absorbs latency on the final boosted frames; after that the budget
       // snaps back to walk speed (expiry is authoritative here, server-side).
+      // Office After Dark overrides (client speed logic MUST mirror this):
+      // alive killers of the active round get their private edge, combined
+      // with a live coffee boost by the LARGER of the two (never the product);
+      // alive CREW clamp to base speed — even a legit pre-round boost timer
+      // must not let them outrun the killers (the boost resumes after).
       const boosted = me.boostUntil && now < me.boostUntil + BOOST_GRACE_MS;
-      const speed = boosted ? MOVE_SPEED * COFFEE_MULT : MOVE_SPEED;
+      let mult = boosted ? COFFEE_MULT : 1;
+      if (round && round.state === "active") {
+        const rm = round.members.get(socket.id);
+        if (rm && rm.alive) {
+          mult = round.killerIds.has(socket.id) ? Math.max(ROUND_KILLER_SPEED_MULT, mult) : 1;
+        }
+      }
+      const speed = MOVE_SPEED * mult;
       const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
       if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return; }   // teleport / speed hack (silently dropped)
@@ -2970,6 +2998,14 @@ io.on("connection", (socket) => {
     const now = Date.now();
 
     // Effect gates BEFORE consuming, so a rejected use never wastes a charge.
+    // Office After Dark lockout: alive participants of the active round can't
+    // gain speed boosts — a crew coffee would erase the killers' edge, and a
+    // killer's group round would boost the crew around them. The message is
+    // IDENTICAL for crew and killers so a refusal can never out anyone.
+    if (BOOST_ITEMS.has(item) && inTheDark(socket.id)) {
+      socket.emit("itemError", { message: "🌙 Too dark to brew — no boosts until the lights come back on!" });
+      return;
+    }
     if (item === "cigarette") {
       if (p.smokeUntil && now < p.smokeUntil) {
         socket.emit("itemError", { message: "You're already smoking!" });
@@ -3029,7 +3065,12 @@ io.on("connection", (socket) => {
       // walk slower than the server allows — the safe direction.
       const dur = item === "pizza_party" ? PIZZA_MS : COFFEE_MS;
       const emoji = item === "pizza_party" ? "🍕" : "☕";
-      const ids = nearbyIds(socket.id, GROUP_RADIUS);
+      // Players in the dark (alive members of the active round) never receive
+      // group boosts — an outsider's coffee round must not speed up the crew
+      // (or hand a killer a boost bubble that outs them). Ghosts and everyone
+      // else nearby are boosted normally. The user can't be in the dark here
+      // (blocked by the gate above), so self stays included.
+      const ids = nearbyIds(socket.id, GROUP_RADIUS).filter((rid) => !inTheDark(rid));
       for (const rid of ids) {
         const q = players[rid];
         if (!q) continue;
@@ -3066,6 +3107,13 @@ io.on("connection", (socket) => {
     const now = Date.now();
 
     if (object === "coffee_machine") {
+      // Same After Dark lockout as boost ITEMS (and the same message for crew
+      // and killers) — and it runs BEFORE the refill cooldown is spent, so a
+      // refused brew never burns the machine.
+      if (inTheDark(socket.id)) {
+        socket.emit("interactError", { message: "🌙 Too dark to brew — no boosts until the lights come back on!" });
+        return;
+      }
       if (p.boostUntil && now < p.boostUntil) {
         socket.emit("interactError", { message: "You're already buzzing from the last cup!" });
         return;
