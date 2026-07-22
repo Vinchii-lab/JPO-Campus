@@ -237,8 +237,8 @@ const OBJECTS = {
   coffee_machine2: { x: 8256, y: 3456, r: 150 }, // coffee maker on the Library counter (c171-172 r70) — shares the coffee_machine cooldown
   water_cooler:    { x: 1800, y: 3816, r: 150 }, // water dispenser, Market north wall (c37, r78-79)
   arcade:          { x: 5280, y: 6000, r: 170 }, // arcade cabinets, Break Room basement corner (c108-111, r123-127)
-  fridge:          { x: 2016, y: 1104, r: 190 }, // kitchenette fridges, West Office break corner (c39-44, r20-22)
-  kitchen_island:  { x: 8520, y: 5880, r: 170 }, // kitchen island, Training Room basement (c176-178, r121-123)
+  fridge:          { x: 5592, y: 4008, r: 190 }, // drink-cooler stack, cafeteria serving area (c116, r82-84)
+  kitchen_island:  { x: 5232, y: 3624, r: 240 }, // cafeteria serving line: display cases + checkout counter (c104-113, r74-75)
   snack_counter:   { x: 9048, y: 1968, r: 220 }, // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
   // cafeteria_food<N> spots are appended after the map loads (see FOOD_TABLES).
 };
@@ -337,6 +337,10 @@ const GID_MASK = 0x1FFFFFFF;
 // gids 2600/2605 are plain desk SURFACES on the current map (DESK_FAMILIES is
 // empty client-side), so they're gone from this set.
 const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2628]);
+// Jail-tileset computer-desk chairs live on the WALL layer (their cells hold no
+// Furniture gid at all) — the work-seat mask below ORs these in from the Wall
+// layer. MUST stay in lockstep with the client's WALL_SEATS table.
+const WALL_WORK_SEAT_GIDS = new Set([5533, 5564, 5565]);
 const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
@@ -361,6 +365,12 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (()
       const furn = tmj.layers?.find((l) => l.name === "Furniture" && Array.isArray(l.data));
       if (furn) {
         workSeats = furn.data.map((g) => WORK_SEAT_GIDS.has(g & GID_MASK));
+        // Wall-layer computer-desk chairs (WALL_WORK_SEAT_GIDS) also pay the
+        // bonus — same mask, same index space.
+        const wallL = tmj.layers?.find((l) => l.name === "Wall" && Array.isArray(l.data));
+        if (wallL) wallL.data.forEach((g, i) => {
+          if (WALL_WORK_SEAT_GIDS.has(g & GID_MASK)) workSeats[i] = true;
+        });
         // Cafeteria food spots: one per table, keyed by the table's top-left
         // marker gid (2183), scanned row-major. The client runs the SAME scan
         // over the same map at create(), so the generated cafeteria_food<N>

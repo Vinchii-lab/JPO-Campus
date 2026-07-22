@@ -1767,10 +1767,10 @@
         hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
       { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
         hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
-      { id:'fridge',          x:2016, y:1104, r:190, label:'Eat a snack', touch:'Eat',
-        hl:{ x:39*48, y:20*48, w:6*48, h:3*48 } },   // kitchenette fridges, West Office break corner (c39-44, r20-22)
-      { id:'kitchen_island',  x:8520, y:5880, r:170, label:'Grab a hot meal', touch:'Eat',
-        hl:{ x:176*48, y:121*48, w:3*48, h:3*48 } }, // kitchen island, Training Room basement (c176-178, r121-123)
+      { id:'fridge',          x:5592, y:4008, r:190, label:'Eat a snack', touch:'Eat',
+        hl:{ x:116*48, y:82*48, w:48, h:3*48 } },    // drink-cooler stack, cafeteria serving area (c116, r82-84; two more stacks above/below share the radius)
+      { id:'kitchen_island',  x:5232, y:3624, r:240, label:'Grab a hot meal', touch:'Eat',
+        hl:{ x:104*48, y:74*48, w:10*48, h:2*48 } }, // cafeteria serving line: food display cases (Wall, c104-110) + checkout counter (Furniture 3831-3849, c111-113), r74-75
       { id:'snack_counter',   x:9048, y:1968, r:220, label:'Grab a gym snack', touch:'Eat',
         hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
     ];
@@ -1833,7 +1833,6 @@
       3252, 3253, 3254, 3255,                                     // gray/blue high-back armchairs (2-wide, centered via SEAT_DX)
       3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
-      5489, 5490, 5491, 5492,                                     // lavender couch cushion row
       7715,                                                       // classroom desk chair (desk to its right -> faces right)
       8825, 8826, 8827, 8828,                                     // basement loveseat cushions
       8888,                                                       // basement side armchair (faces right)
@@ -1843,6 +1842,14 @@
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
     // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
     const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764, 2628]);
+    // Jail-tileset computer-desk chairs live on the WALL layer (the Furniture layer
+    // holds the desk itself: 5489-5492 top strips over 5505-5508 bodies — those top
+    // strips are NOT seats; they were once mislabeled "lavender couch cushions").
+    // gid -> pinned facing. All six chairs sit directly BELOW their desk -> 'up'.
+    // isFurnSeat() probes this alongside FURN_SEATS, and every chair here is a
+    // computer desk, so all of them pay the work bonus — MUST match
+    // WALL_WORK_SEAT_GIDS in server.js.
+    const WALL_SEATS = { 5533:'up', 5564:'up', 5565:'up' };
     // Fixed sit-facing for seats whose orientation is baked into the tile art, so a seated
     // player faces the way the FURNITURE faces (its open front) instead of the aisle they
     // walked in from. Carrel chairs (2763/2764) have their desk directly ABOVE -> 'up'.
@@ -1862,7 +1869,6 @@
       3252:'down', 3253:'down', 3254:'down', 3255:'down',                            // high-back armchairs
       3320:'down', 3321:'down',                                                      // tan armchair
       5425:'down', 5426:'down', 5427:'down',                                         // green couch
-      5489:'down', 5490:'down', 5491:'down', 5492:'down',                            // lavender couch
       7715:'right',                                                                  // classroom desk chair
       8825:'down', 8826:'down', 8827:'down', 8828:'down',                            // basement loveseats
       8888:'right',                                                                  // basement side armchair
@@ -5175,7 +5181,11 @@
         // JPO_HQ.tmj seats legitimately share cells with Wall-layer desk/monitor/
         // table tiles — workstation monitors 2078, conference-table edges — so no
         // wall-coverage veto applies.)
-        this.isFurnSeat = (gid, c, r) => FURN_SEATS.has(gid);
+        // ...plus the Jail computer-desk chairs, which live on the WALL layer
+        // (WALL_SEATS) — the gid arg is the FURNITURE gid, so those cells probe
+        // the wall tile directly.
+        this.isFurnSeat = (gid, c, r) => FURN_SEATS.has(gid)
+          || WALL_SEATS[wallLayer.getTileAt(c, r)?.index] !== undefined;
         // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
         // Seat banks are packed workstations: each chair (Furniture layer) shares its
         // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
@@ -5505,6 +5515,10 @@
         {
           const NB = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
           for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            // Wall-layer computer-desk chairs get their facing pinned here (there
+            // is no Furniture gid at those cells for SEAT_FACING to key off).
+            const wt = wallLayer.getTileAt(c, r);
+            if (wt && WALL_SEATS[wt.index]) { this.seatFacingAt[c + ',' + r] = WALL_SEATS[wt.index]; continue; }
             const t = furnitureLayer.getTileAt(c, r);
             if (!t || !CONF_CHAIR_GIDS.has(t.index)) continue;
             let faced = false;
@@ -6273,9 +6287,11 @@
                            : BED_GIDS.has(seatGid) ? { pose: 'lie' }
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : null;
-            // Work-bonus chairs (office/carrel chairs + manager desks) earn the
-            // +3/min bonus — same rule as the server's WORK_SEAT_GIDS check.
-            _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo);
+            // Work-bonus chairs (office/carrel chairs + manager desks + wall-layer
+            // computer-desk chairs) earn the +3/min bonus — same rule as the
+            // server's WORK_SEAT_GIDS / WALL_WORK_SEAT_GIDS check.
+            _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo
+              || WALL_SEATS[this.wallLayer.getTileAt(s.col, s.row)?.index] !== undefined);
             this.lastDir = this._deskPose ? 'down' : interact.dir;
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
