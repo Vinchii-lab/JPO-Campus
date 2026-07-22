@@ -3188,7 +3188,10 @@ io.on("connection", (socket) => {
       pruneCooldowns(coffeeMachineReadyAt, now);
       coffeeMachineReadyAt.set(key, now + COFFEE_MACHINE_COOLDOWN_MS);
       p.boostUntil = now + COFFEE_MS;
-      io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
+      // `machine` tells every client WHICH machine to play the brew animation
+      // at (pure flavor — clients ignore unknown ids). Item/round coffees omit
+      // it, so only real machine brews animate the hardware.
+      io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT, machine: object });
       console.log(`${p.name} brewed a free coffee at the machine`);
 
     } else if (object === "water_cooler") {

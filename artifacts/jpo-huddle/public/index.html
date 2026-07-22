@@ -1837,6 +1837,8 @@
       8825, 8826, 8827, 8828,                                     // basement loveseat cushions
       8888,                                                       // basement side armchair (faces right)
       8891, 8892,                                                 // basement loveseat cushions
+      8449, 8450, 8451,                                           // up-facing TV couch, back-top row (body row 8465-8467 stays solid)
+      8481, 8482, 8483,                                           // up-facing TV couch, back-top row (body row 8497-8499 stays solid)
       7032, 7033, 7068, 7069,                                     // nap-room beds: lie row (renders the lying pose, see BED_GIDS)
     ]);
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
@@ -1873,6 +1875,8 @@
       8825:'down', 8826:'down', 8827:'down', 8828:'down',                            // basement loveseats
       8888:'right',                                                                  // basement side armchair
       8891:'down', 8892:'down',                                                      // basement loveseat
+      8449:'up', 8450:'up', 8451:'up',                                               // TV couch seen from behind — sit faces the TV above (standup pose)
+      8481:'up', 8482:'up', 8483:'up',                                               // second TV couch (basement south wall), same back view
       7032:'down', 7033:'down', 7068:'down', 7069:'down',                            // beds (pose overrides to 'lie')
     };
     // 2-tile-wide single seats (high-back armchairs, tan armchair, beds): BOTH tiles
@@ -2118,7 +2122,8 @@
       { id: 'pet_dragon', emoji: '🐉', name: 'Baby Dragon', cost: 30000, desc: 'the ultimate office flex' },
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
-    const PET_GAP   = 36;   // px the pet trails behind its owner (follow-at-distance)
+    const PET_GAP     = 36; // px the pet trails behind its owner (follow-at-distance)
+    const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
     let _equippedPet = '';  // active pet ('' = none); server-authoritative
 
     // Department allowlist — MUST stay identical (same values, same order) to
@@ -2784,9 +2789,12 @@
     // Group items reuse this event per recipient with an optional emoji
     // (🍕 for pizza party) — the boost mechanics are identical.
     socket.on('coffeeBoost', (payload) => {
-      const { id, durationMs, emoji } = payload || {};
+      const { id, durationMs, emoji, machine } = payload || {};
       const scene = window._gameScene;
       const em = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '☕';
+      // Machine brews carry the machine id — play the brew animation at the
+      // machine itself so everyone nearby sees it actually making the coffee.
+      if (typeof machine === 'string' && scene) scene._brewFx(machine);
       if (id === socket.id) {
         _boostUntil = Date.now() + (durationMs || 45000);
         _boostEmoji = em;
@@ -5357,6 +5365,7 @@
         socket.on('playerMoved', (data) => {
           const entry = this.otherPlayers[data.id];
           if (!entry) return;
+          entry.seated = data.anim === 'sit';   // drives the pet's wider stand-off ring
           entry.sprite.setPosition(data.x, data.y);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
           if (data.anim === 'sit') {
@@ -5851,15 +5860,47 @@
       // PET_GAP away, then walks to a point PET_GAP behind them — the classic
       // "pet on a slack leash" feel. A >300px jump (spawn/teleport/grace
       // restore) snaps instantly so the pet never sprints across the office.
-      _stepPet(petObj, px, py, delta) {
+      // While the owner is SEATED the ring widens to PET_SIT_GAP and the pet
+      // is nudged OUT to it as well — the ~36px walk trail otherwise parks the
+      // emoji ON the seated body (pets render above players at depth 2). A pet
+      // sitting exactly underfoot settles straight DOWN (in front of the chair).
+      _stepPet(petObj, px, py, delta, seated) {
+        const gap = seated ? PET_SIT_GAP : PET_GAP;
         const ty = py + 10;                       // anchor beside the feet
-        const dx = petObj.x - px, dy = petObj.y - ty;
-        const dist = Math.hypot(dx, dy) || 1;
-        if (dist > 300) { petObj.setPosition(px - PET_GAP, ty); return; }
-        if (dist > PET_GAP) {
+        let dx = petObj.x - px, dy = petObj.y - ty;
+        let dist = Math.hypot(dx, dy) || 1;
+        if (dist > 300) { petObj.setPosition(px - gap, ty); return; }
+        if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
+        if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
-          petObj.x += (px + (dx / dist) * PET_GAP - petObj.x) * k;
-          petObj.y += (ty + (dy / dist) * PET_GAP - petObj.y) * k;
+          petObj.x += (px + (dx / dist) * gap - petObj.x) * k;
+          petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;
+        }
+      }
+
+      // One-shot brew animation at a coffee machine (triggered by a machine
+      // coffeeBoost — see the socket handler). Client-only flavor on top of the
+      // idle steam loop: a ☕ pops out of the machine, lingers, floats away;
+      // a few extra steam puffs burst while it brews. All pieces self-destroy
+      // on tween complete, so repeated brews never leak display objects.
+      _brewFx(machineId) {
+        const o = OFFICE_OBJECTS.find(m => m.id === machineId);
+        if (!o || !o.hl) return;
+        const cx = o.hl.x + o.hl.w / 2, cy = o.hl.y + o.hl.h * 0.45;
+        const cup = this.add.text(cx, cy, '☕', { fontSize: '22px', resolution: 2 })
+          .setOrigin(0.5, 1).setScale(0).setDepth(460);
+        this.tweens.add({ targets: cup, scale: 1, duration: 280, ease: 'Back.easeOut' });
+        this.tweens.add({
+          targets: cup, y: cy - 42, alpha: 0, delay: 1400, duration: 900,
+          ease: 'Sine.easeIn', onComplete: () => cup.destroy(),
+        });
+        for (let i = 0; i < 3; i++) {
+          const puff = this.add.text(cx + (i - 1) * 14, cy - 10, '💨', { fontSize: '14px' })
+            .setOrigin(0.5, 1).setAlpha(0.9).setDepth(459);
+          this.tweens.add({
+            targets: puff, y: cy - 52, alpha: 0, delay: i * 240, duration: 1000,
+            ease: 'Sine.easeOut', onComplete: () => puff.destroy(),
+          });
         }
       }
 
@@ -6119,7 +6160,7 @@
         const cosmeticDef = made ? made.def : null;
         const pet = this._makePet(data.pet, data.x, data.y);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.
@@ -6174,10 +6215,10 @@
 
         // Pets trail their owners — local pet follows us, remote pets follow
         // their entry's sprite (whose position the playerMoved stream drives).
-        if (this.localPet) this._stepPet(this.localPet, player.x, player.y, delta);
+        if (this.localPet) this._stepPet(this.localPet, player.x, player.y, delta, this.sitting);
         for (const oid in this.otherPlayers) {
           const oe = this.otherPlayers[oid];
-          if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta);
+          if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta, oe.seated === true);
         }
 
         if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {

@@ -158,3 +158,6 @@ earlier note that nohup worked. A full 2-browser cosmetics run fits in ~60s.
 **How to apply:** prefer foreground `timeout 110 node test.cjs` (under the
 2-min shell cap); only if a run truly exceeds that, split the test into
 phases that each fit foreground.
+
+- Headless Chromium has no emoji fonts — emoji text objects (pets, brew ☕, E-hint) render as □ boxes in screenshots. Verify emoji features NUMERICALLY (positions, depths, children-list counts via page.evaluate), only use screenshots for sprite/tile art.
+- Top-level `const` tables in the classic (non-module) client script (PET_EMOJI, DIR_START, …) are reachable from page.evaluate — no window. prefix needed.

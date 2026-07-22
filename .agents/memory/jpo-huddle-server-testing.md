@@ -54,3 +54,4 @@ Additional traps learned while testing RPS challenges:
   normal max 372, boosted max 516) to prove a speed change both ways. Rejected moves
   are SILENT drops — assert via a second observer socket that a matching
   `playerMoved` broadcast does/doesn't arrive within a timeout, never via an error event.
+- To test proximity-gated `interact` objects headlessly, seed the approved row's x/y AT the object anchor before registering — restore places the server-side position there, so no movement (and no move-budget fight) is needed at all.
