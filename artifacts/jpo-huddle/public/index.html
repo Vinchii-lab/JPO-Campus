@@ -1926,17 +1926,19 @@
     // Vertical seat shift. The tall HR-desk chairs (2593) sit one full tile NORTH of
     // their tall desk — with the default snap the avatar's feet land a whole tile above
     // the desk top, so nothing occludes the legs and the sitter reads as STANDING beside
-    // the desk. Dropping the sitter HALF a tile (+24) puts the feet on an exact .5 row
-    // boundary, and Math.round(row + 0.5) rounds UP — so the position-derived cell
-    // becomes the desk-top cell (Furniture 2609 / Wall 2178-2179): the desk tiles get
-    // redrawn over the lower body (see _makeSeatOccluders) while head + torso stay
-    // visible between the backrest and the desk. Remote viewers derive the seat cell
-    // from the broadcast position with the SAME formula on exact integers, so local and
-    // remote agree — keep any new dy at 24 (half-tile, rounds up) or 48 (full tile) or
-    // the two occluder lookups will disagree. Stays inside the server's 160px
-    // SEAT_SNAP_ALLOWANCE.
+    // the desk. Dropping the sitter a FULL tile (+48) parks the feet on the desk-top
+    // cell's center (Furniture 2609 / Wall 2178-2179) — exactly the workstation recipe:
+    // the sitter renders the upright standing DOWN frame (see the 2609 branch in
+    // _deskPoseAt) and the desk tiles get redrawn over the lower body
+    // (_makeSeatOccluders), so it reads as seated at the tall desk with the face
+    // visible — same approved look as the computer workstations. A half-tile 24 was
+    // tried first with the sit sheet and read as "head under the chair". Remote viewers
+    // derive the seat cell from the broadcast position with the SAME formula on exact
+    // integers, so local and remote agree — keep any new dy at 24 (half-tile, rounds
+    // up) or 48 (full tile) or the two occluder lookups will disagree. Stays inside
+    // the server's 160px SEAT_SNAP_ALLOWANCE.
     const SEAT_DY = {
-      2593: 24,   // tall HR-desk chair: drop the sitter half a tile onto the desk-top row
+      2593: 48,   // tall HR-desk chair: drop the sitter a full tile onto the desk-top cell
     };
     // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
     // upright front idle frame laid on the pillow row + a floating 💤 — the wire
@@ -5834,6 +5836,10 @@
         const row = Math.round((y - 24 + BODY_DY) / 48);
         if (this._isWorkstation(col, row)) return { pose: 'stand' };
         const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        // Tall HR-desk top (2609): SEAT_DY parks the 2593-chair sitter's feet on this
+        // cell — render the workstation 'stand' pose (standing DOWN frame; the desk
+        // redraw from _makeSeatOccluders hides the legs, the face stays visible).
+        if (gid === 2609) return { pose: 'stand' };
         if (BED_GIDS.has(gid)) return { pose: 'lie' };
         const desk = deskChairAt(gid, col, row);
         if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
@@ -6410,6 +6416,7 @@
             // facing you walked in with.
             const deskInfo = deskChairAt(seatGid, s.col, s.row);
             this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
+                           : seatGid === 2593 ? { pose: 'stand' }  // tall HR-desk chair: workstation look (SEAT_DY parks the feet on the 2609 desk-top cell — matches _deskPoseAt's derived-cell branch)
                            : BED_GIDS.has(seatGid) ? { pose: 'lie' }
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : this._upSeatAt(s.col, s.row) ? { pose: 'standup' }
