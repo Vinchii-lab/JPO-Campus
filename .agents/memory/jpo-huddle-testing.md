@@ -161,3 +161,6 @@ phases that each fit foreground.
 
 - Headless Chromium has no emoji fonts — emoji text objects (pets, brew ☕, E-hint) render as □ boxes in screenshots. Verify emoji features NUMERICALLY (positions, depths, children-list counts via page.evaluate), only use screenshots for sprite/tile art.
 - Top-level `const` tables in the classic (non-module) client script (PET_EMOJI, DIR_START, …) are reachable from page.evaluate — no window. prefix needed.
+
+## Remote-parity tests need server-ACCEPTED movement
+`body.reset` teleports render locally but the server anti-cheat silently REJECTS the move for broadcast — a second client never sees the avatar move. For any two-client parity test, move via micro-hops (≤45px per step, ~350ms apart, straight line is fine — server checks distance/bounds, not walls). Single-client visual tests can still teleport freely.
