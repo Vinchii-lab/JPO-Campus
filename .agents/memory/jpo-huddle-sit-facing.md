@@ -1,7 +1,9 @@
 ---
 name: JPO Huddle seated facing
-description: Seated avatars keep the player's pre-sit direction (approach-based), EXCEPT desk-type seats — computer workstations (GID 606) render the upright STANDING DOWN frame; manager-desk baked chairs render sit3-down MIRRORED toward the desk. Seated state (anim) is persisted server-side so refresh/restart never shows a sitter standing.
+description: Seated avatars keep the player's pre-sit direction (approach-based), EXCEPT desk-type seats — computer workstations render the upright STANDING DOWN frame; manager-desk baked chairs render sit3-down MIRRORED toward the desk. Seated state (anim) is persisted server-side so refresh/restart never shows a sitter standing.
 ---
+
+> **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + Wall monitor **2078** sharing the cell (`_isWorkstation`), desk-front **2094** below; manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged.
 
 # Seated facing is APPROACH-BASED — EXCEPT desk-type seats, which have forced poses
 

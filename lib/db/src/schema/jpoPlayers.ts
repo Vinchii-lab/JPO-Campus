@@ -54,8 +54,8 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // their tab — would show every rejected person forever.
   dismissed: boolean("dismissed").notNull().default(false),
   isAnnouncer: boolean("is_announcer").notNull().default(false),
-  x: integer("x").notNull().default(1080),
-  y: integer("y").notNull().default(840),
+  x: integer("x").notNull().default(5304),
+  y: integer("y").notNull().default(2232),
   dir: text("dir").notNull().default("down"),
   // 'sit' | 'idle' — persisted so a player who was sitting is restored SEATED
   // (not standing on their chair) after a refresh / server restart.

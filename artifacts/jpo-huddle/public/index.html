@@ -1716,8 +1716,8 @@
       _showRegisterForm();
     });
 
-    const WORLD_W = 3024;  // 63 tiles * 16px * 3 scale
-    const WORLD_H = 1728;  // 36 tiles * 16px * 3 scale
+    const WORLD_W = 10080;  // 210 tiles * 16px * 3 scale
+    const WORLD_H = 6144;   // 128 tiles * 16px * 3 scale
     const SPEED   = 150;
     // Coffee walk-speed multiplier — MUST match COFFEE_MULT in server.js (the
     // server widens its per-move budget by exactly this while a boost is live).
@@ -1740,18 +1740,18 @@
     const SIT_SUFFIX = { right: 'sit', up: 'sit2', down: 'sit3' };
     const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
 
-    // Furniture tile GIDs that are ACTUAL wall-mounted announcement boards:
-    //   - colorful notice/bulletin boards       1013/1014 top, 1029/1030 base
-    //   - green chalkboard (on stand)           1042/1043 top, 1058/1059 base
-    //   - blackboard                            1045/1046 top, 1061/1062 base
-    // Desks, monitors, lockers (1044/1060), thin wall trim (1031/1047/1063) and
-    // shelves/plants are NOT boards. GIDs 682-717 (the white kitchen unit /
-    // fridges in the Pantry, c24-31 r31-33) were once misclassified as cork
-    // boards — they're the 'fridge' interactive object below, NOT a board.
+    // Tile GIDs that are ACTUAL announcement boards (Interiors tileset):
+    //   - colorful notice/bulletin boards       2638/2639 top, 2654/2655 base
+    //   - green chalkboard (on stand)           2667/2668 top, 2683/2684 base
+    //   - blackboard                            2670/2671 top, 2686/2687 base
+    // In JPO_HQ.tmj boards appear on BOTH the Furniture layer AND the Wall
+    // layer (wall-mounted boards in classrooms/offices are painted on Wall), so
+    // every board scan below probes both layers. Desks, monitors, lockers and
+    // shelves/plants are NOT boards.
     const BOARD_GIDS = new Set([
-      1013,1014,1029,1030,
-      1042,1043,1058,1059,
-      1045,1046,1061,1062,
+      2638,2639,2654,2655,
+      2667,2668,2683,2684,
+      2670,2671,2686,2687,
     ]);
     // ── Interactive office objects ─────────────────────────────────────
     // Fixed stations you can use with E / the touch action button. Coords are
@@ -1759,90 +1759,162 @@
     // server re-checks proximity and owns every cooldown. hl = the rectangle
     // (world px) that pulses over the object while you're in range.
     const OFFICE_OBJECTS = [
-      { id:'coffee_machine', x:1056, y:864, r:150, label:'Brew free coffee', touch:'Brew',
-        hl:{ x:21*48, y:17*48, w:2*48, h:2*48 } },   // vending-machine bank, IT kitchenette corner
-      { id:'water_cooler',   x:1800, y:1272, r:150, label:'Grab some water', touch:'Drink',
-        hl:{ x:37*48, y:25*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r25-26), Pantry
-      { id:'arcade',         x:720,  y:720, r:170, label:'Play arcade (2P)', touch:'Play',
-        hl:{ x:13*48, y:14*48, w:4*48, h:2*48 } },   // twin TV screens, IT lounge
-      { id:'fridge',         x:1344, y:1584, r:190, label:'Eat a snack', touch:'Eat',
-        hl:{ x:24*48, y:31*48, w:8*48, h:3*48 } },   // white kitchen/fridge unit, Pantry (c24-31, r31-33)
+      { id:'coffee_machine',  x:6816, y:5808, r:160, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:140*48, y:119*48, w:4*48, h:2*48 } }, // vending-machine bank, Break Room (c140-143, r119-120)
+      { id:'coffee_machine2', x:8256, y:3456, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:171*48, y:70*48, w:2*48, h:2*48 } },  // coffee maker on the Library counter (c171-172 r70, counter r71)
+      { id:'water_cooler',    x:1800, y:3816, r:150, label:'Grab some water', touch:'Drink',
+        hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
+      { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
+        hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
+      { id:'fridge',          x:2016, y:1104, r:190, label:'Eat a snack', touch:'Eat',
+        hl:{ x:39*48, y:20*48, w:6*48, h:3*48 } },   // kitchenette fridges, West Office break corner (c39-44, r20-22)
     ];
     // ── Rooms ──────────────────────────────────────────────────────────
     // Each announcement board belongs to a room; posting at a board only shows on
     // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
     // matching the map's walled areas. Every board tile falls inside exactly one.
-    // (Derived from the map's walled areas. Some physically-open rooms are split into
-    // logical sub-rectangles so each gets its own floating label + board thread:
-    // the top-middle room is CEO (left) + Conference (right); the bottom-left room is
-    // QA (top) + L&D (bottom). Claims/Accounting ARE separated by a real wall at r31.
-    // Order matters: roomForTile returns the FIRST matching rect. Rects are disjoint,
-    // so any tile outside every rect falls back to the generic 'office' id.
+    // (Derived from JPO_HQ.tmj's walled areas. Order matters: roomForTile returns
+    // the FIRST matching rect — the Game Room rect overlaps the wider Library
+    // rect's north-east corner, so Game Room MUST come before Library. Any tile
+    // outside every rect falls back to the generic 'office' id.
     const ROOMS = [
-      { id:'hr',         name:'HR',         c0:13, c1:23, r0:0,  r1:9  },
-      { id:'it',         name:'IT/Dev',     c0:13, c1:23, r0:14, r1:21 },
-      { id:'ceo',        name:'CEO',        c0:24, c1:31, r0:0,  r1:9  },
-      { id:'conference', name:'Conference', c0:32, c1:43, r0:0,  r1:9  },
-      { id:'operations', name:'Operations', c0:44, c1:62, r0:0,  r1:13 },
-      { id:'frontdesk',  name:'Front Desk', c0:24, c1:43, r0:10, r1:23 },
-      { id:'cma',        name:'CMA',        c0:44, c1:62, r0:14, r1:24 },
-      { id:'qa',         name:'QA',         c0:13, c1:23, r0:22, r1:28 },
-      { id:'ld',         name:'L&D',        c0:13, c1:23, r0:29, r1:35 },
-      { id:'pantry',     name:'Pantry',     c0:24, c1:43, r0:24, r1:35 },
-      { id:'claims',     name:'Claims',     c0:44, c1:62, r0:25, r1:31 },
-      { id:'accounting', name:'Accounting', c0:44, c1:62, r0:32, r1:35 },
+      { id:'courtyard',  name:'Courtyard',        c0:2,   c1:29,  r0:14,  r1:127 },
+      { id:'westoffice', name:'West Office',      c0:31,  c1:77,  r0:15,  r1:43  },
+      { id:'central',    name:'Central Office',   c0:79,  c1:125, r0:15,  r1:43  },
+      { id:'eastoffice', name:'East Office',      c0:127, c1:175, r0:15,  r1:43  },
+      { id:'naprooms',   name:'Nap Rooms',        c0:176, c1:187, r0:15,  r1:43  },
+      { id:'gym',        name:'Gym',              c0:188, c1:209, r0:14,  r1:43  },
+      { id:'studio',     name:'TV Studio',        c0:30,  c1:77,  r0:50,  r1:63  },
+      { id:'lounge',     name:'Lounge',           c0:30,  c1:77,  r0:64,  r1:75  },
+      { id:'market',     name:'Market',           c0:30,  c1:75,  r0:76,  r1:95  },
+      { id:'cafeteria',  name:'Cafeteria',        c0:78,  c1:145, r0:50,  r1:95  },
+      { id:'gameroom',   name:'Game Room',        c0:177, c1:209, r0:50,  r1:71  },
+      { id:'library',    name:'Library',          c0:146, c1:190, r0:50,  r1:95  },
+      { id:'itoffice',   name:'IT Office',        c0:30,  c1:61,  r0:96,  r1:111 },
+      { id:'devroom',    name:'Dev Room',         c0:30,  c1:61,  r0:112, r1:127 },
+      { id:'oncall',     name:'On-Call Rooms',    c0:62,  c1:77,  r0:96,  r1:127 },
+      { id:'conference', name:'Conference Hall',  c0:90,  c1:126, r0:98,  r1:116 },
+      { id:'breakroom',  name:'Break Room',       c0:90,  c1:126, r0:117, r1:127 },
+      { id:'manager',    name:"Manager's Office", c0:127, c1:143, r0:98,  r1:127 },
+      { id:'training',   name:'Training Room',    c0:144, c1:190, r0:96,  r1:127 },
     ];
     function roomForTile(c, r) { const m = ROOMS.find(x => c>=x.c0 && c<=x.c1 && r>=x.r0 && r<=x.r1); return m ? m.id : 'office'; }
     function roomNameById(id)  { const m = ROOMS.find(x => x.id === id); return m ? m.name : 'Announcements'; }
-    // Sittable tiles ALL live on the FURNITURE layer. The "classroom"/workstation
-    // brown chair is GID 606 (103 of them): it shares a cell with a monitor (Wall
-    // 453/523) and sits directly ABOVE a desk-front tile (Wall 469/539). The 469/539
-    // tiles are the DESK, NOT the seat — sitting on them put the player on the desk
-    // edge / made front-row chairs unreachable, so they are intentionally excluded.
-    // Also: wooden chairs 750/751 (flank a shared desk, so they face toward it),
-    // conference chairs 510/472/474, and the sofas / benches. Seats with a fixed
-    // orientation get a SEAT_FACING entry below (workstation chairs, wooden chairs and
-    // all sofas/benches); any GID without one falls back to the approach direction.
+    // Sittable tiles ALL live on the FURNITURE layer. The office chair in
+    // JPO_HQ.tmj is GID 2231 (472 of them!) and is used EVERYWHERE: workstation
+    // banks (a monitor tile — Wall 2078 — shares the chair cell, desk-front Wall
+    // 2094 sits directly below), conference-table rings, and market checkouts.
+    // The desk tiles are NOT seats — sitting on them put the player on the desk
+    // edge, so only the chair GID is listed. Study-carrel units (2731/2732 top,
+    // 2747/2748 middle) have their two chairs on the BOTTOM row (2763/2764),
+    // facing UP toward the desk. Seats with a fixed orientation get a
+    // SEAT_FACING entry below; any GID without one falls back to the approach
+    // direction (workstation/conference 2231 facings are derived per-tile at
+    // create() — see seatFacingAt).
     const FURN_SEATS = new Set([
-      606,                                                        // brown workstation chair (desk is directly below -> pinned 'down' in SEAT_FACING)
-      1006,                                                       // classroom study-desk chair (desk 1005 is on its LEFT -> faces 'left')
-      510, 472, 474, 750, 751,                                    // conference + wooden chairs
-      1583, 1584, 1599, 1600,                                     // purple 2-seat sofa
-      1548, 1549, 1550, 1564, 1565, 1566, 1580, 1581, 1582, 1596, 1597, // gray sectional sofa
-      1210, 1211, 1226, 1227,                                     // wooden waiting benches
-      1679, 1680, 1695, 1696, 1711, 1712,                         // wooden settle/bench
+      2231,                                                       // office chair (workstations, conference tables, checkouts)
+      2763, 2764,                                                 // study-carrel chairs (desk directly above -> pinned 'up')
+      3208, 3209, 3224, 3225,                                     // purple 2-seat sofa
+      3173, 3174, 3175, 3189, 3190, 3191, 3205, 3206, 3207, 3221, 3222, // gray sectional sofa
+      2835, 2836, 2851, 2852,                                     // wooden waiting benches
+      3304, 3305, 3320, 3321, 3336, 3337,                         // wooden settle/bench
+      2642,                                                       // armchair seat (its top tile 2626 stays solid)
+      5505, 5506, 5507,                                           // lounge couch seat row (Jail tileset)
+      8497, 8498, 8499,                                           // basement couch seat row
     ]);
+    // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
+    // the non-manager-desk part of WORK_SEAT_GIDS in server.js (manager desks
+    // are detected via deskChairAt instead). Drives the 💼 chip at sit time.
+    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764]);
     // Fixed sit-facing for seats whose orientation is baked into the tile art, so a seated
     // player faces the way the FURNITURE faces (its open front) instead of the aisle they
-    // walked in from. Workstation chairs (606) have their desk + monitor directly BELOW
-    // them -> 'down'. Wooden chairs 750/751 flank a shared desk -> right/left toward it.
-    // Sofa/bench facing was derived PER-PIECE by rendering the art + an in-map composite
-    // crop (map has NO flip flags): the purple sofa, gray sectional and waiting benches
-    // open DOWN (backrest at top); the wooden settle is a SIDE-VIEW piece with its tall
-    // back on the RIGHT, so it opens LEFT.
+    // walked in from. Carrel chairs (2763/2764) have their desk directly ABOVE -> 'up'.
+    // Sofas/benches/couches open DOWN (backrest at top); the wooden settle is a
+    // SIDE-VIEW piece with its tall back on the RIGHT, so it opens LEFT. The office
+    // chair 2231 is deliberately NOT here — it rings tables on all four sides, so its
+    // facing is derived per-tile at create() (see seatFacingAt).
     const SEAT_FACING = {
-      606:'down', 750:'right', 751:'left', 1006:'left',                                // study-desk chair: desk on its left
-      1583:'down', 1584:'down', 1599:'down', 1600:'down',                            // purple 2-seat sofa
-      1548:'down', 1549:'down', 1550:'down', 1564:'down', 1565:'down', 1566:'down',  // gray sectional
-      1580:'down', 1581:'down', 1582:'down', 1596:'down', 1597:'down',               //   (front base -> still 'down')
-      1210:'down', 1211:'down', 1226:'down', 1227:'down',                            // wooden waiting benches
-      1679:'left', 1680:'left', 1695:'left', 1696:'left', 1711:'left', 1712:'left',  // wooden settle (back on right -> faces left)
+      2763:'up', 2764:'up',                                                          // study-carrel chairs: desk above
+      3208:'down', 3209:'down', 3224:'down', 3225:'down',                            // purple 2-seat sofa
+      3173:'down', 3174:'down', 3175:'down', 3189:'down', 3190:'down', 3191:'down',  // gray sectional
+      3205:'down', 3206:'down', 3207:'down', 3221:'down', 3222:'down',               //   (front base -> still 'down')
+      2835:'down', 2836:'down', 2851:'down', 2852:'down',                            // wooden waiting benches
+      3304:'left', 3305:'left', 3320:'left', 3321:'left', 3336:'left', 3337:'left',  // wooden settle (back on right -> faces left)
+      2642:'down',                                                                   // armchair
+      5505:'down', 5506:'down', 5507:'down',                                         // lounge couch
+      8497:'down', 8498:'down', 8499:'down',                                         // basement couch
     };
-    // Conference chairs (472/474/510) ring a shared table and the SAME GID (510) is
-    // used on the top, left, right AND bottom edges, so a single per-GID facing can't
-    // be correct. Their facing is derived PER-TILE at scene create() from whichever
-    // orthogonal neighbour is one of these conference-table tiles.
-    const CONF_CHAIR_GIDS = new Set([472, 474, 510]);
-    const CONF_TABLE_GIDS = new Set([488, 489, 490, 504, 505, 506, 520, 521, 522]);
+    // The office chair (2231) rings shared tables on the top, left, right AND
+    // bottom edges, so a single per-GID facing can't be correct. Its facing is
+    // derived PER-TILE at scene create(): face whichever orthogonal neighbour is
+    // a conference-table tile (tables live on the WALL layer in JPO_HQ.tmj), else
+    // pin 'down' when a workstation monitor (Wall 2078) shares the chair cell.
+    const CONF_CHAIR_GIDS = new Set([2231]);
+    const CONF_TABLE_GIDS = new Set([2097, 2098, 2099, 2113, 2114, 2115, 2129, 2130, 2131, 2145, 2146, 2147]);
+    // Wall tile that marks a chair cell as a computer workstation (monitor/desk-back).
+    const WORKSTATION_WALL_GID = 2078;
 
-    // Manager desks (blue 959.. / green 963..) are 2-wide x 3-tall furniture sprites
+    // ── JPO_HQ.tmj tilesets ────────────────────────────────────────────
+    // Three lockstepped views of the SAME 13 embedded tilesets:
+    //  - TILESET_IMAGES:  preload texture key → asset file
+    //  - TILESET_NAMES:   Tiled tileset name  → texture key (create() wiring)
+    //  - TILESET_SHEETS:  firstgid → spritesheet key, DESCENDING, for _gidToSheet
+    // A re-imported map with new/renamed tilesets must update all three.
+    const TILESET_IMAGES = {
+      floors:    'Room_Builder_Floors_16x16.png',
+      walls:     'Room_Builder_3d_walls_16x16.png',
+      interiors: 'Interiors_free_16x16.png',
+      grocery:   'Grocery_16x16.png',
+      icecream:  'Ice_Cream_16x16.png',
+      tvstudio:  'TV_Studio_16x16.png',
+      jail:      'Jail_16x16.png',
+      hospital:  'Hospital_16x16.png',
+      classroom: 'Classroom_16x16.png',
+      ext:       'tilemap_packed.png',
+      basement:  'Basement_16x16.png',
+      gym1:      'Gym_layer_1.png',
+      gym:       'Gym_16x16.png',
+    };
+    const TILESET_NAMES = {
+      'Room builder':         'floors',
+      'Walls':                'walls',
+      'Interiors_free_16x16': 'interiors',
+      'Grocery':              'grocery',
+      'IceCream':             'icecream',
+      'TVStudio':             'tvstudio',
+      'Jail':                 'jail',
+      'Hospital':             'hospital',
+      'Classroom':            'classroom',
+      'Ext':                  'ext',
+      'Basement':             'basement',
+      'Gym_layer_1':          'gym1',
+      'Gym':                  'gym',
+    };
+    const TILESET_SHEETS = [
+      { first: 9378, key: 'gym_ss'       },
+      { first: 9093, key: 'gym1_ss'      },
+      { first: 8293, key: 'basement_ss'  },
+      { first: 8161, key: 'ext_ss'       },
+      { first: 7617, key: 'classroom_ss' },
+      { first: 5905, key: 'hospital_ss'  },
+      { first: 5185, key: 'jail_ss'      },
+      { first: 4961, key: 'tvstudio_ss'  },
+      { first: 4689, key: 'icecream_ss'  },
+      { first: 3441, key: 'grocery_ss'   },
+      { first: 2017, key: 'interiors_ss' },
+      { first: 601,  key: 'walls_ss'     },
+      { first: 1,    key: 'floors_ss'    },
+    ];
+
+    // Manager desks (blue 2584.. / green 2588..) are 2-wide x 3-tall furniture sprites
     // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
     // tiles seats you in that baked-in chair. Each family maps its 6 GIDs to their
     // position in the 2x3 block, plus the block-relative chair cell and its facing
     // (blue chair is left-middle facing right; green is right-middle facing left).
     const DESK_FAMILIES = [
-      { facing:'right', chair:[0,1], gids:{ 959:[0,0], 960:[1,0], 975:[0,1], 976:[1,1], 991:[0,2], 992:[1,2] } },
-      { facing:'left',  chair:[1,1], gids:{ 963:[0,0], 964:[1,0], 979:[0,1], 980:[1,1], 995:[0,2], 996:[1,2] } },
+      { facing:'right', chair:[0,1], gids:{ 2584:[0,0], 2585:[1,0], 2600:[0,1], 2601:[1,1], 2616:[0,2], 2617:[1,2] } },
+      { facing:'left',  chair:[1,1], gids:{ 2588:[0,0], 2589:[1,0], 2604:[0,1], 2605:[1,1], 2620:[0,2], 2621:[1,2] } },
     ];
     // Given the faced furniture GID at tile (c,r), return the seat cell (col,row) of
     // that desk's baked-in chair plus its facing, or null if it isn't a manager desk.
@@ -4994,24 +5066,24 @@
       constructor() { super('OfficeScene'); }
 
       preload() {
-        this.load.image('roombuilder', '/assets/Room_Builder_free_16x16.png');
-        this.load.image('interiors',   '/assets/Interiors_free_16x16.png');
-        this.load.image('ext',         '/assets/tilemap_packed.png');
-        // Same three tilesets also loaded as 16×16 spritesheets so a single desk/monitor
-        // tile can be redrawn as a high-depth overlay that occludes a seated body
-        // (tuck-under-desk). Frame index within each sheet == GID - firstgid.
-        this.load.spritesheet('roombuilder_ss', '/assets/Room_Builder_free_16x16.png', { frameWidth: 16, frameHeight: 16 });
-        this.load.spritesheet('interiors_ss',   '/assets/Interiors_free_16x16.png',   { frameWidth: 16, frameHeight: 16 });
-        this.load.spritesheet('ext_ss',         '/assets/tilemap_packed.png',         { frameWidth: 16, frameHeight: 16 });
-        // Custom furniture sprite (not part of the Tiled map): the Pantry water
-        // cooler, drawn beside the potted plant. 16×32 source px.
+        // All 13 tilesets embedded in JPO_HQ.tmj (TILESET_SHEETS below mirrors
+        // this list with each tileset's firstgid). Every image is ALSO loaded as
+        // a 16×16 spritesheet so a single desk/monitor tile can be redrawn as a
+        // high-depth overlay that occludes a seated body (tuck-under-desk).
+        // Frame index within each sheet == GID - firstgid.
+        for (const [key, file] of Object.entries(TILESET_IMAGES)) {
+          this.load.image(key, `/assets/${file}`);
+          this.load.spritesheet(`${key}_ss`, `/assets/${file}`, { frameWidth: 16, frameHeight: 16 });
+        }
+        // Custom furniture sprite (not part of the Tiled map): the Market water
+        // cooler, drawn against the north wall. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
-        this.load.tilemapTiledJSON('map', '/assets/Office.tmj');
+        this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
 
         CHARACTERS.forEach(char => {
           this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
@@ -5036,10 +5108,10 @@
         _phaserKbd = this.input.keyboard;
 
         const map      = this.make.tilemap({ key: 'map' });
-        const tsRoom   = map.addTilesetImage('Room_Builder',         'roombuilder');
-        const tsInter  = map.addTilesetImage('Interiors_free_16x16', 'interiors');
-        const tsExt    = map.addTilesetImage('Ext',                  'ext');
-        const tilesets = [tsRoom, tsInter, tsExt];
+        // Tiled tileset name → the texture key loaded in preload(). MUST cover
+        // every tileset in JPO_HQ.tmj or its tiles render as black squares.
+        const tilesets = Object.entries(TILESET_NAMES).map(([tiledName, key]) =>
+          map.addTilesetImage(tiledName, key));
 
         map.createLayer('Floor', tilesets).setScale(3);
 
@@ -5056,19 +5128,12 @@
         const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
-        // A tile is a real seat only if its GID is in FURN_SEATS AND it isn't a
-        // study-desk chair (1006) whose cell is covered by a Wall-layer tile. The
-        // classroom's east column of chairs (c23) sits UNDER structural wall GID 64,
-        // which renders as an opaque wall over the chair; treating those as seats
-        // would let a player on the open pantry floor (e.g. (24,34)) face in, get a
-        // "sit" prompt and sit INSIDE the wall. The two open columns (c17/c20) have
-        // no wall on the chair cell and stay sittable. Kept 1006-specific on purpose:
-        // other seats legitimately share cells with wall GID 64 (benches, sofas).
-        this.isFurnSeat = (gid, c, r) => {
-          if (!FURN_SEATS.has(gid)) return false;
-          if (gid === 1006) { const w = this.wallLayer.getTileAt(c, r); if (w && w.index > 0) return false; }
-          return true;
-        };
+        // A tile is a real seat if its GID is in FURN_SEATS. (The old map needed a
+        // special case for classroom chairs buried under structural wall tiles; in
+        // JPO_HQ.tmj seats legitimately share cells with Wall-layer desk/monitor/
+        // table tiles — workstation monitors 2078, conference-table edges — so no
+        // wall-coverage veto applies.)
+        this.isFurnSeat = (gid, c, r) => FURN_SEATS.has(gid);
         // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
         // Seat banks are packed workstations: each chair (Furniture layer) shares its
         // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
@@ -5085,20 +5150,20 @@
         // working across the periodic Tiled re-import.
         wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
         furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
-        // Remove the operations lounge couch: a side-view sofa the team can't sit on (its only
-        // usable pose would be the hunched side profile), so per the owner it's dropped entirely,
-        // leaving open floor. Keyed by its tileset GIDs (they appear ONLY at that couch) so it
-        // stays gone across the periodic Tiled re-import; removed BEFORE the seat/collision passes
-        // below so the freed cells become plain walkable floor.
-        const COUCH_REMOVE = new Set([1613, 1629, 1630, 1645, 1646]);
-        for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
-          const ct = furnitureLayer.getTileAt(c, r);
-          if (ct && COUCH_REMOVE.has(ct.index)) furnitureLayer.removeTileAt(c, r);
+        // Furniture-removal seam (kept from the old map, currently empty): if a
+        // future Tiled re-import ships an unusable piece, list its GIDs here and
+        // they're stripped BEFORE the seat/collision passes below, leaving open floor.
+        const COUCH_REMOVE = new Set([]);
+        if (COUCH_REMOVE.size) {
+          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            const ct = furnitureLayer.getTileAt(c, r);
+            if (ct && COUCH_REMOVE.has(ct.index)) furnitureLayer.removeTileAt(c, r);
+          }
         }
-        // ── Water cooler sprite (Pantry, beside the potted plant) ────────
-        // A custom 16×32 sprite centered on the interaction anchor (1800, 1272)
+        // ── Water cooler sprite (Market, against the north wall) ────────
+        // A custom 16×32 sprite centered on the interaction anchor (1800, 3816)
         // — MUST stay in lockstep with OFFICE_OBJECTS.water_cooler and the server
-        // OBJECTS.water_cooler anchor (base tile c37 r26, top half over r25).
+        // OBJECTS.water_cooler anchor (base tile c37 r79, top half over r78).
         // Split into two images from the same texture so players layer correctly:
         //  - base (bottom 16 source px = the r26 footprint tile): default depth 0,
         //    created before any player sprite, so players render in front of it;
@@ -5107,14 +5172,14 @@
         //    not), so a player walking the r25 tile behind it is occluded by it.
         // A static body over the base tile keeps anyone from walking through the
         // stand itself (client-side only — the server has no tile collision).
-        const COOLER_X = 1800, COOLER_BOTTOM = 27*48;  // feet of the sprite = bottom of r26
+        const COOLER_X = 1800, COOLER_BOTTOM = 80*48;  // feet of the sprite = bottom of r79
         const coolerBase = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
           .setOrigin(0.5, 1).setScale(3);
         coolerBase.setCrop(0, 16, 16, 16);
         const coolerTop = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
           .setOrigin(0.5, 1).setScale(3).setDepth(900);
         coolerTop.setCrop(0, 0, 16, 16);
-        this._coolerBlock = this.add.zone(COOLER_X, 26*48+24, 48, 48);  // the r26 base tile
+        this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
         this.physics.add.existing(this._coolerBlock, true);
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
@@ -5128,13 +5193,13 @@
         }
 
         // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
-        // Office.tmj is regenerated from the user's Tiled project and re-imported
+        // JPO_HQ.tmj is regenerated from the user's Tiled project and re-imported
         // periodically; a manager desk can end up walled off behind structural walls,
         // making "your desk" impossible to reach. Flood-fill from spawn using the SAME
         // collision model as gameplay (only solid walls block) and warn so a map
         // regression shows up as a console message here instead of a bug report.
         (() => {
-          const W = map.width, Hh = map.height, SPAWN = [28, 17];
+          const W = map.width, Hh = map.height, SPAWN = [110, 46];
           // Gameplay walkability: a tile blocks if its wall OR furniture tile still
           // collides after the seat/desk openings above (only seats & aisles are open).
           const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const w = wallLayer.getTileAt(c,r); if (w && w.collides) return false; const f = furnitureLayer.getTileAt(c,r); return !(f && f.collides); };
@@ -5155,7 +5220,7 @@
             const cells = [[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]].map(([dc,dr]) => [c+dc, r+dr]);
             if (!hasReachableNbr(cells)) {
               orphans++;
-              console.warn(`[reachability] manager desk at (${c},${r}) gid ${gid} is walled off — no reachable adjacent tile in Office.tmj`);
+              console.warn(`[reachability] manager desk at (${c},${r}) gid ${gid} is walled off — no reachable adjacent tile in JPO_HQ.tmj`);
             }
           }
           if (orphans) console.warn(`[reachability] ${orphans} manager desk(s) unreachable from spawn — check the Tiled map.`);
@@ -5213,8 +5278,9 @@
           if (data.anim === 'sit') {
             const dp = this._deskPoseAt(data.x, data.y);
             if (dp) {
-              // Desk-type seat: 606 -> upright standing DOWN frame (desk hides the legs);
-              // manager-desk chair -> seated sit3 sheet mirrored toward the desk (see _deskPoseAt).
+              // Desk-type seat: monitor workstation -> upright standing DOWN frame (desk hides
+              // the legs); manager-desk chair -> seated sit3 sheet mirrored toward the desk
+              // (see _deskPoseAt).
               const dsk = `sit_${entry.texKey}_down`;
               if (dp.pose === 'sit3' && this.anims.exists(dsk)) {
                 entry.sprite.setFlipX(dp.flip === true);
@@ -5304,9 +5370,13 @@
         _boardLabels = {};         // boardId -> human label, shared with the announcement UI
         {
           const cells = new Map();
-          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
-            const t = furnitureLayer.getTileAt(c, r);
-            if (t && t.index > 0 && BOARD_GIDS.has(t.index)) cells.set(c + ',' + r, { c, r });
+          // Boards live on BOTH layers in JPO_HQ.tmj: free-standing chalkboards on
+          // Furniture, wall-mounted notice boards painted on Wall.
+          for (const layer of [furnitureLayer, wallLayer]) {
+            for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+              const t = layer.getTileAt(c, r);
+              if (t && t.index > 0 && BOARD_GIDS.has(t.index)) cells.set(c + ',' + r, { c, r });
+            }
           }
           const seen = new Set();
           const clusters = [];
@@ -5350,21 +5420,25 @@
           refreshBoardMarkers();   // announcements may already be loaded
         }
 
-        // ── Conference chairs: pin each to face its adjacent table tile ────
-        // 510 (and 472/474) sit on every side of the table, so we resolve facing
-        // per TILE here: whichever orthogonal neighbour is a conference-table tile
-        // is the way that seat faces. Chairs with no table beside them are left out
-        // and fall back to the approach direction at sit time.
+        // ── Office chairs (2231): pin each to face its context ────────────
+        // The same chair GID sits on every side of conference tables, so facing is
+        // resolved per TILE: whichever orthogonal neighbour holds a conference-table
+        // tile (tables live on the WALL layer in JPO_HQ.tmj) is the way that seat
+        // faces. Otherwise, a workstation monitor sharing the chair cell pins it
+        // 'down' (desk-front is directly below). Chairs matching neither are left
+        // out and fall back to the approach direction at sit time.
         this.seatFacingAt = {};
         {
           const NB = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
           for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
             const t = furnitureLayer.getTileAt(c, r);
             if (!t || !CONF_CHAIR_GIDS.has(t.index)) continue;
+            let faced = false;
             for (const d in NB) {
-              const nt = furnitureLayer.getTileAt(c + NB[d][0], r + NB[d][1]);
-              if (nt && CONF_TABLE_GIDS.has(nt.index)) { this.seatFacingAt[c + ',' + r] = d; break; }
+              const nt = wallLayer.getTileAt(c + NB[d][0], r + NB[d][1]);
+              if (nt && CONF_TABLE_GIDS.has(nt.index)) { this.seatFacingAt[c + ',' + r] = d; faced = true; break; }
             }
+            if (!faced && this._isWorkstation(c, r)) this.seatFacingAt[c + ',' + r] = 'down';
           }
         }
 
@@ -5450,7 +5524,7 @@
         // Idempotent: a blip resume re-fires 'approved'. If we already have a local
         // player (scene survived the socket reconnect), don't build a second sprite.
         if (this.player) { this.cameras?.main?.startFollow(this.player); return; }
-        const SPAWN_X = 28*48+24, SPAWN_Y = 17*48+24;
+        const SPAWN_X = 110*48+24, SPAWN_Y = 46*48+24;
 
         const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
@@ -5505,9 +5579,16 @@
       // ── Desk occlusion ────────────────────────────────────────────────
       // Map a Tiled GID to the matching 16×16 overlay spritesheet + frame index.
       _gidToSheet(gid) {
-        if (gid >= 1816) return { key: 'ext_ss',        frame: gid - 1816 };
-        if (gid >= 392)  return { key: 'interiors_ss',  frame: gid - 392  };
-        return                { key: 'roombuilder_ss',  frame: gid - 1    };
+        const t = TILESET_SHEETS.find(ts => gid >= ts.first);
+        return { key: t.key, frame: gid - t.first };
+      }
+      // A cell is a computer workstation when the office chair (Furniture) shares
+      // it with a monitor/desk-back tile on the Wall layer. Drives the 'stand'
+      // sit pose + wall-tile occluders; conference-table 2231 chairs (which share
+      // their cell with TABLE edge tiles instead) don't match.
+      _isWorkstation(col, row) {
+        if ((this.furnitureLayer.getTileAt(col, row)?.index || 0) !== 2231) return false;
+        return (this.wallLayer.getTileAt(col, row)?.index || 0) === WORKSTATION_WALL_GID;
       }
       // Redraw the desk/monitor tiles that belong IN FRONT of a seated body as
       // high-depth overlay images, so the body tucks UNDER the desk instead of
@@ -5527,17 +5608,14 @@
             if (dc === col && dr === row) continue; // chair cell stays behind the body
             cells.push({ layer: this.furnitureLayer, c: dc, r: dr });
           }
-        } else if (seatGid === 606) {
-          // Workstation: a monitor shares the chair cell and a desk-front sits in the
-          // seat's REAL orientation (SEAT_FACING), both on the Wall layer. This is derived
-          // from the seat — NOT the sprite's approach facing — so the desk-front is always
-          // occluded correctly even though the avatar now sits facing whatever way it
-          // walked in. Gated to the workstation chair so sofas/benches that legitimately
-          // share a cell with structural wall GID 64 never get that wall redrawn over the body.
-          const seatDir = SEAT_FACING[seatGid] || 'down';
-          const fwd = { down:[0,1], up:[0,-1], left:[-1,0], right:[1,0] }[seatDir] || [0,1];
-          cells.push({ layer: this.wallLayer, c: col,          r: row          });
-          cells.push({ layer: this.wallLayer, c: col + fwd[0], r: row + fwd[1] });
+        } else if (this._isWorkstation(col, row)) {
+          // Workstation: a monitor (Wall 2078) shares the chair cell and a desk-front
+          // (Wall 2094) sits directly BELOW it — fixed geometry in JPO_HQ.tmj, so both
+          // occluder cells are pinned regardless of the sprite's approach facing. Gated
+          // on the monitor tile so conference-table 2231 chairs (which share their cell
+          // with table-edge tiles instead) never get the table redrawn over the body.
+          cells.push({ layer: this.wallLayer, c: col, r: row     });
+          cells.push({ layer: this.wallLayer, c: col, r: row + 1 });
         }
         for (const cell of cells) {
           const t = cell.layer.getTileAt(cell.c, cell.r);
@@ -5558,7 +5636,7 @@
       // Desk-type seat pose, detected from the seat cell under a seated sprite's pixel position
       // (same col/row math as _seatOccludersFor) so local + remote + snapshot render the same pose
       // regardless of the broadcast approach dir. Returns:
-      //  - { pose:'stand' } for computer workstations (GID 606): upright standing DOWN frame. The
+      //  - { pose:'stand' } for computer workstations (chair 2231 + monitor Wall 2078): upright standing DOWN frame. The
       //    desk + monitor in front hide the legs, so it reads as seated with the face visible —
       //    the owner-approved look; do NOT swap it for a sit sheet.
       //  - { pose:'sit3', flip } for the baked-in manager-desk chairs: the real seated DOWN sheet,
@@ -5570,8 +5648,8 @@
       _deskPoseAt(x, y) {
         const col = Math.round((x - 24) / 48);
         const row = Math.round((y - 24 + BODY_DY) / 48);
+        if (this._isWorkstation(col, row)) return { pose: 'stand' };
         const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
-        if (gid === 606) return { pose: 'stand' };
         const desk = deskChairAt(gid, col, row);
         if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
         return null;
@@ -5880,7 +5958,7 @@
         if (data.anim === 'sit') {
           const dp = this._deskPoseAt(data.x, data.y);
           if (dp) {
-            // Desk-type seat: 606 -> standing DOWN frame; manager desk -> sit3 toward the desk.
+            // Desk-type seat: monitor workstation -> standing DOWN frame; manager desk -> sit3 toward the desk.
             const dsk = `sit_${texKey}_down`;
             if (dp.pose === 'sit3' && this.anims.exists(dsk)) { sprite.setFlipX(dp.flip === true); sprite.play(dsk); }
             else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START.down); }
@@ -6006,10 +6084,12 @@
         const pty = Math.floor((player.y + BODY_DY) / 48);
 
         // Scan the 4 adjacent tiles (facing first). Boards read; chairs and manager
-        // desks sit. All sit targets (brown chair 606, wooden 750/751, sofas, and the
-        // baked-in manager-desk chairs) live on the FURNITURE layer, so we probe it.
+        // desks sit. All sit targets (office chair 2231, carrel chairs, sofas, and the
+        // baked-in manager-desk chairs) live on the FURNITURE layer; boards can also
+        // be wall-mounted, so the board probe checks BOTH layers.
         const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
         const furnAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
+        const wallAt = (c,r) => { const t = this.wallLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
         // First interactable neighbour in priority order (facing first) wins. Its
         // OWN type decides the action; plain solid furniture/walls are skipped so
         // the scan keeps looking for a genuine seat or board in the other directions.
@@ -6026,7 +6106,7 @@
               const v = DIRVEC[d]; if (!v) continue;
               const nc = ptx+v[0], nr = pty+v[1];
               const fg = furnAt(nc,nr);
-              if (BOARD_GIDS.has(fg)) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
+              if (BOARD_GIDS.has(fg) || BOARD_GIDS.has(wallAt(nc,nr))) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
               const desk = deskChairAt(fg, nc, nr);
               if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
               if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
@@ -6086,18 +6166,18 @@
             // origin sits BODY_DY above it, so the character rests IN the chair.
             player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
-            // Desk-type seats face the desk: 606 workstations render the standing DOWN frame,
-            // manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the sitting
-            // block below — detection matches _deskPoseAt so remote viewers render the same pose).
-            // Every other seat keeps the approach facing you walked in with.
+            // Desk-type seats face the desk: monitor workstations render the standing DOWN
+            // frame, manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the
+            // sitting block below — detection matches _deskPoseAt so remote viewers render the
+            // same pose). Every other seat keeps the approach facing you walked in with.
             const seatGid = furnAt(s.col, s.row);
             const deskInfo = deskChairAt(seatGid, s.col, s.row);
-            this._deskPose = seatGid === 606 ? { pose: 'stand' }
-                           : deskInfo        ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
+            this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
+                           : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : null;
-            // Desk-type seats (workstations + manager desks) earn the work
-            // bonus — same rule as the server's WORK_SEAT_GIDS check.
-            _setWorkChip(!!this._deskPose);
+            // Work-bonus chairs (office/carrel chairs + manager desks) earn the
+            // +3/min bonus — same rule as the server's WORK_SEAT_GIDS check.
+            _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo);
             this.lastDir = this._deskPose ? 'down' : interact.dir;
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
@@ -6108,7 +6188,7 @@
         if (this.sitting) {
           player.setVelocity(0,0);
           if (this._deskPose) {
-            // Desk-type seat: 606 workstations show the upright standing DOWN idle frame — the
+            // Desk-type seat: monitor workstations show the upright standing DOWN idle frame — the
             // desk + monitor hide the legs so it reads as seated with the face visible (the
             // approved look). Manager-desk chairs are side-on with nothing occluding the body, so
             // they play the real seated sit3 sheet mirrored toward the desk instead.

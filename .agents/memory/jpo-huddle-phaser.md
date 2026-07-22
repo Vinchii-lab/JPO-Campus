@@ -3,6 +3,8 @@ name: JPO Huddle Phaser sprite & collision
 description: Non-obvious facts about the Adam player spritesheet, Phaser arcade body sizing, TilemapLayer rendering order, and animation system in the JPO Huddle office game.
 ---
 
+> **Map swap (July 2026):** the map is now `JPO_HQ.tmj` (210×128, 13 embedded tilesets, firstgids 1/601/2017/3441/4689/4961/5185/5905/7617/8161/8293/9093/9378). Old-map specifics below are HISTORICAL: Office.tmj, GID 606 chairs, monitors 453/523, desk-fronts 469/539, firstgids 392/1816, the removed lounge couch, and the old BOARD_GIDS/FURN_SEATS lists. Current: workstation chair **2231** + Wall monitor **2078** (desk-front **2094** below), carrels **2763/2764**, manager chair cells **2600/2605**, conf-table Wall gids **2097–2147** (per-tile facing), boards on BOTH Furniture and Wall layers, `_gidToSheet` table-driven over all 13 tilesets. The PRINCIPLES (insertion-order depth, occluder overlays, per-tile facing, isFurnSeat gating, feet-body math) all still apply.
+
 # Adam player spritesheet
 - `public/assets/Adam_16x16.png` is **16×32 per frame**, NOT 16×16 (the filename misleads — the character spans two tiles tall). Each 32px frame holds one full character; frames are cleanly aligned, no misalignment.
 - **So a "cut character" is NOT a spritesheet/frameHeight problem** — look at TilemapLayer insertion order (see below).

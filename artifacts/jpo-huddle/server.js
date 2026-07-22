@@ -233,10 +233,11 @@ const GROUP_RADIUS    = 420;     // "everyone nearby" radius for group consumabl
 // sprite origin. The client only ever sends an intent; proximity, cooldowns,
 // and rate limits are all enforced here.
 const OBJECTS = {
-  coffee_machine: { x: 1056, y: 864, r: 150 },   // vending-machine bank, IT kitchenette corner (c21-22, r17-18)
-  water_cooler:   { x: 1800, y: 1272, r: 150 },  // water dispenser, Pantry (c37, r25-26, beside the potted plant)
-  arcade:         { x: 720,  y: 720, r: 170 },   // twin TV screens, IT lounge (c13-16, r14-15)
-  fridge:         { x: 1344, y: 1584, r: 190 },  // white kitchen/fridge unit, Pantry (c24-31, r31-33)
+  coffee_machine:  { x: 6816, y: 5808, r: 160 }, // vending-machine bank, Break Room (c140-143, r119-120)
+  coffee_machine2: { x: 8256, y: 3456, r: 150 }, // coffee maker on the Library counter (c171-172 r70) — shares the coffee_machine cooldown
+  water_cooler:    { x: 1800, y: 3816, r: 150 }, // water dispenser, Market north wall (c37, r78-79)
+  arcade:          { x: 5280, y: 6000, r: 170 }, // arcade cabinets, Break Room basement corner (c108-111, r123-127)
+  fridge:          { x: 2016, y: 1104, r: 190 }, // kitchenette fridges, West Office break corner (c39-44, r20-22)
 };
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee
 // (instant, usable anywhere, stockpilable) stays worth buying.
@@ -292,40 +293,42 @@ const CLOTH_MAX = 22;
 
 // ── World bounds (derived from the loaded Tiled map, NOT hardcoded) ───────────
 // Movement validation rejects positions outside the office. We read the same
-// Tiled map the client renders (public/assets/Office.tmj) so the bounds track a
+// Tiled map the client renders (public/assets/JPO_HQ.tmj) so the bounds track a
 // future map swap automatically. RENDER_SCALE must match the client's setScale(3)
 // in public/index.html — the map file stores tile counts/sizes, not the on-screen
-// render scale. Falls back to the current 63×36 map if the file can't be read.
+// render scale. Falls back to the current 210×128 map if the file can't be read.
 const RENDER_SCALE = 3;
 // Outdoor mask: OUTDOOR[row*MAP_W + col] === true where the Floor tile comes
-// from the exterior tileset (grass/pavement). Ext is the map's LAST tileset, so
-// any Floor gid >= its firstgid is outdoor. Flip-flag bits are masked off
-// (Tiled stores flips in the top bits of the gid). Used by the cigarette's
-// "outside on the grass only" rule.
+// from the exterior tileset (grass/pavement), found BY NAME ("Ext") with a
+// bounded gid range — Ext is NOT the last tileset in JPO_HQ.tmj. Flip-flag
+// bits are masked off (Tiled stores flips in the top bits of the gid). Used
+// by the cigarette's "outside on the grass only" rule.
 const GID_MASK = 0x1FFFFFFF;
-// Work-seat GIDs on the Furniture layer: 606 = workstation chair (shares its
-// cell with a monitor), 975 / 980 = the baked-in chair cell of the blue / green
-// manager desks (the cell the sit action snaps the avatar onto — matches the
-// client's DESK_FAMILIES chair cells). Sitting on one of these earns the work
-// bonus; sofas/benches/wooden chairs don't. MUST stay in lockstep with the
-// client's "desk-type seat" rule (_deskPoseAt: gid 606 or deskChairAt hit),
-// which is what shows the 💼 chip.
-const WORK_SEAT_GIDS = new Set([606, 975, 980]);
+// Work-seat GIDs on the Furniture layer: 2231 = office chair (workstations,
+// conference tables, checkouts), 2763/2764 = study-carrel chairs, 2600/2605 =
+// the baked-in chair cell of the blue/green manager desks (the cell the sit
+// action snaps the avatar onto — matches the client's DESK_FAMILIES chair
+// cells). Sitting on one of these earns the work bonus; sofas/benches don't.
+// MUST stay in lockstep with the client's work-chip rule (WORK_CHAIR_GIDS +
+// deskChairAt), which is what shows the 💼 chip.
+const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2600, 2605]);
 const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS } = (() => {
   try {
-    const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "Office.tmj"), "utf8"));
+    const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
     const h = tmj.height * tmj.tileheight * RENDER_SCALE;
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
       let outdoor = null;
       const floor = tmj.layers?.find((l) => l.name === "Floor" && Array.isArray(l.data));
-      const extGid = tmj.tilesets?.length
-        ? Math.max(...tmj.tilesets.map((t) => t.firstgid || 0))
-        : null;
-      if (floor && extGid) {
-        outdoor = floor.data.map((g) => (g & GID_MASK) >= extGid);
+      // The exterior tileset is found BY NAME (not "last firstgid" — JPO_HQ.tmj
+      // has tilesets after Ext), and the outdoor test is a bounded range so
+      // Basement/Gym tiles never count as outdoors.
+      const ext = tmj.tilesets?.find((t) => t.name === "Ext");
+      if (floor && ext?.firstgid && ext?.tilecount) {
+        const lo = ext.firstgid, hi = ext.firstgid + ext.tilecount;
+        outdoor = floor.data.map((g) => { const gg = g & GID_MASK; return gg >= lo && gg < hi; });
       } else {
-        console.error("outdoor mask unavailable (no Floor layer or tilesets) — smoking disabled");
+        console.error("outdoor mask unavailable (no Floor layer or Ext tileset) — smoking disabled");
       }
       // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
       let workSeats = null;
@@ -340,8 +343,8 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS } = (() => {
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
-  // Fallback: 63×36 tiles · 16px · scale 3, no outdoor/work masks (smoking + work bonus disabled).
-  return { WORLD_W: 3024, WORLD_H: 1728, MAP_W: 63, MAP_H: 36, OUTDOOR: null, WORK_SEATS: null };
+  // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work masks (smoking + work bonus disabled).
+  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, WORK_SEATS: null };
 })();
 
 // Is this player position outdoors? Uses the FEET tile — the sprite origin is
@@ -1393,7 +1396,7 @@ setInterval(async () => {
               SET coins = coins + $6, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
             WHERE email = $1
             RETURNING coins`,
-          [p.email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
+          [p.email, Math.round(p.x ?? 5304), Math.round(p.y ?? 2232), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
         );
         if (rows[0]) p.coins = rows[0].coins;
       } catch (err) {
@@ -1983,7 +1986,7 @@ io.on("connection", (socket) => {
       // Session-only (no email) registrant: approve into memory only.
       if (reg && !reg.email) {
         const state = {
-          x: 1080, y: 840, dir: "down", anim: "idle",
+          x: 5304, y: 2232, dir: "down", anim: "idle",
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
@@ -3106,7 +3109,10 @@ io.on("connection", (socket) => {
     }
     const now = Date.now();
 
-    if (object === "coffee_machine") {
+    if (object === "coffee_machine" || object === "coffee_machine2") {
+      // Both machines share ONE per-person refill cooldown (coffeeMachineReadyAt
+      // is keyed by email only) — two stations are a convenience, not a way to
+      // double the free-coffee rate.
       // Same After Dark lockout as boost ITEMS (and the same message for crew
       // and killers) — and it runs BEFORE the refill cooldown is spent, so a
       // refused brew never burns the machine.
@@ -3305,7 +3311,7 @@ io.on("connection", (socket) => {
         try {
           await pool.query(
             `UPDATE jpo_players SET x = $2, y = $3, dir = $4, anim = $5, updated_at = now() WHERE email = $1`,
-            [email, Math.round(p.x ?? 1080), Math.round(p.y ?? 840), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
+            [email, Math.round(p.x ?? 5304), Math.round(p.y ?? 2232), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
           );
         } catch (err) { console.error("disconnect flush failed:", err); }
       } else {
