@@ -1809,26 +1809,33 @@
     // the FIRST matching rect — the Game Room rect overlaps the wider Library
     // rect's north-east corner, so Game Room MUST come before Library. Any tile
     // outside every rect falls back to the generic 'office' id.
+    // Department mapping (Jul 2026): display names renamed per team layout, but the
+    // room `id`s are FROZEN — announcement boardIds are `<roomId>#<n>`, so changing an
+    // id would orphan that room's posted announcements. Rename `name` only.
+    // NOTE: ids 'itoffice'/'devroom' have SWAPPED display names on purpose (user request);
+    // 'breakroom' kept its id but is now the CEO's office (right half of the old Break
+    // Room row — the c105 wall splits it from the COO's office on the left).
     const ROOMS = [
       { id:'courtyard',  name:'Courtyard',        c0:2,   c1:29,  r0:14,  r1:127 },
-      { id:'westoffice', name:'West Office',      c0:31,  c1:77,  r0:15,  r1:43  },
-      { id:'central',    name:'Central Office',   c0:79,  c1:125, r0:15,  r1:43  },
-      { id:'eastoffice', name:'East Office',      c0:127, c1:175, r0:15,  r1:43  },
+      { id:'westoffice', name:'Ops Office',       c0:31,  c1:77,  r0:15,  r1:43  },
+      { id:'central',    name:'CMA Office',       c0:79,  c1:125, r0:15,  r1:43  },
+      { id:'eastoffice', name:'Claims Office',    c0:127, c1:175, r0:15,  r1:43  },
       { id:'naprooms',   name:'Nap Rooms',        c0:176, c1:187, r0:15,  r1:43  },
       { id:'gym',        name:'Gym',              c0:188, c1:209, r0:14,  r1:43  },
-      { id:'studio',     name:'TV Studio',        c0:30,  c1:77,  r0:50,  r1:63  },
-      { id:'lounge',     name:'Lounge',           c0:30,  c1:77,  r0:64,  r1:75  },
-      { id:'market',     name:'Market',           c0:30,  c1:75,  r0:76,  r1:95  },
+      { id:'studio',     name:'Front Desk',       c0:30,  c1:77,  r0:50,  r1:63  },
+      { id:'lounge',     name:'Recruiters Room',  c0:30,  c1:77,  r0:64,  r1:75  },
+      { id:'market',     name:'HR Room',          c0:30,  c1:75,  r0:76,  r1:95  },
       { id:'cafeteria',  name:'Cafeteria',        c0:78,  c1:145, r0:50,  r1:95  },
-      { id:'gameroom',   name:'Game Room',        c0:177, c1:209, r0:50,  r1:71  },
-      { id:'library',    name:'Library',          c0:146, c1:190, r0:50,  r1:95  },
-      { id:'itoffice',   name:'IT Office',        c0:30,  c1:61,  r0:96,  r1:111 },
-      { id:'devroom',    name:'Dev Room',         c0:30,  c1:61,  r0:112, r1:127 },
-      { id:'oncall',     name:'On-Call Rooms',    c0:62,  c1:77,  r0:96,  r1:127 },
+      { id:'gameroom',   name:'Game Room',        c0:177, c1:209, r0:50,  r1:71  }, // MUST stay before qa/library (rect overlap; first match wins)
+      { id:'qa',         name:'QA Room',          c0:146, c1:190, r0:50,  r1:71  }, // top portion of the old Library (above the r72-73 wall)
+      { id:'library',    name:'L&D Room',         c0:146, c1:190, r0:72,  r1:95  },
+      { id:'itoffice',   name:'Dev Room',         c0:30,  c1:61,  r0:96,  r1:111 }, // names swapped with devroom on purpose
+      { id:'devroom',    name:'IT Office',        c0:30,  c1:61,  r0:112, r1:127 },
       { id:'conference', name:'Conference Hall',  c0:90,  c1:126, r0:98,  r1:116 },
-      { id:'breakroom',  name:'Break Room',       c0:90,  c1:126, r0:117, r1:127 },
-      { id:'manager',    name:"Manager's Office", c0:127, c1:143, r0:98,  r1:127 },
-      { id:'training',   name:'Training Room',    c0:144, c1:190, r0:96,  r1:127 },
+      { id:'coo',        name:"COO's Office",     c0:90,  c1:104, r0:117, r1:127 },
+      { id:'breakroom',  name:"CEO's Office",     c0:105, c1:126, r0:117, r1:127 },
+      { id:'manager',    name:"CFO's Office",     c0:127, c1:143, r0:98,  r1:127 },
+      { id:'training',   name:'Accounting',       c0:144, c1:190, r0:96,  r1:127 },
     ];
     function roomForTile(c, r) { const m = ROOMS.find(x => c>=x.c0 && c<=x.c1 && r>=x.r0 && r<=x.r1); return m ? m.id : 'office'; }
     function roomNameById(id)  { const m = ROOMS.find(x => x.id === id); return m ? m.name : 'Announcements'; }
