@@ -1,15 +1,29 @@
 ---
 name: JPO Huddle seated facing
-description: Seated avatars keep the player's pre-sit direction (approach-based), EXCEPT desk-type seats — computer workstations render the upright STANDING DOWN frame; manager-desk baked chairs render sit3-down MIRRORED toward the desk. Seated state (anim) is persisted server-side so refresh/restart never shows a sitter standing.
+description: Seated facing = pin first (seatFacingAt per-tile || SEAT_FACING per-GID), approach direction only as fallback. UP-pinned seats render the STANDING UP frame (back of head) + chair-tile occluder ('standup' pose) because NO sit sheet shows a back view. Desk seats keep forced poses. Seated state (anim) persists server-side.
 ---
 
 > **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + Wall monitor **2078** sharing the cell (`_isWorkstation`), desk-front **2094** below; manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged.
 
-# Seated facing is APPROACH-BASED — EXCEPT desk-type seats, which have forced poses
+# Seated facing is PIN-FIRST — approach direction is only the fallback (changed July 2026)
 
-When a player sits, the avatar keeps whatever direction it was facing when it pressed sit.
-Face left → sit facing left; face down → sit facing down; etc. This holds for sofas/benches and
-conference chairs.
+Sit facing resolves `seatFacingAt["c,r"] || SEAT_FACING[gid] || approachDir`, and `lastDir` must be
+set from that SAME resolved value — an earlier bug set `lastDir` from the approach direction, so a
+side approach to a pinned chair ignored the pin and played the side sit anim. Seats with no pin
+(most sofas/benches/stools) still use the approach direction.
+
+## UP-pinned seats → 'standup' pose (STANDING UP frame + chair-tile occluder)
+**No sit sheet contains a back-of-head pose** (see the sit2 correction below), so 'up' facing cannot
+use a sit anim. The 'standup' desk pose renders the standing UP idle frame (genuine back of head on
+the run sheet) with the chair's OWN tile overlaid as a depth-900 occluder so the chair back covers
+the body — reads as "seated facing away". GID lists, layer choice, and broadcast details live in the
+replit.md seating gotcha (code-derivable); the durable rule is: any seat pinned 'up' MUST take this
+pose, never a sit sheet.
+
+## CORRECTION: Adam_sit2 is NOT a back view (earlier notes here were wrong)
+Skin-pixel counting proved sit2 frames 0–5 have ~41 face-skin px — same as the RIGHT sit sheet; a
+genuine back-of-head frame (run-sheet UP rows) has ~3. sit2 is a face-visible profile pose. Never
+use any sit sheet for 'up' facing; only the run sheet's UP rows show the back of the head.
 
 ## Exception 1: computer workstations (GID 606) → STANDING DOWN frame (LOVED — do not change)
 Workstations seat you facing the desk; the avatar is rendered as the **standing DOWN idle frame**

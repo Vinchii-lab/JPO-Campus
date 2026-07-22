@@ -5373,7 +5373,7 @@
                 entry.sprite.setTexture(entry.texKey);
                 entry.sprite.setFlipX(false);
                 entry.sprite.anims.stop();
-                entry.sprite.setFrame(DIR_START.down);
+                entry.sprite.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']);
               }
             } else {
               const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
@@ -5704,6 +5704,14 @@
           // with table-edge tiles instead) never get the table redrawn over the body.
           cells.push({ layer: this.wallLayer, c: col, r: row     });
           cells.push({ layer: this.wallLayer, c: col, r: row + 1 });
+        } else if (this._upSeatAt(col, row)) {
+          // Pinned-up seat: redraw the chair's OWN tile over the body so the backrest
+          // hides the legs — with the standing UP frame it reads as "seated from behind".
+          // Wall-layer chairs (WALL_SEATS) hold their art on the Wall layer; gate the
+          // Wall branch on WALL_SEATS membership (sofas share cells with structural
+          // walls — a generic Wall overlay would draw a wall over the sitter).
+          const wallChair = WALL_SEATS[this.wallLayer.getTileAt(col, row)?.index] !== undefined;
+          cells.push({ layer: wallChair ? this.wallLayer : this.furnitureLayer, c: col, r: row });
         }
         for (const cell of cells) {
           const t = cell.layer.getTileAt(cell.c, cell.r);
@@ -5755,7 +5763,19 @@
         if (BED_GIDS.has(gid)) return { pose: 'lie' };
         const desk = deskChairAt(gid, col, row);
         if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
+        if (this._upSeatAt(col, row)) return { pose: 'standup' };
         return null;
+      }
+      // A seat whose facing is PINNED 'up' (wall-layer desk chairs via seatFacingAt,
+      // carrel/dining chairs via SEAT_FACING, conference chairs whose table is above).
+      // These render the standing UP frame (real back of head) + the chair's own tile
+      // redrawn over the legs — the sit2 sheet is NOT a back view (it shows a face
+      // profile, verified by skin-pixel counts), so a "sit up" anim never reads as
+      // facing the desk. Pin-based, not broadcast-dir-based, so local/remote/snapshot
+      // agree from coordinates alone; approach-based 'up' sits (poufs) keep the old path.
+      _upSeatAt(col, row) {
+        if (this.seatFacingAt[col + ',' + row] === 'up') return true;
+        return SEAT_FACING[this.furnitureLayer.getTileAt(col, row)?.index || 0] === 'up';
       }
       _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
 
@@ -6064,7 +6084,7 @@
             // Desk-type seat: monitor workstation -> standing DOWN frame; manager desk -> sit3 toward the desk.
             const dsk = `sit_${texKey}_down`;
             if (dp.pose === 'sit3' && this.anims.exists(dsk)) { sprite.setFlipX(dp.flip === true); sprite.play(dsk); }
-            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START.down); }
+            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']); }
           } else {
             const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
             if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
@@ -6286,13 +6306,18 @@
             this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
                            : BED_GIDS.has(seatGid) ? { pose: 'lie' }
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
+                           : this._upSeatAt(s.col, s.row) ? { pose: 'standup' }
                            : null;
             // Work-bonus chairs (office/carrel chairs + manager desks + wall-layer
             // computer-desk chairs) earn the +3/min bonus — same rule as the
             // server's WORK_SEAT_GIDS / WALL_WORK_SEAT_GIDS check.
             _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo
               || WALL_SEATS[this.wallLayer.getTileAt(s.col, s.row)?.index] !== undefined);
-            this.lastDir = this._deskPose ? 'down' : interact.dir;
+            // Pinned seats face their pin (s.facing is seatFacingAt || SEAT_FACING || approach
+            // dir — using the raw approach dir here sat players SIDEWAYS on pinned chairs when
+            // they walked in from the side). Desk poses broadcast their forced facing.
+            this.lastDir = this._deskPose ? (this._deskPose.pose === 'standup' ? 'up' : 'down')
+                                          : (s.facing || interact.dir);
             this.sitting = true;
             this._clearOccluders(this._seatOccluders);
             this._seatOccluders = this._makeSeatOccluders(s.col, s.row, s.facing);
@@ -6311,10 +6336,12 @@
               player.setFlipX(this._deskPose.flip === true);
               if (player.anims.currentAnim?.key !== deskSit || !player.anims.isPlaying) player.play(deskSit);
             } else {
+              // 'stand'/'lie' -> standing DOWN frame; 'standup' (pinned-up seats) -> standing UP
+              // frame (real back of head — the sit2 sheet is a face profile, not a back view).
               player.setTexture(this.playerTexKey);
               player.setFlipX(false);
               player.anims.stop();
-              player.setFrame(DIR_START.down);
+              player.setFrame(DIR_START[this._deskPose.pose === 'standup' ? 'up' : 'down']);
             }
           } else {
             // Every character has real directional sit animations (left mirrors the right sheet).
