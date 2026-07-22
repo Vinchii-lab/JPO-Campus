@@ -97,6 +97,18 @@ its last/default string while hidden — detect an available interaction with
 `tryLogin()` are reachable from `page.evaluate`; the socket itself is not
 (top-level `const`).
 
+# First-run tour modal blocks screenshots — Skip it before capturing
+
+A first-time player gets a multi-step welcome tour modal overlaying the whole
+canvas right after entering the office. Assertion-only tests pass through it,
+but any screenshot capture shows the modal instead of the game.
+
+**How to apply:** after `body.playing`, click the visible "Skip" button from
+`page.evaluate` (iterate buttons, match trimmed text, check `offsetParent`)
+before taking screenshots. Also note: headless nix Chromium has no emoji font —
+emoji game objects (💤 💨) render as hollow boxes in screenshots; verify emoji
+presence via object/text assertions, judge only position/animation visually.
+
 # Tuning visual offsets: sweep values live via the scene's def object, don't guess
 
 Static geometry notes (e.g. "eyes ≈ y−12") can be wrong when the overlay art has

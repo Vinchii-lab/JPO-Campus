@@ -1718,7 +1718,7 @@
 
     const WORLD_W = 10080;  // 210 tiles * 16px * 3 scale
     const WORLD_H = 6144;   // 128 tiles * 16px * 3 scale
-    const SPEED   = 150;
+    const SPEED   = 195;   // px/s — MUST match MOVE_SPEED in server.js (movement budget)
     // Coffee walk-speed multiplier — MUST match COFFEE_MULT in server.js (the
     // server widens its per-move budget by exactly this while a boost is live).
     const COFFEE_MULT = 1.4;
@@ -1769,7 +1769,15 @@
         hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
       { id:'fridge',          x:2016, y:1104, r:190, label:'Eat a snack', touch:'Eat',
         hl:{ x:39*48, y:20*48, w:6*48, h:3*48 } },   // kitchenette fridges, West Office break corner (c39-44, r20-22)
+      { id:'kitchen_island',  x:8520, y:5880, r:170, label:'Grab a hot meal', touch:'Eat',
+        hl:{ x:176*48, y:121*48, w:3*48, h:3*48 } }, // kitchen island, Training Room basement (c176-178, r121-123)
+      { id:'snack_counter',   x:9048, y:1968, r:220, label:'Grab a gym snack', touch:'Eat',
+        hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
     ];
+    // Cafeteria tables (gid 2183 = table top-left marker) each get their own food
+    // spot — entries are appended at create() from the loaded map so a Tiled
+    // re-import keeps working. Ids MUST mirror the server's cafeteria_food<N>
+    // generation (same gid scan, same row-major order).
     // ── Rooms ──────────────────────────────────────────────────────────
     // Each announcement board belongs to a room; posting at a board only shows on
     // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
@@ -1813,38 +1821,71 @@
     // direction (workstation/conference 2231 facings are derived per-tile at
     // create() — see seatFacingAt).
     const FURN_SEATS = new Set([
-      2231,                                                       // office chair (workstations, conference tables, checkouts)
+      2231,                                                       // office chair (workstations, conference tables, checkouts, island stools)
       2763, 2764,                                                 // study-carrel chairs (desk directly above -> pinned 'up')
-      3208, 3209, 3224, 3225,                                     // purple 2-seat sofa
-      3173, 3174, 3175, 3189, 3190, 3191, 3205, 3206, 3207, 3221, 3222, // gray sectional sofa
-      2835, 2836, 2851, 2852,                                     // wooden waiting benches
-      3304, 3305, 3320, 3321, 3336, 3337,                         // wooden settle/bench
-      2642,                                                       // armchair seat (its top tile 2626 stays solid)
-      5505, 5506, 5507,                                           // lounge couch seat row (Jail tileset)
-      8497, 8498, 8499,                                           // basement couch seat row
+      2628,                                                       // lounge work-pod desk chair (side view, faces left) — work seat
+      2593,                                                       // dining chair north of the big table (faces down)
+      2642,                                                       // dining chair south of a table (art faces up; 2626 tuck tile stays solid)
+      2835, 2836,                                                 // wooden bench TOPS (front row 2851/2852 stays solid)
+      2758, 2759,                                                 // pouf top row (approach-facing)
+      3189, 3190, 3191,                                           // gray studio sofa cushion row
+      3192, 3193,                                                 // brown loveseat cushions
+      3252, 3253, 3254, 3255,                                     // gray/blue high-back armchairs (2-wide, centered via SEAT_DX)
+      3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
+      5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
+      5489, 5490, 5491, 5492,                                     // lavender couch cushion row
+      7715,                                                       // classroom desk chair (desk to its right -> faces right)
+      8825, 8826, 8827, 8828,                                     // basement loveseat cushions
+      8888,                                                       // basement side armchair (faces right)
+      8891, 8892,                                                 // basement loveseat cushions
+      7032, 7033, 7068, 7069,                                     // nap-room beds: lie row (renders the lying pose, see BED_GIDS)
     ]);
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
-    // the non-manager-desk part of WORK_SEAT_GIDS in server.js (manager desks
-    // are detected via deskChairAt instead). Drives the 💼 chip at sit time.
-    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764]);
+    // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
+    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764, 2628]);
     // Fixed sit-facing for seats whose orientation is baked into the tile art, so a seated
     // player faces the way the FURNITURE faces (its open front) instead of the aisle they
     // walked in from. Carrel chairs (2763/2764) have their desk directly ABOVE -> 'up'.
-    // Sofas/benches/couches open DOWN (backrest at top); the wooden settle is a
-    // SIDE-VIEW piece with its tall back on the RIGHT, so it opens LEFT. The office
-    // chair 2231 is deliberately NOT here — it rings tables on all four sides, so its
-    // facing is derived per-tile at create() (see seatFacingAt).
+    // Sofas/benches/couches open DOWN (backrest at top). The dining chair pair is a
+    // matched set: 2593 sits NORTH of a table (art faces down), 2642 sits SOUTH of one
+    // (art faces up/away). The office chair 2231 is deliberately NOT here — it rings
+    // tables on all four sides, so its facing is derived per-tile at create() (see
+    // seatFacingAt). Poufs (2758/2759) keep the approach direction on purpose.
     const SEAT_FACING = {
       2763:'up', 2764:'up',                                                          // study-carrel chairs: desk above
-      3208:'down', 3209:'down', 3224:'down', 3225:'down',                            // purple 2-seat sofa
-      3173:'down', 3174:'down', 3175:'down', 3189:'down', 3190:'down', 3191:'down',  // gray sectional
-      3205:'down', 3206:'down', 3207:'down', 3221:'down', 3222:'down',               //   (front base -> still 'down')
-      2835:'down', 2836:'down', 2851:'down', 2852:'down',                            // wooden waiting benches
-      3304:'left', 3305:'left', 3320:'left', 3321:'left', 3336:'left', 3337:'left',  // wooden settle (back on right -> faces left)
-      2642:'down',                                                                   // armchair
-      5505:'down', 5506:'down', 5507:'down',                                         // lounge couch
-      8497:'down', 8498:'down', 8499:'down',                                         // basement couch
+      2628:'left',                                                                   // lounge work-pod chair (side view)
+      2593:'down',                                                                   // dining chair north of table
+      2642:'up',                                                                     // dining chair south of table
+      2835:'down', 2836:'down',                                                      // wooden bench tops
+      3189:'down', 3190:'down', 3191:'down',                                         // gray studio sofa
+      3192:'down', 3193:'down',                                                      // brown loveseat
+      3252:'down', 3253:'down', 3254:'down', 3255:'down',                            // high-back armchairs
+      3320:'down', 3321:'down',                                                      // tan armchair
+      5425:'down', 5426:'down', 5427:'down',                                         // green couch
+      5489:'down', 5490:'down', 5491:'down', 5492:'down',                            // lavender couch
+      7715:'right',                                                                  // classroom desk chair
+      8825:'down', 8826:'down', 8827:'down', 8828:'down',                            // basement loveseats
+      8888:'right',                                                                  // basement side armchair
+      8891:'down', 8892:'down',                                                      // basement loveseat
+      7032:'down', 7033:'down', 7068:'down', 7069:'down',                            // beds (pose overrides to 'lie')
     };
+    // 2-tile-wide single seats (high-back armchairs, tan armchair, beds): BOTH tiles
+    // are sittable and both snap the avatar to the piece's horizontal CENTER (the
+    // boundary between the two tiles) so you never perch on one half. The left tile
+    // shifts +24px, the right tile -24px — the same world point either way. Remote
+    // pose lookups round to the RIGHT tile (x lands exactly on the boundary), which
+    // is why both tiles carry the gid entries here and in BED_GIDS/FURN_SEATS.
+    const SEAT_DX = {
+      3252: 24, 3253: -24,   // gray high-back armchair
+      3254: 24, 3255: -24,   // blue high-back armchair
+      3320: 24, 3321: -24,   // tan library armchair
+      7032: 24, 7033: -24,   // pink nap-room bed (lie row)
+      7068: 24, 7069: -24,   // blue nap-room bed (lie row)
+    };
+    // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
+    // upright front idle frame laid on the pillow row + a floating 💤 — the wire
+    // format still says anim:'sit' so the server/seat-snap path is unchanged.
+    const BED_GIDS = new Set([7032, 7033, 7068, 7069]);
     // The office chair (2231) rings shared tables on the top, left, right AND
     // bottom edges, so a single per-GID facing can't be correct. Its facing is
     // derived PER-TILE at scene create(): face whichever orthogonal neighbour is
@@ -1907,15 +1948,13 @@
       { first: 1,    key: 'floors_ss'    },
     ];
 
-    // Manager desks (blue 2584.. / green 2588..) are 2-wide x 3-tall furniture sprites
-    // with an office chair drawn INTO the sprite. Pressing E at any of a desk's 6
-    // tiles seats you in that baked-in chair. Each family maps its 6 GIDs to their
-    // position in the 2x3 block, plus the block-relative chair cell and its facing
-    // (blue chair is left-middle facing right; green is right-middle facing left).
-    const DESK_FAMILIES = [
-      { facing:'right', chair:[0,1], gids:{ 2584:[0,0], 2585:[1,0], 2600:[0,1], 2601:[1,1], 2616:[0,2], 2617:[1,2] } },
-      { facing:'left',  chair:[1,1], gids:{ 2588:[0,0], 2589:[1,0], 2604:[0,1], 2605:[1,1], 2620:[0,2], 2621:[1,2] } },
-    ];
+    // Manager-desk "baked-in chair" families from the OLD map. On the current
+    // JPO_HQ.tmj the 2584/2588 desk sprites are plain desk SURFACES (no chair in
+    // the art — 2600/2605 are desk tiles now) and the lounge work pods use a real
+    // chair tile (2628) instead, so the family list is empty. The deskChairAt/
+    // occluder seams stay wired so a future map with baked-in chairs only needs
+    // entries added here.
+    const DESK_FAMILIES = [];
     // Given the faced furniture GID at tile (c,r), return the seat cell (col,row) of
     // that desk's baked-in chair plus its facing, or null if it isn't a manager desk.
     const deskChairAt = (gid, c, r) => {
@@ -2774,10 +2813,13 @@
       const { line } = payload || {};
       if (line) _rpsToast('💧 ' + line);
     });
-    // Fridge: the eater gets a rotating snack line; everyone sees the snack emoji bubble.
+    // Food spots (fridge / kitchen island / snack counter / cafeteria tables):
+    // the eater gets a rotating flavor line; everyone sees the food emoji bubble.
+    // `icon` is the toast prefix per station kind (fridge omits it -> 🧊).
     socket.on('fridgeSnack', (payload) => {
-      const { line } = payload || {};
-      if (typeof line === 'string' && line) _rpsToast('🧊 ' + line.slice(0, 120));
+      const { line, icon } = payload || {};
+      const ic = (typeof icon === 'string' && icon.length > 0 && icon.length <= 8) ? icon : '🧊';
+      if (typeof line === 'string' && line) _rpsToast(ic + ' ' + line.slice(0, 120));
     });
     socket.on('objectEffect', (payload) => {
       const { id, kind, emoji } = payload || {};
@@ -5228,6 +5270,25 @@
 
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
 
+        // Cafeteria food spots: one per table, found by the table's top-left
+        // marker gid (2183) on the Furniture layer, scanned row-major. The
+        // server derives its cafeteria_food<N> OBJECTS from the SAME scan of
+        // the same map file, so ids stay in lockstep across a Tiled re-import.
+        // MUST run before the highlight loop below so each spot gets a rect.
+        {
+          let cafN = 0;
+          const lw = furnitureLayer.layer.width, lh = furnitureLayer.layer.height;
+          for (let r = 0; r < lh; r++) for (let c = 0; c < lw; c++) {
+            const t = furnitureLayer.getTileAt(c, r);
+            if (!t || t.index !== 2183) continue;
+            OFFICE_OBJECTS.push({
+              id: `cafeteria_food${cafN++}`, x: (c+1)*48, y: (r+1.5)*48, r: 150,
+              label: 'Grab some food', touch: 'Eat',
+              hl: { x: (c-1)*48, y: r*48, w: 4*48, h: 3*48 },  // the full 4-wide × 3-tall table block
+            });
+          }
+        }
+
         // Soft pulsing highlight over each interactive office object, shown
         // only while the local player is in range (see update()).
         this._objHl = {};
@@ -5236,6 +5297,19 @@
             .setStrokeStyle(2, 0xffe066, 0.85).setDepth(400).setVisible(false);
           this.tweens.add({ targets: rect, alpha: { from: 1, to: 0.35 }, duration: 800, yoyo: true, repeat: -1 });
           this._objHl[o.id] = rect;
+        }
+
+        // Coffee machines visibly brewing: steam puffs loop above both machines,
+        // client-only flavor (no protocol change — the server never knows). The
+        // rects/texts live for the whole scene, so the repeat -1 tweens are safe.
+        for (const o of OFFICE_OBJECTS) {
+          if (o.id !== 'coffee_machine' && o.id !== 'coffee_machine2') continue;
+          for (let i = 0; i < 2; i++) {
+            const sx = o.hl.x + o.hl.w * (i === 0 ? 0.32 : 0.68);
+            const sy = o.hl.y + 12;
+            const puff = this.add.text(sx, sy, '💨', { fontSize: '15px' }).setOrigin(0.5, 1).setAlpha(0).setDepth(450);
+            this.tweens.add({ targets: puff, y: sy - 34, alpha: { from: 0.8, to: 0 }, duration: 2400, delay: i * 1200, repeat: -1, ease: 'Sine.easeOut' });
+          }
         }
 
         this.otherPlayers    = {};
@@ -5625,6 +5699,15 @@
           out.push(this.add.image(cell.c * 48, cell.r * 48, key, frame)
             .setOrigin(0, 0).setScale(3).setDepth(900));
         }
+        // Beds: no tile occluders, but the lying pose gets a floating 💤 that
+        // rides in the occluder array so every stand-up/teardown path destroys
+        // it for free. STATIC text on purpose — a repeat -1 tween would keep
+        // running against a destroyed target and leak one tween per nap.
+        if (BED_GIDS.has(seatGid)) {
+          const bx = col * 48 + 24 + (SEAT_DX[seatGid] || 0);
+          const by = row * 48 + 24 - BODY_DY - 46;
+          out.push(this.add.text(bx, by, '💤', { fontSize: '16px' }).setOrigin(0.5, 1).setDepth(901));
+        }
         return out;
       }
       // Same, but locate the seat cell from a seated sprite's pixel position (remote players).
@@ -5645,11 +5728,17 @@
       //    chairs are side-on with nothing occluding the body, so a standing frame there reads as
       //    "standing on the chair" — they need a genuine seated pose.
       //  - null for every other seat (approach-based directional sit anims).
+      //  - { pose:'lie' } for bed lie cells (BED_GIDS): renders exactly like 'stand' (upright
+      //    front idle frame — laid on the pillow row it reads as lying down) plus the 💤 from
+      //    _makeSeatOccluders. Bed sits snap to the 2-tile bed's horizontal CENTER via SEAT_DX,
+      //    so the rounded col lands on the bed's RIGHT tile — which is why both bed tiles are
+      //    in BED_GIDS.
       _deskPoseAt(x, y) {
         const col = Math.round((x - 24) / 48);
         const row = Math.round((y - 24 + BODY_DY) / 48);
         if (this._isWorkstation(col, row)) return { pose: 'stand' };
         const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        if (BED_GIDS.has(gid)) return { pose: 'lie' };
         const desk = deskChairAt(gid, col, row);
         if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
         return null;
@@ -6021,7 +6110,7 @@
         if (forceDisabled)                   { /* keep disabled */ }
         else if (this.sitting)               { label = 'Stand'; avail = true; }
         else if (interact?.type === 'board') { label = 'Read';  avail = true; }
-        else if (interact?.type === 'sit')   { label = 'Sit';   avail = true; }
+        else if (interact?.type === 'sit')   { label = interact.bed ? 'Lie' : 'Sit'; avail = true; }
         else if (interact?.type === 'object'){ label = interact.obj.touch; avail = true; }
         if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
         if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
@@ -6128,9 +6217,13 @@
         }
         this._setObjHighlight(objNear && objNear.id);
 
+        // Beds get their own verb — the seat mechanics are identical, only the
+        // labels and the rendered pose differ (see BED_GIDS / pose 'lie').
+        if (interact?.type === 'sit') interact.bed = BED_GIDS.has(furnAt(interact.seat.col, interact.seat.row));
+
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
-        else if (interact?.type === 'sit')   this.eHint.setText('[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
         this._updateTouchActionBtn(interact);
@@ -6164,15 +6257,20 @@
             player.setVelocity(0,0);
             // Snap so the body (feet) lands on the seat tile centre; the sprite
             // origin sits BODY_DY above it, so the character rests IN the chair.
-            player.setPosition(s.col*48+24, s.row*48+24 - BODY_DY);
+            // 2-tile-wide seats (armchairs/beds) also shift by SEAT_DX so either
+            // tile lands the avatar on the piece's horizontal center. The snap
+            // stays well inside the server's SEAT_SNAP_ALLOWANCE (160px).
+            const seatGid = furnAt(s.col, s.row);
+            player.setPosition(s.col*48+24 + (SEAT_DX[seatGid] || 0), s.row*48+24 - BODY_DY);
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
             // Desk-type seats face the desk: monitor workstations render the standing DOWN
             // frame, manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the
             // sitting block below — detection matches _deskPoseAt so remote viewers render the
-            // same pose). Every other seat keeps the approach facing you walked in with.
-            const seatGid = furnAt(s.col, s.row);
+            // same pose). Beds render the lying pose. Every other seat keeps the approach
+            // facing you walked in with.
             const deskInfo = deskChairAt(seatGid, s.col, s.row);
             this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
+                           : BED_GIDS.has(seatGid) ? { pose: 'lie' }
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : null;
             // Work-bonus chairs (office/carrel chairs + manager desks) earn the

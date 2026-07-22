@@ -238,6 +238,9 @@ const OBJECTS = {
   water_cooler:    { x: 1800, y: 3816, r: 150 }, // water dispenser, Market north wall (c37, r78-79)
   arcade:          { x: 5280, y: 6000, r: 170 }, // arcade cabinets, Break Room basement corner (c108-111, r123-127)
   fridge:          { x: 2016, y: 1104, r: 190 }, // kitchenette fridges, West Office break corner (c39-44, r20-22)
+  kitchen_island:  { x: 8520, y: 5880, r: 170 }, // kitchen island, Training Room basement (c176-178, r121-123)
+  snack_counter:   { x: 9048, y: 1968, r: 220 }, // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
+  // cafeteria_food<N> spots are appended after the map loads (see FOOD_TABLES).
 };
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee
 // (instant, usable anywhere, stockpilable) stays worth buying.
@@ -270,6 +273,28 @@ const SNACKS = [
   { emoji: "🥡", line: "Leftover takeout. Finders keepers is office law." },
 ];
 let snackIdx = 0;
+// Hot meals (kitchen island + cafeteria tables) and gym snacks — same flavor
+// mechanics as SNACKS, different menus. `icon` below picks the toast prefix
+// the client shows before the line (fridge omits it → 🧊 default).
+const MEALS = [
+  { emoji: "🍝", line: "A generous plate of pasta. Carbs are a team sport." },
+  { emoji: "🍛", line: "Today's special: curry. The cafeteria outdid itself." },
+  { emoji: "🥘", line: "Something simmered, something delicious. No questions." },
+  { emoji: "🍲", line: "A warm bowl of stew. Morale +1." },
+  { emoji: "🌮", line: "Taco day. Attendance mysteriously improves on taco day." },
+  { emoji: "🍱", line: "A neatly packed lunch box. Compartments = serenity." },
+  { emoji: "🍔", line: "A cafeteria burger, engineered to leave no meeting survivor hungry." },
+  { emoji: "🥟", line: "Dumplings! Grab them before Accounting hears about it." },
+];
+let mealIdx = 0;
+const GYM_SNACKS = [
+  { emoji: "🥤", line: "A protein shake. You feel 4% more swole already." },
+  { emoji: "🍌", line: "A perfectly ripe banana. Nature's energy bar." },
+  { emoji: "⚡", line: "An energy bar that tastes like drywall and ambition." },
+  { emoji: "🥚", line: "Two boiled eggs. The gym fridge does not do subtle." },
+  { emoji: "🫐", line: "A cup of blueberries. Antioxidants for the grind." },
+];
+let gymSnackIdx = 0;
 // Cooldowns are keyed by email (fallback: socket id) and live in memory only —
 // a server restart forgives them, which is fine for flavor perks.
 const coffeeMachineReadyAt = new Map();  // key → ts when the next free coffee unlocks
@@ -305,14 +330,14 @@ const RENDER_SCALE = 3;
 // by the cigarette's "outside on the grass only" rule.
 const GID_MASK = 0x1FFFFFFF;
 // Work-seat GIDs on the Furniture layer: 2231 = office chair (workstations,
-// conference tables, checkouts), 2763/2764 = study-carrel chairs, 2600/2605 =
-// the baked-in chair cell of the blue/green manager desks (the cell the sit
-// action snaps the avatar onto — matches the client's DESK_FAMILIES chair
-// cells). Sitting on one of these earns the work bonus; sofas/benches don't.
-// MUST stay in lockstep with the client's work-chip rule (WORK_CHAIR_GIDS +
-// deskChairAt), which is what shows the 💼 chip.
-const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2600, 2605]);
-const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS } = (() => {
+// conference tables, checkouts), 2763/2764 = study-carrel chairs, 2628 = the
+// lounge work-pod desk chair (side-view, faces left). Sitting on one of these
+// earns the work bonus; sofas/benches/beds don't. MUST stay in lockstep with
+// the client's WORK_CHAIR_GIDS (what shows the 💼 chip). The old manager-desk
+// gids 2600/2605 are plain desk SURFACES on the current map (DESK_FAMILIES is
+// empty client-side), so they're gone from this set.
+const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2628]);
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
@@ -332,20 +357,39 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS } = (() => {
       }
       // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
       let workSeats = null;
+      const foodTables = [];
       const furn = tmj.layers?.find((l) => l.name === "Furniture" && Array.isArray(l.data));
       if (furn) {
         workSeats = furn.data.map((g) => WORK_SEAT_GIDS.has(g & GID_MASK));
+        // Cafeteria food spots: one per table, keyed by the table's top-left
+        // marker gid (2183), scanned row-major. The client runs the SAME scan
+        // over the same map at create(), so the generated cafeteria_food<N>
+        // ids stay in lockstep across a Tiled re-import. Coords are scaled
+        // world px at the table's visual center (4-wide × 3-tall block).
+        const ts = tmj.tilewidth * RENDER_SCALE;   // 48 at scale 3
+        furn.data.forEach((g, i) => {
+          if ((g & GID_MASK) !== 2183) return;
+          const c = i % tmj.width, r = Math.floor(i / tmj.width);
+          foodTables.push({ x: (c + 1) * ts, y: (r + 1.5) * ts });
+        });
       } else {
         console.error("work-seat mask unavailable (no Furniture layer) — work bonus disabled");
       }
-      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, WORK_SEATS: workSeats };
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
     }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
   // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work masks (smoking + work bonus disabled).
-  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, WORK_SEATS: null };
+  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, WORK_SEATS: null, FOOD_TABLES: [] };
 })();
+
+// Register the cafeteria food spots as interactive objects, and group EVERY
+// station that serves food behind one id set: they all share the single
+// per-person "you're full" cooldown (fridgeReadyAt) — only the menu differs.
+FOOD_TABLES.forEach((t, i) => { OBJECTS[`cafeteria_food${i}`] = { x: t.x, y: t.y, r: 150 }; });
+const FOOD_OBJECT_IDS = new Set(["fridge", "kitchen_island", "snack_counter",
+  ...FOOD_TABLES.map((_, i) => `cafeteria_food${i}`)]);
 
 // Is this player position outdoors? Uses the FEET tile — the sprite origin is
 // the character's center, and the tile a player occupies is derived from
@@ -426,7 +470,7 @@ function takeToken(b) {
 // ONLY on a sit<->stand "snap" (see SEAT_SNAP_ALLOWANCE), so normal travel stays
 // bounded to roughly walk speed.
 const MOVE_MIN_INTERVAL_MS  = 33;    // < client's 50ms cadence, so legit frames never drop
-const MOVE_SPEED            = 150;   // px/s, MUST match client SPEED in public/index.html
+const MOVE_SPEED            = 195;   // px/s, MUST match client SPEED in public/index.html
 const MOVE_SPEED_TOLERANCE  = 1.6;   // multiplicative slack over walk speed for network jitter
 const MOVE_JITTER_PX        = 12;    // small additive floor: covers one ~7.5px frame at near-0 elapsed
 const MOVE_ELAPSED_CAP_MS   = 1500;  // cap the time budget so a long idle can't bank a big teleport
@@ -3146,17 +3190,23 @@ io.on("connection", (socket) => {
       socket.emit("waterCooler", { line });
       io.emit("objectEffect", { id: socket.id, kind: "water" });
 
-    } else if (object === "fridge") {
+    } else if (FOOD_OBJECT_IDS.has(object)) {
+      // All food stations (fridge, kitchen island, gym snack counter, cafeteria
+      // tables) share ONE per-person "you're full" cooldown — more stations are
+      // a convenience, not a faster snack rate. Only the menu + toast icon vary.
       const key = p.email || socket.id;
       const readyAt = fridgeReadyAt.get(key) || 0;
       if (now < readyAt) {
-        socket.emit("interactError", { message: "You're full! The fridge will forgive you in a bit. 🫃" });
+        socket.emit("interactError", { message: "You're full! Your appetite will be back in a bit. 🫃" });
         return;
       }
       pruneCooldowns(fridgeReadyAt, now);
       fridgeReadyAt.set(key, now + FRIDGE_COOLDOWN_MS);
-      const s = SNACKS[snackIdx++ % SNACKS.length];
-      socket.emit("fridgeSnack", { line: s.line });
+      let s, icon;
+      if (object === "fridge")              { s = SNACKS[snackIdx++ % SNACKS.length]; }                       // 🧊 client default
+      else if (object === "snack_counter")  { s = GYM_SNACKS[gymSnackIdx++ % GYM_SNACKS.length]; icon = "💪"; }
+      else                                  { s = MEALS[mealIdx++ % MEALS.length]; icon = "🍽️"; }
+      socket.emit("fridgeSnack", { line: s.line, icon });
       io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
 
     } else if (object === "arcade") {
