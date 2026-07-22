@@ -235,6 +235,20 @@ const GROUP_RADIUS    = 420;     // "everyone nearby" radius for group consumabl
 const OBJECTS = {
   coffee_machine:  { x: 6816, y: 5808, r: 160 }, // vending-machine bank, Break Room (c140-143, r119-120)
   coffee_machine2: { x: 8256, y: 3456, r: 150 }, // coffee maker on the Library counter (c171-172 r70) — shares the coffee_machine cooldown
+  // White cabinet coffee makers (Interiors 2669/2685 units) around the office.
+  // EVERY id starting with "coffee_machine" is one station of the same brew
+  // system: interact matches on the prefix and they ALL share the single
+  // per-person coffeeMachineReadyAt cooldown — more machines are a walk-distance
+  // convenience, never a faster refill. Coords MUST match OFFICE_OBJECTS.
+  coffee_machine3:  { x: 2016, y: 1440, r: 150 }, // West Office pair (c41-42, r28-29)
+  coffee_machine4:  { x: 7056, y: 1584, r: 150 }, // East Office pair (c146-147, r31-32)
+  coffee_machine5:  { x: 4800, y: 1776, r: 150 }, // Central Office pair (c99-100, r35-36)
+  coffee_machine6:  { x: 3600, y: 3840, r: 150 }, // Lounge/Market pair (c74-75, r78-79)
+  coffee_machine7:  { x: 8808, y: 3168, r: 150 }, // Game Room single (c183, r64-65)
+  coffee_machine8:  { x: 8904, y: 3648, r: 150 }, // Library single (c185, r74-75)
+  coffee_machine9:  { x: 3768, y: 5088, r: 150 }, // IT Office single (c78, r104-105)
+  coffee_machine10: { x: 3768, y: 5616, r: 150 }, // Dev Room single (c78, r115-116)
+  coffee_machine11: { x: 8952, y: 5712, r: 150 }, // Training Room single (c186, r117-118)
   water_cooler:    { x: 1800, y: 3816, r: 150 }, // water dispenser, Market north wall (c37, r78-79)
   arcade:          { x: 5280, y: 6000, r: 170 }, // arcade cabinets, Break Room basement corner (c108-111, r123-127)
   fridge:          { x: 5592, y: 4008, r: 190 }, // drink-cooler stack, cafeteria serving area (c116, r82-84)
@@ -3163,10 +3177,10 @@ io.on("connection", (socket) => {
     }
     const now = Date.now();
 
-    if (object === "coffee_machine" || object === "coffee_machine2") {
-      // Both machines share ONE per-person refill cooldown (coffeeMachineReadyAt
-      // is keyed by email only) — two stations are a convenience, not a way to
-      // double the free-coffee rate.
+    if (object.startsWith("coffee_machine")) {
+      // ALL machines share ONE per-person refill cooldown (coffeeMachineReadyAt
+      // is keyed by email only) — more stations are a convenience, not a way to
+      // multiply the free-coffee rate.
       // Same After Dark lockout as boost ITEMS (and the same message for crew
       // and killers) — and it runs BEFORE the refill cooldown is spent, so a
       // refused brew never burns the machine.

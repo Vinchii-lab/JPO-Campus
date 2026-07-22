@@ -3,7 +3,7 @@ name: JPO Huddle seated facing
 description: Seated facing = pin first (seatFacingAt per-tile || SEAT_FACING per-GID), approach direction only as fallback. UP-pinned seats render the STANDING UP frame (back of head) + chair-tile occluder ('standup' pose) because NO sit sheet shows a back view. Desk seats keep forced poses. Seated state (anim) persists server-side.
 ---
 
-> **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + Wall monitor **2078** sharing the cell (`_isWorkstation`), desk-front **2094** below; manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged.
+> **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + a `WORKSTATION_WALL_GIDS` Wall tile sharing the cell (`_isWorkstation`) — monitor **2078** (desk-front 2094 below) or cash register **2148** (counter-front 2164 below; Market checkout + library counters get the same stand pose + occluders); manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged. The durable rule: any chair sharing its cell with a "thing on a desk in front of you" Wall tile should be a workstation — matching on ONE hardcoded gid is how the register bug happened.
 
 # Seated facing is PIN-FIRST — approach direction is only the fallback (changed July 2026)
 

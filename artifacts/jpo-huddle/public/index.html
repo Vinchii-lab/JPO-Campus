@@ -1763,6 +1763,29 @@
         hl:{ x:140*48, y:119*48, w:4*48, h:2*48 } }, // vending-machine bank, Break Room (c140-143, r119-120)
       { id:'coffee_machine2', x:8256, y:3456, r:150, label:'Brew free coffee', touch:'Brew',
         hl:{ x:171*48, y:70*48, w:2*48, h:2*48 } },  // coffee maker on the Library counter (c171-172 r70, counter r71)
+      // White cabinet coffee makers (Interiors 2669 top / 2685 bottom) scattered through
+      // the rooms — the double-door units with the machine on top. Every id starting with
+      // 'coffee_machine' shares ONE per-person refill cooldown server-side and gets the
+      // idle-steam + _brewFx treatment automatically. Anchors = unit's horizontal center,
+      // one tile below its bottom row; coords MUST match OBJECTS in server.js.
+      { id:'coffee_machine3',  x:2016, y:1440, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:41*48,  y:28*48,  w:2*48, h:2*48 } }, // West Office pair (c41-42, r28-29)
+      { id:'coffee_machine4',  x:7056, y:1584, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:146*48, y:31*48,  w:2*48, h:2*48 } }, // East Office pair (c146-147, r31-32)
+      { id:'coffee_machine5',  x:4800, y:1776, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:99*48,  y:35*48,  w:2*48, h:2*48 } }, // Central Office pair (c99-100, r35-36)
+      { id:'coffee_machine6',  x:3600, y:3840, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:74*48,  y:78*48,  w:2*48, h:2*48 } }, // Lounge/Market pair (c74-75, r78-79)
+      { id:'coffee_machine7',  x:8808, y:3168, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:183*48, y:64*48,  w:48,   h:2*48 } }, // Game Room single (c183, r64-65)
+      { id:'coffee_machine8',  x:8904, y:3648, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:185*48, y:74*48,  w:48,   h:2*48 } }, // Library single (c185, r74-75)
+      { id:'coffee_machine9',  x:3768, y:5088, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:78*48,  y:104*48, w:48,   h:2*48 } }, // IT Office single (c78, r104-105)
+      { id:'coffee_machine10', x:3768, y:5616, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:78*48,  y:115*48, w:48,   h:2*48 } }, // Dev Room single (c78, r115-116)
+      { id:'coffee_machine11', x:8952, y:5712, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:186*48, y:117*48, w:48,   h:2*48 } }, // Training Room single (c186, r117-118)
       { id:'water_cooler',    x:1800, y:3816, r:150, label:'Grab some water', touch:'Drink',
         hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
       { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
@@ -1830,7 +1853,9 @@
       2758, 2759,                                                 // pouf top row (approach-facing)
       3189, 3190, 3191,                                           // gray studio sofa cushion row
       3192, 3193,                                                 // brown loveseat cushions
-      3252, 3253, 3254, 3255,                                     // gray/blue high-back armchairs (2-wide, centered via SEAT_DX)
+      // 3252-3255 are NOT seats: they're the tall white double-door cabinet units
+      // (coffee makers sit on some of them) — sitting put the player INSIDE the
+      // cabinet art. Removed from all three seat tables; keep them out.
       3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
       7715,                                                       // classroom desk chair (desk to its right -> faces right)
@@ -1868,7 +1893,6 @@
       2835:'down', 2836:'down',                                                      // wooden bench tops
       3189:'down', 3190:'down', 3191:'down',                                         // gray studio sofa
       3192:'down', 3193:'down',                                                      // brown loveseat
-      3252:'down', 3253:'down', 3254:'down', 3255:'down',                            // high-back armchairs
       3320:'down', 3321:'down',                                                      // tan armchair
       5425:'down', 5426:'down', 5427:'down',                                         // green couch
       7715:'right',                                                                  // classroom desk chair
@@ -1886,8 +1910,6 @@
     // pose lookups round to the RIGHT tile (x lands exactly on the boundary), which
     // is why both tiles carry the gid entries here and in BED_GIDS/FURN_SEATS.
     const SEAT_DX = {
-      3252: 24, 3253: -24,   // gray high-back armchair
-      3254: 24, 3255: -24,   // blue high-back armchair
       3320: 24, 3321: -24,   // tan library armchair
       7032: 24, 7033: -24,   // pink nap-room bed (lie row)
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
@@ -1900,11 +1922,14 @@
     // bottom edges, so a single per-GID facing can't be correct. Its facing is
     // derived PER-TILE at scene create(): face whichever orthogonal neighbour is
     // a conference-table tile (tables live on the WALL layer in JPO_HQ.tmj), else
-    // pin 'down' when a workstation monitor (Wall 2078) shares the chair cell.
+    // pin 'down' when a workstation monitor (Wall 2078) or a checkout register
+    // (Wall 2148 — Market checkout + Library counters) shares the chair cell.
     const CONF_CHAIR_GIDS = new Set([2231]);
     const CONF_TABLE_GIDS = new Set([2097, 2098, 2099, 2113, 2114, 2115, 2129, 2130, 2131, 2145, 2146, 2147]);
-    // Wall tile that marks a chair cell as a computer workstation (monitor/desk-back).
-    const WORKSTATION_WALL_GID = 2078;
+    // Wall tiles that mark a chair cell as a computer workstation: 2078 = monitor
+    // (desk-front 2094 below), 2148 = cash register on a counter (counter-front
+    // 2164 below). Same fixed geometry, same stand pose + occluder treatment.
+    const WORKSTATION_WALL_GIDS = new Set([2078, 2148]);
 
     // ── JPO_HQ.tmj tilesets ────────────────────────────────────────────
     // Three lockstepped views of the SAME 13 embedded tilesets:
@@ -5321,7 +5346,7 @@
         // client-only flavor (no protocol change — the server never knows). The
         // rects/texts live for the whole scene, so the repeat -1 tweens are safe.
         for (const o of OFFICE_OBJECTS) {
-          if (o.id !== 'coffee_machine' && o.id !== 'coffee_machine2') continue;
+          if (!o.id.startsWith('coffee_machine')) continue;
           for (let i = 0; i < 2; i++) {
             const sx = o.hl.x + o.hl.w * (i === 0 ? 0.32 : 0.68);
             const sy = o.hl.y + 12;
@@ -5685,7 +5710,7 @@
       // their cell with TABLE edge tiles instead) don't match.
       _isWorkstation(col, row) {
         if ((this.furnitureLayer.getTileAt(col, row)?.index || 0) !== 2231) return false;
-        return (this.wallLayer.getTileAt(col, row)?.index || 0) === WORKSTATION_WALL_GID;
+        return WORKSTATION_WALL_GIDS.has(this.wallLayer.getTileAt(col, row)?.index || 0);
       }
       // Redraw the desk/monitor tiles that belong IN FRONT of a seated body as
       // high-depth overlay images, so the body tucks UNDER the desk instead of
