@@ -5,6 +5,24 @@ description: Seated facing = pin first (seatFacingAt per-tile || SEAT_FACING per
 
 > **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + a `WORKSTATION_WALL_GIDS` Wall tile sharing the cell (`_isWorkstation`) — monitor **2078** (desk-front 2094 below) or cash register **2148** (counter-front 2164 below; Market checkout + library counters get the same stand pose + occluders); manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged. The durable rule: any chair sharing its cell with a "thing on a desk in front of you" Wall tile should be a workstation — matching on ONE hardcoded gid is how the register bug happened.
 
+## L&D bottom wall gap sealed at client startup (not in Tiled map)
+Row 82 of the Wall layer has W1821 tiles from c163-c182 but NO tiles at c183-c190 (c187
+already has W2699). Players could walk through this 7-tile gap into/out of the L&D room.
+Fix: `[183,184,185,186,188,189,190].forEach(col => wallLayer.putTileAt(1821, col, 82))`
+placed BEFORE `wallLayer.setCollisionByExclusion([-1])` in the Phaser create() function
+so the newly placed tiles are included in the collision pass.
+**Why:** The gap is in the Tiled source map; the client-side putTileAt avoids touching the
+.tmj file. putTileAt MUST precede setCollisionByExclusion or the tile won't be solid.
+
+## L&D green reading chairs (7628-7661) face 'left' (west into room), NOT 'right'
+Chairs at c189-190, r88-93 are against the EAST WALL of L&D (c191=W1239). The chair art
+opens to the WEST; the sitter faces the room interior (west/'left'). An earlier pin of
+'right' (east = toward the wall) was wrong — "faces chair back" was the report.
+**Why:** the seat pad DX -9 positions the sitter near the west edge of c190 (close to the
+backrest at c189). Facing 'right' aimed the avatar at the wall; facing 'left' aims toward
+the open room — consistent with the tan library armchair at the same room (pinned 'left',
+backrest col EAST).
+
 ## Same GID, different room → per-tile SEAT_TILE_FACING override (not a SEAT_FACING change)
 When the same chair GID appears in multiple rooms whose desks face DIFFERENT directions, the global
 `SEAT_FACING[gid]` pin is correct for some instances and wrong for others. Fix with per-tile entries

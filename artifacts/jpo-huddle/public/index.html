@@ -1975,6 +1975,17 @@
       '160,72': 'right',  // L&D trainer's chair top tile
       '160,73': 'right',  // L&D trainer's chair seat tile
       '160,74': 'right',  // L&D trainer's chair legs tile
+      // Green desk chairs (GID 2589/2605/2621) at the Accounting manager east wall
+      // (c190,r122-124) and CEO area south desk (c104,r125-127): the global
+      // SEAT_FACING[2589]='left' aims the sitter at the panel/divider to the west —
+      // reads as "facing the chair back." Override to face RIGHT (east, away from panel)
+      // at both the chair column and the panel-alias column, all three rows each.
+      '189,122': 'right', '190,122': 'right',
+      '189,123': 'right', '190,123': 'right',
+      '189,124': 'right', '190,124': 'right',
+      '103,125': 'right', '104,125': 'right',
+      '103,126': 'right', '104,126': 'right',
+      '103,127': 'right', '104,127': 'right',
       // L&D round table: its 10 chairs are gid 2231 on the WALL layer (the teal
       // table is Wall 2043-2077), so FURN_SEATS never sees them — pin each cell
       // here, facing the table center. The 'up' chair renders the standup pose
@@ -2032,8 +2043,8 @@
       // "standing next to the chair" (Vince's July 2026 screenshot). Pin them.
       3304:'left', 3320:'left', 3336:'left',                                         // tan library armchair seat col (backrest col EAST → sitter faces west)
       3305:'left', 3321:'left', 3337:'left',                                         // its backrest alias tiles — same facing
-      7629:'right', 7645:'right', 7661:'right',                                      // L&D green reading chair seat col (backrest col WEST → sitter faces east)
-      7628:'right', 7644:'right', 7660:'right',                                      // its backrest alias tiles — same facing
+      7629:'left', 7645:'left', 7661:'left',                                         // L&D green reading chair seat col (chairs against EAST wall → sitter faces west/into room)
+      7628:'left', 7644:'left', 7660:'left',                                         // its backrest alias tiles — same facing
       7699:'right', 7715:'right',                                                    // classroom desk chair (desk to its right; 7699 = chair-back alias tile)
       8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
       8887:'right', 8888:'right', 8903:'right', 8904:'right',                          // CEO west armchair → sitter faces east/right (inward toward center)
@@ -5587,6 +5598,12 @@
         //      centre chairs, while structural room walls stay solid.
         // This is derived from the loaded map (not a hard-coded GID list), so it keeps
         // working across the periodic Tiled re-import.
+        // Fix: L&D room bottom wall gap — row 82 has W1821 from c163-c182 but
+        // no tiles at c183-c190 (c187 already has W2699), leaving a 7-tile hole
+        // that lets players walk through the south wall of the L&D room.
+        // Place matching W1821 tiles to seal the gap BEFORE setCollisionByExclusion
+        // so they're picked up by the collision pass automatically.
+        [183, 184, 185, 186, 188, 189, 190].forEach(col => wallLayer.putTileAt(1821, col, 82));
         wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
         furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
         // Furniture-removal seam (kept from the old map, currently empty): if a
