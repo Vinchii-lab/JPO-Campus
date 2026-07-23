@@ -1950,7 +1950,7 @@
       7628, 7644, 7660,                                           // its tall green BACKREST column (west) — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
       5441, 5442, 5443,                                           // green couch FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
-      7699, 7715,                                                 // classroom desk chair: 7715 seat + 7699 chair-back tile above (alias: SEAT_DY +48 down onto 7715; every 7699 has 7715 directly below — verified map-wide). Chair art hugs the LEFT of the tile -> SEAT_DX -12.
+      7699, 7715,                                                 // classroom desk chair: 7715 seat + 7699 chair-back tile above (alias: SEAT_DY down onto 7715; every 7699 has 7715 directly below — verified map-wide). Chair art hugs the RIGHT of the tile -> SEAT_DX +18 into the desk column (desk front redrawn over the lap).
       8827, 8828, 8843, 8844,                                     // CEO front armchair (2×2, faces down; top row 8827/8828 aliases to seat row 8843/8844 via SEAT_DY)
       8887, 8888, 8903, 8904,                                     // CEO left armchair  (2×2, faces left; top row 8887/8888 aliases to seat row 8903/8904 via SEAT_DY)
       8825, 8826, 8841, 8842,                                     // CEO right armchair (2×2, faces right; top row 8825/8826 aliases to seat row 8841/8842 via SEAT_DY)
@@ -2018,9 +2018,14 @@
       2522:'right',                                                                  // red ladder chair west of the HR tall desk
       2642:'up',                                                                     // dining chair south of table
       2877:'down', 2893:'down', 2909:'down',                                         // blue drafting stool (CFO office c133,r118-120 — wall on west, faces south into office). All 3 tiles needed: player may be standing on cap/seat/pedestal when E is pressed
-      // Tan side-view armchair 3304/3320/3336 + backrest col and the L&D green
-      // reading chairs 7628-7661 deliberately have NO pin — approach-facing,
-      // same policy as the other side-view sofas/lounge chairs.
+      // Side-view high-back chairs are ART-CONSTRAINED like the desk chairs, not
+      // approach-facing like sofas: their tall backrest column reads as the chair's
+      // back, so an approach-facing sit could face INTO the backrest and read as
+      // "standing next to the chair" (Vince's July 2026 screenshot). Pin them.
+      3304:'left', 3320:'left', 3336:'left',                                         // tan library armchair seat col (backrest col EAST → sitter faces west)
+      3305:'left', 3321:'left', 3337:'left',                                         // its backrest alias tiles — same facing
+      7629:'right', 7645:'right', 7661:'right',                                      // L&D green reading chair seat col (backrest col WEST → sitter faces east)
+      7628:'right', 7644:'right', 7660:'right',                                      // its backrest alias tiles — same facing
       7699:'right', 7715:'right',                                                    // classroom desk chair (desk to its right; 7699 = chair-back alias tile)
       8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
       8887:'right', 8888:'right', 8903:'right', 8904:'right',                          // CEO west armchair → sitter faces east/right (inward toward center)
@@ -2037,15 +2042,26 @@
     // pose lookups round to the RIGHT tile (x lands exactly on the boundary), which
     // is why both tiles carry the gid entries here and in BED_GIDS/FURN_SEATS.
     const SEAT_DX = {
-      // Tan side-view armchair BACKREST column — full-tile shift west onto the seat column:
-      3305: -48, 3321: -48, 3337: -48,
-      // L&D green reading chair backrest column — full-tile shift east onto the seat column:
-      7628: 48, 7644: 48, 7660: 48,
+      // Tan side-view armchair: the cushion straddles the seat-column's EAST side up
+      // to the backrest boundary (art x≈9-22 of the 32px pair), so the seat column
+      // shifts +15 toward the backrest and the backrest column shifts -33 (= -48+15)
+      // so both tiles land on the SAME final point. -33 still crosses the boundary
+      // (0.6875 > 0.5 rounds the derived col to the seat column), +15 stays interior.
+      3304: 15, 3320: 15, 3336: 15,
+      3305: -33, 3321: -33, 3337: -33,
+      // L&D green reading chair: mirrored — the seat pad hugs the WEST side of the
+      // seat column against the backrest (art x≈1-10 of 16), so the seat column
+      // shifts -9 and the backrest column +39 (= 48-9) onto the same point.
+      7629: -9, 7645: -9, 7661: -9,
+      7628: 39, 7644: 39, 7660: 39,
       // Classroom chair art hugs the RIGHT of its tile (pixel-verified: seat block
-      // spans x≈10-15 of 16): nudge the sitter 12px EAST. Strictly interior offset —
-      // the derived cell can't change, so remote parity holds without the ±24/48
-      // boundary rule. (An earlier -12 went the wrong way — owner screenshot.)
-      7699: 12, 7715: 12,
+      // spans x≈10-15 of 16): nudge the sitter 18px EAST so the body's front edge
+      // overlaps the desk column (whose tiles are redrawn over it — see the 7715
+      // occluder branch — so the lap tucks BEHIND the desk). Strictly interior
+      // offset — the derived cell can't change (0.375 < 0.5), so remote parity
+      // holds without the ±24/48 boundary rule. (An earlier -12 went the wrong
+      // way — owner screenshot.)
+      7699: 18, 7715: 18,
       7032: 24, 7033: -24,   // pink nap-room bed (lie row)
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
       5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
@@ -2124,14 +2140,24 @@
       3208: 48, 3209: 48,               // white lounge sofa backrest row → cushions below
       5441: -48, 5442: -48, 5443: -48,  // green couch front row → cushions above
       2851: -48, 2852: -48,             // wooden bench front row → bench top above
-      3304: 48,   // tan armchair seat-column TOP: down onto the 3320 seat tile
-      3336: -48,  // tan armchair seat-column BASE: up onto the 3320 seat tile
-      3305: 48,   // tan armchair backrest TOP: down (SEAT_DX shifts west onto the seat column)
-      3337: -48,  // tan armchair backrest BASE: up (SEAT_DX shifts west)
-      7629: 48,   // L&D reading chair pole-top: down onto the 7645 seat tile
-      7661: -48,  // L&D reading chair legs: up onto the 7645 seat tile
-      7628: 48,   // its backrest TOP: down (SEAT_DX shifts east onto the seat column)
-      7660: -48,  // its backrest BASE: up (SEAT_DX shifts east)
+      // Tan armchair + L&D green reading chair: every tile lands on the MIDDLE seat
+      // tile PLUS a 12px sink (so the head stays below the chair top and the feet
+      // overlap the base row, which the occluder branch redraws over the legs —
+      // without the sink the sitter read as perched ON TOP of the chair). +12 stays
+      // interior (0.25 < 0.5); the ±48 alias components keep derived-row parity
+      // (top: +60 → r+1.25 rounds to the middle; base: -36 → r-0.75 rounds up).
+      3320: 12,   // tan armchair seat tile: sink
+      3304: 60,   // tan armchair seat-column TOP: down onto the 3320 seat tile (+ sink)
+      3336: -36,  // tan armchair seat-column BASE: up onto the 3320 seat tile (+ sink)
+      3305: 60,   // tan armchair backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3321: 12,   // tan armchair backrest MIDDLE: sink (SEAT_DX shifts west)
+      3337: -36,  // tan armchair backrest BASE: up (SEAT_DX shifts west)
+      7645: 12,   // L&D reading chair seat pad: sink
+      7629: 60,   // L&D reading chair pole-top: down onto the 7645 seat tile (+ sink)
+      7661: -36,  // L&D reading chair legs: up onto the 7645 seat tile (+ sink)
+      7628: 60,   // its backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      7644: 12,   // its backrest MIDDLE: sink (SEAT_DX shifts east)
+      7660: -36,  // its backrest BASE: up (SEAT_DX shifts east)
       7699: 24,   // classroom chair-back tile: down onto the 7715 seat (48 minus the shared -24 lift; round(+0.5) still derives 7715's row)
       7715: -24,  // classroom seat: half-tile LIFT — the seat surface sits at the top edge of the tile (art rows ≈8-16 of the 7699 tile); Math.round(-0.5) rounds UP so the derived row stays 7715's
       2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
@@ -6130,6 +6156,21 @@
           // sofas also share cells with structural walls, and a generic Wall overlay
           // would draw a wall over the sitter.
           cells.push({ layer: this.wallLayer, c: col, r: row });
+        } else if (seatGid === 7715) {
+          // Classroom student desk-chair: the 1-wide desk sits in the NEXT column
+          // east (top 7700 above, legs/front 7716 on the seat row). The sitter is
+          // shifted +18 east (SEAT_DX) so his front overlaps the desk column —
+          // redraw the desk's FRONT tile (seat row only) over him so the lap/hands
+          // tuck behind the desk. Deliberately NOT the desk-top tile at row-1:
+          // that would occlude the head/torso (the head must never be covered).
+          cells.push({ layer: this.furnitureLayer, c: col + 1, r: row });
+        } else if (seatGid === 3320 || seatGid === 7645) {
+          // Side-view high-back chairs (tan library armchair 3320 / L&D green
+          // reading chair 7645 — derived cell is always the middle seat tile):
+          // the sitter sinks 12px (SEAT_DY), so redraw the chair's BASE row tile
+          // below over the feet — the legs tuck behind the chair front and it
+          // reads as sitting IN the chair instead of perched on top of it.
+          cells.push({ layer: this.furnitureLayer, c: col, r: row + 1 });
         } else if (STUDIO_CHAIR_GIDS.has(seatGid)) {
           // Studio front-desk armchair: the sitter straddles the boundary between the
           // chair's two columns (SEAT_DX), so redraw BOTH columns of the white control

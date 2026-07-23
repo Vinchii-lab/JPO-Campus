@@ -96,6 +96,22 @@ loveseat, white lounge sofa, green couch, and wooden benches were removed AGAIN.
 desk/computer chairs, single armchairs the owner asked to pin (CEO set, tan), art-constrained
 back-view TV couches ('up' → standup pose), and beds.
 
+## Side-view HIGH-BACK single chairs: pin + center on the pad + sink + base-row occluder
+A playing sit anim is NOT enough — Vince's July 2026 "everyone looks standing" report was seats
+where the anim played but the sitter was rendered BESIDE/ON TOP of the furniture. Side-view
+high-back chairs (tall backrest column + seat column) are ART-CONSTRAINED like desk chairs, not
+approach-facing like sofas: pin facing AWAY from the backrest, center the sitter on the actual
+seat-pad pixels (measure the tileset PNG, not the tile grid), sink ~12px so the head stays below
+the chair top, and redraw the chair's BASE row over the feet as an occluder so the legs tuck
+behind the chair front. Side desk-chairs (classroom style, desk in the next column) instead shift
+the sitter INTO the desk column and redraw the desk's FRONT tile over the lap — never the desk-top
+tile at head height.
+**Why:** the chair art is thin; the 48px avatar fully covers it, so without overlap+occlusion
+nothing on screen says "chair" and the profile sit frames read as standing.
+**How to apply:** keep all alias tiles' DX/DY summing to ONE canonical point on the middle seat
+tile with derived-cell parity (interior offsets < 24px; boundary-crossing alias components > 24px);
+gate occluder branches on the DERIVED cell's gid. Verify with in-game screenshots, not state dumps.
+
 ## Sit trigger range includes DIAGONALS (owner request July 2026)
 The E-scan checks the standing tile, 4 cardinal neighbours, then the 4 diagonal neighbours (seats
 only — boards stay cardinal). Diagonal approaches face `lastDir`. The server's 160px seat-snap

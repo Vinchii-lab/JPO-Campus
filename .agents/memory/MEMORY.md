@@ -1,4 +1,4 @@
-- [JPO Huddle seated facing](jpo-huddle-sit-facing.md) — approach-based sitting; workstations (chair + monitor/register Wall tile on-cell) render a standing frame + occluders, never a sit sheet.
+- [JPO Huddle seated facing](jpo-huddle-sit-facing.md) — pin-first facing (approach as fallback); side high-back chairs need pad-centering + sink + occluders — a playing sit anim alone can still read as standing.
 - [JPO Huddle per-tile seat overrides](jpo-huddle-seat-tile-facing.md) — SEAT_TILE_FACING map ("col,row"→facing) for seats whose GIDs can't go in FURN_SEATS globally (same GID = desk top elsewhere).
 - [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — 4-dir run + 3-sheet directional sit, insertion-order depth, per-tile conference facing; old-map GIDs historical.
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD via one clustering pass that also drives E-press, "!" badge, and the panel.
