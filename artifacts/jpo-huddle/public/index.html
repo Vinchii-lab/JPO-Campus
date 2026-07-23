@@ -1914,6 +1914,8 @@
       2628,                                                       // lounge work-pod desk chair TOP tile (side view, faces left) — work seat
       2644,                                                       // lounge work-pod chair BOTTOM tile — alias seat: SEAT_DY -48 snaps the sitter up onto the 2628 tile (every 2644 has 2628 directly above; verified map-wide)
       2584, 2600, 2616,                                           // lounge work-pod LEFT chair stack (mirror of 2628/2644: top/seat/legs, faces RIGHT into the pod divider 2585/2601/2617). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2600 seat tile. Also standalone at (163,64-66), (163,80-82), (133,125-127).
+      2589, 2605, 2621,                                           // MIRRORED green side-view desk chair stack (top/seat/legs, faces LEFT into its divider panel 2588/2604/2620 to the west). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2605 seat tile. COO office (104,125-127) + Accounting (190,122-124).
+      2588, 2604, 2620,                                           // that chair's big green divider panel column — ALIAS seats: SEAT_DX +48 (plus SEAT_DY on top/legs) lands the sitter on the chair's middle tile, so pressing E at the panel (which players read as the chair back) still seats you. Unlike pod divider 2585 (solid, appears in packed pods), 2588 appears ONLY directly west of a 2589 chair — verified map-wide.
       2593,                                                       // tall HR-desk chair north of the desk (faces down; 2577 backrest row stays solid — see SEAT_DY)
       2642,                                                       // dining chair south of a table (art faces up; 2626 tuck tile stays solid)
       2522,                                                       // red ladder chair west of the HR tall desk (faces right; 2538 leg tile stays solid)
@@ -1923,6 +1925,10 @@
       5016, 5017, 5032, 5033,                                     // studio front-desk grey armchair (TVStudio 2×2: back row 5016/5017 over seat row 5032/5033, centered between its two columns via SEAT_DX; back row aliases down onto the seat row via SEAT_DY). The 4-wide white control desk lives on the WALL layer at the seat row + the row below.
       3192, 3193,                                                 // brown loveseat cushions
       3224, 3225,                                                 // white lounge sofa cushion row (rooms east of Dev/IT; backrest row 3208/3209 stays solid)
+      3241, 3257, 3273,                                           // grey SIDE-view sofa, seat column (arm-top/seat/base; backrest column 3240/3256/3272 to its west stays solid; faces right). CFO office (138,125-127). SEAT_DY aliases top/base onto the middle 3257.
+      3242, 3258, 3274,                                           // grey side-view sofa MIRRORED, seat column (backrest column 3243/3259/3275 to its east stays solid; faces left). COO office (99,125-127). SEAT_DY aliases top/base onto the middle 3258.
+      2877, 2893, 2909,                                           // blue drafting stool (1-wide 3-tall: cap/seat/pedestal; approach-facing like poufs). CFO office (133,118-120). SEAT_DY aliases cap/base onto the middle 2893.
+      2878, 2894, 2910,                                           // red drafting stool, same treatment. Accounting (150,121-123) + (171,125-127).
       // 3252-3255 are NOT seats: they're the tall white double-door cabinet units
       // (coffee makers sit on some of them) — sitting put the player INSIDE the
       // cabinet art. Removed from all three seat tables; keep them out.
@@ -1967,6 +1973,10 @@
       2628:'left',                                                                   // lounge work-pod chair (side view)
       2644:'left',                                                                   // work-pod chair bottom tile (alias — snaps up onto 2628, same facing)
       2584:'right', 2600:'right', 2616:'right',                                      // lounge work-pod LEFT chair stack (mirror of 2628 — faces right into its divider)
+      2589:'left', 2605:'left', 2621:'left',                                         // mirrored green side-view desk chair (faces left into its divider panel)
+      2588:'left', 2604:'left', 2620:'left',                                         // that divider panel's alias tiles — same facing (sit lands on the chair column)
+      3241:'right', 3257:'right', 3273:'right',                                      // grey side-view sofa, CFO office (backrest west -> faces right)
+      3242:'left', 3258:'left', 3274:'left',                                         // grey side-view sofa mirrored, COO office (backrest east -> faces left)
       5016:'down', 5017:'down', 5032:'down', 5033:'down',                            // studio front-desk armchair (faces its control desk below)
       2593:'down',                                                                   // tall HR-desk chair north of its desk
       2522:'right',                                                                  // red ladder chair west of the HR tall desk
@@ -1997,6 +2007,10 @@
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
       5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
       5032: 24, 5033: -24,   // studio front-desk armchair seat row (2-wide, centered on the column boundary)
+      // Divider-panel alias tiles for the mirrored green desk chair: a FULL-tile +48
+      // shifts the sitter one column EAST onto the chair column (2589 stack) — exact
+      // integer column, so remote derived-cell parity holds (same rule as SEAT_DY ±48).
+      2588: 48, 2604: 48, 2620: 48,
     };
     // Vertical seat shift. The tall HR-desk chairs (2593) sit one full tile NORTH of
     // their tall desk — with the default snap the avatar's feet land a whole tile above
@@ -2024,6 +2038,18 @@
       2584: 48,   // left pod chair TOP tile: snap DOWN onto the 2600 seat tile
       2616: -48,  // left pod chair LEGS tile: snap UP onto the 2600 seat tile
       5016: 48, 5017: 48,  // studio armchair back row: snap DOWN onto the 5032/5033 seat row
+      2589: 48,   // mirrored green desk chair TOP tile: snap DOWN onto the 2605 seat tile
+      2621: -48,  // mirrored green desk chair LEGS tile: snap UP onto the 2605 seat tile
+      2588: 48,   // divider panel TOP tile: down onto the chair's middle row (SEAT_DX shifts east)
+      2620: -48,  // divider panel LEGS tile: up onto the chair's middle row (SEAT_DX shifts east)
+      3241: 48,   // CFO side sofa arm-top tile: down onto the 3257 seat tile
+      3273: -48,  // CFO side sofa base tile: up onto the 3257 seat tile
+      3242: 48,   // COO side sofa top tile: down onto the 3258 seat tile
+      3274: -48,  // COO side sofa base tile: up onto the 3258 seat tile
+      2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
+      2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
+      2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
+      2910: -48,  // red drafting stool pedestal: up onto the 2894 seat tile
     };
     // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
     // upright front idle frame laid on the pillow row + a floating 💤 — the wire
