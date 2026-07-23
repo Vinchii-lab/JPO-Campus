@@ -5517,6 +5517,11 @@
           this.load.spritesheet(`${char}_sit3`, `/assets/${C}_sit3_16x16.png`, { frameWidth: 16, frameHeight: 32 });  // DOWN (face), 16px pitch
         });
         this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
+        // Environmental animation sheets
+        this.load.spritesheet('punch_bag_idle', '/assets/punch_bag_idle.png', { frameWidth: 32, frameHeight: 32 });  // 6 frames, bag swinging
+        this.load.spritesheet('punch_bag_hit',  '/assets/punch_bag_hit.png',  { frameWidth: 32, frameHeight: 32 });  // 6 frames, faster swing on hit
+        this.load.spritesheet('anim_treadmill', '/assets/anim_treadmill.png', { frameWidth: 48, frameHeight: 64 });  // 3 frames, belt moving
+        this.load.spritesheet('anim_fridge',    '/assets/anim_fridge.png',    { frameWidth: 32, frameHeight: 48 });  // 7 frames, door cycle
       }
 
       create() {
@@ -5535,6 +5540,12 @@
         // Seated anims are per-player (palette-swapped) and created in _buildPlayerTex; no base
         // sit anims are needed here.
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
+        // Environmental animations — looping idle variants
+        this.anims.create({ key: 'punch_bag_idle', frames: this.anims.generateFrameNumbers('punch_bag_idle', {start:0, end:5}), frameRate:6, repeat:-1 });
+        this.anims.create({ key: 'punch_bag_hit',  frames: this.anims.generateFrameNumbers('punch_bag_hit',  {start:0, end:5}), frameRate:14, repeat:0  });
+        this.anims.create({ key: 'treadmill_run',  frames: this.anims.generateFrameNumbers('anim_treadmill', {start:0, end:2}), frameRate:8, repeat:-1 });
+        // Fridge: loop frames 0-3 (idle humming — door barely moves)
+        this.anims.create({ key: 'fridge_idle',    frames: this.anims.generateFrameNumbers('anim_fridge',    {start:0, end:3}), frameRate:4, repeat:-1, yoyo:true });
 
         // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
         // The Wall layer holds the upper/back parts of desks & chairs, so it must render
@@ -5699,6 +5710,50 @@
             const sy = o.hl.y + 12;
             const puff = this.add.text(sx, sy, '💨', { fontSize: '15px' }).setOrigin(0.5, 1).setAlpha(0).setDepth(450);
             this.tweens.add({ targets: puff, y: sy - 34, alpha: { from: 0.8, to: 0 }, duration: 2400, delay: i * 1200, repeat: -1, ease: 'Sine.easeOut' });
+          }
+        }
+
+        // ── Environmental animated overlays ────────────────────────────────
+        // Placed here (after tilemap layers, before any player sprite) so they
+        // render above the floor/furniture tiles but below all character sprites
+        // (which use default depth 0 in insertion order). Scale 3 matches the
+        // map's setScale(3) so 1 source-pixel = 3 world pixels = 1 tile at 48px.
+        //
+        // PUNCH BAGS — hang from the bracket tiles at c199/c202/c205 r18
+        // (GIDs 9872/9873 = wall-mount brackets already in the map).
+        // Each bag (32×32 source → 96×96 world) fills the 2×2 tile space below.
+        // Stored in this._punchBags with world coords for the E-key proximity check.
+        {
+          const T = 48;
+          this._punchBags = [];
+          for (const bc of [199, 202, 205]) {
+            const bx = bc * T + T / 2;   // horizontal center of bracket tile
+            const by = 19 * T + T / 2;   // vertical center of row 19 (one below bracket)
+            const spr = this.add.sprite(bx, by, 'punch_bag_idle')
+              .setOrigin(0.5, 0.5).setScale(3);
+            spr.play('punch_bag_idle');
+            this._punchBags.push({ x: bx, y: by, sprite: spr });
+          }
+
+          // TREADMILLS — animate the belt on the 3 × (3×3-tile) treadmill units
+          // at c193-201, r33-35. Sprite is 48×64 source; squished to 144×144
+          // (3×3 tiles) with setDisplaySize so the aspect ratio matches the static art.
+          for (const startCol of [193, 196, 199]) {
+            const tx = startCol * T + T * 1.5;  // center of 3-tile column
+            const ty = 33 * T + T * 1.5;        // center of r33-35
+            this.add.sprite(tx, ty, 'anim_treadmill')
+              .setOrigin(0.5, 0.5).setDisplaySize(T * 3, T * 3)
+              .play('treadmill_run');
+          }
+
+          // DRINK COOLERS — two stacks at c115-116, r63-65 and r68-70.
+          // Sprite frame 32×48 source → 96×144 world = exactly 2×3 tiles at scale 3.
+          for (const startRow of [63, 68]) {
+            const fx = 115 * T + T;         // center of 2-tile column c115-116
+            const fy = startRow * T + T * 1.5; // center of 3-tile row
+            this.add.sprite(fx, fy, 'anim_fridge')
+              .setOrigin(0.5, 0.5).setScale(3)
+              .play('fridge_idle');
           }
         }
 
@@ -6097,6 +6152,26 @@
           || WALL_SEATS[wallGid] !== undefined);
         this._clearOccluders(this._seatOccluders);
         this._seatOccluders = this._seatOccludersFor(x, y, dir);
+      }
+
+      // Play the "hit" animation on a nearby punching bag and float a 🥊 emoji
+      // above the local player. Client-only — no server state. 2-second per-bag
+      // cooldown prevents spam.
+      _doPunchBag(bag) {
+        const now = this.time.now;
+        if (bag._lastHit && now - bag._lastHit < 2000) return;
+        bag._lastHit = now;
+        bag.sprite.play('punch_bag_hit');
+        bag.sprite.once('animationcomplete', () => {
+          if (bag.sprite?.active) bag.sprite.play('punch_bag_idle');
+        });
+        if (this.player) {
+          const px = this.player.x, py = this.player.y;
+          const emj = this.add.text(px, py - 44, '🥊', { fontSize: '20px' })
+            .setOrigin(0.5, 1).setDepth(500);
+          this.tweens.add({ targets: emj, y: py - 84, alpha: 0, duration: 1100,
+            ease: 'Sine.easeOut', onComplete: () => emj.destroy() });
+        }
       }
 
       // ── Desk occlusion ────────────────────────────────────────────────
@@ -6789,6 +6864,16 @@
         }
         this._setObjHighlight(objNear && objNear.id);
 
+        // Punch bag proximity — checked after OFFICE_OBJECTS so a bag never
+        // conflicts with a real interactive object. Radius ~2 tiles (96px).
+        let nearBag = null;
+        if (!this.sitting && !interact && this._punchBags) {
+          for (const bag of this._punchBags) {
+            const dx = player.x - bag.x, dy = player.y - bag.y;
+            if (dx*dx + dy*dy < 96*96) { nearBag = bag; break; }
+          }
+        }
+
         // Beds get their own verb — the seat mechanics are identical, only the
         // labels and the rendered pose differ (see BED_GIDS / pose 'lie').
         if (interact?.type === 'sit') interact.bed = BED_GIDS.has(furnAt(interact.seat.col, interact.seat.row));
@@ -6797,6 +6882,7 @@
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
+        else if (nearBag)                    this.eHint.setText('[ E ] Punch bag').setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
         this._updateTouchActionBtn(interact);
 
@@ -6815,6 +6901,8 @@
             // stood on before sitting, so re-enabling collision there is safe.
             if (this._preSitPos) { player.body.reset(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
             player.body.enable = true;
+          } else if (nearBag) {
+            this._doPunchBag(nearBag);
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
