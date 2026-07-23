@@ -1797,8 +1797,6 @@
     // server re-checks proximity and owns every cooldown. hl = the rectangle
     // (world px) that pulses over the object while you're in range.
     const OFFICE_OBJECTS = [
-      { id:'coffee_machine',  x:6816, y:5808, r:160, label:'Brew free coffee', touch:'Brew',
-        hl:{ x:140*48, y:119*48, w:4*48, h:2*48 } }, // vending-machine bank, Break Room (c140-143, r119-120)
       { id:'coffee_machine2', x:8256, y:3456, r:150, label:'Brew free coffee', touch:'Brew',
         hl:{ x:171*48, y:70*48, w:2*48, h:2*48 } },  // coffee maker on the Library counter (c171-172 r70, counter r71)
       // White cabinet coffee makers (Interiors 2669 top / 2685 bottom) scattered through
@@ -1943,6 +1941,15 @@
       8481, 8482, 8483,                                           // up-facing TV couch, back-top row (body row 8497-8499 stays solid)
       7032, 7033, 7068, 7069,                                     // nap-room beds: lie row (renders the lying pose, see BED_GIDS)
     ]);
+    // Per-tile seat overrides — used when the same GIDs appear as desk tops elsewhere
+    // and cannot be added to FURN_SEATS globally.  Key = "col,row" in tile coords.
+    // These cells have their Furniture (and any Wall) collision cleared at create()
+    // via isFurnSeat, and their facing is baked into seatFacingAt there too.
+    const SEAT_TILE_FACING = {
+      '128,124': 'down',  // CFO office: visitor bench, Jail desk south face (c128-130 r124)
+      '129,124': 'down',
+      '130,124': 'down',
+    };
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
     // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
     // Alias tiles are CLIENT-ONLY here (chip display keys off the tile you press
@@ -5445,7 +5452,8 @@
         // (WALL_SEATS) — the gid arg is the FURNITURE gid, so those cells probe
         // the wall tile directly.
         this.isFurnSeat = (gid, c, r) => FURN_SEATS.has(gid)
-          || WALL_SEATS[wallLayer.getTileAt(c, r)?.index] !== undefined;
+          || WALL_SEATS[wallLayer.getTileAt(c, r)?.index] !== undefined
+          || SEAT_TILE_FACING[c + ',' + r] !== undefined;
         // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
         // Seat banks are packed workstations: each chair (Furniture layer) shares its
         // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
@@ -5802,6 +5810,7 @@
             if (!faced && this._isWorkstation(c, r)) this.seatFacingAt[c + ',' + r] = 'down';
           }
         }
+        for (const key of Object.keys(SEAT_TILE_FACING)) this.seatFacingAt[key] = SEAT_TILE_FACING[key];
 
         // ── Floating room-name labels hovering over the centre of each room ──
         // Default depth (0) + created after the tile layers but before any player
