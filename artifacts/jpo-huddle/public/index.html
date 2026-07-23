@@ -1797,8 +1797,8 @@
     // server re-checks proximity and owns every cooldown. hl = the rectangle
     // (world px) that pulses over the object while you're in range.
     const OFFICE_OBJECTS = [
-      { id:'coffee_machine2', x:8256, y:3456, r:150, label:'Brew free coffee', touch:'Brew',
-        hl:{ x:171*48, y:70*48, w:2*48, h:2*48 } },  // coffee maker on the Library counter (c171-172 r70, counter r71)
+      // (coffee_machine2 removed July 2026 — the counter object at c171-172 r70-71
+      // reads as a plant/lamp beside the fruit basket, per owner; don't re-add it.)
       // White cabinet coffee makers (Interiors 2669 top / 2685 bottom) scattered through
       // the rooms — the double-door units with the machine on top. Every id starting with
       // 'coffee_machine' shares ONE per-person refill cooldown server-side and gets the

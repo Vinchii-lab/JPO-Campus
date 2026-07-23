@@ -233,7 +233,9 @@ const GROUP_RADIUS    = 420;     // "everyone nearby" radius for group consumabl
 // sprite origin. The client only ever sends an intent; proximity, cooldowns,
 // and rate limits are all enforced here.
 const OBJECTS = {
-  coffee_machine2: { x: 8256, y: 3456, r: 150 }, // coffee maker on the Library counter (c171-172 r70) — shares the coffee_machine cooldown
+  // (coffee_machine2 removed July 2026 — the counter object at c171-172 r70-71
+  // reads as a plant/lamp beside the fruit basket, not a coffee maker, per
+  // owner; don't re-add it. The art stays as pure decoration.)
   // White cabinet coffee makers (Interiors 2669/2685 units) around the office.
   // EVERY id starting with "coffee_machine" is one station of the same brew
   // system: interact matches on the prefix and they ALL share the single
