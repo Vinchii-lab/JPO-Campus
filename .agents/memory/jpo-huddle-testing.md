@@ -201,3 +201,6 @@ phases that each fit foreground.
 
 ## Remote-parity tests need server-ACCEPTED movement
 `body.reset` teleports render locally but the server anti-cheat silently REJECTS the move for broadcast — a second client never sees the avatar move. For any two-client parity test, move via micro-hops (≤45px per step, ~350ms apart, straight line is fine — server checks distance/bounds, not walls). Single-client visual tests can still teleport freely.
+
+## Invisible-chair class of bug
+The Wall layer renders over Furniture, so a seat gid on a cell covered by solid Wall art is invisible but still seatable — the sitter gets buried and users report it as "sitting broken". When a sit-bug report doesn't match known seat tables, dump all three layers at the player's stored DB position (x/48, (y+27)/48) first; the real fixture there may not be what the screenshot suggests.
