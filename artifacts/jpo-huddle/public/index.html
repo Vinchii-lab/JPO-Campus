@@ -1917,14 +1917,23 @@
       2593,                                                       // tall HR-desk chair north of the desk (faces down; 2577 backrest row stays solid — see SEAT_DY)
       2642,                                                       // dining chair south of a table (art faces up; 2626 tuck tile stays solid)
       2522,                                                       // red ladder chair west of the HR tall desk (faces right; 2538 leg tile stays solid)
-      2835, 2836,                                                 // wooden bench TOPS (front row 2851/2852 stays solid)
+      2835, 2836,                                                 // wooden bench TOPS
+      2851, 2852,                                                 // wooden bench FRONT row — alias: SEAT_DY -48 onto the bench top above (verified map-wide)
       2758, 2759,                                                 // pouf top row (approach-facing)
       3189, 3190, 3191,                                           // gray studio sofa cushion row
+      3173, 3174, 3175,                                           // gray studio sofa BACKREST row — alias: SEAT_DY +48 onto the cushion row below (verified map-wide)
+      3205, 3206, 3207,                                           // gray studio sofa FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
       5016, 5017, 5032, 5033,                                     // studio front-desk grey armchair (TVStudio 2×2: back row 5016/5017 over seat row 5032/5033, centered between its two columns via SEAT_DX; back row aliases down onto the seat row via SEAT_DY). The 4-wide white control desk lives on the WALL layer at the seat row + the row below.
       3192, 3193,                                                 // brown loveseat cushions
-      3224, 3225,                                                 // white lounge sofa cushion row (rooms east of Dev/IT; backrest row 3208/3209 stays solid)
-      3241, 3257, 3273,                                           // grey SIDE-view sofa, seat column (arm-top/seat/base; backrest column 3240/3256/3272 to its west stays solid; faces left — armrest column is east in the art). CFO office (138,125-127). SEAT_DY aliases top/base onto the middle 3257.
-      3242, 3258, 3274,                                           // grey side-view sofa MIRRORED, seat column (backrest column 3243/3259/3275 to its east stays solid; faces right — mirror of the CFO one). COO office (99,125-127). SEAT_DY aliases top/base onto the middle 3258.
+      3176, 3177,                                                 // brown loveseat BACKREST row — alias: SEAT_DY +48 onto the cushions below (verified map-wide)
+      3224, 3225,                                                 // white lounge sofa cushion row (rooms east of Dev/IT)
+      3208, 3209,                                                 // white lounge sofa BACKREST row — alias: SEAT_DY +48 onto the cushions below (verified map-wide)
+      3241, 3257, 3273,                                           // grey SIDE-view sofa, seat column (arm-top/seat/base). CFO office (138,125-127). SEAT_DY aliases top/base onto the middle 3257.
+      3240, 3256, 3272,                                           // that sofa's BACKREST column — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide: 3240-col always has 3241-col to its east
+      3242, 3258, 3274,                                           // grey side-view sofa MIRRORED, seat column. COO office (99,125-127). SEAT_DY aliases top/base onto the middle 3258.
+      3243, 3259, 3275,                                           // its BACKREST column — alias: SEAT_DX -48 west onto the seat column (plus DY on top/base); verified map-wide
+      3307, 3323, 3339,                                           // tan SIDE-view sofa, seat column (top/seat/base — backrest column is WEST in the art). Accounting manager office (186,122-124). SEAT_DY aliases top/base onto the middle 3323.
+      3306, 3322, 3338,                                           // its BACKREST column — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
       2877, 2893, 2909,                                           // blue drafting stool (1-wide 3-tall: cap/seat/pedestal; faces down). CFO office (133,118-120). SEAT_DY aliases cap/base onto the middle 2893.
       2878, 2894, 2910,                                           // red drafting stool, same treatment. Accounting (150,121-123) + (171,125-127).
       // 3252-3255 are NOT seats: they're the tall white double-door cabinet units
@@ -1932,6 +1941,7 @@
       // cabinet art. Removed from all three seat tables; keep them out.
       3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
+      5441, 5442, 5443,                                           // green couch FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
       7715,                                                       // classroom desk chair (desk to its right -> faces right)
       8827, 8828, 8843, 8844,                                     // CEO front armchair (2×2, faces down; top row 8827/8828 aliases to seat row 8843/8844 via SEAT_DY)
       8887, 8888, 8903, 8904,                                     // CEO left armchair  (2×2, faces left; top row 8887/8888 aliases to seat row 8903/8904 via SEAT_DY)
@@ -2024,6 +2034,11 @@
       // shifts the sitter one column EAST onto the chair column (2589 stack) — exact
       // integer column, so remote derived-cell parity holds (same rule as SEAT_DY ±48).
       2588: 48, 2604: 48, 2620: 48,
+      // Side-view sofa BACKREST columns — full-tile shift onto the seat column so
+      // the whole sofa footprint is sittable ("sit where I please", owner July 2026):
+      3240: 48, 3256: 48, 3272: 48,     // CFO grey sofa backrest → seat column east
+      3243: -48, 3259: -48, 3275: -48,  // COO mirrored grey sofa backrest → seat column west
+      3306: 48, 3322: 48, 3338: 48,     // Accounting tan sofa backrest → seat column east
     };
     // Vertical seat shift. The tall HR-desk chairs (2593) sit one full tile NORTH of
     // their tall desk — with the default snap the avatar's feet land a whole tile above
@@ -2057,8 +2072,23 @@
       2620: -48,  // divider panel LEGS tile: up onto the chair's middle row (SEAT_DX shifts east)
       3241: 48,   // CFO side sofa arm-top tile: down onto the 3257 seat tile
       3273: -48,  // CFO side sofa base tile: up onto the 3257 seat tile
+      3240: 48,   // CFO sofa backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      3272: -48,  // CFO sofa backrest BASE: up (SEAT_DX shifts east)
       3242: 48,   // COO side sofa top tile: down onto the 3258 seat tile
       3274: -48,  // COO side sofa base tile: up onto the 3258 seat tile
+      3243: 48,   // COO sofa backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3275: -48,  // COO sofa backrest BASE: up (SEAT_DX shifts west)
+      3307: 48,   // Accounting tan sofa seat-column TOP: down onto the 3323 seat tile
+      3339: -48,  // Accounting tan sofa seat-column BASE: up onto the 3323 seat tile
+      3306: 48,   // Accounting sofa backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      3338: -48,  // Accounting sofa backrest BASE: up (SEAT_DX shifts east)
+      // Whole-sofa sittability aliases (front/backrest rows snap onto the cushion row):
+      3173: 48, 3174: 48, 3175: 48,     // studio sofa backrest row → cushions below
+      3205: -48, 3206: -48, 3207: -48,  // studio sofa front row → cushions above
+      3176: 48, 3177: 48,               // loveseat backrest row → cushions below
+      3208: 48, 3209: 48,               // white lounge sofa backrest row → cushions below
+      5441: -48, 5442: -48, 5443: -48,  // green couch front row → cushions above
+      2851: -48, 2852: -48,             // wooden bench front row → bench top above
       2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
       2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
       2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
