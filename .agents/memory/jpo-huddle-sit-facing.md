@@ -5,6 +5,13 @@ description: Seated facing = pin first (seatFacingAt per-tile || SEAT_FACING per
 
 > **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + a `WORKSTATION_WALL_GIDS` Wall tile sharing the cell (`_isWorkstation`) — monitor **2078** (desk-front 2094 below) or cash register **2148** (counter-front 2164 below; Market checkout + library counters get the same stand pose + occluders); manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged. The durable rule: any chair sharing its cell with a "thing on a desk in front of you" Wall tile should be a workstation — matching on ONE hardcoded gid is how the register bug happened.
 
+## SEAT_FACING must cover ALL aliased tiles, not just the seat tile
+`SEAT_FACING` is keyed by the GID at the player's CURRENT tile when E is pressed — BEFORE SEAT_DY snapping.
+For multi-tile furniture (cap/seat/pedestal 3-stacks, alias seats), the facing lookup fires against whichever
+tile the player happens to stand on. Adding only the seat tile (e.g. 2893) leaves the cap (2877) and pedestal
+(2909) without a pin, so they fall through to `lastDir`. Always add all GIDs in the aliased set.
+**Why:** the E-handler resolves `seatFacingAt[col,row] || SEAT_FACING[gid] || lastDir` at press-time (line 6583/6592 in index.html); the SEAT_DY snap that moves the player to the canonical seat tile happens later.
+
 # Seated facing is PIN-FIRST — approach direction is only the fallback (changed July 2026)
 
 Sit facing resolves `seatFacingAt["c,r"] || SEAT_FACING[gid] || approachDir`, and `lastDir` must be
