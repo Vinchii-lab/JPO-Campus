@@ -1935,9 +1935,10 @@
       3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
       7715,                                                       // classroom desk chair (desk to its right -> faces right)
-      8825, 8826, 8827, 8828,                                     // basement loveseat cushions
-      8888,                                                       // basement side armchair (faces right)
-      8891, 8892,                                                 // basement loveseat cushions
+      8827, 8828, 8843, 8844,                                     // CEO front armchair (2×2, faces down; top row 8827/8828 aliases to seat row 8843/8844 via SEAT_DY)
+      8887, 8888, 8903, 8904,                                     // CEO left armchair  (2×2, faces left; top row 8887/8888 aliases to seat row 8903/8904 via SEAT_DY)
+      8825, 8826, 8841, 8842,                                     // CEO right armchair (2×2, faces right; top row 8825/8826 aliases to seat row 8841/8842 via SEAT_DY)
+      8891, 8892,                                                 // CEO bottom armchair seat row only (faces up → standup pose; body row 8907/8908 stays solid, same as TV couch)
       8449, 8450, 8451,                                           // up-facing TV couch, back-top row (body row 8465-8467 stays solid)
       8481, 8482, 8483,                                           // up-facing TV couch, back-top row (body row 8497-8499 stays solid)
       7032, 7033, 7068, 7069,                                     // nap-room beds: lie row (renders the lying pose, see BED_GIDS)
@@ -1988,9 +1989,10 @@
       3320:'down', 3321:'down',                                                      // tan armchair
       5425:'down', 5426:'down', 5427:'down',                                         // green couch
       7715:'right',                                                                  // classroom desk chair
-      8825:'down', 8826:'down', 8827:'down', 8828:'down',                            // basement loveseats
-      8888:'right',                                                                  // basement side armchair
-      8891:'down', 8892:'down',                                                      // basement loveseat
+      8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
+      8887:'left', 8888:'left', 8903:'left', 8904:'left',                            // CEO left armchair (backrest on right → faces west/left)
+      8825:'right', 8826:'right', 8841:'right', 8842:'right',                        // CEO right armchair (backrest on left → faces east/right)
+      8891:'up', 8892:'up',                                                          // CEO bottom armchair seat row (back faces north → standup pose, faces north/up)
       8449:'up', 8450:'up', 8451:'up',                                               // TV couch seen from behind — sit faces the TV above (standup pose)
       8481:'up', 8482:'up', 8483:'up',                                               // second TV couch (basement south wall), same back view
       7032:'down', 7033:'down', 7068:'down', 7069:'down',                            // beds (pose overrides to 'lie')
@@ -2007,6 +2009,11 @@
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
       5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
       5032: 24, 5033: -24,   // studio front-desk armchair seat row (2-wide, centered on the column boundary)
+      // CEO office 2×2 armchairs: left tile +24, right tile -24 (centers sitter between columns for all 4 types)
+      8827: 24, 8828: -24, 8843: 24, 8844: -24,   // front armchair (down-facing)
+      8887: 24, 8888: -24, 8903: 24, 8904: -24,   // left-facing armchair
+      8825: 24, 8826: -24, 8841: 24, 8842: -24,   // right-facing armchair
+      8891: 24, 8892: -24,                          // bottom armchair seat row (up-facing)
       // Divider-panel alias tiles for the mirrored green desk chair: a FULL-tile +48
       // shifts the sitter one column EAST onto the chair column (2589 stack) — exact
       // integer column, so remote derived-cell parity holds (same rule as SEAT_DY ±48).
@@ -2050,6 +2057,10 @@
       2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
       2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
       2910: -48,  // red drafting stool pedestal: up onto the 2894 seat tile
+      // CEO office armchairs — top row aliases DOWN to the seat row (+48)
+      8827: 48, 8828: 48,   // front armchair top row → seat row 8843/8844
+      8887: 48, 8888: 48,   // left armchair top row  → seat row 8903/8904
+      8825: 48, 8826: 48,   // right armchair top row → seat row 8841/8842
     };
     // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
     // upright front idle frame laid on the pillow row + a floating 💤 — the wire
