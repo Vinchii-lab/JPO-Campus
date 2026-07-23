@@ -5827,18 +5827,17 @@
           // Studio front-desk armchair: the sitter straddles the boundary between the
           // chair's two columns (SEAT_DX), so redraw BOTH columns of the white control
           // desk (Wall layer: desk top shares the seat row, desk front is the row
-          // below) over the legs, then the armchair's own seat-row Furniture tiles
-          // back on top so the armrests stay in front of the body. Same depth (900),
-          // creation order layers them: desk over player, chair front over desk. The
-          // derived cell is always the RIGHT seat tile (5033) — x lands exactly on
+          // below) over the legs. Do NOT redraw the chair's own Furniture tiles — the
+          // seat-row art includes the chair's lower backrest, which buries the body
+          // (the sitter read as standing BEHIND the chair). The chair back stays on
+          // the base layer behind the sprite, like every other down-facing armchair.
+          // The derived cell is always the RIGHT seat tile (5033) — x lands exactly on
           // the boundary and Math.round rounds up — but handle 5032 too for safety.
           const cL = seatGid === 5033 || seatGid === 5017 ? col - 1 : col;
           cells.push({ layer: this.wallLayer,      c: cL,     r: row     });
           cells.push({ layer: this.wallLayer,      c: cL + 1, r: row     });
           cells.push({ layer: this.wallLayer,      c: cL,     r: row + 1 });
           cells.push({ layer: this.wallLayer,      c: cL + 1, r: row + 1 });
-          cells.push({ layer: this.furnitureLayer, c: cL,     r: row     });
-          cells.push({ layer: this.furnitureLayer, c: cL + 1, r: row     });
         } else if (this._upSeatAt(col, row)) {
           // Pinned-up seat: redraw the chair's OWN tile over the body so the backrest
           // hides the legs — with the standing UP frame it reads as "seated from behind".

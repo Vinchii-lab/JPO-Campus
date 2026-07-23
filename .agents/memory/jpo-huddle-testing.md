@@ -97,6 +97,18 @@ its last/default string while hidden — detect an available interaction with
 `tryLogin()` are reachable from `page.evaluate`; the socket itself is not
 (top-level `const`).
 
+# Verify sprite layering with a TIGHT viewport, not a wide screenshot
+
+A wide (1280px) screenshot made a buried avatar look "fine": a seat-occluder
+that redrew a chair's own front tile over the sitter hid the whole body behind
+the backrest, and it shipped — a real user's zoomed screenshot caught it.
+
+**Rule:** when judging player-vs-furniture layering, capture with a small
+viewport (~520×360, camera-follow zooms the subject) or crop tight around the
+avatar; explicitly ask "is the BODY in front of the chair back?" — a floating
+head can pass a casual glance. For down-facing seats, redrawing the chair's own
+tile over the sitter is almost always wrong (only up-pinned seats do that).
+
 # First-run tour modal blocks screenshots — Skip it before capturing
 
 A first-time player gets a multi-step welcome tour modal overlaying the whole
