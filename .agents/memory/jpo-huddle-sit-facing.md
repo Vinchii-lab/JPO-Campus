@@ -5,6 +5,18 @@ description: Seated facing = pin first (seatFacingAt per-tile || SEAT_FACING per
 
 > **Map swap (July 2026):** the map is now `JPO_HQ.tmj`. Old-map GIDs below (606, 959–996, 1005/1006, etc.) are HISTORICAL. Current equivalents: workstation = Furniture chair **2231** + a `WORKSTATION_WALL_GIDS` Wall tile sharing the cell (`_isWorkstation`) — monitor **2078** (desk-front 2094 below) or cash register **2148** (counter-front 2164 below; Market checkout + library counters get the same stand pose + occluders); manager-desk chair cells **2600** (blue) / **2605** (green); carrel chairs **2763/2764**. All principles (poses, `_deskPoseAt`, persistence) still apply unchanged. The durable rule: any chair sharing its cell with a "thing on a desk in front of you" Wall tile should be a workstation — matching on ONE hardcoded gid is how the register bug happened.
 
+## Same GID, different room → per-tile SEAT_TILE_FACING override (not a SEAT_FACING change)
+When the same chair GID appears in multiple rooms whose desks face DIFFERENT directions, the global
+`SEAT_FACING[gid]` pin is correct for some instances and wrong for others. Fix with per-tile entries
+in `SEAT_TILE_FACING` (keyed `"col,row"`) — these are checked FIRST by `seatFacingAt[ptx+','+pty]`
+and override the global pin for just those cells without touching any other room.
+**Why:** changing `SEAT_FACING[gid]` globally would break every other room that uses the same GID
+correctly. Example: GID 2589/2605/2621 (mirrored green desk chair) is 'left' everywhere (COO,
+Accounting) but at the L&D trainer's desk (c160, r72–74) the desk is to the east → override via
+`'160,72':'right', '160,73':'right', '160,74':'right'`. All three rows need entries because the
+seatFacingAt lookup fires against the SCAN tile (the row the player pressed E on), not the
+SEAT_DY-snapped cell.
+
 ## SEAT_FACING must cover ALL aliased tiles, not just the seat tile
 `SEAT_FACING` is keyed by the GID at the player's CURRENT tile when E is pressed — BEFORE SEAT_DY snapping.
 For multi-tile furniture (cap/seat/pedestal 3-stacks, alias seats), the facing lookup fires against whichever

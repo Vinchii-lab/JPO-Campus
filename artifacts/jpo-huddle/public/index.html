@@ -1967,6 +1967,14 @@
       '128,124': 'down',  // CFO office: visitor bench, Jail desk south face (c128-130 r124)
       '129,124': 'down',
       '130,124': 'down',
+      // L&D trainer's desk chair (GID 2589/2605/2621 at c160, r72-74): the global
+      // SEAT_FACING[2589]='left' pin is correct for COO/Accounting (desk to the west),
+      // but at the L&D position the trainer's desk + classroom are to the EAST, so
+      // the sitter must face RIGHT. Three rows needed — seatFacingAt is keyed on the
+      // scan tile (whichever row the player pressed E on), not the SEAT_DY-snapped cell.
+      '160,72': 'right',  // L&D trainer's chair top tile
+      '160,73': 'right',  // L&D trainer's chair seat tile
+      '160,74': 'right',  // L&D trainer's chair legs tile
       // L&D round table: its 10 chairs are gid 2231 on the WALL layer (the teal
       // table is Wall 2043-2077), so FURN_SEATS never sees them — pin each cell
       // here, facing the table center. The 'up' chair renders the standup pose
