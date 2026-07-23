@@ -79,6 +79,17 @@ coordinate-based, not event-based).
 **Why (non-desk seats):** the old blanket baked-facing model (every seat forced to a per-GID
 direction) was unpredictable, so approach-based facing replaced it for the non-desk seats. Only
 desk-type seats force a pose. Do not reinstate blanket forced facing for non-desk seats.
+RE-CONFIRMED July 2026: owner explicitly asked for approach-facing on all sofas/long chairs/benches
+after pinned sofas kept "facing the wrong way" — the pins on the grey side sofas, studio sofa,
+loveseat, white lounge sofa, green couch, and wooden benches were removed AGAIN. Keep pins only on
+desk/computer chairs, single armchairs the owner asked to pin (CEO set, tan), art-constrained
+back-view TV couches ('up' → standup pose), and beds.
+
+## Sit trigger range includes DIAGONALS (owner request July 2026)
+The E-scan checks the standing tile, 4 cardinal neighbours, then the 4 diagonal neighbours (seats
+only — boards stay cardinal). Diagonal approaches face `lastDir`. The server's 160px seat-snap
+allowance already covers the ~68px diagonal snap; don't widen the scan beyond 1 tile without
+checking that allowance.
 
 ## There is no separate "CEO desk" / "executive desk" sprite
 The owner refers to the seated desks by role ("manager desk", "CEO desk", "executive desk"), but the

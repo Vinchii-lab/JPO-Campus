@@ -1983,19 +1983,17 @@
       2584:'right', 2600:'right', 2616:'right',                                      // lounge work-pod LEFT chair stack (mirror of 2628 — faces right into its divider)
       2589:'left', 2605:'left', 2621:'left',                                         // mirrored green side-view desk chair (faces left into its divider panel)
       2588:'left', 2604:'left', 2620:'left',                                         // that divider panel's alias tiles — same facing (sit lands on the chair column)
-      3241:'left', 3257:'left', 3273:'left',                                          // grey SIDE-view sofa, CFO office — backrest/armrest column is EAST (verified from tileset art), opens west -> sitter faces left
-      3242:'right', 3258:'right', 3274:'right',                                        // grey side-view sofa MIRRORED, COO office — backrest column is WEST, opens east -> sitter faces right
+      // Sofas / long chairs / benches deliberately have NO pin — they face the
+      // APPROACH direction (owner request July 2026): grey side sofas 3241/3242
+      // families, studio sofa 3189-3191, loveseat 3192/3193, white lounge sofa
+      // 3224/3225, green couch 5425-5427, wooden benches 2835/2836. Desk/computer
+      // chairs and art-constrained seats (back-view TV couches, beds) stay pinned.
       5016:'down', 5017:'down', 5032:'down', 5033:'down',                            // studio front-desk armchair (faces its control desk below)
       2593:'down',                                                                   // tall HR-desk chair north of its desk
       2522:'right',                                                                  // red ladder chair west of the HR tall desk
       2642:'up',                                                                     // dining chair south of table
       2877:'down', 2893:'down', 2909:'down',                                         // blue drafting stool (CFO office c133,r118-120 — wall on west, faces south into office). All 3 tiles needed: player may be standing on cap/seat/pedestal when E is pressed
-      2835:'down', 2836:'down',                                                      // wooden bench tops
-      3189:'down', 3190:'down', 3191:'down',                                         // gray studio sofa
-      3192:'down', 3193:'down',                                                      // brown loveseat
-      3224:'down', 3225:'down',                                                      // white lounge sofa (backrest above -> faces down)
       3320:'down', 3321:'down',                                                      // tan armchair
-      5425:'down', 5426:'down', 5427:'down',                                         // green couch
       7715:'right',                                                                  // classroom desk chair
       8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
       8887:'right', 8888:'right', 8903:'right', 8904:'right',                          // CEO west armchair → sitter faces east/right (inward toward center)
@@ -6591,6 +6589,17 @@
               if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
               if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
               // any other solid furniture/wall is not interactable
+            }
+            // Diagonal neighbours too — "close to the sofa" should be enough (owner
+            // request July 2026). Seats only (boards keep cardinal-only). Facing for
+            // a diagonal approach falls back to the walk direction, matching the
+            // approach-facing model for unpinned sofas/benches.
+            if (!interact) for (const dv of [[1,1],[1,-1],[-1,1],[-1,-1]]) {
+              const nc = ptx+dv[0], nr = pty+dv[1];
+              const fg = furnAt(nc,nr);
+              const desk = deskChairAt(fg, nc, nr);
+              if (desk) { interact = { type:'sit', dir:this.lastDir, seat:desk }; break; }
+              if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || this.lastDir } }; break; }
             }
           }
         }
