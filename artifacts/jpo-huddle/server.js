@@ -842,6 +842,11 @@ async function restorePlayer(socket, row) {
     items:     state.items || {},
     x:         state.x,
     y:         state.y,
+    // Restored pose: the client re-enters the seated pose from these instead of
+    // spawning fresh — without them every refresh/build-stamp reload stood the
+    // player up at spawn (and un-seated them for everyone watching).
+    dir:       state.dir,
+    anim:      state.anim === "sit" ? "sit" : "idle",
   });
   socket.emit("currentPlayers", players);
   socket.emit("announcerStatus", { canPost: state.isAnnouncer });

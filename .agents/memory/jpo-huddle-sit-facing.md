@@ -76,6 +76,17 @@ while seated appeared STANDING on their sofa/chair to others.
 derive the correct pose from `{x, y, dir, anim}` alone (that is why `_deskPoseAt` is
 coordinate-based, not event-based).
 
+## The RELOADING client itself must also restore the pose (July 2026)
+Server-side persistence alone is NOT enough: the resumed client's own 50ms position stream is
+authoritative-looking to observers, so if it boots standing at spawn it un-seats the avatar for
+everyone within a second — every deploy's build-stamp force-reload stood ALL seated players up.
+**Why:** two independent restore paths exist (server broadcast state + the local client's own
+spawn), and they must agree; the local one silently won.
+**How to apply:** the local restore must derive pose/occluders from the restored coordinates with
+the SAME coordinate-based helpers remote viewers use — never duplicate the E-press branch's
+seat-cell inputs (those are press-time, not position-derived). Also restore a stand-up tile by
+probing the seat's walkable neighbours; the pre-sit tile is gone after a reload.
+
 **Why (non-desk seats):** the old blanket baked-facing model (every seat forced to a per-GID
 direction) was unpredictable, so approach-based facing replaced it for the non-desk seats. Only
 desk-type seats force a pose. Do not reinstate blanket forced facing for non-desk seats.

@@ -5969,10 +5969,18 @@
         // player (scene survived the socket reconnect), don't build a second sprite.
         if (this.player) { this.cameras?.main?.startFollow(this.player); return; }
         const SPAWN_X = 110*48+24, SPAWN_Y = 46*48+24;
+        // Server-restored position (refresh / build-stamp reload / auto-rejoin):
+        // spawn THERE, not at the fixed spawn point — the server already restored
+        // us at those coords, and starting anywhere else makes our idle stream
+        // drag the avatar across the office for everyone watching. Fresh rows
+        // carry the spawn coords as their DB default, and the session-only
+        // approve path sends no coords at all, so new players still start at SPAWN.
+        const hasPos = Number.isFinite(data.x) && Number.isFinite(data.y);
+        const startX = hasPos ? data.x : SPAWN_X, startY = hasPos ? data.y : SPAWN_Y;
 
         const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
-        this.player   = this.physics.add.sprite(SPAWN_X, SPAWN_Y, texKey);
+        this.player   = this.physics.add.sprite(startX, startY, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
         this.player.body.setSize(12, 10).setOffset(2, 20);   // feet-centered body (fits 48px aisles, matches BODY_DY)
         this.player.setCollideWorldBounds(true);
@@ -5981,7 +5989,7 @@
         this.physics.add.collider(this.player, this.furnitureLayer);
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
 
-        this.localNameTag = this._makeNameTag(SPAWN_X, SPAWN_Y, _playerName);
+        this.localNameTag = this._makeNameTag(startX, startY, _playerName);
 
         // Clicking YOUR OWN avatar opens your profile card (others get the
         // Whisper/Challenge/Profile menu from _addOtherPlayer). Same gate as
@@ -6018,6 +6026,51 @@
           });
           this._pendingPlayers = null;
         }
+
+        // The server restored us mid-sit (page refresh, build-stamp force-reload,
+        // auto-rejoin): re-enter the seated pose. Without this the resumed client
+        // stood up at spawn and its 50ms idle stream un-seated the avatar for
+        // every observer — anyone seated came back standing after each deploy.
+        if (hasPos && data.anim === 'sit') this._restoreSeatedPose(startX, startY, data.dir);
+      }
+
+      // Re-enter the seated pose from a server-restored state. Mirrors the E-press
+      // sit branch, but every input derives from the restored position — the exact
+      // derivation remote viewers run in playerMoved/_deskPoseAt — so the restored
+      // local player renders the same pose everyone else already sees. update()'s
+      // `this.sitting` branch takes over rendering + broadcasting from here.
+      _restoreSeatedPose(x, y, dir) {
+        const player = this.player;
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        const seatGid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        const wallGid = this.wallLayer.getTileAt(col, row)?.index || 0;
+        player.setVelocity(0, 0);
+        player.body.enable = false;    // seat tile is solid — same as the sit branch
+        // The pre-sit tile is unknown after a reload; probe the seat's four
+        // neighbours for a walkable cell to stand back up on (below first —
+        // most chairs are approached from below). No hit = stand up in place,
+        // the stand branch's null-_preSitPos guard already handles that.
+        this._preSitPos = null;
+        for (const [dc, dr] of [[0, 1], [0, -1], [-1, 0], [1, 0]]) {
+          const ft = this.furnitureLayer.getTileAt(col + dc, row + dr);
+          const wt = this.wallLayer.getTileAt(col + dc, row + dr);
+          if ((!ft || !ft.collides) && (!wt || !wt.collides)) {
+            this._preSitPos = { x: (col + dc) * 48 + 24, y: (row + dr) * 48 + 24 - BODY_DY };
+            break;
+          }
+        }
+        this._deskPose = this._deskPoseAt(x, y);   // null for plain directional seats
+        this.sitting = true;
+        // Desk poses force their facing; plain seats keep the broadcast dir
+        // (the pin/approach facing we were seated with before the reload).
+        this.lastDir = this._deskPose ? (this._deskPose.pose === 'standup' ? 'up' : 'down')
+                                      : (DIR_START[dir] !== undefined ? dir : 'down');
+        // Same work-bonus rule as the sit branch (server re-derives it anyway).
+        _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskChairAt(seatGid, col, row)
+          || WALL_SEATS[wallGid] !== undefined);
+        this._clearOccluders(this._seatOccluders);
+        this._seatOccluders = this._seatOccludersFor(x, y, dir);
       }
 
       // ── Desk occlusion ────────────────────────────────────────────────
