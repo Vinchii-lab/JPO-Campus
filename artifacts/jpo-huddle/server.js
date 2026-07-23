@@ -254,6 +254,17 @@ const OBJECTS = {
   fridge:          { x: 5592, y: 4008, r: 190 }, // drink-cooler stack, cafeteria serving area (c116, r82-84)
   kitchen_island:  { x: 5232, y: 3624, r: 240 }, // cafeteria serving line: display cases + checkout counter (c104-113, r74-75)
   snack_counter:   { x: 9048, y: 1968, r: 220 }, // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
+  // ── Cafeteria kitchen: PAID food stations (menus in FOOD_MENUS, routing in
+  // FOOD_STATIONS — fridge + kitchen_island above are paid stations too).
+  // Wide furniture runs get 2-3 anchors sharing one menu.
+  candy_stand:     { x: 4392, y: 3576, r: 150 }, // candy stand (Wall c91, r73-75)
+  dessert_case:    { x: 4728, y: 3624, r: 240 }, // pink dessert counters + west display cases (c93-103, r74-75)
+  grill_bank:      { x: 4560, y: 3960, r: 200 }, // kitchen appliance bank, west half (c91-99, r81-83)
+  grill_bank2:     { x: 4944, y: 3960, r: 200 }, // kitchen appliance bank, east half (c100-106, r81-83)
+  produce_crates:  { x: 5184, y: 3984, r: 170 }, // produce crates (c106-109, r82-83)
+  bakery_line:     { x: 4512, y: 4536, r: 170 }, // prep/bakery tables, west (c91-97, r94-95)
+  bakery_line2:    { x: 4848, y: 4536, r: 170 }, // prep/bakery tables, middle (c98-104, r94-95)
+  bakery_line3:    { x: 5232, y: 4536, r: 210 }, // prep/bakery tables + register, east (c105-113, r94-95)
   // cafeteria_food<N> spots are appended after the map loads (see FOOD_TABLES).
 };
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee
@@ -271,25 +282,89 @@ const WATER_LINES = [
   "You briefly consider this water's long journey.",
 ];
 let waterLineIdx = 0;
-// Fridge snacks: pure flavor (no buff, no coins). The eater gets the line as a
-// toast; everyone nearby sees the snack emoji bubble over their head.
-const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between snacks
-const SNACKS = [
-  { emoji: "🍕", line: "Cold pizza from Friday. Still elite." },
-  { emoji: "🥪", line: "A mystery sandwich. It was labeled. You ignored the label." },
-  { emoji: "🍎", line: "An apple a day keeps the standup short." },
-  { emoji: "🍩", line: "Someone brought donuts. That someone is a hero." },
-  { emoji: "🥗", line: "A responsible little salad. Your future self says thanks." },
-  { emoji: "🍫", line: "Emergency chocolate. This qualifies as an emergency." },
-  { emoji: "🧀", line: "A cheeky cube of cheese. Quality control, obviously." },
-  { emoji: "🍜", line: "Instant noodles — the official fuel of shipping features." },
-  { emoji: "🍦", line: "Freezer ice cream. Eat fast, type faster." },
-  { emoji: "🥡", line: "Leftover takeout. Finders keepers is office law." },
-];
-let snackIdx = 0;
-// Hot meals (kitchen island + cafeteria tables) and gym snacks — same flavor
-// mechanics as SNACKS, different menus. `icon` below picks the toast prefix
-// the client shows before the line (fridge omits it → 🧊 default).
+// Free snacks (gym counter + cafeteria dining tables): pure flavor (no buff,
+// no coins). The eater gets the line as a toast; everyone nearby sees the
+// snack emoji bubble over their head.
+const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
+
+// ── Cafeteria kitchen: PAID food menus ───────────────────────────────────
+// Every kitchen station in the cafeteria sells food for coins: `interact`
+// sends the station's menu (foodMenu event), `buyFood` re-validates proximity
+// and charges the SERVER-side price — the client renders whatever foodMenu
+// sent and is never authoritative. Several station ids share one menu (the
+// appliance bank / bakery tables are wider than one interact radius, so they
+// get 2-3 anchors). Paid food deliberately never touches fridgeReadyAt (the
+// free-snack cooldown) in either direction: the price + buyBucket are the
+// limiters, and a paid meal shouldn't lock the free dining-table nibbles.
+const FOOD_MENUS = {
+  sweets: { title: "🍬 Candy Stand", items: [
+    { id: "lollipop",  name: "Lollipop",             icon: "🍭", price: 3 },
+    { id: "gummies",   name: "Gummy bears",          icon: "🍬", price: 4 },
+    { id: "chocolate", name: "Chocolate bar",        icon: "🍫", price: 5 },
+    { id: "donut",     name: "Sprinkle donut",       icon: "🍩", price: 5 },
+    { id: "cupcake",   name: "Cupcake",              icon: "🧁", price: 6 },
+    { id: "icecream",  name: "Soft-serve cone",      icon: "🍦", price: 7 },
+  ] },
+  desserts: { title: "🍰 Dessert Counter", items: [
+    { id: "cookie",    name: "Warm cookie",          icon: "🍪", price: 4 },
+    { id: "pudding",   name: "Caramel pudding",      icon: "🍮", price: 6 },
+    { id: "pie",       name: "Pie slice",            icon: "🥧", price: 7 },
+    { id: "cake",      name: "Cake slice",           icon: "🍰", price: 8 },
+    { id: "shortcake", name: "Strawberry shortcake", icon: "🍓", price: 9 },
+    { id: "fondue",    name: "Chocolate fondue",     icon: "🫕", price: 10 },
+  ] },
+  meals: { title: "🍽️ Serving Line", items: [
+    { id: "salad",     name: "Garden salad",         icon: "🥗", price: 8 },
+    { id: "taco",      name: "Taco",                 icon: "🌮", price: 9 },
+    { id: "pizza",     name: "Pizza slice",          icon: "🍕", price: 10 },
+    { id: "spaghetti", name: "Spaghetti",            icon: "🍝", price: 11 },
+    { id: "burger",    name: "Office burger",        icon: "🍔", price: 12 },
+    { id: "curry",     name: "Curry plate",          icon: "🍛", price: 12 },
+  ] },
+  grill: { title: "🍳 Kitchen Grill", items: [
+    { id: "eggs",      name: "Fried eggs",           icon: "🍳", price: 6 },
+    { id: "hotdog",    name: "Hot dog",              icon: "🌭", price: 6 },
+    { id: "bacon",     name: "Bacon strips",         icon: "🥓", price: 7 },
+    { id: "soup",      name: "Soup of the day",      icon: "🍲", price: 7 },
+    { id: "pancakes",  name: "Pancake stack",        icon: "🥞", price: 8 },
+    { id: "sandwich",  name: "Grilled sandwich",     icon: "🥪", price: 8 },
+  ] },
+  produce: { title: "🥕 Fresh Produce", items: [
+    { id: "carrot",    name: "Crunchy carrot",       icon: "🥕", price: 2 },
+    { id: "apple",     name: "Apple",                icon: "🍎", price: 3 },
+    { id: "banana",    name: "Banana",               icon: "🍌", price: 3 },
+    { id: "grapes",    name: "Grapes",               icon: "🍇", price: 4 },
+    { id: "melon",     name: "Watermelon slice",     icon: "🍉", price: 5 },
+    { id: "avocado",   name: "Avocado",              icon: "🥑", price: 6 },
+  ] },
+  bakery: { title: "🥐 Bakery Line", items: [
+    { id: "bagel",     name: "Bagel",                icon: "🥯", price: 4 },
+    { id: "pretzel",   name: "Soft pretzel",         icon: "🥨", price: 4 },
+    { id: "croissant", name: "Croissant",            icon: "🥐", price: 5 },
+    { id: "baguette",  name: "Baguette",             icon: "🥖", price: 5 },
+    { id: "bread",     name: "Fresh loaf",           icon: "🍞", price: 6 },
+    { id: "bakedpie",  name: "Whole pie",            icon: "🥧", price: 8 },
+  ] },
+  drinks: { title: "🧊 Drink Coolers", items: [
+    { id: "juicebox",  name: "Juice box",            icon: "🧃", price: 3 },
+    { id: "milk",      name: "Milk",                 icon: "🥛", price: 3 },
+    { id: "soda",      name: "Fizzy soda",           icon: "🥤", price: 4 },
+    { id: "lemonade",  name: "Lemonade",             icon: "🍋", price: 4 },
+    { id: "coconut",   name: "Coconut water",        icon: "🥥", price: 5 },
+    { id: "boba",      name: "Bubble tea",           icon: "🧋", price: 6 },
+  ] },
+};
+// Station object id → FOOD_MENUS key. Ids MUST exist in OBJECTS (and in the
+// client's OFFICE_OBJECTS — the usual lockstep).
+const FOOD_STATIONS = {
+  candy_stand: "sweets", dessert_case: "desserts", kitchen_island: "meals",
+  grill_bank: "grill", grill_bank2: "grill", produce_crates: "produce",
+  bakery_line: "bakery", bakery_line2: "bakery", bakery_line3: "bakery",
+  fridge: "drinks",
+};
+
+// Free-snack menus for the remaining FREE spots. `icon` picks the toast
+// prefix the client shows before the line (cafeteria tables 🍽️, gym 💪).
 const MEALS = [
   { emoji: "🍝", line: "A generous plate of pasta. Carbs are a team sport." },
   { emoji: "🍛", line: "Today's special: curry. The cafeteria outdid itself." },
@@ -413,11 +488,13 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (()
   return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, WORK_SEATS: null, FOOD_TABLES: [] };
 })();
 
-// Register the cafeteria food spots as interactive objects, and group EVERY
-// station that serves food behind one id set: they all share the single
-// per-person "you're full" cooldown (fridgeReadyAt) — only the menu differs.
+// Register the cafeteria food spots as interactive objects, and group the
+// FREE snack spots (gym snack counter + cafeteria dining tables) behind one
+// id set: they share the single per-person "you're full" cooldown
+// (fridgeReadyAt) — only the menu differs. fridge + kitchen_island are PAID
+// stations now (FOOD_STATIONS), so they are deliberately NOT in this set.
 FOOD_TABLES.forEach((t, i) => { OBJECTS[`cafeteria_food${i}`] = { x: t.x, y: t.y, r: 150 }; });
-const FOOD_OBJECT_IDS = new Set(["fridge", "kitchen_island", "snack_counter",
+const FOOD_OBJECT_IDS = new Set(["snack_counter",
   ...FOOD_TABLES.map((_, i) => `cafeteria_food${i}`)]);
 
 // Is this player position outdoors? Uses the FEET tile — the sprite origin is
@@ -2829,6 +2906,53 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("buyCosmetic failed:", err); }
   });
 
+  // ── Cafeteria kitchen: buy a specific item off a station's menu ──────────
+  // Mirrors buyCosmetic: bucket first, the same wager-invariant blocks, price
+  // from the SERVER's menu table only, and one atomic conditional UPDATE for
+  // DB players (a coin tick or double-click can't overdraw). Proximity is
+  // re-checked at buy time — the menu panel can be left open while walking
+  // away. Paid food never reads or writes fridgeReadyAt (see FOOD_MENUS).
+  socket.on("buyFood", async (payload) => {
+    const { station, item } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
+    if (typeof station !== "string" || typeof item !== "string") return;
+    // hasOwn so "__proto__"/"constructor" can't match (same as interact).
+    if (!Object.hasOwn(FOOD_STATIONS, station)) return;
+    if (rpsBySocket.has(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
+    if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
+    const obj = OBJECTS[station];
+    const dx = (p.x ?? 0) - obj.x, dy = (p.y ?? 0) - obj.y;
+    if (dx * dx + dy * dy > obj.r * obj.r) {
+      socket.emit("foodError", { message: "Walk back to the counter to order." });
+      return;
+    }
+    const menuItem = FOOD_MENUS[FOOD_STATIONS[station]].items.find((it) => it.id === item);
+    if (!menuItem) return;
+
+    if (!p.email) {
+      // Session-only players (no email): memory-only purchase.
+      if ((p.coins ?? 0) < menuItem.price) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+      p.coins -= menuItem.price;
+    } else {
+      try {
+        const { rows } = await pool.query(
+          `UPDATE jpo_players SET coins = coins - $2, updated_at = now()
+            WHERE email = $1 AND coins >= $2 RETURNING coins`,
+          [p.email, menuItem.price],
+        );
+        if (rows.length === 0) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+        p.coins = rows[0].coins;   // keep the cached balance honest (wager caps read it)
+      } catch (err) { console.error("buyFood failed:", err); return; }
+    }
+    socket.emit("coinUpdate", { coins: p.coins });
+    socket.emit("foodBought", { station, item: menuItem.id, name: menuItem.name, icon: menuItem.icon, price: menuItem.price, coins: p.coins });
+    // Everyone nearby sees the food bubble — same event the free snacks use.
+    io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: menuItem.icon });
+    console.log(`${p.name} bought ${menuItem.name} (${menuItem.price} coins) at ${station}`);
+  });
+
   // ── Cosmetics: switch which owned item is worn ('' = take it off) ────────
   // Free (no coin movement), so it is NOT blocked mid-match and doesn't touch
   // the wager invariant. Ownership is enforced in the same statement that
@@ -3222,10 +3346,19 @@ io.on("connection", (socket) => {
       socket.emit("waterCooler", { line });
       io.emit("objectEffect", { id: socket.id, kind: "water" });
 
+    } else if (Object.hasOwn(FOOD_STATIONS, object)) {
+      // Cafeteria kitchen stations: browsing is FREE (interactBucket is the
+      // only throttle) — just send the station's menu. The purchase happens in
+      // buyFood, which re-validates everything. Prices ride along so the
+      // client never hardcodes them. This branch MUST stay above the
+      // FOOD_OBJECT_IDS one (fridge/kitchen_island used to live there).
+      const menu = FOOD_MENUS[FOOD_STATIONS[object]];
+      socket.emit("foodMenu", { station: object, title: menu.title, items: menu.items, coins: p.coins ?? 0 });
+
     } else if (FOOD_OBJECT_IDS.has(object)) {
-      // All food stations (fridge, kitchen island, gym snack counter, cafeteria
-      // tables) share ONE per-person "you're full" cooldown — more stations are
-      // a convenience, not a faster snack rate. Only the menu + toast icon vary.
+      // FREE snack spots (gym snack counter + cafeteria dining tables) share
+      // ONE per-person "you're full" cooldown — more stations are a
+      // convenience, not a faster snack rate. Only the menu + toast icon vary.
       const key = p.email || socket.id;
       const readyAt = fridgeReadyAt.get(key) || 0;
       if (now < readyAt) {
@@ -3235,9 +3368,8 @@ io.on("connection", (socket) => {
       pruneCooldowns(fridgeReadyAt, now);
       fridgeReadyAt.set(key, now + FRIDGE_COOLDOWN_MS);
       let s, icon;
-      if (object === "fridge")              { s = SNACKS[snackIdx++ % SNACKS.length]; }                       // 🧊 client default
-      else if (object === "snack_counter")  { s = GYM_SNACKS[gymSnackIdx++ % GYM_SNACKS.length]; icon = "💪"; }
-      else                                  { s = MEALS[mealIdx++ % MEALS.length]; icon = "🍽️"; }
+      if (object === "snack_counter")  { s = GYM_SNACKS[gymSnackIdx++ % GYM_SNACKS.length]; icon = "💪"; }
+      else                             { s = MEALS[mealIdx++ % MEALS.length]; icon = "🍽️"; }
       socket.emit("fridgeSnack", { line: s.line, icon });
       io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
 

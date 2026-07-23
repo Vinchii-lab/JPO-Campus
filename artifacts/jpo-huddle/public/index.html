@@ -300,6 +300,30 @@
     }
     #shop-close-btn:hover { background: #e0e0e0; }
 
+    /* ── Cafeteria food menu (same overlay pattern as the shop) ── */
+    #food-modal {
+      position: fixed; inset: 0; z-index: 8000;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+    }
+    #food-modal.open { display: flex; }
+    #food-card {
+      background: #fff; border-radius: 16px; padding: 32px 36px;
+      font-family: monospace; color: #222;
+      width: 380px; max-width: calc(100vw - 32px); box-sizing: border-box;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+      max-height: 85vh; overflow-y: auto;
+    }
+    #food-card h3 { font-size: 20px; margin-bottom: 6px; }
+    #food-balance { font-size: 14px; color: #666; margin-bottom: 6px; }
+    #food-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #e74c3c; }
+    #food-close-btn {
+      width: 100%; margin-top: 16px; padding: 9px;
+      background: #f0f0f0; border: none; border-radius: 8px;
+      font-family: monospace; font-size: 14px; cursor: pointer;
+    }
+    #food-close-btn:hover { background: #e0e0e0; }
+
     /* ── Owner password modal ── */
     #owner-pwd-modal {
       position: fixed; inset: 0; z-index: 10001;
@@ -1544,6 +1568,20 @@
     </div>
   </div>
 
+  <!-- ── Cafeteria food menu ──
+       Opened by the server's foodMenu event (E at a kitchen station). Rows are
+       generated FROM THE EVENT PAYLOAD — prices/items are server-owned, this
+       panel never hardcodes a menu. Reuses the shop's .shop-item/.buy-btn CSS. -->
+  <div id="food-modal">
+    <div id="food-card">
+      <h3 id="food-title">🍽️ Menu</h3>
+      <div id="food-balance">💰 Coins: <span id="food-coin-display">0</span></div>
+      <div id="food-items"></div>
+      <div id="food-msg"></div>
+      <button id="food-close-btn" onclick="closeFoodMenu()">Close</button>
+    </div>
+  </div>
+
   <!-- ── Owner password modal ── -->
   <div id="owner-pwd-modal">
     <div id="owner-pwd-card">
@@ -1790,12 +1828,32 @@
         hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
       { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
         hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
-      { id:'fridge',          x:5592, y:4008, r:190, label:'Eat a snack', touch:'Eat',
-        hl:{ x:116*48, y:82*48, w:48, h:3*48 } },    // drink-cooler stack, cafeteria serving area (c116, r82-84; two more stacks above/below share the radius)
-      { id:'kitchen_island',  x:5232, y:3624, r:240, label:'Grab a hot meal', touch:'Eat',
-        hl:{ x:104*48, y:74*48, w:10*48, h:2*48 } }, // cafeteria serving line: food display cases (Wall, c104-110) + checkout counter (Furniture 3831-3849, c111-113), r74-75
+      { id:'fridge',          x:5592, y:4008, r:190, label:'Buy a drink', touch:'Drinks',
+        hl:{ x:116*48, y:82*48, w:48, h:3*48 } },    // drink-cooler stack, cafeteria serving area (c116, r82-84; two more stacks above/below share the radius) — PAID drinks menu
+      { id:'kitchen_island',  x:5232, y:3624, r:240, label:'Buy a hot meal', touch:'Meals',
+        hl:{ x:104*48, y:74*48, w:10*48, h:2*48 } }, // cafeteria serving line: food display cases (Wall, c104-110) + checkout counter (Furniture 3831-3849, c111-113), r74-75 — PAID meals menu
       { id:'snack_counter',   x:9048, y:1968, r:220, label:'Grab a gym snack', touch:'Eat',
-        hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
+        hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor) — still FREE
+      // ── Cafeteria kitchen: PAID food stations (server FOOD_STATIONS/FOOD_MENUS).
+      // ORDER MATTERS: the E-scan above is FIRST-MATCH, so produce_crates MUST
+      // stay before the grill banks (the crates sit inside the appliance bank's
+      // radius) — and fridge/kitchen_island above win their own overlap bands.
+      { id:'candy_stand',     x:4392, y:3576, r:150, label:'Buy sweets', touch:'Sweets',
+        hl:{ x:91*48, y:73*48, w:48, h:3*48 } },     // candy stand (Wall c91, r73-75)
+      { id:'dessert_case',    x:4728, y:3624, r:240, label:'Buy a dessert', touch:'Dessert',
+        hl:{ x:93*48, y:74*48, w:11*48, h:2*48 } },  // pink dessert counters + west display cases (c93-103, r74-75)
+      { id:'produce_crates',  x:5184, y:3984, r:170, label:'Buy fresh produce', touch:'Produce',
+        hl:{ x:106*48, y:82*48, w:4*48, h:2*48 } },  // produce crates (c106-109, r82-83) — keep BEFORE the grill banks
+      { id:'grill_bank',      x:4560, y:3960, r:200, label:'Order from the grill', touch:'Grill',
+        hl:{ x:91*48, y:81*48, w:9*48, h:3*48 } },   // kitchen appliance bank, west half (c91-99, r81-83)
+      { id:'grill_bank2',     x:4944, y:3960, r:200, label:'Order from the grill', touch:'Grill',
+        hl:{ x:100*48, y:81*48, w:7*48, h:3*48 } },  // kitchen appliance bank, east half (c100-106, r81-83)
+      { id:'bakery_line',     x:4512, y:4536, r:170, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:91*48, y:94*48, w:7*48, h:2*48 } },   // prep/bakery tables, west (c91-97, r94-95)
+      { id:'bakery_line2',    x:4848, y:4536, r:170, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:98*48, y:94*48, w:7*48, h:2*48 } },   // prep/bakery tables, middle (c98-104, r94-95)
+      { id:'bakery_line3',    x:5232, y:4536, r:210, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:105*48, y:94*48, w:9*48, h:2*48 } },  // prep/bakery tables + register, east (c105-113, r94-95)
     ];
     // Cafeteria tables (gid 2183 = table top-left marker) each get their own food
     // spot — entries are appended at create() from the loaded map so a Tiled
@@ -2770,9 +2828,79 @@
       _playerCoins = coins;
       document.getElementById('coin-count').textContent = coins;
       document.getElementById('shop-coin-display').textContent = coins;
+      document.getElementById('food-coin-display').textContent = coins;
       // Affordability (the greyed "Buy" state) depends on the balance.
       if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
     });
+
+    // ── Cafeteria food menus ──────────────────────────────────────────
+    // The server sends the whole menu (title/items/prices) in foodMenu — this
+    // panel renders whatever arrives and NEVER hardcodes prices; buyFood
+    // re-validates proximity + price server-side. Reuses the shop's row CSS.
+    let _foodStation = null;
+    socket.on('foodMenu', (payload) => {
+      const { station, title, items, coins } = payload || {};
+      if (typeof station !== 'string' || !Array.isArray(items)) return;
+      _foodStation = station;
+      closeShop();   // panels are mutually exclusive
+      document.getElementById('food-title').textContent =
+        (typeof title === 'string' && title) ? title.slice(0, 40) : 'Menu';
+      document.getElementById('food-coin-display').textContent =
+        Number.isFinite(coins) ? coins : _playerCoins;
+      const box = document.getElementById('food-items');
+      box.textContent = '';
+      for (const it of items.slice(0, 12)) {
+        if (!it || typeof it.id !== 'string') continue;
+        const row = document.createElement('div');
+        row.className = 'shop-item';
+        const icon = document.createElement('div');
+        icon.className = 'shop-item-icon';
+        icon.textContent = String(it.icon || '🍽️').slice(0, 8);
+        const info = document.createElement('div');
+        info.className = 'shop-item-info';
+        const nm = document.createElement('div');
+        nm.className = 'shop-item-name';
+        nm.textContent = String(it.name || it.id).slice(0, 40);
+        const ct = document.createElement('div');
+        ct.className = 'shop-item-cost';
+        ct.textContent = `${it.price} coins`;
+        info.append(nm, ct);
+        const btn = document.createElement('button');
+        btn.className = 'buy-btn';
+        btn.textContent = 'Buy';
+        const itemId = it.id;
+        btn.onclick = () => socket.emit('buyFood', { station: _foodStation, item: itemId });
+        row.append(icon, info, btn);
+        box.append(row);
+      }
+      document.getElementById('food-msg').textContent = '';
+      document.getElementById('food-modal').classList.add('open');
+    });
+    socket.on('foodBought', (payload) => {
+      const { name, icon, price, coins } = payload || {};
+      if (Number.isFinite(coins)) document.getElementById('food-coin-display').textContent = coins;
+      const msg = document.getElementById('food-msg');
+      msg.style.color = '#27ae60';
+      msg.textContent = `${icon || ''} ${String(name || 'Enjoy').slice(0, 40)} — enjoy! (−${price} 🪙)`;
+    });
+    socket.on('foodError', (payload) => {
+      const { message } = payload || {};
+      const text = String(message || "Can't buy that right now.").slice(0, 120);
+      const modal = document.getElementById('food-modal');
+      if (modal.classList.contains('open')) {
+        const msg = document.getElementById('food-msg');
+        msg.style.color = '#e74c3c';
+        msg.textContent = text;
+      } else {
+        _rpsToast(text);
+      }
+    });
+    function closeFoodMenu() {
+      document.getElementById('food-modal').classList.remove('open');
+      document.getElementById('food-msg').textContent = '';
+      _foodStation = null;
+      document.querySelector('canvas')?.focus();
+    }
 
     socket.on('shopSuccess', ({ item, equipped }) => {
       if (!_ownedItems.includes(item)) _ownedItems.push(item);
@@ -3766,6 +3894,7 @@
       if (e.key !== 'Escape' || !_logOpen) return;
       if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) return;
       if (document.getElementById('shop-modal').classList.contains('open')) return;
+      if (document.getElementById('food-modal').classList.contains('open')) return;
       if (document.getElementById('owner-pwd-modal').classList.contains('open')) return;
       closeChatLog();
     });
@@ -4921,6 +5050,9 @@
         if (_ownerPanelOpen) { e.preventDefault(); closeOwnerPanel(); }
         if (document.getElementById('owner-pwd-modal').classList.contains('open')) {
           e.preventDefault(); closeOwnerPwd();
+        }
+        if (document.getElementById('food-modal').classList.contains('open')) {
+          e.preventDefault(); closeFoodMenu();
         }
       }
     });

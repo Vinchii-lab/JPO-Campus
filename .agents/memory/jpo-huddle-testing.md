@@ -85,6 +85,21 @@ works, stop debugging game code and drive a browser directly:
   `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
   ~(dist/220)*1000 ms per waypoint. Works first try.
 
+# Seeding x/y does NOT position a BROWSER test player — micro-hop walk instead
+
+The real client always spawns at the default spawn point and its FIRST
+`playerMove` re-baselines the server (bounds-only check), overwriting any
+seeded DB coords — so "seed the row next to the object" only works for
+HEADLESS socket tests (no client, restored p.x/p.y stands). In puppeteer the
+avatar is at spawn regardless of the seed, and a later long teleport is
+rejected server-side.
+
+**How to apply:** for far-away objects, drive a micro-hop loop from node
+(`p.body.reset` toward the target, ≤43px per step, ~360ms apart — ~14s per
+1700px); each hop is inside the move budget so the server accepts it, and the
+E-hint/interact both work on arrival. Straight-line is fine (server checks
+distance/bounds, not walls).
+
 # Sitting a test player: stand ON/next to the chair tile first
 
 The interact scan keys off the FEET tile (`floor(x/48), floor((y+27)/48)`) and
