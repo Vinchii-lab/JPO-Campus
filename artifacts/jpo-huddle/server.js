@@ -345,12 +345,17 @@ const RENDER_SCALE = 3;
 const GID_MASK = 0x1FFFFFFF;
 // Work-seat GIDs on the Furniture layer: 2231 = office chair (workstations,
 // conference tables, checkouts), 2763/2764 = study-carrel chairs, 2628 = the
-// lounge work-pod desk chair (side-view, faces left). Sitting on one of these
-// earns the work bonus; sofas/benches/beds don't. MUST stay in lockstep with
-// the client's WORK_CHAIR_GIDS (what shows the 💼 chip). The old manager-desk
-// gids 2600/2605 are plain desk SURFACES on the current map (DESK_FAMILIES is
-// empty client-side), so they're gone from this set.
-const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2628]);
+// lounge work-pod desk chair (side-view, faces left), 2600 = the pod's LEFT
+// chair seat tile (side-view, faces right — the 2584 top / 2616 legs tiles
+// alias onto it client-side, so the derived cell is always 2600), 5033 = the
+// studio front-desk armchair's RIGHT seat tile (the chair is 2-wide and the
+// sit is centered on the column boundary — x lands exactly between the two
+// tiles and Math.round picks the RIGHT one, so 5033 is the only derived gid).
+// Sitting on one of these earns the work bonus; sofas/benches/beds don't.
+// MUST stay in lockstep with the client's WORK_CHAIR_GIDS (what shows the 💼
+// chip) — the client set also lists the alias tiles (2644, 2584/2616,
+// 5016/5017/5032) for chip display; never add those here.
+const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2628, 2600, 5033]);
 // Jail-tileset computer-desk chairs live on the WALL layer (their cells hold no
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.

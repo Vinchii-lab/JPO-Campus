@@ -1855,12 +1855,14 @@
       2763, 2764,                                                 // study-carrel chairs (desk directly above -> pinned 'up')
       2628,                                                       // lounge work-pod desk chair TOP tile (side view, faces left) — work seat
       2644,                                                       // lounge work-pod chair BOTTOM tile — alias seat: SEAT_DY -48 snaps the sitter up onto the 2628 tile (every 2644 has 2628 directly above; verified map-wide)
+      2584, 2600, 2616,                                           // lounge work-pod LEFT chair stack (mirror of 2628/2644: top/seat/legs, faces RIGHT into the pod divider 2585/2601/2617). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2600 seat tile. Also standalone at (163,64-66), (163,80-82), (133,125-127).
       2593,                                                       // tall HR-desk chair north of the desk (faces down; 2577 backrest row stays solid — see SEAT_DY)
       2642,                                                       // dining chair south of a table (art faces up; 2626 tuck tile stays solid)
       2522,                                                       // red ladder chair west of the HR tall desk (faces right; 2538 leg tile stays solid)
       2835, 2836,                                                 // wooden bench TOPS (front row 2851/2852 stays solid)
       2758, 2759,                                                 // pouf top row (approach-facing)
       3189, 3190, 3191,                                           // gray studio sofa cushion row
+      5016, 5017, 5032, 5033,                                     // studio front-desk grey armchair (TVStudio 2×2: back row 5016/5017 over seat row 5032/5033, centered between its two columns via SEAT_DX; back row aliases down onto the seat row via SEAT_DY). The 4-wide white control desk lives on the WALL layer at the seat row + the row below.
       3192, 3193,                                                 // brown loveseat cushions
       // 3252-3255 are NOT seats: they're the tall white double-door cabinet units
       // (coffee makers sit on some of them) — sitting put the player INSIDE the
@@ -1877,11 +1879,14 @@
     ]);
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
     // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
-    // 2644 is CLIENT-ONLY here (chip display): it's the work-pod chair's bottom
-    // tile whose SEAT_DY snaps the sitter onto the 2628 cell — the server derives
-    // the seat from the final position, which lands on 2628, so the server set
-    // must NOT list 2644.
-    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764, 2628, 2644]);
+    // Alias tiles are CLIENT-ONLY here (chip display keys off the tile you press
+    // E on): the server derives the seat from the FINAL position, so its set
+    // lists only the derived-cell gids. Client-only aliases: 2644 (right pod
+    // chair bottom → lands on 2628), 2584/2616 (left pod chair top/legs → land
+    // on 2600), 5016/5017/5032 (studio armchair tiles — the centered sit always
+    // derives to the RIGHT seat tile 5033). Server set = {2231, 2763, 2764,
+    // 2628, 2600, 5033} (+ WALL_WORK_SEAT_GIDS).
+    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033]);
     // Jail-tileset computer-desk chairs live on the WALL layer (the Furniture layer
     // holds the desk itself: 5489-5492 top strips over 5505-5508 bodies — those top
     // strips are NOT seats; they were once mislabeled "lavender couch cushions").
@@ -1902,6 +1907,8 @@
       2763:'up', 2764:'up',                                                          // study-carrel chairs: desk above
       2628:'left',                                                                   // lounge work-pod chair (side view)
       2644:'left',                                                                   // work-pod chair bottom tile (alias — snaps up onto 2628, same facing)
+      2584:'right', 2600:'right', 2616:'right',                                      // lounge work-pod LEFT chair stack (mirror of 2628 — faces right into its divider)
+      5016:'down', 5017:'down', 5032:'down', 5033:'down',                            // studio front-desk armchair (faces its control desk below)
       2593:'down',                                                                   // tall HR-desk chair north of its desk
       2522:'right',                                                                  // red ladder chair west of the HR tall desk
       2642:'up',                                                                     // dining chair south of table
@@ -1928,6 +1935,8 @@
       3320: 24, 3321: -24,   // tan library armchair
       7032: 24, 7033: -24,   // pink nap-room bed (lie row)
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
+      5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
+      5032: 24, 5033: -24,   // studio front-desk armchair seat row (2-wide, centered on the column boundary)
     };
     // Vertical seat shift. The tall HR-desk chairs (2593) sit one full tile NORTH of
     // their tall desk — with the default snap the avatar's feet land a whole tile above
@@ -1952,6 +1961,9 @@
     const SEAT_DY = {
       2593: 24,   // tall HR-desk chair: half-tile drop, feet on the desk-top cell's top edge
       2644: -48,  // work-pod chair bottom tile: snap UP onto the 2628 chair tile
+      2584: 48,   // left pod chair TOP tile: snap DOWN onto the 2600 seat tile
+      2616: -48,  // left pod chair LEGS tile: snap UP onto the 2600 seat tile
+      5016: 48, 5017: 48,  // studio armchair back row: snap DOWN onto the 5032/5033 seat row
     };
     // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
     // upright front idle frame laid on the pillow row + a floating 💤 — the wire
@@ -1969,6 +1981,11 @@
     // (desk-front 2094 below), 2148 = cash register on a counter (counter-front
     // 2164 below). Same fixed geometry, same stand pose + occluder treatment.
     const WORKSTATION_WALL_GIDS = new Set([2078, 2148]);
+    // TVStudio front-desk armchair tiles (the 2-wide grey chair behind each white
+    // control desk in the studio). Sitting gets the workstation treatment: the
+    // standing DOWN frame + desk/chair-front occluders (see _makeSeatOccluders
+    // and _deskPoseAt) so the sitter reads as seated behind the desk.
+    const STUDIO_CHAIR_GIDS = new Set([5016, 5017, 5032, 5033]);
 
     // ── JPO_HQ.tmj tilesets ────────────────────────────────────────────
     // Three lockstepped views of the SAME 13 embedded tilesets:
@@ -2023,9 +2040,9 @@
     ];
 
     // Manager-desk "baked-in chair" families from the OLD map. On the current
-    // JPO_HQ.tmj the 2584/2588 desk sprites are plain desk SURFACES (no chair in
-    // the art — 2600/2605 are desk tiles now) and the lounge work pods use a real
-    // chair tile (2628) instead, so the family list is empty. The deskChairAt/
+    // JPO_HQ.tmj there are no baked-in-chair desk sprites (2584/2600/2616 is the
+    // work-pod LEFT chair stack — a real seat, see FURN_SEATS — and the pods'
+    // RIGHT chair is 2628/2644), so the family list is empty. The deskChairAt/
     // occluder seams stay wired so a future map with baked-in chairs only needs
     // entries added here.
     const DESK_FAMILIES = [];
@@ -5233,7 +5250,7 @@
         const tilesets = Object.entries(TILESET_NAMES).map(([tiledName, key]) =>
           map.addTilesetImage(tiledName, key));
 
-        map.createLayer('Floor', tilesets).setScale(3);
+        const floorLayer = map.createLayer('Floor', tilesets).setScale(3);
 
         // Base animations
         CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
@@ -5313,6 +5330,18 @@
           if (ft && ft.index > 0 && this.isFurnSeat(ft.index, c, r)) ft.setCollision(false, false, false, false);
           // ...then re-open the workstation desk pieces (Wall layer) around any seat.
           const t = wallLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
+          // VOID GUARD: a STRUCTURAL wall tile (Room-builder/Walls tilesets,
+          // gid < 2017 — desk pieces all come from Interiors+ tilesets) never
+          // opens when the cell below it is unbuilt VOID (no tile on any layer).
+          // The standalone work-pod chair at (133,125-127) shares its legs cell
+          // with the basement south wall and r128+ is empty — opening that wall
+          // would let players walk off the map. Wall notches with real tiles
+          // below keep opening (players use them, e.g. stepping into the r76
+          // wall row to reach a pod chair from below).
+          if (t.index < 2017) {
+            const empt = (L, cc, rr) => { const tt = L.getTileAt(cc, rr); return !tt || tt.index <= 0; };
+            if (empt(floorLayer, c, r+1) && empt(wallLayer, c, r+1) && empt(furnitureLayer, c, r+1)) continue;
+          }
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
 
@@ -5794,6 +5823,22 @@
           // sofas also share cells with structural walls, and a generic Wall overlay
           // would draw a wall over the sitter.
           cells.push({ layer: this.wallLayer, c: col, r: row });
+        } else if (STUDIO_CHAIR_GIDS.has(seatGid)) {
+          // Studio front-desk armchair: the sitter straddles the boundary between the
+          // chair's two columns (SEAT_DX), so redraw BOTH columns of the white control
+          // desk (Wall layer: desk top shares the seat row, desk front is the row
+          // below) over the legs, then the armchair's own seat-row Furniture tiles
+          // back on top so the armrests stay in front of the body. Same depth (900),
+          // creation order layers them: desk over player, chair front over desk. The
+          // derived cell is always the RIGHT seat tile (5033) — x lands exactly on
+          // the boundary and Math.round rounds up — but handle 5032 too for safety.
+          const cL = seatGid === 5033 || seatGid === 5017 ? col - 1 : col;
+          cells.push({ layer: this.wallLayer,      c: cL,     r: row     });
+          cells.push({ layer: this.wallLayer,      c: cL + 1, r: row     });
+          cells.push({ layer: this.wallLayer,      c: cL,     r: row + 1 });
+          cells.push({ layer: this.wallLayer,      c: cL + 1, r: row + 1 });
+          cells.push({ layer: this.furnitureLayer, c: cL,     r: row     });
+          cells.push({ layer: this.furnitureLayer, c: cL + 1, r: row     });
         } else if (this._upSeatAt(col, row)) {
           // Pinned-up seat: redraw the chair's OWN tile over the body so the backrest
           // hides the legs — with the standing UP frame it reads as "seated from behind".
@@ -5855,6 +5900,11 @@
         // 'stand' pose (standing DOWN frame; the desk redraw from _makeSeatOccluders
         // hides the feet/legs, head+torso stay visible).
         if (gid === 2609) return { pose: 'stand' };
+        // Studio front-desk armchair (derived cell = the 5033 seat tile; the back
+        // row aliases here via SEAT_DY): workstation treatment — standing DOWN
+        // frame, the desk + chair-front redraws from _makeSeatOccluders hide the
+        // legs so the sitter reads as seated behind the control desk.
+        if (STUDIO_CHAIR_GIDS.has(gid)) return { pose: 'stand' };
         if (BED_GIDS.has(gid)) return { pose: 'lie' };
         const desk = deskChairAt(gid, col, row);
         if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
@@ -6432,6 +6482,7 @@
             const deskInfo = deskChairAt(seatGid, s.col, s.row);
             this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
                            : seatGid === 2593 ? { pose: 'stand' }  // tall HR-desk chair: workstation look (SEAT_DY parks the feet on the 2609 desk-top cell — matches _deskPoseAt's derived-cell branch)
+                           : STUDIO_CHAIR_GIDS.has(seatGid) ? { pose: 'stand' }  // studio front-desk armchair: workstation look (matches _deskPoseAt's derived-cell branch on the 5033 seat tile)
                            : BED_GIDS.has(seatGid) ? { pose: 'lie' }
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : this._upSeatAt(s.col, s.row) ? { pose: 'standup' }
