@@ -1812,8 +1812,8 @@
         hl:{ x:99*48,  y:35*48,  w:2*48, h:2*48 } }, // Central Office pair (c99-100, r35-36)
       { id:'coffee_machine6',  x:3600, y:3840, r:150, label:'Brew free coffee', touch:'Brew',
         hl:{ x:74*48,  y:78*48,  w:2*48, h:2*48 } }, // Lounge/Market pair (c74-75, r78-79)
-      { id:'coffee_machine7',  x:8808, y:3168, r:150, label:'Brew free coffee', touch:'Brew',
-        hl:{ x:183*48, y:64*48,  w:48,   h:2*48 } }, // Game Room single (c183, r64-65)
+      // (coffee_machine7 removed July 2026 — the 2669/2685 unit at c183 r64-65 is in
+      // the QA manager's room and reads as a blender cabinet there, per owner.)
       { id:'coffee_machine8',  x:8904, y:3648, r:150, label:'Brew free coffee', touch:'Brew',
         hl:{ x:185*48, y:74*48,  w:48,   h:2*48 } }, // Library single (c185, r74-75)
       { id:'coffee_machine9',  x:3768, y:5088, r:150, label:'Brew free coffee', touch:'Brew',
@@ -1900,15 +1900,16 @@
     // banks (a monitor tile — Wall 2078 — shares the chair cell, desk-front Wall
     // 2094 sits directly below), conference-table rings, and market checkouts.
     // The desk tiles are NOT seats — sitting on them put the player on the desk
-    // edge, so only the chair GID is listed. Study-carrel units (2731/2732 top,
-    // 2747/2748 middle) have their two chairs on the BOTTOM row (2763/2764),
-    // facing UP toward the desk. Seats with a fixed orientation get a
+    // edge, so only the chair GID is listed. Seats with a fixed orientation get a
     // SEAT_FACING entry below; any GID without one falls back to the approach
     // direction (workstation/conference 2231 facings are derived per-tile at
     // create() — see seatFacingAt).
     const FURN_SEATS = new Set([
       2231,                                                       // office chair (workstations, conference tables, checkouts, island stools)
-      2763, 2764,                                                 // study-carrel chairs (desk directly above -> pinned 'up')
+      // (2763/2764 REMOVED July 2026: on this map every instance is the pedestal row
+      // of the 2-wide, 3-tall white lectern/front-desk unit (2731/2732 over 2747/2748
+      // over 2763/2764 — a white board with a plant picture). Sitting buried the
+      // avatar inside the desk art. No true study carrels exist on JPO_HQ.tmj.)
       2628,                                                       // lounge work-pod desk chair TOP tile (side view, faces left) — work seat
       2644,                                                       // lounge work-pod chair BOTTOM tile — alias seat: SEAT_DY -48 snaps the sitter up onto the 2628 tile (every 2644 has 2628 directly above; verified map-wide)
       2584, 2600, 2616,                                           // lounge work-pod LEFT chair stack (mirror of 2628/2644: top/seat/legs, faces RIGHT into the pod divider 2585/2601/2617). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2600 seat tile. Also standalone at (163,64-66), (163,80-82), (133,125-127).
@@ -1982,9 +1983,9 @@
     // lists only the derived-cell gids. Client-only aliases: 2644 (right pod
     // chair bottom → lands on 2628), 2584/2616 (left pod chair top/legs → land
     // on 2600), 5016/5017/5032 (studio armchair tiles — the centered sit always
-    // derives to the RIGHT seat tile 5033). Server set = {2231, 2763, 2764,
+    // derives to the RIGHT seat tile 5033). Server set = {2231,
     // 2628, 2600, 5033} (+ WALL_WORK_SEAT_GIDS).
-    const WORK_CHAIR_GIDS = new Set([2231, 2763, 2764, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033]);
+    const WORK_CHAIR_GIDS = new Set([2231, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033]);
     // Jail-tileset computer-desk chairs live on the WALL layer (the Furniture layer
     // holds the desk itself: 5489-5492 top strips over 5505-5508 bodies — those top
     // strips are NOT seats; they were once mislabeled "lavender couch cushions").
@@ -2002,7 +2003,6 @@
     // tables on all four sides, so its facing is derived per-tile at create() (see
     // seatFacingAt). Poufs (2758/2759) keep the approach direction on purpose.
     const SEAT_FACING = {
-      2763:'up', 2764:'up',                                                          // study-carrel chairs: desk above
       2628:'left',                                                                   // lounge work-pod chair (side view)
       2644:'left',                                                                   // work-pod chair bottom tile (alias — snaps up onto 2628, same facing)
       2584:'right', 2600:'right', 2616:'right',                                      // lounge work-pod LEFT chair stack (mirror of 2628 — faces right into its divider)
@@ -2041,10 +2041,11 @@
       3305: -48, 3321: -48, 3337: -48,
       // L&D green reading chair backrest column — full-tile shift east onto the seat column:
       7628: 48, 7644: 48, 7660: 48,
-      // Classroom chair art hugs the LEFT of its tile: nudge the sitter 12px west
-      // (strictly interior offset — the derived cell can't change, so remote
-      // parity holds without the ±24/48 boundary rule).
-      7699: -12, 7715: -12,
+      // Classroom chair art hugs the RIGHT of its tile (pixel-verified: seat block
+      // spans x≈10-15 of 16): nudge the sitter 12px EAST. Strictly interior offset —
+      // the derived cell can't change, so remote parity holds without the ±24/48
+      // boundary rule. (An earlier -12 went the wrong way — owner screenshot.)
+      7699: 12, 7715: 12,
       7032: 24, 7033: -24,   // pink nap-room bed (lie row)
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
       5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
@@ -2131,7 +2132,8 @@
       7661: -48,  // L&D reading chair legs: up onto the 7645 seat tile
       7628: 48,   // its backrest TOP: down (SEAT_DX shifts east onto the seat column)
       7660: -48,  // its backrest BASE: up (SEAT_DX shifts east)
-      7699: 48,   // classroom chair-back tile: down onto the 7715 seat tile
+      7699: 24,   // classroom chair-back tile: down onto the 7715 seat (48 minus the shared -24 lift; round(+0.5) still derives 7715's row)
+      7715: -24,  // classroom seat: half-tile LIFT — the seat surface sits at the top edge of the tile (art rows ≈8-16 of the 7699 tile); Math.round(-0.5) rounds UP so the derived row stays 7715's
       2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
       2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
       2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
@@ -6166,7 +6168,7 @@
         return null;
       }
       // A seat whose facing is PINNED 'up' (wall-layer desk chairs via seatFacingAt,
-      // carrel/dining chairs via SEAT_FACING, conference chairs whose table is above).
+      // dining chairs via SEAT_FACING, conference chairs whose table is above).
       // These render the standing UP frame (real back of head) + the chair's own tile
       // redrawn over the legs — the sit2 sheet is NOT a back view (it shows a face
       // profile, verified by skin-pixel counts), so a "sit up" anim never reads as
@@ -6638,7 +6640,7 @@
         const pty = Math.floor((player.y + BODY_DY) / 48);
 
         // Scan the 4 adjacent tiles (facing first). Boards read; chairs and manager
-        // desks sit. All sit targets (office chair 2231, carrel chairs, sofas, and the
+        // desks sit. All sit targets (office chair 2231, sofas, and the
         // baked-in manager-desk chairs) live on the FURNITURE layer; boards can also
         // be wall-mounted, so the board probe checks BOTH layers.
         const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
@@ -6752,7 +6754,7 @@
                            : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
                            : this._upSeatAt(s.col, s.row) ? { pose: 'standup' }
                            : null;
-            // Work-bonus chairs (office/carrel chairs + manager desks + wall-layer
+            // Work-bonus chairs (office chairs + manager desks + wall-layer
             // computer-desk chairs) earn the +3/min bonus — same rule as the
             // server's WORK_SEAT_GIDS / WALL_WORK_SEAT_GIDS check.
             _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo

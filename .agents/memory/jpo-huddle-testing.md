@@ -27,6 +27,16 @@ Then register in the browser with the same email (case doesn't matter on input �
 the server lowercases it). `upsertPlayerProfile` never overwrites `approved`, so
 the seeded approval sticks. No email-domain validation server-side.
 
+**Gotcha (July 2026):** a seeded `approved=true` row still showed up as
+"Pending" once — the seed was lost between the psql seed and the register
+(the same interruption also wiped /tmp mid-session). No server code path
+flips `approved` on register (the TOFU claim only sets `password_hash`).
+**How to apply:** if a seeded player lands in the pending queue, don't debug
+the game — re-run `UPDATE jpo_players SET approved=true, dismissed=false
+WHERE email='…'` and register again (the row now has the claimed password,
+which still verifies). Cheap to check: `SELECT approved` right before the
+browser run.
+
 # Coins drift during long e2e runs (don't assert exact coin totals)
 
 Approved players earn **+2 coins/minute** on a server tick. Any e2e test that

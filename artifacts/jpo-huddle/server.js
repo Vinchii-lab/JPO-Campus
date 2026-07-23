@@ -243,7 +243,8 @@ const OBJECTS = {
   coffee_machine4:  { x: 7056, y: 1584, r: 150 }, // East Office pair (c146-147, r31-32)
   coffee_machine5:  { x: 4800, y: 1776, r: 150 }, // Central Office pair (c99-100, r35-36)
   coffee_machine6:  { x: 3600, y: 3840, r: 150 }, // Lounge/Market pair (c74-75, r78-79)
-  coffee_machine7:  { x: 8808, y: 3168, r: 150 }, // Game Room single (c183, r64-65)
+  // (coffee_machine7 removed July 2026 — the 2669/2685 unit at c183 r64-65 sits in
+  // the QA manager's room and its art reads as a blender cabinet there, per owner.)
   coffee_machine8:  { x: 8904, y: 3648, r: 150 }, // Library single (c185, r74-75)
   coffee_machine9:  { x: 3768, y: 5088, r: 150 }, // IT Office single (c78, r104-105)
   coffee_machine10: { x: 3768, y: 5616, r: 150 }, // Dev Room single (c78, r115-116)
@@ -418,7 +419,7 @@ const RENDER_SCALE = 3;
 // by the cigarette's "outside on the grass only" rule.
 const GID_MASK = 0x1FFFFFFF;
 // Work-seat GIDs on the Furniture layer: 2231 = office chair (workstations,
-// conference tables, checkouts), 2763/2764 = study-carrel chairs, 2628 = the
+// conference tables, checkouts), 2628 = the
 // lounge work-pod desk chair (side-view, faces left), 2600 = the pod's LEFT
 // chair seat tile (side-view, faces right — the 2584 top / 2616 legs tiles
 // alias onto it client-side, so the derived cell is always 2600), 5033 = the
@@ -429,7 +430,9 @@ const GID_MASK = 0x1FFFFFFF;
 // MUST stay in lockstep with the client's WORK_CHAIR_GIDS (what shows the 💼
 // chip) — the client set also lists the alias tiles (2644, 2584/2616,
 // 5016/5017/5032) for chip display; never add those here.
-const WORK_SEAT_GIDS = new Set([2231, 2763, 2764, 2628, 2600, 5033]);
+// (2763/2764 were removed July 2026: on this map every instance is the pedestal
+// row of the 2-wide white lectern/front-desk unit 2731/2747/2763 — not chairs.)
+const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033]);
 // Jail-tileset computer-desk chairs live on the WALL layer (their cells hold no
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.
