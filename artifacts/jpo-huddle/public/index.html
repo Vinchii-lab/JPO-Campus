@@ -1943,10 +1943,13 @@
       // (Historical note: 3252-3255 were once mislabeled "cabinet units" — cropping
       // the tileset + checking all 4 map placements proved they're the middle row of
       // these high-back sofas. The real coffee-maker cabinets are 2669/2685.)
-      3320, 3321,                                                 // tan library armchair (2-wide, centered via SEAT_DX)
+      3304, 3320, 3336,                                           // tan SIDE-view library armchair, seat column (top/seat/base — backrest column is EAST in the art). QA (167,64-66) + L&D (167,80-82). SEAT_DY aliases top/base onto the middle 3320.
+      3305, 3321, 3337,                                           // its BACKREST column — alias: SEAT_DX -48 west onto the seat column (plus DY on top/base); verified map-wide
+      7629, 7645, 7661,                                           // L&D green high-back reading chair, RIGHT column (pole-top/seat/legs — the seat pad is the middle 7645). East wall of L&D (190,88-93). SEAT_DY aliases top/legs onto 7645.
+      7628, 7644, 7660,                                           // its tall green BACKREST column (west) — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
       5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
       5441, 5442, 5443,                                           // green couch FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
-      7715,                                                       // classroom desk chair (desk to its right -> faces right)
+      7699, 7715,                                                 // classroom desk chair: 7715 seat + 7699 chair-back tile above (alias: SEAT_DY +48 down onto 7715; every 7699 has 7715 directly below — verified map-wide). Chair art hugs the LEFT of the tile -> SEAT_DX -12.
       8827, 8828, 8843, 8844,                                     // CEO front armchair (2×2, faces down; top row 8827/8828 aliases to seat row 8843/8844 via SEAT_DY)
       8887, 8888, 8903, 8904,                                     // CEO left armchair  (2×2, faces left; top row 8887/8888 aliases to seat row 8903/8904 via SEAT_DY)
       8825, 8826, 8841, 8842,                                     // CEO right armchair (2×2, faces right; top row 8825/8826 aliases to seat row 8841/8842 via SEAT_DY)
@@ -1963,6 +1966,14 @@
       '128,124': 'down',  // CFO office: visitor bench, Jail desk south face (c128-130 r124)
       '129,124': 'down',
       '130,124': 'down',
+      // L&D round table: its 10 chairs are gid 2231 on the WALL layer (the teal
+      // table is Wall 2043-2077), so FURN_SEATS never sees them — pin each cell
+      // here, facing the table center. The 'up' chair renders the standup pose
+      // (chair art redrawn from the Wall layer — see _makeSeatOccluders).
+      '175,76': 'down', '176,76': 'down', '177,76': 'down',
+      '174,77': 'right', '174,78': 'right', '174,79': 'right',
+      '178,77': 'left',  '178,78': 'left',  '178,79': 'left',
+      '176,80': 'up',
     };
     // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
     // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
@@ -2007,8 +2018,10 @@
       2522:'right',                                                                  // red ladder chair west of the HR tall desk
       2642:'up',                                                                     // dining chair south of table
       2877:'down', 2893:'down', 2909:'down',                                         // blue drafting stool (CFO office c133,r118-120 — wall on west, faces south into office). All 3 tiles needed: player may be standing on cap/seat/pedestal when E is pressed
-      3320:'down', 3321:'down',                                                      // tan armchair
-      7715:'right',                                                                  // classroom desk chair
+      // Tan side-view armchair 3304/3320/3336 + backrest col and the L&D green
+      // reading chairs 7628-7661 deliberately have NO pin — approach-facing,
+      // same policy as the other side-view sofas/lounge chairs.
+      7699:'right', 7715:'right',                                                    // classroom desk chair (desk to its right; 7699 = chair-back alias tile)
       8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
       8887:'right', 8888:'right', 8903:'right', 8904:'right',                          // CEO west armchair → sitter faces east/right (inward toward center)
       8825:'left', 8826:'left', 8841:'left', 8842:'left',                            // CEO east armchair → sitter faces west/left (inward toward center)
@@ -2024,7 +2037,14 @@
     // pose lookups round to the RIGHT tile (x lands exactly on the boundary), which
     // is why both tiles carry the gid entries here and in BED_GIDS/FURN_SEATS.
     const SEAT_DX = {
-      3320: 24, 3321: -24,   // tan library armchair
+      // Tan side-view armchair BACKREST column — full-tile shift west onto the seat column:
+      3305: -48, 3321: -48, 3337: -48,
+      // L&D green reading chair backrest column — full-tile shift east onto the seat column:
+      7628: 48, 7644: 48, 7660: 48,
+      // Classroom chair art hugs the LEFT of its tile: nudge the sitter 12px west
+      // (strictly interior offset — the derived cell can't change, so remote
+      // parity holds without the ±24/48 boundary rule).
+      7699: -12, 7715: -12,
       7032: 24, 7033: -24,   // pink nap-room bed (lie row)
       7068: 24, 7069: -24,   // blue nap-room bed (lie row)
       5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
@@ -2103,6 +2123,15 @@
       3208: 48, 3209: 48,               // white lounge sofa backrest row → cushions below
       5441: -48, 5442: -48, 5443: -48,  // green couch front row → cushions above
       2851: -48, 2852: -48,             // wooden bench front row → bench top above
+      3304: 48,   // tan armchair seat-column TOP: down onto the 3320 seat tile
+      3336: -48,  // tan armchair seat-column BASE: up onto the 3320 seat tile
+      3305: 48,   // tan armchair backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3337: -48,  // tan armchair backrest BASE: up (SEAT_DX shifts west)
+      7629: 48,   // L&D reading chair pole-top: down onto the 7645 seat tile
+      7661: -48,  // L&D reading chair legs: up onto the 7645 seat tile
+      7628: 48,   // its backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      7660: -48,  // its backrest BASE: up (SEAT_DX shifts east)
+      7699: 48,   // classroom chair-back tile: down onto the 7715 seat tile
       2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
       2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
       2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
@@ -6064,10 +6093,13 @@
         } else if (this._upSeatAt(col, row)) {
           // Pinned-up seat: redraw the chair's OWN tile over the body so the backrest
           // hides the legs — with the standing UP frame it reads as "seated from behind".
-          // Wall-layer chairs (WALL_SEATS) hold their art on the Wall layer; gate the
-          // Wall branch on WALL_SEATS membership (sofas share cells with structural
-          // walls — a generic Wall overlay would draw a wall over the sitter).
-          const wallChair = WALL_SEATS[this.wallLayer.getTileAt(col, row)?.index] !== undefined;
+          // Wall-layer chairs come in two forms: WALL_SEATS gids (Jail desks) and
+          // SEAT_TILE_FACING coordinate pins whose cell has NO Furniture tile but a
+          // non-structural Wall tile (L&D round-table chairs, Wall 2231). Structural
+          // walls (gid < 2017) never qualify, so sofas against real walls stay safe.
+          const wg = this.wallLayer.getTileAt(col, row)?.index || 0;
+          const wallChair = WALL_SEATS[wg] !== undefined
+            || (wg >= 2017 && !(this.furnitureLayer.getTileAt(col, row)?.index > 0));
           cells.push({ layer: wallChair ? this.wallLayer : this.furnitureLayer, c: col, r: row });
         }
         for (const cell of cells) {
