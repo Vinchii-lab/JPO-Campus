@@ -814,6 +814,33 @@
     }
     #pf-dept-select:focus { border-color: #6c63ff; }
     #pf-error { font-size: 12px; color: #e74c3c; min-height: 16px; margin: 4px 0 6px; }
+    /* Hobby editor (own card only) — same visual family as the dept picker. */
+    #pf-hobby-edit { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.12); }
+    #pf-hobby-edit.show { display: block; }
+    #pf-hobby-input {
+      width: 100%; box-sizing: border-box; padding: 9px 12px; font-size: 14px; font-family: monospace;
+      background: #111; border: 2px solid #444; border-radius: 8px; color: #eee;
+      outline: none; margin-bottom: 4px;
+    }
+    #pf-hobby-input:focus { border-color: #6c63ff; }
+    #pf-hobby-error { font-size: 12px; color: #e74c3c; min-height: 16px; margin: 4px 0 6px; }
+    /* ── Office leaderboard ── (above the profile card it opens from) */
+    #lb-modal {
+      position: fixed; inset: 0; z-index: 8450; display: none;
+      align-items: center; justify-content: center; background: rgba(0,0,0,0.55);
+    }
+    #lb-modal.open { display: flex; }
+    #lb-list { text-align: left; margin: 14px 0 2px; max-height: 46vh; overflow-y: auto; }
+    .lb-row {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px;
+    }
+    .lb-row:last-child { border-bottom: none; }
+    .lb-rank { flex-shrink: 0; width: 32px; }
+    .lb-name { flex: 1; word-break: break-word; }
+    .lb-games { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+    .lb-total { flex-shrink: 0; color: #ffd76a; }
+    #lb-empty { font-size: 12px; color: #888; padding: 10px 0; }
     .rps-card {
       background: #1e1e30; border: 1px solid #3a3a5e; border-radius: 14px;
       padding: 26px 30px; font-family: monospace; color: #eee; text-align: center;
@@ -1358,7 +1385,9 @@
       <h3 id="pf-name"></h3>
       <div class="pf-rows">
         <div class="pf-row"><span class="pf-label">Department</span><span id="pf-dept"></span></div>
+        <div class="pf-row"><span class="pf-label">Hobby</span><span id="pf-hobby"></span></div>
         <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
+        <div class="pf-row"><span class="pf-label">Wins</span><span id="pf-wins"></span></div>
         <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
         <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
       </div>
@@ -1368,8 +1397,26 @@
         <div id="pf-error"></div>
         <button id="pf-dept-save" class="rps-btn primary" type="button">Save department</button>
       </div>
+      <div id="pf-hobby-edit">
+        <label class="rps-wager-label" for="pf-hobby-input">Your hobby — shown on your card</label>
+        <input id="pf-hobby-input" type="text" maxlength="40" autocomplete="off" placeholder="e.g. basketball, baking, K-dramas…" />
+        <div id="pf-hobby-error"></div>
+        <button id="pf-hobby-save" class="rps-btn primary" type="button">Save hobby</button>
+      </div>
       <div class="rps-btn-row">
+        <button id="pf-lb-btn" class="rps-btn" type="button">🏆 Leaderboard</button>
         <button id="pf-close" class="rps-btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lb-modal">
+    <div class="rps-card">
+      <h3>🏆 Office Leaderboard</h3>
+      <p class="rps-sub">Most game wins — all time</p>
+      <div id="lb-list"></div>
+      <div class="rps-btn-row">
+        <button id="lb-close" class="rps-btn" type="button">Close</button>
       </div>
     </div>
   </div>
@@ -4329,6 +4376,38 @@
       socket.emit('setDepartment', { department: dept });
     });
 
+    // Hobby editor — own card only, editable any time (unlike the set-once
+    // department). Same keyboard-capture guards as the dept select so typing
+    // doesn't walk the avatar around.
+    (() => {
+      const inp = pfEl('pf-hobby-input');
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); pfEl('pf-hobby-save').click(); }
+      });
+      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+      pfEl('pf-hobby-save').addEventListener('click', () => {
+        pfEl('pf-hobby-error').textContent = '';
+        socket.emit('setHobby', { hobby: inp.value.trim().slice(0, 40) });
+      });
+    })();
+
+    // Shared win labels: keys match the server's WIN_KEYS (7 duel game ids +
+    // 'dark' for Office After Dark). Unknown keys are ignored on render.
+    const WIN_LABELS = { rps: 'RPS', ttt: 'Tic-Tac-Toe', qd: 'Quick Draw', ib: 'Icebreakers', wr: 'Word Race', trivia: 'Trivia', c4: 'Connect 4', dark: 'After Dark' };
+    function _winEntries(w) {
+      return Object.entries(w || {})
+        .filter(([k, n]) => WIN_LABELS[k] && Number.isFinite(n) && n > 0)
+        .sort((a, b) => b[1] - a[1]);
+    }
+    function _winsText(w) {
+      const entries = _winEntries(w);
+      const total = entries.reduce((s, [, n]) => s + n, 0);
+      if (!total) return '—';
+      return '🏆 ' + total + ' · ' + entries.map(([k, n]) => WIN_LABELS[k] + ' ' + n).join(' · ');
+    }
+
     function _pfJoinedText(ts) {
       if (!ts || !Number.isFinite(ts)) return '—';
       const dateStr = new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -4346,21 +4425,77 @@
       if (!d.ok) { _rpsToast(d.message || "They're not in the office right now."); return; }
       pfEl('pf-name').textContent = '👤 ' + (d.name || '?') + (d.self ? ' (you)' : '');
       pfEl('pf-dept').textContent = d.department || '—';
+      pfEl('pf-hobby').textContent = d.hobby || '—';
       pfEl('pf-coins').textContent = '🪙 ' + (Number.isFinite(d.coins) ? d.coins : 0);
+      pfEl('pf-wins').textContent = _winsText(d.wins);
       const worn = COSMETICS.find(c => c.id === d.equipped);
       pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
       pfEl('pf-joined').textContent = _pfJoinedText(d.joinedAt);
       pfEl('pf-error').textContent = '';
+      pfEl('pf-hobby-error').textContent = '';
       // One-time picker: only on YOUR OWN card, only while unset.
       pfEl('pf-dept-pick').classList.toggle('show', !!d.self && !d.department);
+      // Hobby editor: always on YOUR OWN card (editable any time).
+      pfEl('pf-hobby-edit').classList.toggle('show', !!d.self);
+      if (d.self) pfEl('pf-hobby-input').value = d.hobby || '';
       pfEl('profile-modal').classList.add('open');
     });
     socket.on('departmentSet', (d) => {
       pfEl('pf-dept-pick').classList.remove('show');
       if (d && d.department) pfEl('pf-dept').textContent = d.department;
     });
+    socket.on('hobbySet', (d) => {
+      const h = (d && typeof d.hobby === 'string') ? d.hobby : '';
+      pfEl('pf-hobby').textContent = h || '—';
+      pfEl('pf-hobby-input').value = h;
+      pfEl('pf-hobby-error').textContent = '';
+      _rpsToast(h ? 'Hobby saved!' : 'Hobby cleared.');
+    });
     socket.on('profileError', (d) => {
-      pfEl('pf-error').textContent = (d && d.message) || 'Something went wrong.';
+      const msg = (d && d.message) || 'Something went wrong.';
+      // Mirror into both inline error slots — only the visible block shows it.
+      pfEl('pf-error').textContent = msg;
+      pfEl('pf-hobby-error').textContent = msg;
+    });
+
+    // ── Office leaderboard (opened from the profile card's 🏆 button) ──
+    // Rendered with createElement/textContent ONLY — names are user text.
+    pfEl('pf-lb-btn').addEventListener('click', () => socket.emit('getLeaderboard'));
+    function closeLeaderboard() { pfEl('lb-modal').classList.remove('open'); }
+    pfEl('lb-close').addEventListener('click', closeLeaderboard);
+    pfEl('lb-modal').addEventListener('pointerdown', (e) => {
+      if (e.target === pfEl('lb-modal')) closeLeaderboard();
+    });
+    socket.on('leaderboardData', (d) => {
+      const list = pfEl('lb-list');
+      list.textContent = '';
+      const rows = (d && Array.isArray(d.rows)) ? d.rows : [];
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.id = 'lb-empty';
+        empty.textContent = 'No wins yet — go challenge someone! ⚔️';
+        list.appendChild(empty);
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      rows.forEach((r, i) => {
+        const row = document.createElement('div'); row.className = 'lb-row';
+        const rank = document.createElement('span'); rank.className = 'lb-rank';
+        rank.textContent = medals[i] || '#' + (i + 1);
+        const name = document.createElement('span'); name.className = 'lb-name';
+        name.textContent = String(r && r.name || '?');
+        const breakdown = _winEntries(r && r.wins).map(([k, n]) => WIN_LABELS[k] + ' ' + n).join(' · ');
+        if (breakdown) {
+          const games = document.createElement('span'); games.className = 'lb-games';
+          games.textContent = breakdown;
+          name.appendChild(games);
+        }
+        const total = document.createElement('span'); total.className = 'lb-total';
+        total.textContent = '🏆 ' + (r && Number.isFinite(r.total) ? r.total : 0);
+        row.appendChild(rank); row.appendChild(name); row.appendChild(total);
+        list.appendChild(row);
+      });
+      closeProfile();               // the board replaces the card it came from
+      pfEl('lb-modal').classList.add('open');
     });
 
     // Game picker (shared by direct challenges and the arcade cabinet).

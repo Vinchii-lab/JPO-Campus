@@ -716,9 +716,48 @@ function rowToPlayerState(row) {
     items:     row.items || {},
     isAnnouncer: row.is_announcer,
     department:  row.department || "",
+    // Lifetime per-game win counts (jsonb) + free-text hobby, both shown on
+    // the profile card. Wins are updated via recordWin's RETURNING value.
+    wins:        row.wins || {},
+    hobby:       row.hobby || "",
     // Epoch ms of account creation, for the profile card's "joined" line.
     createdAt:   row.created_at ? new Date(row.created_at).getTime() : null,
   };
+}
+
+// Valid win-counter keys: the seven duel game ids + 'dark' for Office After
+// Dark. An allowlist (not free-form) so a future typo can't mint a new
+// untranslatable counter in everyone's rows.
+const WIN_KEYS = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "dark"]);
+
+// Record one win. Email-backed → atomic jsonb increment in the DB (RETURNING
+// refreshes the in-memory copy, so concurrent wins can't clobber each other);
+// session-only → in-memory bump (same policy as their coins). `emailFallback`
+// mirrors the After Dark payout's captured-email pattern: a winner who
+// disconnects between the winners snapshot and this call still gets the win
+// counted, exactly like they still get the coins. Fire-and-forget from
+// settlement paths: a failed count must never block a payout, so callers
+// .catch(log) instead of awaiting into their flow.
+async function recordWin(socketId, gameKey, emailFallback = null) {
+  if (!WIN_KEYS.has(gameKey)) return;
+  const p = players[socketId];
+  if (p && !p.email) {
+    p.wins = p.wins || {};
+    p.wins[gameKey] = (p.wins[gameKey] || 0) + 1;
+    return;
+  }
+  const email = (p && p.email) || emailFallback;
+  if (!email) return;
+  const { rows } = await pool.query(
+    `UPDATE jpo_players
+        SET wins = jsonb_set(wins, ARRAY[$2], (COALESCE((wins->>$2)::int, 0) + 1)::text::jsonb),
+            updated_at = now()
+      WHERE email = $1
+      RETURNING wins`,
+    [email, gameKey],
+  );
+  const live = players[socketId];
+  if (rows[0] && live && live.email === email) live.wins = rows[0].wins || {};
 }
 
 // Upsert a person's profile on registration, keyed by email. Existing rows keep
@@ -1240,6 +1279,9 @@ async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false
   if (wp) io.to(winnerId).emit("coinUpdate", { coins: wp.coins });
   if (lp) io.to(loserId).emit("coinUpdate", { coins: lp.coins });
   io.emit("rpsIndicator", { draw: false, winnerId, loserId });
+  // Lifetime win counter (profile card / leaderboard). Fire-and-forget: a
+  // failed count must never affect the already-settled match.
+  recordWin(winnerId, m.game).catch((err) => console.error("recordWin failed:", err));
   console.log(`${GAME_NAMES[m.game] || m.game}: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
   done();
 }
@@ -1779,6 +1821,9 @@ async function endRound(outcome, { forfeit = false } = {}) {
         if (p) { p.coins += ROUND_PRIZE; io.to(w.id).emit("coinUpdate", { coins: p.coins }); }
       }
     } catch (err) { console.error("round payout failed:", err); }
+    // After Dark win counter ('dark') — same fire-and-forget policy as duels;
+    // w.email lets a winner who just disconnected still get the win counted.
+    recordWin(w.id, "dark", w.email).catch((err) => console.error("recordWin (dark) failed:", err));
   }
 
   const payload = {
@@ -2160,7 +2205,7 @@ io.on("connection", (socket) => {
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
           coins: 50, cosmetics: [], equipped: "", pet: "", items: {}, isAnnouncer: false,
-          department: reg.department || "", createdAt: Date.now(),
+          department: reg.department || "", wins: {}, hobby: "", createdAt: Date.now(),
         };
         players[targetId] = state;
         io.to(targetId).emit("approved", {
@@ -2469,6 +2514,8 @@ io.on("connection", (socket) => {
       coins:      p.coins,
       equipped:   p.equipped || "",
       joinedAt:   p.createdAt || null,
+      wins:       p.wins || {},
+      hobby:      p.hobby || "",
     });
   });
 
@@ -2512,6 +2559,64 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("setDepartment failed:", err);
       socket.emit("profileError", { message: "Something went wrong — try again." });
+    }
+  });
+
+  // Free-text hobby, editable ANY time from your own card (unlike the set-once
+  // department). Server-side hygiene: trim, strip control chars, cap length;
+  // '' clears it. Rendered client-side with textContent only, so the text is
+  // display-safe by construction.
+  socket.on("setHobby", async (payload) => {
+    const { hobby } = payload || {};
+    const me = players[socket.id];
+    if (!me) return;
+    if (!takeToken(profileBucket)) return;           // shares the profile throttle
+    if (typeof hobby !== "string") return;
+    const clean = hobby.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 40);
+    if (!me.email) {
+      me.hobby = clean;                              // session-only: memory
+      socket.emit("hobbySet", { hobby: clean });
+      return;
+    }
+    try {
+      await pool.query(
+        `UPDATE jpo_players SET hobby = $2, updated_at = now() WHERE email = $1`,
+        [me.email, clean],
+      );
+      me.hobby = clean;
+      socket.emit("hobbySet", { hobby: clean });
+    } catch (err) {
+      console.error("setHobby failed:", err);
+      socket.emit("profileError", { message: "Something went wrong — try again." });
+    }
+  });
+
+  // Office-wide all-time leaderboard: top 10 approved accounts by TOTAL wins
+  // across every game (duels + After Dark), from the DB so offline champions
+  // still rank. Zero-win rows are excluded — an empty board reads better than
+  // a wall of zeros. Read-only, shares the profile throttle.
+  socket.on("getLeaderboard", async () => {
+    if (!players[socket.id]) return;                 // must be in the office
+    if (!takeToken(profileBucket)) return;
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM (
+           SELECT COALESCE(NULLIF(nickname, ''), NULLIF(first_name, ''), name) AS display,
+                  wins,
+                  (SELECT COALESCE(SUM(v.value::int), 0)::int FROM jsonb_each_text(wins) v) AS total
+             FROM jpo_players
+            WHERE approved = true
+         ) t
+         WHERE total > 0
+         ORDER BY total DESC, display ASC
+         LIMIT 10`,
+      );
+      socket.emit("leaderboardData", {
+        rows: rows.map((r) => ({ name: r.display, total: r.total, wins: r.wins || {} })),
+      });
+    } catch (err) {
+      console.error("getLeaderboard failed:", err);
+      socket.emit("leaderboardData", { rows: [] });
     }
   });
 
@@ -3615,8 +3720,10 @@ function _playerList() {
 // a no-op everywhere else). Awaited before listen so no query can race it.
 try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS wins jsonb NOT NULL DEFAULT '{}'::jsonb`);
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS hobby text NOT NULL DEFAULT ''`);
 } catch (err) {
-  console.error("schema nudge (dismissed column) failed:", err);
+  console.error("schema nudge (columns) failed:", err);
 }
 
 const port = process.env.PORT || 3000;

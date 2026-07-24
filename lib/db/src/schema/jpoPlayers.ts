@@ -42,6 +42,13 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // legacy accounts pick one from their own profile card, once). Validated
   // server-side against a fixed allowlist shared with the client.
   department: text("department").notNull().default(""),
+  // Lifetime win counts per game, e.g. {"rps": 3, "trivia": 1, "dark": 2}.
+  // Keys are the server's game ids (duels) plus 'dark' for Office After Dark.
+  // Incremented atomically at settlement time; draws move nothing.
+  wins: jsonb("wins").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+  // Free-text hobby shown on the profile card ('' = not set). Editable any
+  // time from your own card; server-side length-capped and control-stripped.
+  hobby: text("hobby").notNull().default(""),
   // Last calendar day (server/DB date, UTC) this player received the once-daily
   // login bonus. NULL = never granted. The grant is an atomic conditional UPDATE
   // (WHERE last_daily_bonus IS NULL OR < CURRENT_DATE) so re-logging can't farm it.
