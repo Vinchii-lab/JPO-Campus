@@ -159,6 +159,18 @@ a chair rendered fully in front of its desk reads as broken to them.
 **How to apply:** any new office desk row goes on the workstation pattern; if a pod looks
 inconsistent, the workstation-style row is the correct one, not the aberration.
 
+## Sittable couch found on the WALL layer → move it to Furniture, never register via WALL_SEATS
+The Game Room TV couch lived on the Wall layer; making it sittable in place via WALL_SEATS would
+have (a) shown the 💼 work chip + demanded the server WALL_WORK_SEAT_GIDS lockstep (couches must
+never pay the work bonus) and (b) let the wall-opening pass make the couch BODY row walkable.
+The fix is a targeted .tmj layer move (Wall→Furniture, assert gids + empty destination cells
+first), then the normal FURN_SEATS + SEAT_FACING 'up' registration — identical to the other
+Furniture-layer TV couches, body row stays solid for free.
+**Why:** WALL_SEATS semantically means "desk chair that pays the work bonus"; Furniture is where
+plain seats belong, and its collision model already does the right thing.
+**How to apply:** any future "sofa/bench isn't sittable" report where the tiles turn out to be on
+the Wall layer → move the tiles, don't extend WALL_SEATS.
+
 ## There is no separate "CEO desk" / "executive desk" sprite
 The owner refers to the seated desks by role ("manager desk", "CEO desk", "executive desk"), but the
 map only has TWO baked-chair desk sprites: the blue and green 2×3 families in `DESK_FAMILIES`. Both
