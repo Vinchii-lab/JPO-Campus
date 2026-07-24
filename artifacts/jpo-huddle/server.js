@@ -135,7 +135,9 @@ app.post("/admin/purge", express.json(), async (req, res) => {
       delete pending[id];
       io.to(id).emit("rejected");
     }
-    for (const em of Object.keys(graceByEmail)) if (em !== keep) cancelGrace(em);
+    // Graced (briefly disconnected) players aren't in players[] — cancel the
+    // hold AND leave their deferred round spot (no successor restore follows).
+    for (const em of Object.keys(graceByEmail)) if (em !== keep) { cancelGrace(em); roundLeaveGoneByEmail(em); }
     io.emit("announcementsUpdate", await fetchAnnouncements());
     _notifyAdmins();
 
@@ -470,7 +472,7 @@ const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033]);
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.
 const WALL_WORK_SEAT_GIDS = new Set([5533, 5564, 5565]);
-const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, WORK_SEATS, FOOD_TABLES } = (() => {
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, PAINTED, WORK_SEATS, FOOD_TABLES } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
@@ -497,6 +499,21 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, WORK_SEATS, FOOD_TABLE
       // production report — positions saved on the old layout restored into
       // nothingness after publish).
       if (floor) floored = floor.data.map((g) => (g & GID_MASK) !== 0);
+      // Painted-ANY-layer mask: PAINTED[i] === true where Floor, Wall or
+      // Furniture has art. The true void around the building has nothing on
+      // any layer. Used by the playerMove void rejection — deliberately
+      // BROADER than FLOORED: players legitimately stand in opened wall-notch
+      // cells that carry Wall art with no Floor painted under it, so the
+      // restore rescue stays floor-only while movement blocking uses the
+      // any-layer rule (the client's _paintedWorldAt mirrors it exactly).
+      let painted = null;
+      if (floor) {
+        painted = floor.data.map((g) => (g & GID_MASK) !== 0);
+        for (const ln of ["Wall", "Furniture"]) {
+          const l = tmj.layers?.find((x) => x.name === ln && Array.isArray(x.data));
+          if (l) l.data.forEach((g, i) => { if ((g & GID_MASK) !== 0) painted[i] = true; });
+        }
+      }
       // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
       let workSeats = null;
       const foodTables = [];
@@ -523,13 +540,13 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, WORK_SEATS, FOOD_TABLE
       } else {
         console.error("work-seat mask unavailable (no Furniture layer) — work bonus disabled");
       }
-      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, FLOORED: floored, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, FLOORED: floored, PAINTED: painted, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
     }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
   // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work/floor masks (smoking + work bonus + void rescue disabled).
-  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, FLOORED: null, WORK_SEATS: null, FOOD_TABLES: [] };
+  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, FLOORED: null, PAINTED: null, WORK_SEATS: null, FOOD_TABLES: [] };
 })();
 
 // Register the cafeteria food spots as interactive objects, and group the
@@ -572,6 +589,22 @@ function isVoidPosition(x, y) {
   if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return true;
   if (!FLOORED) return false;   // no mask (map load failed) → never relocate anyone
   return !FLOORED[row * MAP_W + col];
+}
+
+// Movement void gate: TRUE when the feet tile has no art on ANY layer — the
+// true nothing outside the drawn world (the map's west courtyard edge has no
+// fence, so without this anyone could stroll off the grass into blackness).
+// Deliberately BROADER than isVoidPosition: players legitimately stand in
+// opened wall-notch cells (Wall art, no Floor painted), so the restore rescue
+// stays floor-only while movement rejection uses the any-layer rule. The
+// client's _paintedWorldAt clamp mirrors this exactly (that's the UX half;
+// this is the anti-cheat half).
+function isUnpaintedPosition(x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+  const col = Math.floor(x / TILE_PX), row = Math.floor((y + BODY_DY) / TILE_PX);
+  if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return true;
+  if (!PAINTED) return false;   // no mask (map load failed) → never block movement
+  return !PAINTED[row * MAP_W + col];
 }
 
 // Live socket ids within `radius` px of the given player (always includes the
@@ -887,7 +920,11 @@ function dropLiveByEmail(email, exceptId) {
     // below triggers this anyway, but if the socket object is already gone
     // there is no disconnect event — this call is the safety net.
     cancelMatchFor(id, "They left the office — match cancelled, no coins moved.");
-    roundHandleLeave(id);
+    // Same grace as a disconnect: the successor session for this email is
+    // about to restore (login/resume/register all call restorePlayer next),
+    // which rebinds the round spot. Paths with NO successor restore must call
+    // roundLeaveGoneByEmail themselves (password reset, pending-queue exits).
+    if (!roundDeferLeave(id)) roundHandleLeave(id);
     if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
@@ -969,6 +1006,45 @@ async function restorePlayer(socket, row) {
 
   for (const pid in players) {
     if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
+  }
+
+  // After Dark grace rebind: if this email holds a spot in the ACTIVE round
+  // (marked `gone` by roundDeferLeave, or still keyed under an older socket id
+  // that dropLiveByEmail just replaced), move the membership — role, aliveness,
+  // per-killer cooldown — onto the new socket, tell every participant the id
+  // swapped (roundRebind), and privately resend the full round state
+  // (roundResume) so the refreshed client walks straight back into the dark.
+  if (state.email && round && round.state === "active") {
+    for (const [oldId, m] of round.members) {
+      if (m.email !== state.email || oldId === socket.id) continue;
+      round.members.delete(oldId);
+      delete m.gone;
+      round.members.set(socket.id, m);
+      if (round.killerIds.delete(oldId)) round.killerIds.add(socket.id);
+      if (round.killerNameOf?.has(oldId)) {
+        round.killerNameOf.set(socket.id, round.killerNameOf.get(oldId));
+        round.killerNameOf.delete(oldId);
+      }
+      // Swap broadcast FIRST (members now holds the new id, so the resumer
+      // gets it too — harmless no-op there), then the private full state.
+      roundEmitMembers("roundRebind", { oldId, newId: socket.id });
+      const isKiller = round.killerIds.has(socket.id);
+      socket.emit("roundResume", {
+        role: isKiller ? "killer" : "crew",
+        alive: !!m.alive,
+        accomplices: isKiller
+          ? [...round.killerIds].filter((k) => k !== socket.id).map((k) => ({ id: k, name: round.members.get(k)?.name || "?" }))
+          : undefined,
+        speedMult: isKiller ? ROUND_KILLER_SPEED_MULT : undefined,
+        endsInMs: Math.max(0, round.endsAt - Date.now()),
+        killCooldownMs: ROUND_KILL_COOLDOWN_MS,
+        killRangePx: ROUND_KILL_RANGE_PX,
+        players: roundRoster(),
+        prize: ROUND_PRIZE,
+      });
+      console.log(`Office After Dark: ${m.name} resumed their round spot`);
+      break;
+    }
   }
 
   // Once-per-calendar-day login bonus. Atomic conditional UPDATE: the WHERE
@@ -1844,9 +1920,12 @@ setInterval(async () => {
 // timer; the killer wins by eliminating all crew first. Winners get a small
 // coin prize (atomic relative SQL, same pattern as the daily bonus — it only
 // ADDS coins, so there is no wager-style exactness invariant to protect).
-// Round state references LIVE SOCKETS (same rule as duels): a disconnect or
-// refresh mid-round drops you from the round even though the PLAYER gets the
-// usual grace window — the round must never wait on a ghost. Nothing is
+// Round state references LIVE SOCKETS, but email-backed members of the ACTIVE
+// round get the SAME ~10s grace as the player session: a refresh/blip marks
+// them `gone` (roundDeferLeave) and restorePlayer rebinds the spot onto the
+// new socket — only grace EXPIRY (or an explicit exit: kick, purge, password
+// reset, pending-queue ends) applies the leave rules. The lobby ('joining')
+// and session-only players keep the immediate-leave rule. Nothing is
 // persisted: a server restart cancels the round harmlessly (clients clear all
 // round UI on the socket 'disconnect' event, so no stuck darkness).
 // SECRECY RULE: the killer's identity is sent ONLY to the killer (their own
@@ -1856,6 +1935,13 @@ setInterval(async () => {
 // (headless integration tests can't wait 3 real minutes); never set in prod.
 const ROUND_JOIN_MS          = Math.max(3_000,  Number(process.env.ROUND_JOIN_MS) || 30_000);
 const ROUND_DURATION_MS      = Math.max(10_000, Number(process.env.ROUND_DURATION_MS) || 360_000);
+// Total hold on a gone member's round spot, measured from the disconnect. Must
+// exceed GRACE_MS: a real browser reload gates `resumeSession` on the Phaser
+// scene being up (map + 13 tilesets), which on slow machines takes longer than
+// the 10s session grace — exactly the deploy force-reload case the round-grace
+// seam exists for. The sprite still vanishes at GRACE_MS (session UX is
+// unchanged); only the round MEMBERSHIP survives until this deadline.
+const ROUND_REJOIN_MS        = Math.max(12_000, Number(process.env.ROUND_REJOIN_MS) || 45_000);
 const ROUND_MIN_PLAYERS      = 3;
 const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well under RPS_RANGE_PX)
 // Desync slack for the server-side kill check ONLY (never advertised to the
@@ -1916,8 +2002,10 @@ function inTheDark(id) {
 }
 
 // Roster sent to EVERY participant (ids/names/alive are not secret — clients
-// need it for the kill affordance, 💀 flashes, and spectator rendering, and it
-// must not include grace-window ghosts the killer could waste a kill on).
+// need it for the kill affordance, 💀 flashes, and spectator rendering).
+// Grace-window ghosts (members marked `gone`) stay listed on purpose: their
+// frozen avatar is still visible AND killable (roundKill falls back to the
+// grace-entry position), so disconnecting can't dodge the knife.
 function roundRoster() {
   return [...round.members].map(([id, m]) => ({ id, name: m.name, alive: m.alive }));
 }
@@ -2021,7 +2109,10 @@ async function endRound(outcome, { forfeit = false } = {}) {
   const winnerPairs = outcome === "crew"
     ? [...r.members].filter(([id, m]) => m.alive && !r.killerIds.has(id))
     : [...r.members].filter(([id]) => r.killerIds.has(id));
-  const winners = winnerPairs.map(([id, m]) => ({ id, name: m.name, email: players[id]?.email || null }));
+  // Email from the member record first: a grace-window survivor (disconnected
+  // but holding their spot) has no players[] entry left, yet still earned the
+  // payout — the UPDATE-by-email path pays them while offline.
+  const winners = winnerPairs.map(([id, m]) => ({ id, name: m.name, email: m.email || players[id]?.email || null }));
 
   for (const w of winners) {
     try {
@@ -2098,6 +2189,50 @@ function roundHandleLeave(id) {
   checkKillerWin();
 }
 
+// Round grace: an email-backed participant of the ACTIVE round who disconnects
+// keeps their spot for the same ~10s window the player session gets — a
+// refresh, a network blip, or the BUILD_STAMP force-reload every publish
+// triggers must never hand the killers a win (the "killers won while crew
+// survived" report: the last crew member's reload counted as an instant
+// leave). The member is marked `gone` (still in members, still counted alive
+// by aliveCrewCount, frozen sprite still visible via the session grace);
+// restorePlayer rebinds the spot onto the new socket, and grace expiry
+// applies the old leave rules (the grace timer calls roundHandleLeave).
+// Session-only players and the 'joining' lobby keep the immediate-leave rule.
+function roundDeferLeave(id) {
+  if (!round || round.state !== "active" || !round.members.has(id)) return false;
+  const m = round.members.get(id);
+  if (!m.email) return false;         // session-only: no durable identity to rebind
+  m.gone = true;
+  return true;
+}
+
+// Session grace expired without a resume, but a slow reload may STILL be
+// booting (resumeSession waits for the Phaser scene). Hold the round spot for
+// the remainder of ROUND_REJOIN_MS, then apply the old leave rules. The stale
+// timer is harmless by construction: socket ids are unique per connection, so
+// a later round can never key a member under this oldId — the `gone` check on
+// the CURRENT round's member is the only guard needed (a rebound member sits
+// under a new id; a settled round fails the members lookup).
+function roundScheduleGoneLeave(oldId) {
+  const m = round?.members?.get(oldId);
+  if (!m || !m.gone) { roundHandleLeave(oldId); return; }
+  setTimeout(() => {
+    const cur = round?.members?.get(oldId);
+    if (cur && cur.gone) roundHandleLeave(oldId);
+  }, Math.max(0, ROUND_REJOIN_MS - GRACE_MS));
+}
+
+// Cleanup hook for every path that cancels a grace hold WITHOUT a restore
+// following (admin password reset, auth flows that end back in the pending
+// queue, purge): the deferred member is never coming back — leave NOW.
+function roundLeaveGoneByEmail(email) {
+  if (!round || !email) return;
+  for (const [id, m] of round.members) {
+    if (m.email === email && m.gone) { roundHandleLeave(id); return; }
+  }
+}
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
@@ -2132,12 +2267,13 @@ io.on("connection", (socket) => {
   //   • New email → row is created with the password. Everyone waits for
   //     approval as before; approved emails restore straight into the office.
   socket.on("register", async (payload) => {
+    let em = "";   // hoisted: the failure exits below need it for round-spot cleanup
     try {
       const { firstName, lastName, nickname, email, password, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx, department } = payload || {};
       const fn   = (firstName || "").trim().slice(0, 20) || "Guest";
       const ln   = (lastName  || "").trim().slice(0, 20);
       const nick = (nickname  || "").trim().slice(0, 16) || fn;
-      const em   = (email     || "").trim().slice(0, 80).toLowerCase();
+      em = (email || "").trim().slice(0, 80).toLowerCase();
       // The email becomes the PRIMARY KEY and flows into admin-panel markup
       // (including `email:<address>` pending ids inside onclick attributes) —
       // enforce a strict shape so quotes/spaces/HTML can never become a PK.
@@ -2247,6 +2383,10 @@ io.on("connection", (socket) => {
           const { rows: rr } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
           const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
           if (!ok) {
+            // dropLiveByEmail above parked the old session's round spot as
+            // `gone` expecting OUR restore to rebind it — this exit has no
+            // successor, so apply the old leave rules now (no-op if none).
+            roundLeaveGoneByEmail(em);
             socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
             return;
           }
@@ -2268,6 +2408,9 @@ io.on("connection", (socket) => {
       }
     } catch (err) {
       console.error("register failed:", err);
+      // If dropLiveByEmail already parked a round spot as `gone`, no restore
+      // is coming — release it under the old leave rules (no-op otherwise).
+      roundLeaveGoneByEmail(em);
       socket.emit("authFailed", { message: "Something went wrong — try again." });
     }
   });
@@ -2280,8 +2423,9 @@ io.on("connection", (socket) => {
   // Always take `payload` and destructure from `payload || {}`.
   socket.on("login", async (payload) => {
     const { email, password } = payload || {};
+    let em = "";   // hoisted: the catch below needs it for round-spot cleanup
     try {
-      const em = (email || "").trim().slice(0, 80).toLowerCase();
+      em = (email || "").trim().slice(0, 80).toLowerCase();
       const pw = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
       if (!em || !pw) { socket.emit("loginFailed", { message: "Email and password are required." }); return; }
       if (!authAllowed(em)) {
@@ -2312,6 +2456,7 @@ io.on("connection", (socket) => {
         console.log(`Signed in: ${row.name} <${em}>`);
       } else {
         cancelGrace(em);
+        roundLeaveGoneByEmail(em);   // ends in the pending queue, not a restore — the deferred round spot leaves now
         pending[socket.id] = {
           firstName: row.first_name, lastName: row.last_name, email: row.email,
           character: row.character, name: row.name, nickname: row.nickname,
@@ -2327,6 +2472,9 @@ io.on("connection", (socket) => {
       }
     } catch (err) {
       console.error("login failed:", err);
+      // If dropLiveByEmail already parked a round spot as `gone` (e.g.
+      // restorePlayer threw), no rebind is coming — release it now.
+      roundLeaveGoneByEmail(em);
       socket.emit("loginFailed", { message: "Something went wrong — try again." });
     }
   });
@@ -2337,10 +2485,11 @@ io.on("connection", (socket) => {
   // into the office (approved) or back into the waiting queue (not approved).
   socket.on("resumeSession", async (payload) => {
     const { token } = payload || {};
+    let em = "";   // hoisted: the catch below needs it for round-spot cleanup
     try {
       const data = verifyToken(token);
       if (!data) { socket.emit("resumeFailed"); return; }
-      const em = data.email;
+      em = data.email;
 
       const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
       const row = rows[0];
@@ -2366,6 +2515,7 @@ io.on("connection", (socket) => {
         // Approved-then-revoked (kicked) or still awaiting first approval: rebuild
         // the pending entry from the row so admins can (re-)approve them.
         cancelGrace(em);
+        roundLeaveGoneByEmail(em);   // ends in the pending queue, not a restore — the deferred round spot leaves now
         pending[socket.id] = {
           firstName: row.first_name, lastName: row.last_name, email: row.email,
           character: row.character, name: row.name, nickname: row.nickname,
@@ -2381,6 +2531,9 @@ io.on("connection", (socket) => {
       }
     } catch (err) {
       console.error("resumeSession failed:", err);
+      // If dropLiveByEmail already parked a round spot as `gone` (e.g.
+      // restorePlayer threw), no rebind is coming — release it now.
+      roundLeaveGoneByEmail(em);
       socket.emit("resumeFailed");
     }
   });
@@ -2569,6 +2722,7 @@ io.on("connection", (socket) => {
       }
       dropLiveByEmail(em, null);
       cancelGrace(em);
+      roundLeaveGoneByEmail(em);   // no successor session is coming — the round spot leaves NOW
       _notifyAdmins();
       socket.emit("resetPasswordDone", { ok: true, message: `Password cleared for ${em}. They set a new one on their next Join.` });
       console.log(`Password reset by admin: <${em}>`);
@@ -2600,6 +2754,10 @@ io.on("connection", (socket) => {
     // edge rounding (a seat on the top row snaps to y ≈ -BODY_DY) — NOT a teleport.
     if (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
         y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON) return;
+    // Void containment: a position whose feet tile has no art on ANY layer is
+    // outside the drawn world — silently dropped like every other rejection
+    // (the client clamps at the border for UX; this is the anti-cheat half).
+    if (isUnpaintedPosition(x, y)) return;
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be
@@ -3872,7 +4030,9 @@ io.on("connection", (socket) => {
     // that synchronicity is the double-start guard.
     round = {
       state: "joining", starterId: socket.id, starterName: p.name,
-      members: new Map([[socket.id, { name: p.name, alive: true }]]),
+      // email here too — the STARTER's record must carry it just like the
+      // roundJoin path, or the round-grace defer/rebind seam skips them.
+      members: new Map([[socket.id, { name: p.name, alive: true, email: p.email || null }]]),
       killerIds: new Set(), endsAt: 0, endTimer: null,
       joinEndsAt: Date.now() + ROUND_JOIN_MS,
       joinTimer: setTimeout(beginRound, ROUND_JOIN_MS),
@@ -3891,7 +4051,10 @@ io.on("connection", (socket) => {
     if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (!round || round.state !== "joining") { socket.emit("roundError", { message: "No round is gathering right now." }); return; }
     if (round.members.has(socket.id)) return;   // already in — quietly ignore
-    round.members.set(socket.id, { name: p.name, alive: true });
+    // email on the member record: the round-grace seam (roundDeferLeave /
+    // restorePlayer rebind) and the payout both key off it — a graced
+    // survivor has no players[] entry left to read the email from.
+    round.members.set(socket.id, { name: p.name, alive: true, email: p.email || null });
     socket.emit("roundJoined", {
       count: round.members.size,
       joinMs: Math.max(0, round.joinEndsAt - Date.now()),
@@ -3916,7 +4079,14 @@ io.on("connection", (socket) => {
     if (round.killerIds.has(targetId)) { socket.emit("roundError", { message: "They're with you…" }); return; }
     const me = round.members.get(socket.id);
     const tm = round.members.get(targetId);
-    const tp = players[targetId];
+    let tp = players[targetId];
+    // A grace-window ghost (disconnected but holding their round spot) is
+    // still a frozen, visible avatar — killable at its parked position, so
+    // pulling the plug can't dodge the knife. On resume they come back dead.
+    if (!tp && tm?.gone && tm.email && graceByEmail[tm.email]?.oldId === targetId) {
+      const g = graceByEmail[tm.email];
+      tp = { x: g.x, y: g.y };
+    }
     if (!tm || !tm.alive || !tp) { socket.emit("roundError", { message: "They slipped away…" }); return; }
     const now = Date.now();
     if (now < me.killReadyAt) {
@@ -3946,7 +4116,11 @@ io.on("connection", (socket) => {
     // even though the PLAYER gets a ~10s grace window, the MATCH does not:
     // leaving an opponent staring at a hung pick screen is worse than a re-challenge.
     cancelMatchFor(socket.id, "They left the office — match cancelled, no coins moved.");
-    roundHandleLeave(socket.id);   // same policy: the PLAYER gets grace, the round does not
+    // The ROUND now gets the same grace as the player: an email-backed member
+    // of the ACTIVE round is marked `gone` and their spot survives until the
+    // grace timer below expires (which then applies the leave rules) or a
+    // resume rebinds it (restorePlayer). Everyone else leaves immediately.
+    if (!roundDeferLeave(socket.id)) roundHandleLeave(socket.id);
     if (pending[socket.id]) {
       console.log(`Pending disconnected: ${pending[socket.id].name}`);
       delete pending[socket.id];
@@ -3970,6 +4144,10 @@ io.on("connection", (socket) => {
           timer: setTimeout(() => {
             io.emit("playerLeft", socket.id);
             delete graceByEmail[email];
+            // Grace expired without a resume: the sprite is gone, but a round
+            // member's SPOT gets the longer ROUND_REJOIN_MS hold (slow reloads
+            // outlive the session grace) — non-members leave-check immediately.
+            roundScheduleGoneLeave(socket.id);
             console.log(`${p.name} left (grace expired)`);
           }, GRACE_MS),
         };

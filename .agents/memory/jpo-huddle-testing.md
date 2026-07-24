@@ -209,6 +209,22 @@ phases that each fit foreground.
 ## Invisible-chair class of bug
 The Wall layer renders over Furniture, so a seat gid on a cell covered by solid Wall art is invisible but still seatable — the sitter gets buried and users report it as "sitting broken". When a sit-bug report doesn't match known seat tables, dump all three layers at the player's stored DB position (x/48, (y+27)/48) first; the real fixture there may not be what the screenshot suggests.
 
+## Socket-level resume tests pass where a REAL reload fails — always test the actual reload
+A headless socket.io client can disconnect+resume in ~2s, but a real browser
+reload gates `resumeSession` on the full Phaser scene boot (map + tilesets), which
+in multi-page headless runs exceeds the 10s session grace. A grace/resume feature
+"proven" by a socket test alone can still be broken for every real refresh.
+**How to apply:** for any grace-window/resume feature, add a puppeteer
+`page.reload()` mid-flow test alongside the socket test; watch the server log
+order (`left (grace expired)` before `Resumed:` = the reload lost the race).
+
+## Border-clamp tests need collider-free border rows
+On the west map border, row 47 has a real wall collider that stops a walker
+before any void clamp can act — a clamp test there passes vacuously. Rows 52-58
+are clean grass(col2)/void(col1) rows where only the clamp can stop the walk.
+**How to apply:** before testing an edge-containment change, scan the target
+rows for Wall-layer tiles and pick a row where nothing else blocks movement.
+
 ## Multi-page Phaser runs are ~10x throttled — scale walk budgets, latch in-page
 Three Phaser WebGL games in ONE headless Chromium run each game loop at ~1/10
 wall speed (CPU contention; `bringToFront` does NOT fix it — it's not tab

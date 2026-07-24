@@ -4717,6 +4717,7 @@
     // radial gradient; _roundFrame (called from the scene's update()) only
     // moves/scales it with a transform, so per-frame cost is negligible.
     let _roundPhase = null;          // null | 'lobby' | 'active'
+    let _roundGen = 0;               // bumped by _roundReset; stale async round entries abort on mismatch
     let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
     let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
     let _roundAccomplices = new Map(); // id -> name (fellow killers; killers only)
@@ -4773,6 +4774,48 @@
       if (fu && fu.collides) return false;
       return true;
     }
+
+    // Painted-world check at the FEET tile (any layer's art counts — wall
+    // cells usually have no Floor painted under them, so wall/furniture art
+    // must count as "world"). MUST mirror the server's PAINTED mask
+    // (isUnpaintedPosition): the map is FINAL and the west courtyard edge has
+    // no fence, so the border of the drawn art IS the outer wall. Used by the
+    // killer-noclip guard and the all-players void containment below.
+    function _paintedWorldAt(sc, x, y) {
+      const c = Math.floor(x / 48), r = Math.floor((y + 27) / 48);
+      const f = sc.floorLayer && sc.floorLayer.getTileAt(c, r);
+      if (f && f.index > 0) return true;
+      const w = sc.wallLayer && sc.wallLayer.getTileAt(c, r);
+      if (w && w.index > 0) return true;
+      const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
+      return !!(fu && fu.index > 0);
+    }
+
+    // ── Void containment (EVERYONE, not just noclip killers) ──
+    // The UX half of the fix (the server's isUnpaintedPosition rejection is
+    // the anti-cheat half): stop at the edge of the drawn world instead of
+    // strolling into blackness. Per-axis lookahead so you can slide ALONG the
+    // border; the frame guard is the belt-and-braces snap-back for any path
+    // that skips the clamp (teleports, physics separation pushes).
+    window._voidClampVelocity = (sc, player) => {
+      const v = player.body && player.body.velocity;
+      if (!v || (!v.x && !v.y)) return;
+      const LOOK = 10;   // px ahead of the feet — small enough to hug the edge
+      if (v.x && !_paintedWorldAt(sc, player.x + Math.sign(v.x) * LOOK, player.y)) player.setVelocityX(0);
+      if (v.y && !_paintedWorldAt(sc, player.x, player.y + Math.sign(v.y) * LOOK)) player.setVelocityY(0);
+    };
+    window._voidGuardFrame = (sc) => {
+      const p = sc.player;
+      if (!p || !p.body) return;
+      if (_paintedWorldAt(sc, p.x, p.y)) {
+        sc._lastPaintedPos = { x: p.x, y: p.y };
+      } else if (sc._lastPaintedPos && !sc.sitting) {
+        // Seated players are legitimately parked on odd tiles — never yank
+        // them (same rule as the noclip-off snap).
+        p.body.reset(sc._lastPaintedPos.x, sc._lastPaintedPos.y);
+      }
+    };
+
     function _roundSetNoclip(on) {
       const sc = window._gameScene;
       if (!sc || !sc._noclipColliders || !sc.player) return;
@@ -4823,6 +4866,7 @@
     // on roundEnd/roundCancelled, socket disconnect, and kick, so a dropped
     // connection can never strand someone in the dark.
     function _roundReset() {
+      _roundGen++;   // invalidate any in-flight roundResume retry loop (round ended/cancelled while the scene booted)
       _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
       _roundSpeedMult = 1;
       _roundSetNoclip(false);
@@ -4926,12 +4970,8 @@
         if (_roundWalkableAt(sc, sc.player.x, sc.player.y)) {
           sc._noclipSafe = { x: sc.player.x, y: sc.player.y };
         } else if (sc._noclipSafe) {
-          const c = Math.floor(sc.player.x / 48), r = Math.floor((sc.player.y + 27) / 48);
-          const f  = sc.floorLayer     && sc.floorLayer.getTileAt(c, r);
-          const w  = sc.wallLayer      && sc.wallLayer.getTileAt(c, r);
-          const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
-          const painted = (f && f.index > 0) || (w && w.index > 0) || (fu && fu.index > 0);
-          if (!painted) sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
+          if (!_paintedWorldAt(sc, sc.player.x, sc.player.y))
+            sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
         }
       }
     };
@@ -4970,9 +5010,15 @@
     socket.on('roundCancelled', (d) => { _roundReset(); if (d && d.reason) _rpsToast('🌙 ' + d.reason); });
     socket.on('roundError', (d) => { if (d && d.message) _rpsToast(d.message); });
 
-    socket.on('roundBegin', (d) => {
-      d = d || {};
-      _roundPhase = 'active'; _roundRole = d.role || 'crew'; _roundAlive = true;
+    // Shared active-round entry: roundBegin (fresh start) and roundResume
+    // (grace-window rejoin after a refresh/blip — the server rebound our spot
+    // in restorePlayer). On resume: `alive` comes from the payload (we may
+    // have been killed while away), the clock uses endsInMs (remaining, not
+    // full duration), the big role card is swapped for a quiet toast, and
+    // already-dead roster entries get re-hidden (fresh scene = fresh sprites).
+    function _roundEnterActive(d, { resume = false } = {}) {
+      _roundPhase = 'active'; _roundRole = d.role || 'crew';
+      _roundAlive = resume ? d.alive !== false : true;
       // Speed edge arrives only in the killers' payload; sanity-clamp so a
       // malformed value can never slow the killer below base or go wild.
       _roundSpeedMult = (_roundRole === 'killer' && Number(d.speedMult) > 1) ? Math.min(Number(d.speedMult), 2) : 1;
@@ -4982,28 +5028,89 @@
       // 0 is a REAL value here (instant kills) — never `|| fallback` it away.
       _roundCoolMs = Number.isFinite(Number(d.killCooldownMs)) ? Number(d.killCooldownMs) : 12000;
       _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown (0 = armed at once)
-      _roundEndsAt = Date.now() + (d.durationMs || 180000);
+      _roundEndsAt = Date.now() + (resume ? Math.max(0, d.endsInMs || 0) : (d.durationMs || 180000));
       clearTimeout(_roundInviteTimer);
       _rnEl('round-invite').classList.remove('open');
-      document.body.classList.add('round-dark');
-      const _accNames = [..._roundAccomplices.values()];
-      _rnEl('round-role-big').textContent = _roundRole === 'killer'
-        ? (_accNames.length ? '🔪 You are a killer' : '🔪 You are the killer')
-        : '🌙 The lights go out…';
-      _rnEl('round-role-sub').textContent = _roundRole === 'killer'
-        ? ((_accNames.length ? `You're in it together with ${_accNames.join(' and ')} — you can't hurt each other. ` : '')
-           + 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.')
-        : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
-      _rnEl('round-role').classList.add('open');
-      clearTimeout(_roundRoleTimer);
-      _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
-      if (_roundRole === 'killer') { _rnEl('round-kill-btn').classList.add('on'); _roundSetNoclip(true); }
+      if (_roundAlive) document.body.classList.add('round-dark');
+      if (resume) {
+        // Re-hide the already-fallen (spectators must stay invisible to the
+        // living); skip when WE are dead — spectators see everyone.
+        if (_roundAlive) {
+          for (const [id, m] of _roundRoster) {
+            if (!m.alive && id !== socket.id) { _roundHiddenIds.add(id); _roundGhostVis(id, false); }
+          }
+        }
+        _rpsToast(!_roundAlive
+          ? '💀 You were got while you were away… stick around and watch how it ends.'
+          : (_roundRole === 'killer' ? '🔪 Welcome back — finish the job.' : '🌙 Welcome back — the round is still on. Survive!'));
+      } else {
+        const _accNames = [..._roundAccomplices.values()];
+        _rnEl('round-role-big').textContent = _roundRole === 'killer'
+          ? (_accNames.length ? '🔪 You are a killer' : '🔪 You are the killer')
+          : '🌙 The lights go out…';
+        _rnEl('round-role-sub').textContent = _roundRole === 'killer'
+          ? ((_accNames.length ? `You're in it together with ${_accNames.join(' and ')} — you can't hurt each other. ` : '')
+             + 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.')
+          : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
+        _rnEl('round-role').classList.add('open');
+        clearTimeout(_roundRoleTimer);
+        _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
+      }
+      if (_roundRole === 'killer' && _roundAlive) { _rnEl('round-kill-btn').classList.add('on'); _roundSetNoclip(true); }
       _roundRosterSig = '';
       _roundRosterRender();
       _rnEl('round-roster').classList.add('on');
       _roundStopTick();
       _roundTick = setInterval(_roundHud, 250);
       _roundHud();
+    }
+
+    socket.on('roundBegin', (d) => { _roundEnterActive(d || {}); });
+
+    // Grace-window rejoin: the server rebound our round spot onto this fresh
+    // socket and sent the full round state. The scene may still be booting
+    // (roundResume arrives right after `approved`) — retry until the player
+    // sprite and the noclip collider list exist, then enter exactly like a
+    // begin. Bounded retries: if the scene never comes up, give up silently
+    // (the round will end without us; grace expiry already handled our spot).
+    socket.on('roundResume', (d) => {
+      d = d || {};
+      if (_roundPhase === 'active') return;   // already in (double resume) — ignore
+      // Generation guard: if the round ends/cancels while the scene is still
+      // booting (roundEnd → _roundReset bumps _roundGen), a late attempt()
+      // must NOT re-enter a dead round — that would re-darken the screen and
+      // wedge _roundPhase='active', blocking every future round until refresh.
+      const gen = _roundGen;
+      let tries = 0;
+      const attempt = () => {
+        if (_roundGen !== gen) return;        // round torn down while we booted — stale resume
+        const sc = window._gameScene;
+        if (!sc || !sc.player || !sc._noclipColliders) {
+          if (tries++ < 25) setTimeout(attempt, 400);
+          return;
+        }
+        _roundEnterActive(d, { resume: true });
+      };
+      attempt();
+    });
+
+    // A participant refreshed mid-round: their spot moved to a new socket id.
+    // Rekey every id-indexed mirror; the HUD tick re-asserts ghost hiding, so
+    // a late-arriving sprite for a hidden (dead) player self-heals.
+    socket.on('roundRebind', (d) => {
+      if (!d || !d.oldId || !d.newId || d.oldId === d.newId) return;
+      const m = _roundRoster.get(d.oldId);
+      if (m) { _roundRoster.delete(d.oldId); _roundRoster.set(d.newId, m); }
+      if (_roundAccomplices.has(d.oldId)) {
+        _roundAccomplices.set(d.newId, _roundAccomplices.get(d.oldId));
+        _roundAccomplices.delete(d.oldId);
+      }
+      if (_roundHiddenIds.has(d.oldId)) {
+        _roundHiddenIds.delete(d.oldId);
+        if (d.newId !== socket.id) { _roundHiddenIds.add(d.newId); _roundGhostVis(d.newId, false); }
+      }
+      _roundRosterSig = '';
+      _roundRosterRender();
     });
 
     socket.on('roundKilled', (d) => {
@@ -7381,6 +7488,10 @@
         // Office After Dark darkness overlay follows the player every frame
         // (transform-only; no-op unless a round is active for us).
         window._roundFrame?.(this);
+        // Void containment snap-back: never let anyone stand in the unpainted
+        // nothing outside the drawn map (the velocity clamp below is the
+        // steering half; this catches teleports/separation pushes).
+        window._voidGuardFrame?.(this);
 
         const { cursors, wasd, player } = this;
 
@@ -7624,6 +7735,10 @@
           if (up)         player.setVelocityY(-spd);
           else if (down)  player.setVelocityY( spd);
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
+          // Void containment: zero any velocity axis that would carry the
+          // feet onto an unpainted tile (per-axis, so you slide along the
+          // world's edge). Mirrors the server's isUnpaintedPosition reject.
+          window._voidClampVelocity?.(this, player);
 
           player.setFlipX(false);
           const moving = left || right || up || down;
