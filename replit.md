@@ -20,7 +20,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 
 - `artifacts/jpo-huddle/server.js` — the whole game server: Express 5 static serving (cache-busting `BUILD_STAMP`), socket.io handlers, all DB access via a raw `pg` Pool. Plain ESM, `node server.js`, no build step.
 - `artifacts/jpo-huddle/public/index.html` — the entire client (plain JS, Phaser 3 + socket.io from CDN, no bundler). Source of truth for socket event shapes and the `CLOTH_COLORS` palette.
-- `artifacts/jpo-huddle/public/assets/JPO_HQ.tmj` — the Tiled map (210×128 tiles, Floor/Furniture/Wall layers, 13 embedded tilesets). Source of truth for room layout, furniture, walkable paths. The old `Office.tmj` stays on disk ONLY as a rollback — nothing references it.
+- `artifacts/jpo-huddle/public/assets/JPO_HQ.tmj` — the Tiled map (210×128 tiles, Floor/Furniture/Wall layers, 13 embedded tilesets). Source of truth for room layout, furniture, walkable paths. **FINAL per owner (July 2026): never re-import/re-export or replace this map — all future layout changes are targeted in-place edits to this file**, which keeps every gid-based lockstep (work chairs, `Ext` outdoor detection, snack-table scan, floor-gid 1237 wall band) safe. The old `Office.tmj` stays on disk ONLY as a rollback — nothing references it.
 - `lib/db/src/schema/jpoPlayers.ts`, `jpoAnnouncements.ts` — Drizzle table definitions (DB schema source of truth) so `drizzle-kit push` works; the game server itself uses raw SQL.
 
 ## Architecture decisions
