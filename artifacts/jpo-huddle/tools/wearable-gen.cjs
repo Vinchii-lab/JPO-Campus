@@ -21,6 +21,28 @@ const SPRITES = {
       '.....DD.',
     ],
   },
+  // Street cap (baseball style): rounded red dome + darker brim band.
+  // Replaces the old solid-red trapezoid that read as a papal mitre.
+  // MUST stay 10x6 per frame (preload frameWidth/frameHeight lockstep).
+  wear_cap: {
+    pal: { R: [192,57,43], D: [146,43,33] },
+    front: [
+      '..RRRRRR..',
+      '.RRRRRRRR.',
+      'RRRRRRRRRR',
+      'DDDDDDDDDD',
+      '..........',
+      '..........',
+    ],
+    side: [
+      '..RRRRRR..',
+      '.RRRRRRRR.',
+      '.RRRRRRRR.',
+      '..DDDDDDDD',
+      '..........',
+      '..........',
+    ],
+  },
   // Gold crown with red jewels.
   wear_crown: {
     pal: { A: [241,196,15], B: [212,160,23], R: [231,76,60] },
