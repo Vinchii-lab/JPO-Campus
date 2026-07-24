@@ -553,9 +553,12 @@ function isOutdoors(x, y) {
   return !!OUTDOOR[row * MAP_W + col];
 }
 
-// Grass respawn point for rescued players: tile (26, 47) — the lawn just west
-// of the building's main (west) entrance corridor at rows 44-50, verified all
-// Ext grass with no Wall/Furniture for several tiles around. World px follow
+// Grass spawn point: tile (26, 47) — the lawn just west of the building's
+// main (west) entrance corridor at rows 44-50, verified all Ext grass with no
+// Wall/Furniture for several tiles around. Serves double duty: void-rescue
+// respawn for bad saved positions AND the new-registrant spawn (the DB column
+// defaults in lib/db/src/schema/jpoPlayers.ts and the client's SPAWN_X/SPAWN_Y
+// fallback carry the same coords — keep all three in lockstep). World px follow
 // the client's position convention (x = col*48+24, y = row*48+24-BODY_DY).
 const GRASS_SPAWN = { x: 26 * TILE_PX + TILE_PX / 2, y: 47 * TILE_PX + TILE_PX / 2 - BODY_DY };
 // A restored position is "in the void" when its FEET tile has no painted Floor
@@ -1820,7 +1823,7 @@ setInterval(async () => {
               SET coins = coins + $6, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
             WHERE email = $1
             RETURNING coins`,
-          [p.email, Math.round(p.x ?? 5304), Math.round(p.y ?? 2232), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
+          [p.email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
         );
         if (rows[0]) p.coins = rows[0].coins;
       } catch (err) {
@@ -2416,7 +2419,7 @@ io.on("connection", (socket) => {
       // Session-only (no email) registrant: approve into memory only.
       if (reg && !reg.email) {
         const state = {
-          x: 5304, y: 2232, dir: "down", anim: "idle",
+          x: GRASS_SPAWN.x, y: GRASS_SPAWN.y, dir: "down", anim: "idle",
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
@@ -3974,7 +3977,7 @@ io.on("connection", (socket) => {
         try {
           await pool.query(
             `UPDATE jpo_players SET x = $2, y = $3, dir = $4, anim = $5, updated_at = now() WHERE email = $1`,
-            [email, Math.round(p.x ?? 5304), Math.round(p.y ?? 2232), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
+            [email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
           );
         } catch (err) { console.error("disconnect flush failed:", err); }
       } else {
@@ -4047,6 +4050,13 @@ try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS wins jsonb NOT NULL DEFAULT '{}'::jsonb`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS hobby text NOT NULL DEFAULT ''`);
+  // New-registrant spawn moved to the west-entrance lawn (GRASS_SPAWN, July
+  // 2026). The registration INSERT relies on these column defaults, and
+  // drizzle push only runs against dev — so prod gets the new defaults here
+  // (idempotent, no-op once set). Keeps the GRASS_SPAWN three-way lockstep
+  // true in every environment.
+  await pool.query(`ALTER TABLE jpo_players ALTER COLUMN x SET DEFAULT ${GRASS_SPAWN.x}`);
+  await pool.query(`ALTER TABLE jpo_players ALTER COLUMN y SET DEFAULT ${GRASS_SPAWN.y}`);
 } catch (err) {
   console.error("schema nudge (columns) failed:", err);
 }

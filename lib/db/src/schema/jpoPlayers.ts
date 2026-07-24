@@ -61,8 +61,11 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // their tab — would show every rejected person forever.
   dismissed: boolean("dismissed").notNull().default(false),
   isAnnouncer: boolean("is_announcer").notNull().default(false),
-  x: integer("x").notNull().default(5304),
-  y: integer("y").notNull().default(2232),
+  // New-registrant spawn: the lawn by the west entrance (tile 26,47 — same
+  // spot as the server's GRASS_SPAWN void-rescue point). Keep in lockstep
+  // with server.js GRASS_SPAWN and the client's SPAWN_X/SPAWN_Y fallback.
+  x: integer("x").notNull().default(1272),
+  y: integer("y").notNull().default(2253),
   dir: text("dir").notNull().default("down"),
   // 'sit' | 'idle' — persisted so a player who was sitting is restored SEATED
   // (not standing on their chair) after a refresh / server restart.

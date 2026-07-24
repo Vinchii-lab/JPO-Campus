@@ -6634,7 +6634,9 @@
         // Idempotent: a blip resume re-fires 'approved'. If we already have a local
         // player (scene survived the socket reconnect), don't build a second sprite.
         if (this.player) { this.cameras?.main?.startFollow(this.player); return; }
-        const SPAWN_X = 110*48+24, SPAWN_Y = 46*48+24;
+        // New-registrant spawn = the west-entrance lawn (tile 26,47), matching
+        // the server's GRASS_SPAWN and the DB column defaults — keep in lockstep.
+        const SPAWN_X = 26*48+24, SPAWN_Y = 47*48+24-27;
         // Server-restored position (refresh / build-stamp reload / auto-rejoin):
         // spawn THERE, not at the fixed spawn point — the server already restored
         // us at those coords, and starting anywhere else makes our idle stream
