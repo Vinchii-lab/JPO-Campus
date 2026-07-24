@@ -2359,20 +2359,22 @@
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the
     // real price, so drift here only breaks the UI (row that can't be bought
-    // or a wrong price label). The emoji is what floats above the wearer.
+    // or a wrong price label). The emoji is only the shop-row icon now: every
+    // wearable has a WEARABLE_DEFS entry, so the floating-emoji render path
+    // below is a dormant fallback for unknown/legacy ids.
     const COSMETICS = [
-      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 15, desc: 'instant cool' },
-      { id: 'book',         emoji: '📖', name: 'Book',          cost: 20, desc: 'for the office bookworm' },
-      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 30, desc: 'wears above your head' },
-      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 35, desc: 'lost in the music' },
-      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 40, desc: 'ooh là là' },
-      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 45, desc: 'kitchen royalty' },
-      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 60, desc: 'always snapping' },
-      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 75, desc: 'certified gamer' },
-      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 90, desc: 'office rockstar' },
-      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 150, desc: 'real shades, worn ON your face' },
-      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 200, desc: 'pixel cap, worn on your head' },
-      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 250, desc: 'real gold, around your neck' },
+      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 300,  desc: 'gold aviators, on your face' },
+      { id: 'book',         emoji: '📖', name: 'Book',          cost: 350,  desc: 'read while you walk' },
+      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 450,  desc: 'worn over your ears' },
+      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 500,  desc: 'ooh là là, on your head' },
+      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 550,  desc: 'the toque sits tall' },
+      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 700,  desc: 'strapped around your neck' },
+      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 850,  desc: 'mic on, worn for real' },
+      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 1000, desc: 'slung across your body' },
+      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 1200, desc: 'real shades, worn ON your face' },
+      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 1500, desc: 'pixel cap, worn on your head' },
+      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 2000, desc: 'real gold, around your neck' },
+      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 2500, desc: 'jeweled gold, on your head' },
     ];
     const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
 
@@ -2396,6 +2398,17 @@
       shades: { tex: 'wear_shades', dy: 8,   side: 6 },
       cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
       chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
+      // July 2026: the nine former emoji wearables became sprite wearables
+      // too (the emoji path below is now only a fallback for unknown ids).
+      sunglasses:   { tex: 'wear_sunglasses',   dy: 8,   side: 6 },
+      crown:        { tex: 'wear_crown',        dy: -24, side: 3, sideDy: -20 },
+      headphones:   { tex: 'wear_headphones',   dy: -3,  side: 0 },
+      beret:        { tex: 'wear_beret',        dy: -20, side: 3, sideDy: -17 },
+      chefhat:      { tex: 'wear_chefhat',      dy: -26, side: 3, sideDy: -22 },
+      camera:       { tex: 'wear_camera',       dy: 24,  side: 4 },
+      gamerheadset: { tex: 'wear_gamerheadset', dy: -1,  side: 0 },
+      book:         { tex: 'wear_book',         dy: 26,  side: 6, sideDy: 30 },
+      guitar:       { tex: 'wear_guitar',       dy: 22,  side: 2 },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -5517,6 +5530,15 @@
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_crown',        '/assets/wear_crown.png',        { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_headphones',   '/assets/wear_headphones.png',   { frameWidth: 12, frameHeight: 7 });
+        this.load.spritesheet('wear_beret',        '/assets/wear_beret.png',        { frameWidth: 10, frameHeight: 5 });
+        this.load.spritesheet('wear_chefhat',      '/assets/wear_chefhat.png',      { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_camera',       '/assets/wear_camera.png',       { frameWidth: 8,  frameHeight: 6 });
+        this.load.spritesheet('wear_gamerheadset', '/assets/wear_gamerheadset.png', { frameWidth: 12, frameHeight: 8 });
+        this.load.spritesheet('wear_book',         '/assets/wear_book.png',         { frameWidth: 9,  frameHeight: 4 });
+        this.load.spritesheet('wear_guitar',       '/assets/wear_guitar.png',       { frameWidth: 10, frameHeight: 8 });
         this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
 
         CHARACTERS.forEach(char => {

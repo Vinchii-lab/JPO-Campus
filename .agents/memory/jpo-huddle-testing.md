@@ -83,9 +83,9 @@ works, stop debugging game code and drive a browser directly:
   position stays at the restored spawn, and `interact` fails with "Walk a
   little closer" even though the client shows the prompt. Walk legitimately —
   EXCEPT small hops: after idling, a teleport within one move budget
-  (~55–300px, e.g. `player.body.reset(1320, 820)` from spawn onto the chair
-  tile next door) IS accepted server-side and is the fastest way to reach an
-  adjacent interactable.
+  (~55–300px) IS accepted server-side and is the fastest way to reach an
+  adjacent interactable. Never hardcode hop coords (the old 1320,820 "chair
+  next to spawn" died with the map swap) — find targets live instead.
 - Naive greedy arrow-walking gets stuck on furniture. BFS-pathfind in
   `page.evaluate`: find TilemapLayers via
   `scene.children.list.filter(o => o.type === 'TilemapLayer')`, identify by
@@ -115,8 +115,11 @@ distance/bounds, not walls).
 
 The interact scan keys off the FEET tile (`floor(x/48), floor((y+27)/48)`) and
 the spawn tile is NOT adjacent to any chair — pressing E at spawn silently does
-nothing. Small-hop `body.reset` onto a chair tile (see above), wait ~800ms so a
-`playerMove` lands, then `page.keyboard.press('KeyE')` sits reliably (puppeteer
+nothing. Find the nearest seat LIVE in `page.evaluate`: scan the furniture
+layer and keep tiles where `_gameScene.isFurnSeat(tile.index, c, r)` is true
+(world px = `c*48+24, r*48+24-27`), micro-hop there (≤42px per ~360ms step),
+wait ~800ms so a `playerMove` lands, then `page.keyboard.press('KeyE')` sits
+reliably (verify via `player.anims.currentAnim.key` containing `sit`) (puppeteer
 key delivery verified via `keyE.isDown` while held). Gotcha: `eHint.text` keeps
 its last/default string while hidden — detect an available interaction with
 `eHint.visible`, never the text. `_gameScene`, `_playerCoins`, `tryRegister()`,

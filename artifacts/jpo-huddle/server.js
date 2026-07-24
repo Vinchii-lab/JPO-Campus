@@ -160,24 +160,25 @@ const GRACE_MS = 10_000;
 // equipped choice lives in jpo_players.equipped_cosmetic; '' = nothing worn).
 // Buying auto-equips; `equipCosmetic` switches or takes off without repurchase.
 // Ids MUST match the client COSMETICS catalog in public/index.html (it maps
-// ids to emoji/names for the shop UI and the overhead overlay).
-// Prices are balanced against the +2/min earn rate: cheapest reachable in one
-// session (players start with 50), fanciest takes a few days of hanging out.
+// ids to names/prices for the shop UI; the emoji there is only the row icon).
+// ALL wearables are sprite wearables since July 2026 — drawn ON the body
+// client-side (real pixel art pinned to the avatar, not a floating emoji).
+// Premium price ladder (vs the +2/min earn rate: cheapest ≈ a couple days of
+// hanging out, crown is a long-term goal); server is authoritative — client
+// drift only mislabels the shop row.
 const SHOP = {
-  sunglasses:   15,
-  book:         20,
-  crown:        30,
-  headphones:   35,
-  beret:        40,
-  chefhat:      45,
-  camera:       60,
-  gamerheadset: 75,
-  guitar:       90,
-  // Sprite wearables — drawn ON the body client-side (real pixel art, not a
-  // floating emoji). Same buy/equip mechanics as every other cosmetic.
-  shades:       150,
-  cap:          200,
-  chain:        250,
+  sunglasses:   300,
+  book:         350,
+  headphones:   450,
+  beret:        500,
+  chefhat:      550,
+  camera:       700,
+  gamerheadset: 850,
+  guitar:       1000,
+  shades:       1200,
+  cap:          1500,
+  chain:        2000,
+  crown:        2500,
 };
 
 // ── Pets catalog ─────────────────────────────────────────────────────────────
