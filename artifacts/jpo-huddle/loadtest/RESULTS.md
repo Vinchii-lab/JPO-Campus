@@ -1,10 +1,27 @@
-# Load test results — 2026-07-09
+# Load test results
 
 Stepped runs on the 2-vCPU workspace, 60s measurement window each, spawn mode
 (harness spawns its own server on port 21999 with `LOADTEST_METRICS=1`).
 Full JSON reports in `results/`.
 
-## Verdict
+## 2026-07-24 — 200-player probe
+
+**FAIL at 200 players on this 2-vCPU box** (report:
+`2026-07-24T13-14-19-083Z-n200.json`): echo p95 259 ms, server lag p99
+393 ms, teleport rejects 0.644 %. CPU was pegged (97 % avg / 103 % max,
+harness + server sharing the same 2 vCPUs), so as at n=150 part of the
+failure is harness scheduling noise — but unlike n=150 the SERVER-side lag
+signal also blew the threshold, so this is a real ceiling, not purely a rig
+artifact. Healthy signals even at 200: all 200 approved, zero disconnects,
+delivery of accepted moves 100 %, RSS 227 MB, coin tick 5 ms.
+
+The dominant cost is the O(n²) movement fan-out: every accepted move
+broadcasts to all 200 clients → ~132 k `playerMoved` messages/s observed.
+Path to 200+: (1) deploy on a bigger Reserved VM (single socket.io process —
+autoscale would split the office), and/or (2) interest-area filtering so
+moves only go to players near you (~10× fan-out cut at this map size).
+
+## 2026-07-09 verdict (100-player target)
 
 **PASS at the 100-player target — no server changes needed.** The server
 stayed healthy at every step; the only degradation up to 100 players is
