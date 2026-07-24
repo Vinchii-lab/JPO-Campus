@@ -148,6 +148,17 @@ only — boards stay cardinal). Diagonal approaches face `lastDir`. The server's
 allowance already covers the ~68px diagonal snap; don't widen the scan beyond 1 tile without
 checking that allowance.
 
+## Office desk pods must be the WORKSTATION pattern — chairs "behind the computer" (owner, July 2026)
+Claims had rows built as plain Furniture chairs with a Furniture desk-front in the row below (no
+on-cell monitor); the owner reported it as a bug ("the chairs should be behind the computer") and
+all such rows were converted to the standard workstation layout (chair + monitor Wall tile on-cell,
+desk-front Wall tile below). I initially "fixed" it in the WRONG direction (converted the one
+correct workstation row to the plain pattern) — the owner laughed and corrected me.
+**Why:** the tuck-behind-the-monitor workstation look is the office-wide standard the owner loves;
+a chair rendered fully in front of its desk reads as broken to them.
+**How to apply:** any new office desk row goes on the workstation pattern; if a pod looks
+inconsistent, the workstation-style row is the correct one, not the aberration.
+
 ## There is no separate "CEO desk" / "executive desk" sprite
 The owner refers to the seated desks by role ("manager desk", "CEO desk", "executive desk"), but the
 map only has TWO baked-chair desk sprites: the blue and green 2×3 families in `DESK_FAMILIES`. Both
