@@ -184,6 +184,159 @@ const SPRITES = {
       '..CCCCC..',
     ],
   },
+  // ── July 2026: six wearables adapted from the MV_Accessories pack ──────
+  // (artifacts/api-server/MV_Accessories). MV art is 48px-native, ~3x finer
+  // than the game's 16px texel density, so these are hand-redrawn from
+  // downscaled+quantized extractions (tools note: /tmp/wearables/mv-extract.cjs
+  // was the throwaway extractor), following the same flat-color contract.
+
+  // Round scholarly spectacles (sheet 10): brown rims, CLEAR lenses — the
+  // transparent centers show the wearer's eyes (unlike sunglasses/shades).
+  wear_spectacles: {
+    pal: { F: [82, 52, 34], G: [205, 225, 240] },
+    front: [
+      '.FF..FF.',
+      'F..FF..F',
+      '.FF..FF.',
+    ],
+    side: [
+      '....FFF.',
+      'FFFFFGFF',
+      '....FFF.',
+    ],
+  },
+  // Blue-grey knit beanie (sheet 3): soft dome, light stitch highlight,
+  // darker folded cuff hugging the head.
+  wear_beanie: {
+    pal: { A: [100, 108, 138], L: [140, 148, 175], B: [64, 70, 90] },
+    front: [
+      '..AAAAAA..',
+      '.AAAALAAA.',
+      'AAAALAAAAA',
+      'AAAAAAAAAA',
+      'BBBBBBBBBB',
+      'BBBBBBBBBB',
+    ],
+    side: [
+      '..AAAAAA..',
+      '.AAAAALAA.',
+      'AAAAALAAAA',
+      'AAAAAAAAAA',
+      'BBBBBBBBBB',
+      'BBBBBBBBBB',
+    ],
+  },
+  // Tan newsboy flat cap (sheet 2): rounded tweed dome, green sprig tucked
+  // in the band, dark front brim.
+  wear_flatcap: {
+    pal: { T: [168, 148, 128], D: [126, 108, 92], G: [72, 130, 96], B: [62, 56, 66] },
+    front: [
+      '..TTTTTT..',
+      '.TTTTTGTT.',
+      'TTTTTTTTTT',
+      'TTTTTTTTTT',
+      'DDDDDDDDDD',
+      '..BBBBBB..',
+    ],
+    side: [
+      '..TTTTTT..',
+      '.TTTTTTGT.',
+      'TTTTTTTTTT',
+      'TTTTTTTTTT',
+      'DDDDDDDDDD',
+      '.....BBBBB',
+    ],
+  },
+  // Brown wide-brim ranger hat (sheet 17): tall dome, orange band, full brim
+  // with a shaded underside.
+  wear_rangerhat: {
+    pal: { H: [150, 96, 70], S: [112, 70, 52], O: [230, 150, 40] },
+    front: [
+      '....HHHH....',
+      '...HHHHHH...',
+      '..HHHHHHHH..',
+      '..OOOOOOOO..',
+      'HHHHHHHHHHHH',
+      '.SSSSSSSSSS.',
+    ],
+    side: [
+      '....HHHH....',
+      '...HHHHHH...',
+      '..HHHHHHHH..',
+      '..OOOOOOOO..',
+      '.HHHHHHHHHHH',
+      '..SSSSSSSSS.',
+    ],
+  },
+  // Gold cat-ear headset (sheet 8): dark band with pointy ears (light inner),
+  // chunky yellow cups landing OUTSIDE the head like the other headsets.
+  wear_catears: {
+    pal: { K: [52, 52, 66], Y: [240, 205, 70], L: [255, 230, 120] },
+    front: [
+      '.KK......KK.',
+      '.KLK....KLK.',
+      '.KKK....KKK.',
+      '..KKKKKKKK..',
+      '..K......K..',
+      'YY........YY',
+      'YY........YY',
+      'YY........YY',
+    ],
+    side: [
+      '...KK.......',
+      '...KLK......',
+      '..KKKK......',
+      '..K.........',
+      '..K.........',
+      '..YYY.......',
+      '..YYY.......',
+      '..YYY.......',
+    ],
+  },
+  // Sci-fi helmet (sheet 19): full-head steel dome with a glowing blue visor
+  // band; the ONLY wearable that covers the whole head (front + side).
+  wear_scifihelmet: {
+    // Full-head bucket: 13x16 so it actually encloses the chibi head
+    // (hair top ≈ -31 … chin ≈ +14 at scale 3) with the visor band landing
+    // over the eyes (≈ +8). The ONLY wearable that covers the whole head.
+    pal: { E: [70, 72, 96], M: [105, 108, 132], H: [132, 136, 162], V: [110, 190, 240] },
+    front: [
+      '....EEEEE....',
+      '..EEMHHHMEE..',
+      '.EMMHMMMMMME.',
+      '.EMMHMMMMMME.',
+      'EMMMHMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EEVVVVVVVVVEE',
+      'EVVVVVVVVVVVE',
+      'EEVVVVVVVVVEE',
+      'EMMMMMMMMMMME',
+      '.EEEEEEEEEEE.',
+    ],
+    side: [
+      '....EEEEE....',
+      '..EEMHHHMEE..',
+      '.EMMMHMMMMME.',
+      '.EMMMHMMMMME.',
+      'EMMMMHMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMMMMMMME',
+      'EMMMMMEVVVVEE',
+      'EMMMMMEVVVVVE',
+      'EMMMMMEVVVVEE',
+      'EMMMMMMMMMMME',
+      '.EEEEEEEEEEE.',
+    ],
+  },
   // Acoustic guitar slung across the torso: tan neck up-right, brown body
   // low-left, dark soundhole.
   wear_guitar: {

@@ -2365,14 +2365,20 @@
     const COSMETICS = [
       { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 300,  desc: 'gold aviators, on your face' },
       { id: 'book',         emoji: '📖', name: 'Book',          cost: 350,  desc: 'read while you walk' },
+      { id: 'spectacles',   emoji: '👓', name: 'Round Specs',   cost: 400,  desc: 'scholarly round frames, clear lenses' },
       { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 450,  desc: 'worn over your ears' },
       { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 500,  desc: 'ooh là là, on your head' },
       { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 550,  desc: 'the toque sits tall' },
+      { id: 'beanie',       emoji: '🧶', name: 'Knit Beanie',   cost: 600,  desc: 'cozy knit, worn low' },
       { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 700,  desc: 'strapped around your neck' },
+      { id: 'flatcap',      emoji: '🍀', name: 'Newsboy Cap',   cost: 750,  desc: 'vintage tweed with a lucky sprig' },
       { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 850,  desc: 'mic on, worn for real' },
+      { id: 'rangerhat',    emoji: '🤠', name: 'Ranger Hat',    cost: 950,  desc: 'wide brim, ready for adventure' },
       { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 1000, desc: 'slung across your body' },
       { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 1200, desc: 'real shades, worn ON your face' },
+      { id: 'catears',      emoji: '😺', name: 'Cat-Ear Headset', cost: 1300, desc: 'golden ears, matching cups' },
       { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 1500, desc: 'pixel cap, worn on your head' },
+      { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 1800, desc: 'full visor, straight from 3024' },
       { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 2000, desc: 'real gold, around your neck' },
       { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 2500, desc: 'jeweled gold, on your head' },
     ];
@@ -2409,6 +2415,14 @@
       gamerheadset: { tex: 'wear_gamerheadset', dy: -1,  side: 0 },
       book:         { tex: 'wear_book',         dy: 26,  side: 6, sideDy: 30 },
       guitar:       { tex: 'wear_guitar',       dy: 22,  side: 2 },
+      // July 2026: six wearables adapted from the MV_Accessories pack
+      // (redrawn to game texel density in tools/wearable-gen.cjs).
+      spectacles:   { tex: 'wear_spectacles',   dy: 8,   side: 6 },
+      beanie:       { tex: 'wear_beanie',       dy: -22, side: 3, sideDy: -18 },
+      flatcap:      { tex: 'wear_flatcap',      dy: -21, side: 3, sideDy: -17 },
+      rangerhat:    { tex: 'wear_rangerhat',    dy: -22, side: 3, sideDy: -18 },
+      catears:      { tex: 'wear_catears',      dy: -4,  side: 0 },
+      scifihelmet:  { tex: 'wear_scifihelmet',  dy: -7,  side: 2, sideDy: -7 },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -5541,6 +5555,12 @@
         this.load.spritesheet('wear_gamerheadset', '/assets/wear_gamerheadset.png', { frameWidth: 12, frameHeight: 8 });
         this.load.spritesheet('wear_book',         '/assets/wear_book.png',         { frameWidth: 9,  frameHeight: 4 });
         this.load.spritesheet('wear_guitar',       '/assets/wear_guitar.png',       { frameWidth: 10, frameHeight: 8 });
+        this.load.spritesheet('wear_spectacles',   '/assets/wear_spectacles.png',   { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_beanie',       '/assets/wear_beanie.png',       { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_flatcap',      '/assets/wear_flatcap.png',      { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_rangerhat',    '/assets/wear_rangerhat.png',    { frameWidth: 12, frameHeight: 6 });
+        this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 12, frameHeight: 8 });
+        this.load.spritesheet('wear_scifihelmet',  '/assets/wear_scifihelmet.png',  { frameWidth: 13, frameHeight: 16 });
         this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
 
         CHARACTERS.forEach(char => {
