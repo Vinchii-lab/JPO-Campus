@@ -5539,8 +5539,6 @@
         // Environmental animation sheets
         this.load.spritesheet('punch_bag_idle', '/assets/punch_bag_idle.png', { frameWidth: 32, frameHeight: 32 });  // 6 frames, bag swinging
         this.load.spritesheet('punch_bag_hit',  '/assets/punch_bag_hit.png',  { frameWidth: 32, frameHeight: 32 });  // 6 frames, faster swing on hit
-        this.load.spritesheet('anim_treadmill', '/assets/anim_treadmill.png', { frameWidth: 48, frameHeight: 64 });  // 3 frames, belt moving
-        this.load.spritesheet('anim_fridge',    '/assets/anim_fridge.png',    { frameWidth: 32, frameHeight: 48 });  // 7 frames, door cycle
       }
 
       create() {
@@ -5562,9 +5560,6 @@
         // Environmental animations — looping idle variants
         this.anims.create({ key: 'punch_bag_idle', frames: this.anims.generateFrameNumbers('punch_bag_idle', {start:0, end:5}), frameRate:6, repeat:-1 });
         this.anims.create({ key: 'punch_bag_hit',  frames: this.anims.generateFrameNumbers('punch_bag_hit',  {start:0, end:5}), frameRate:14, repeat:0  });
-        this.anims.create({ key: 'treadmill_run',  frames: this.anims.generateFrameNumbers('anim_treadmill', {start:0, end:2}), frameRate:8, repeat:-1 });
-        // Fridge: loop frames 0-3 (idle humming — door barely moves)
-        this.anims.create({ key: 'fridge_idle',    frames: this.anims.generateFrameNumbers('anim_fridge',    {start:0, end:3}), frameRate:4, repeat:-1, yoyo:true });
 
         // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
         // The Wall layer holds the upper/back parts of desks & chairs, so it must render
@@ -5725,19 +5720,6 @@
           this._objHl[o.id] = rect;
         }
 
-        // Coffee machines visibly brewing: steam puffs loop above both machines,
-        // client-only flavor (no protocol change — the server never knows). The
-        // rects/texts live for the whole scene, so the repeat -1 tweens are safe.
-        for (const o of OFFICE_OBJECTS) {
-          if (!o.id.startsWith('coffee_machine')) continue;
-          for (let i = 0; i < 2; i++) {
-            const sx = o.hl.x + o.hl.w * (i === 0 ? 0.32 : 0.68);
-            const sy = o.hl.y + 12;
-            const puff = this.add.text(sx, sy, '💨', { fontSize: '15px' }).setOrigin(0.5, 1).setAlpha(0).setDepth(450);
-            this.tweens.add({ targets: puff, y: sy - 34, alpha: { from: 0.8, to: 0 }, duration: 2400, delay: i * 1200, repeat: -1, ease: 'Sine.easeOut' });
-          }
-        }
-
         // ── Environmental animated overlays ────────────────────────────────
         // Placed here (after tilemap layers, before any player sprite) so they
         // render above the floor/furniture tiles but below all character sprites
@@ -5760,26 +5742,6 @@
             this._punchBags.push({ x: bx, y: by, sprite: spr });
           }
 
-          // TREADMILLS — animate the belt on the 3 × (3×3-tile) treadmill units
-          // at c193-201, r33-35. Sprite is 48×64 source; squished to 144×144
-          // (3×3 tiles) with setDisplaySize so the aspect ratio matches the static art.
-          for (const startCol of [193, 196, 199]) {
-            const tx = startCol * T + T * 1.5;  // center of 3-tile column
-            const ty = 33 * T + T * 1.5;        // center of r33-35
-            this.add.sprite(tx, ty, 'anim_treadmill')
-              .setOrigin(0.5, 0.5).setDisplaySize(T * 3, T * 3)
-              .play('treadmill_run');
-          }
-
-          // DRINK COOLERS — two stacks at c115-116, r63-65 and r68-70.
-          // Sprite frame 32×48 source → 96×144 world = exactly 2×3 tiles at scale 3.
-          for (const startRow of [63, 68]) {
-            const fx = 115 * T + T;         // center of 2-tile column c115-116
-            const fy = startRow * T + T * 1.5; // center of 3-tile row
-            this.add.sprite(fx, fy, 'anim_fridge')
-              .setOrigin(0.5, 0.5).setScale(3)
-              .play('fridge_idle');
-          }
         }
 
         this.otherPlayers    = {};
