@@ -1936,6 +1936,25 @@
         hl:{ x:104*48, y:74*48, w:10*48, h:2*48 } }, // cafeteria serving line: food display cases (Wall, c104-110) + checkout counter (Furniture 3831-3849, c111-113), r74-75 — PAID meals menu
       { id:'snack_counter',   x:9048, y:1968, r:220, label:'Grab a gym snack', touch:'Eat',
         hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor) — still FREE
+      // ── Gym animated equipment (LimeZu strips; server broadcasts gymFx) ──
+      // The bags sway on an idle loop; E throws a punch everyone sees. The
+      // treadmill belts spin for a few seconds per run. The static Furniture
+      // tiles are swapped for animated sprites at create() — see the gym
+      // block there. Coords MUST match OBJECTS in server.js.
+      { id:'punch_bag1',      x:9432, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:196*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c196, r16-18)
+      { id:'punch_bag2',      x:9576, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:199*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c199, r16-18)
+      { id:'punch_bag3',      x:9720, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:202*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c202, r16-18)
+      { id:'punch_bag4',      x:9864, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:205*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c205, r16-18)
+      { id:'treadmill1',      x:9336, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:193*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c193-195, r33-35)
+      { id:'treadmill2',      x:9480, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:196*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c196-198, r33-35)
+      { id:'treadmill3',      x:9624, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:199*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c199-201, r33-35)
       // ── Cafeteria kitchen: PAID food stations (server FOOD_STATIONS/FOOD_MENUS).
       // ORDER MATTERS: the E-scan above is FIRST-MATCH, so produce_crates MUST
       // stay before the grill banks (the crates sit inside the appliance bank's
@@ -2558,6 +2577,7 @@
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
     const PET_GAP     = 36; // px the pet trails behind its owner (follow-at-distance)
+    const PET_PX      = 42; // longest-side px of a pet sprite in the world (~half a player)
     const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
     let _equippedPet = '';  // active pet ('' = none); server-authoritative
 
@@ -3360,6 +3380,25 @@
       }
     });
 
+    // Gym equipment (punch bags / treadmills): everyone plays the machine's
+    // animation strip; the athlete gets an emote bubble like other effects.
+    socket.on('gymFx', (payload) => {
+      const { id, object, kind } = payload || {};
+      const scene = window._gameScene;
+      if (!scene || (kind !== 'punch' && kind !== 'run')) return;
+      if (typeof object === 'string') scene._gymFx(object, kind);
+      const bubble = kind === 'punch' ? '🥊' : '🏃';
+      if (id === socket.id) {
+        if (scene.player) scene._showEmoteBubble(scene.player, bubble, true);
+      } else {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, bubble, false);
+        }
+      }
+    });
+
     // Countdown chip under the coin HUD while the boost is live.
     let _boostTimer = null;
     let _boostEmoji = '☕';   // what the current boost came from (☕ or 🍕)
@@ -3432,7 +3471,18 @@
       const row = document.createElement('div');
       row.className = 'shop-item';
       const icon = document.createElement('div');
-      icon.className = 'shop-item-icon'; icon.textContent = c.emoji;
+      icon.className = 'shop-item-icon';
+      if (c.id && c.id.startsWith('pet_')) {
+        // Pets show their actual sprite in the shop (emoji is the fallback
+        // elsewhere); crisp scaling for pixel art.
+        const im = document.createElement('img');
+        im.src = `/assets/pets/${c.id}.png`;
+        im.alt = c.name;
+        im.style.cssText = 'width:34px;height:34px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;';
+        icon.append(im);
+      } else {
+        icon.textContent = c.emoji;
+      }
       const info = document.createElement('div');
       info.className = 'shop-item-info';
       const nm = document.createElement('div');
@@ -5924,6 +5974,18 @@
         // Custom furniture sprite (not part of the Tiled map): the Market water
         // cooler, drawn against the north wall. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
+        // Gym animation strips (LimeZu): bag sway + punch, treadmill belt.
+        // Bag frames are 32px wide but the bag art fills only the LEFT 16px
+        // column (the right half is sway room); treadmill frames carry 2px of
+        // top padding vs the static tile art — see the gym block in create().
+        this.load.spritesheet('punch_bag_idle', '/assets/punch_bag_idle.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('punch_bag_hit',  '/assets/punch_bag_hit.png',  { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('anim_treadmill', '/assets/anim_treadmill.png', { frameWidth: 48, frameHeight: 64 });
+        // Pet companion sprites: one trimmed 64px PNG per PETS catalog id,
+        // drawn facing RIGHT (_stepPet flips toward the walk direction).
+        // Texture key = the pet id; _makePet falls back to the emoji if a
+        // texture is missing, so a failed load never breaks joining.
+        for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
@@ -6056,6 +6118,43 @@
         coolerTop.setCrop(0, 0, 16, 16);
         this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
         this.physics.add.existing(this._coolerBlock, true);
+
+        // ── Gym animated equipment (LimeZu strips) ──────────────────────
+        // The static Furniture tiles for the 4 hanging bags (bag art r17-18;
+        // the r16 hook stays static) and the 3 treadmills (r33-35) are
+        // REPLACED at runtime by animated sprites: the bag strip's left 16px
+        // column matches the static tile art almost pixel-for-pixel, and the
+        // treadmill strip is the same machine drawn 2 source px lower (hence
+        // the -6 world px offset at scale 3). removeTileAt also drops the
+        // tile's collision, so each footprint gets a static zone (colliders
+        // added with the player's, like _coolerBlock). Insertion order keeps
+        // the sprites above the tile layers and below players (created
+        // later) — same rules as the water cooler. Keyed by server object id
+        // so gymFx can find the right machine.
+        this.anims.create({ key: 'bag_idle',  frames: this.anims.generateFrameNumbers('punch_bag_idle', { start: 0, end: 5 }), frameRate: 6,  repeat: -1 });
+        this.anims.create({ key: 'bag_hit',   frames: this.anims.generateFrameNumbers('punch_bag_hit',  { start: 0, end: 5 }), frameRate: 14, repeat: 0 });
+        this.anims.create({ key: 'tread_run', frames: this.anims.generateFrameNumbers('anim_treadmill', { start: 0, end: 2 }), frameRate: 8,  repeat: -1 });
+        this._gymBlocks = [];
+        this._gymSprites = {};
+        [196, 199, 202, 205].forEach((c, i) => {
+          furnitureLayer.removeTileAt(c, 17);
+          furnitureLayer.removeTileAt(c, 18);
+          const s = this.add.sprite(c*48, 17*48, 'punch_bag_idle', 0).setOrigin(0, 0).setScale(3);
+          s.play({ key: 'bag_idle', startFrame: (i * 2) % 6 });   // stagger the sway
+          this._gymSprites['punch_bag' + (i + 1)] = s;
+          const z = this.add.zone(c*48 + 24, 18*48, 48, 96);      // rows 17-18
+          this.physics.add.existing(z, true);
+          this._gymBlocks.push(z);
+        });
+        [193, 196, 199].forEach((c0, i) => {
+          for (let r = 33; r <= 35; r++)
+            for (let c = c0; c < c0 + 3; c++) furnitureLayer.removeTileAt(c, r);
+          const s = this.add.sprite(c0*48, 33*48 - 6, 'anim_treadmill', 0).setOrigin(0, 0).setScale(3);
+          this._gymSprites['treadmill' + (i + 1)] = s;            // belt parked until a run
+          const z = this.add.zone(c0*48 + 72, 33*48 + 72, 144, 144);  // the 3x3 footprint
+          this.physics.add.existing(z, true);
+          this._gymBlocks.push(z);
+        });
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
@@ -6458,6 +6557,7 @@
         this.physics.add.collider(this.player, this.wallLayer);
         this.physics.add.collider(this.player, this.furnitureLayer);
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
+        if (this._gymBlocks) for (const z of this._gymBlocks) this.physics.add.collider(this.player, z);
         this.physics.add.collider(this.player, this.floorLayer);   // solid floor-painted walls (L&D bottom band, gid 1237)
 
         this.localNameTag = this._makeNameTag(startX, startY, _playerName);
@@ -6783,7 +6883,13 @@
       // bodies (default 0) but below seat occluders (900) and nametags (990).
       _makePet(pet, x, y) {
         const emoji = PET_EMOJI[pet];
-        if (!emoji) return null;
+        if (!emoji) return null;                    // unknown id — not a pet
+        if (this.textures.exists(pet)) {            // pixel-art sprite (preloaded per PETS id)
+          const img = this.add.image(x - PET_GAP, y + 10, pet).setOrigin(0.5, 1).setDepth(2);
+          img.setScale(PET_PX / Math.max(img.width, img.height));
+          return img;
+        }
+        // Fallback: texture failed to load — the old emoji companion.
         return this.add.text(x - PET_GAP, y + 10, emoji, { fontSize: '22px', resolution: 2 })
           .setOrigin(0.5, 1).setDepth(2);
       }
@@ -6805,8 +6911,12 @@
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
         if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
-          petObj.x += (px + (dx / dist) * gap - petObj.x) * k;
+          const mx = (px + (dx / dist) * gap - petObj.x) * k;
+          petObj.x += mx;
           petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;
+          // Sprite pets are drawn facing RIGHT; flip toward the walk
+          // direction (idle keeps the last facing). Tiny drifts don't flip.
+          if (petObj.setFlipX && Math.abs(mx) > 0.3) petObj.setFlipX(mx < 0);
         }
       }
 
@@ -6832,6 +6942,30 @@
           this.tweens.add({
             targets: puff, y: cy - 52, alpha: 0, delay: i * 240, duration: 1000,
             ease: 'Sine.easeOut', onComplete: () => puff.destroy(),
+          });
+        }
+      }
+
+      // Gym equipment fx (server gymFx broadcast): a punch plays the bag's
+      // hit strip once then falls back to the idle sway; a treadmill run
+      // spins the belt for a few seconds then parks on frame 0. The stop
+      // timer is per-machine so overlapping runs just extend the spin, and
+      // the hit listener is re-armed per punch (off before once) so rapid
+      // punches never double-fire the fallback.
+      _gymFx(object, kind) {
+        const s = this._gymSprites?.[object];
+        if (!s) return;
+        if (kind === 'punch') {
+          s.off('animationcomplete-bag_hit');
+          s.play('bag_hit');
+          s.once('animationcomplete-bag_hit', () => s.play('bag_idle'));
+        } else if (kind === 'run') {
+          s.play('tread_run');
+          if (s._stopTimer) s._stopTimer.remove();
+          s._stopTimer = this.time.delayedCall(8000, () => {
+            s.anims.stop();
+            s.setTexture('anim_treadmill', 0);
+            s._stopTimer = null;
           });
         }
       }

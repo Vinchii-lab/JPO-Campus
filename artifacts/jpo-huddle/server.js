@@ -274,6 +274,19 @@ const OBJECTS = {
   fridge:          { x: 5592, y: 4008, r: 190 }, // drink-cooler stack, cafeteria serving area (c116, r82-84)
   kitchen_island:  { x: 5232, y: 3624, r: 240 }, // cafeteria serving line: display cases + checkout counter (c104-113, r74-75)
   snack_counter:   { x: 9048, y: 1968, r: 220 }, // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
+  // ── Gym animated equipment (LimeZu animation strips) ────────────────────
+  // Pure flavor — no coins, no boost, so no cooldown map either (interactBucket
+  // is the spam guard). interact re-checks proximity, then broadcasts gymFx so
+  // EVERY client plays the strip (bag punch / belt run). Coords MUST match
+  // OFFICE_OBJECTS; the client replaces the static Furniture tiles with the
+  // animated sprites at create() (see the gym block in index.html).
+  punch_bag1:      { x: 9432, y: 888, r: 100 },  // hanging bag (c196, r16-18)
+  punch_bag2:      { x: 9576, y: 888, r: 100 },  // hanging bag (c199, r16-18)
+  punch_bag3:      { x: 9720, y: 888, r: 100 },  // hanging bag (c202, r16-18)
+  punch_bag4:      { x: 9864, y: 888, r: 100 },  // hanging bag (c205, r16-18)
+  treadmill1:      { x: 9336, y: 1656, r: 150 }, // treadmill (c193-195, r33-35)
+  treadmill2:      { x: 9480, y: 1656, r: 150 }, // treadmill (c196-198, r33-35)
+  treadmill3:      { x: 9624, y: 1656, r: 150 }, // treadmill (c199-201, r33-35)
   // ── Cafeteria kitchen: PAID food stations (menus in FOOD_MENUS, routing in
   // FOOD_STATIONS — fridge + kitchen_island above are paid stations too).
   // Wide furniture runs get 2-3 anchors sharing one menu.
@@ -3719,6 +3732,21 @@ io.on("connection", (socket) => {
       const line = WATER_LINES[waterLineIdx++ % WATER_LINES.length];
       socket.emit("waterCooler", { line });
       io.emit("objectEffect", { id: socket.id, kind: "water" });
+
+    } else if (object.startsWith("punch_bag") || object.startsWith("treadmill")) {
+      // Gym equipment: pure flavor (no coins/boost), so no per-person cooldown
+      // — interactBucket already throttles spam, and rapid re-punches are the
+      // fun part. kind tells clients which strip to play; id drives the emote
+      // bubble over the athlete. Same After Dark isolation as chat/emotes: a
+      // lit outsider's 🥊/🏃 bubble is a position-anchored signal that must
+      // not reach alive participants in the dark.
+      const kind = object.startsWith("punch_bag") ? "punch" : "run";
+      const fx = { id: socket.id, object, kind };
+      if (round && round.state === "active" && !inTheDark(socket.id)) {
+        for (const pid of Object.keys(players)) if (!inTheDark(pid)) io.to(pid).emit("gymFx", fx);
+      } else {
+        io.emit("gymFx", fx);
+      }
 
     } else if (Object.hasOwn(FOOD_STATIONS, object)) {
       // Cafeteria kitchen stations: browsing is FREE (interactBucket is the

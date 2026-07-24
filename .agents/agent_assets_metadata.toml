@@ -1,5 +1,40 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "dZf1yUxmr5qCPfsbt9AsR"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_duck.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "jovw9z7K1mx2UGtvNXdS_"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_cat.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "xk8fLsN02_AvkWTM_26oU"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_dog.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Dh25qaKkXlwFt3zDcqaqd"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_bunny.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "UTQmTpohVTZzXAISWikvN"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_turtle.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "uuuNbCuyO5VMVM9cJWlsE"
+uri = "file://artifacts/jpo-huddle/public/assets/pets/pet_dragon.png"
+type = "image"
+title = "generated_image"
 
 [[outputs]]
 id = "2tGIjzMTBBjBk5ewMEGvo"

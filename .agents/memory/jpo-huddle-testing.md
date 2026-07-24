@@ -96,20 +96,20 @@ works, stop debugging game code and drive a browser directly:
   `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
   ~(dist/220)*1000 ms per waypoint. Works first try.
 
-# Seeding x/y does NOT position a BROWSER test player — micro-hop walk instead
+# Seeding x/y DOES position a BROWSER test player now (since the July 2026 seated-restore fix)
 
-The real client always spawns at the default spawn point and its FIRST
-`playerMove` re-baselines the server (bounds-only check), overwriting any
-seeded DB coords — so "seed the row next to the object" only works for
-HEADLESS socket tests (no client, restored p.x/p.y stands). In puppeteer the
-avatar is at spawn regardless of the seed, and a later long teleport is
-rejected server-side.
+The `approved` payload carries the restored x/y and the client spawns there
+(fallback to SPAWN only when coords are absent/non-finite), and the FIRST
+`playerMove` is a bounds-only baseline — so seeding the row's x/y next to the
+test object works for BOTH headless socket tests AND puppeteer browser runs
+(verified July 2026: a browser client seeded at the Gym spawned at the Gym).
+An older note here claimed browser clients always spawn at default spawn —
+that was true before the restore fix and is now stale.
 
-**How to apply:** for far-away objects, drive a micro-hop loop from node
-(`p.body.reset` toward the target, ≤43px per step, ~360ms apart — ~14s per
-1700px); each hop is inside the move budget so the server accepts it, and the
-E-hint/interact both work on arrival. Straight-line is fine (server checks
-distance/bounds, not walls).
+**How to apply:** seed `x`/`y` in the same INSERT/UPDATE as `approved`; if the
+avatar still needs fine positioning after load, micro-hop (`p.body.reset`
+≤43px per step, ~360ms apart — each hop fits the move budget). Long teleports
+are still rejected server-side.
 
 # Sitting a test player: stand ON/next to the chair tile first
 
