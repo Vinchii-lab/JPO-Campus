@@ -4347,7 +4347,7 @@
     let _c4MyDisc = '?';           // Connect Four: 'R' | 'Y'
     let _poolMyTurn = false;       // Billiards: my cue, meter running
     let _poolArmAt = 0;            // performance.now() when my shot was armed (meter epoch)
-    let _poolPeriod = 1600;        // meter sweep ms — server-sent, mirrors POOL_PERIOD_MS
+    let _poolPeriod = 1150;        // meter sweep ms — server-sent, mirrors POOL_PERIOD_MS
     let _poolRaf = null;           // marker animation frame
     let _pongSide = 'left';        // which paddle line is mine
     let _pongCourt = { w: 100, h: 60, padX: 4, padHalf: 7 };  // server-sent court dims
@@ -5430,7 +5430,7 @@
         panel.classList.add('aiming');
         btn.disabled = false;
         rpsEl('rps-match-status').textContent = '🎱 Your shot — stop the slider in the green!';
-        _rpsCountdown(rpsEl('rps-match-count'), turnMs || 12000, 'Shot clock: ');
+        _rpsCountdown(rpsEl('rps-match-count'), turnMs || 9000, 'Shot clock: ');
         _poolAnimate();
       } else {
         panel.classList.remove('aiming');

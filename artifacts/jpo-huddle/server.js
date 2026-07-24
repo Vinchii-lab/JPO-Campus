@@ -1010,11 +1010,11 @@ const C4_COLS    = 7;           // Connect Four board
 const C4_ROWS    = 6;
 const C4_MOVE_MS = 20_000;      // per-move clock — the slow side forfeits (mirrors TTT)
 const POOL_TARGET      = 5;      // Billiards: balls to sink to win
-const POOL_TURN_MS     = 12_000; // shot clock — the slow side forfeits (mirrors TTT)
-const POOL_PERIOD_MS   = 1_600;  // one full meter sweep, 0 → 100 → 0
+const POOL_TURN_MS     = 9_000;  // shot clock — the slow side forfeits (mirrors TTT)
+const POOL_PERIOD_MS   = 1_150;  // one full meter sweep, 0 → 100 → 0
 const POOL_SPOT_HW     = 9;      // sweet-spot half-width with 0 balls sunk…
 const POOL_SPOT_MIN_HW = 5;      // …shrinking by 1 per sunk ball down to this
-const POOL_BEAT_MS     = 1_400;  // result-flash pause between shots
+const POOL_BEAT_MS     = 900;    // result-flash pause between shots
 const POOL_SKEW_MS     = 1_500;  // client-vs-server elapsed sanity window
 const PONG_TARGET    = 5;        // Ping Pong: points to win
 const PONG_TICK_MS   = 33;       // server sim/broadcast rate (~30 Hz)
@@ -1022,11 +1022,11 @@ const PONG_W         = 100;      // court units (client scales to pixels)
 const PONG_H         = 60;
 const PONG_PAD_X     = 4;        // paddle line inset (challenger left, target right)
 const PONG_PAD_HH    = 7;        // paddle half-height
-const PONG_PAD_SPEED = 90;       // paddle units/s toward the client's target y
-const PONG_BALL_V0   = 45;       // serve speed, units/s…
-const PONG_BALL_VMAX = 100;      // …capped here after per-hit speedups
-const PONG_SPEEDUP   = 1.06;     // speed multiplier per paddle hit
-const PONG_SERVE_MS  = 900;      // freeze after each point before the serve
+const PONG_PAD_SPEED = 115;      // paddle units/s toward the client's target y
+const PONG_BALL_V0   = 58;       // serve speed, units/s…
+const PONG_BALL_VMAX = 130;      // …capped here after per-hit speedups
+const PONG_SPEEDUP   = 1.08;     // speed multiplier per paddle hit
+const PONG_SERVE_MS  = 600;      // freeze after each point before the serve
 const PONG_MAX_MS    = 240_000;  // hard cap: leader wins, tie = draw
 
 // Icebreaker prompt pool (SERVER-ONLY — the client only ever sees the labels
