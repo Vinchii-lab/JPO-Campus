@@ -266,6 +266,11 @@ const OBJECTS = {
   coffee_machine11: { x: 8952, y: 5712, r: 150 }, // Training Room single (c186, r117-118)
   water_cooler:    { x: 1800, y: 3816, r: 150 }, // water dispenser, Market north wall (c37, r78-79)
   arcade:          { x: 5280, y: 6000, r: 170 }, // arcade cabinets, Break Room basement corner (c108-111, r123-127)
+  // Game Room tables (Basement tileset art, c194-198): each starts its game
+  // with the nearest free player — same friendly-duel flow as the arcade.
+  pool_table:      { x: 9408, y: 3336, r: 170 }, // green billiard table (c194-197, r68-70) → Billiards
+  pool_table2:     { x: 9408, y: 3096, r: 170 }, // blue billiard table (c194-197, r63-65) → Billiards
+  pingpong_table:  { x: 9480, y: 2760, r: 170 }, // ping pong table (c196-198, r56-58) → Ping Pong
   fridge:          { x: 5592, y: 4008, r: 190 }, // drink-cooler stack, cafeteria serving area (c116, r82-84)
   kitchen_island:  { x: 5232, y: 3624, r: 240 }, // cafeteria serving line: display cases + checkout counter (c104-113, r74-75)
   snack_counter:   { x: 9048, y: 1968, r: 220 }, // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor)
@@ -731,10 +736,10 @@ function rowToPlayerState(row) {
   };
 }
 
-// Valid win-counter keys: the seven duel game ids + 'dark' for Office After
+// Valid win-counter keys: the duel game ids + 'dark' for Office After
 // Dark. An allowlist (not free-form) so a future typo can't mint a new
 // untranslatable counter in everyone's rows.
-const WIN_KEYS = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "dark"]);
+const WIN_KEYS = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "pool", "pong", "dark"]);
 
 // Record one win. Email-backed → atomic jsonb increment in the DB (RETURNING
 // refreshes the in-memory copy, so concurrent wins can't clobber each other);
@@ -973,8 +978,8 @@ const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scal
 // mid-match spend block apply to new games automatically. The `rps*` event
 // names are kept for the shared lifecycle events (they predate the roster);
 // payloads carry a `game` field.
-const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4"]);
-const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race", trivia: "Trivia Duel", c4: "Connect Four" };
+const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "pool", "pong"]);
+const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race", trivia: "Trivia Duel", c4: "Connect Four", pool: "Billiards", pong: "Ping Pong" };
 const TTT_MOVE_MS   = 20_000;  // per-move clock — the slow side forfeits
 const TTT_LINES     = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const QD_ARM_MIN_MS = 2_000;   // random wait before the DRAW! signal…
@@ -991,6 +996,25 @@ const TRIV_REVEAL_MS = 4_000;   // reading pause between the reveal and the next
 const C4_COLS    = 7;           // Connect Four board
 const C4_ROWS    = 6;
 const C4_MOVE_MS = 20_000;      // per-move clock — the slow side forfeits (mirrors TTT)
+const POOL_TARGET      = 5;      // Billiards: balls to sink to win
+const POOL_TURN_MS     = 12_000; // shot clock — the slow side forfeits (mirrors TTT)
+const POOL_PERIOD_MS   = 1_600;  // one full meter sweep, 0 → 100 → 0
+const POOL_SPOT_HW     = 9;      // sweet-spot half-width with 0 balls sunk…
+const POOL_SPOT_MIN_HW = 5;      // …shrinking by 1 per sunk ball down to this
+const POOL_BEAT_MS     = 1_400;  // result-flash pause between shots
+const POOL_SKEW_MS     = 1_500;  // client-vs-server elapsed sanity window
+const PONG_TARGET    = 5;        // Ping Pong: points to win
+const PONG_TICK_MS   = 33;       // server sim/broadcast rate (~30 Hz)
+const PONG_W         = 100;      // court units (client scales to pixels)
+const PONG_H         = 60;
+const PONG_PAD_X     = 4;        // paddle line inset (challenger left, target right)
+const PONG_PAD_HH    = 7;        // paddle half-height
+const PONG_PAD_SPEED = 90;       // paddle units/s toward the client's target y
+const PONG_BALL_V0   = 45;       // serve speed, units/s…
+const PONG_BALL_VMAX = 100;      // …capped here after per-hit speedups
+const PONG_SPEEDUP   = 1.06;     // speed multiplier per paddle hit
+const PONG_SERVE_MS  = 900;      // freeze after each point before the serve
+const PONG_MAX_MS    = 240_000;  // hard cap: leader wins, tie = draw
 
 // Icebreaker prompt pool (SERVER-ONLY — the client only ever sees the labels
 // of the rounds it is playing). Work-friendly either/or pairs; a match draws
@@ -1142,6 +1166,7 @@ function clearMatchTimers(m) {
   clearTimeout(m.acceptTimer); clearTimeout(m.pickTimer);
   clearTimeout(m.moveTimer);   clearTimeout(m.signalTimer); clearTimeout(m.liveTimer);
   clearTimeout(m.roundTimer);  clearTimeout(m.revealTimer);
+  clearInterval(m.pongInterval);   // Ping Pong's sim loop rides the same seam
 }
 
 function rpsOtherId(m, id) { return id === m.challengerId ? m.targetId : m.challengerId; }
@@ -1543,6 +1568,142 @@ function c4Winner(board, idx) {
     if (n >= 4) return true;
   }
   return false;
+}
+
+// ── Billiards helpers ────────────────────────────────────────────────────────
+// Turn-based trick shots: the server picks a sweet spot on a 0–100 meter, the
+// shooter's client animates the SAME triangle-wave sweep (poolMeterPos must
+// stay in lockstep with the client's copy) and reports its elapsed ms at tap
+// time. Client elapsed is trusted inside POOL_SKEW_MS of the server's own
+// clock — outside the window the server's elapsed is used instead, so lag
+// never punishes, and a hacked client could at worst aim perfectly (accepted
+// for an office game; same residual class as banked-teleport movement).
+// Sink = shoot again (like real pool); miss = the cue passes. Shot-clock
+// expiry = forfeit by the slow side (TTT pattern).
+function poolMeterPos(elapsedMs) {
+  const phase = (elapsedMs % POOL_PERIOD_MS) / POOL_PERIOD_MS;
+  return (phase < 0.5 ? phase * 2 : 2 - phase * 2) * 100;
+}
+function poolHalfWidth(score) { return Math.max(POOL_SPOT_MIN_HW, POOL_SPOT_HW - score); }
+function poolExtras(m) {
+  return (me, them) => ({ scores: { you: m.poolScores[me] ?? 0, them: m.poolScores[them] ?? 0 } });
+}
+function poolTimeout(m) {
+  if (m.state !== "playing" || m.game !== "pool") return;
+  const slow = m.poolTurn, fast = rpsOtherId(m, slow);
+  finishMatch(m, { winnerId: fast, loserId: slow, forfeit: true, extras: poolExtras(m) })
+    .catch((err) => console.error("pool timeout resolve failed:", err));
+}
+// Arm the next shot: new sweet spot, fresh shot clock, new meter epoch.
+// poolTurn is null during the between-shots beat (set in the poolShot
+// handler), so a spammed tap can't double-fire before the next arm.
+function poolNextTurn(m, shooterId) {
+  if (m.state !== "playing" || m.game !== "pool") return;
+  m.poolTurn = shooterId;
+  m.poolTurnAt = Date.now();
+  m.poolSpot = 20 + Math.floor(Math.random() * 61);   // center ∈ [20, 80]
+  m.moveTimer = setTimeout(() => poolTimeout(m), POOL_TURN_MS);
+  for (const id of [m.challengerId, m.targetId]) {
+    io.to(id).emit("poolState", {
+      challengeId: m.id, yourTurn: id === shooterId,
+      scores: { you: m.poolScores[id] ?? 0, them: m.poolScores[rpsOtherId(m, id)] ?? 0 },
+      spotCenter: m.poolSpot, spotHalf: poolHalfWidth(m.poolScores[shooterId] ?? 0),
+      periodMs: POOL_PERIOD_MS, turnMs: POOL_TURN_MS, target: POOL_TARGET,
+    });
+  }
+}
+
+// ── Ping Pong helpers ────────────────────────────────────────────────────────
+// The only real-time duel: the server runs an authoritative ~30 Hz sim per
+// match (pongInterval — cleared by clearMatchTimers like every other match
+// timer) and broadcasts the full court each tick (2 players, tiny payload).
+// Clients only send a target paddle y; the server walks the paddle toward it
+// at a capped speed, so no input can teleport a paddle. First to PONG_TARGET
+// wins; PONG_MAX_MS is a hard cap (leader wins, tie = draw) so an idle match
+// can't run forever. Serve goes toward the player who just conceded.
+function pongExtras(m) {
+  return (me, them) => ({ scores: { you: m.pongScore[me] ?? 0, them: m.pongScore[them] ?? 0 } });
+}
+function pongServe(m, towardId) {
+  m.pongBall = { x: PONG_W / 2, y: PONG_H / 2 };
+  const dir = towardId === m.challengerId ? -1 : 1;
+  const angle = (Math.random() * 0.6 - 0.3) * Math.PI;   // up to ±54° off horizontal
+  m.pongVel = { x: dir * PONG_BALL_V0 * Math.cos(angle), y: PONG_BALL_V0 * Math.sin(angle) };
+  m.pongFreezeUntil = Date.now() + PONG_SERVE_MS;
+}
+function pongPoint(m, scorerId, concederId) {
+  const s = (m.pongScore[scorerId] ?? 0) + 1;
+  m.pongScore[scorerId] = s;
+  if (s >= PONG_TARGET) {
+    finishMatch(m, { winnerId: scorerId, loserId: concederId, extras: pongExtras(m) })
+      .catch((err) => console.error("pong resolve failed:", err));
+    return;
+  }
+  pongServe(m, concederId);
+}
+function pongTick(m) {
+  // Belt-and-braces: finishMatch/cancelMatchFor already clear the interval.
+  if (m.state !== "playing" || m.game !== "pong") { clearInterval(m.pongInterval); return; }
+  const now = Date.now();
+  const dt = Math.min(0.1, (now - m.pongLastTick) / 1000);
+  m.pongLastTick = now;
+  if (now - m.pongStartAt > PONG_MAX_MS) {
+    const c = m.pongScore[m.challengerId] ?? 0, t = m.pongScore[m.targetId] ?? 0;
+    const opts = c === t ? { draw: true, extras: pongExtras(m) }
+      : c > t ? { winnerId: m.challengerId, loserId: m.targetId, extras: pongExtras(m) }
+              : { winnerId: m.targetId, loserId: m.challengerId, extras: pongExtras(m) };
+    finishMatch(m, opts).catch((err) => console.error("pong cap resolve failed:", err));
+    return;
+  }
+  // Paddles glide toward each side's latest requested y at a capped speed.
+  for (const id of [m.challengerId, m.targetId]) {
+    const cur = m.pongPad[id], tgt = m.pongPadTarget[id];
+    const maxStep = PONG_PAD_SPEED * dt;
+    m.pongPad[id] = Math.abs(tgt - cur) <= maxStep ? tgt : cur + Math.sign(tgt - cur) * maxStep;
+  }
+  const b = m.pongBall, v = m.pongVel;
+  if (now >= m.pongFreezeUntil) {
+    b.x += v.x * dt; b.y += v.y * dt;
+    if (b.y < 0)      { b.y = -b.y;            v.y = Math.abs(v.y); }
+    if (b.y > PONG_H) { b.y = 2 * PONG_H - b.y; v.y = -Math.abs(v.y); }
+    const speedUp = () => {
+      const s = Math.min(PONG_BALL_VMAX, Math.hypot(v.x, v.y) * PONG_SPEEDUP);
+      const a = Math.atan2(v.y, v.x);
+      v.x = s * Math.cos(a); v.y = s * Math.sin(a);
+    };
+    // Reach zone scales with per-tick travel so a fast ball can't tunnel
+    // through the paddle line between ticks.
+    const reach = Math.max(4, Math.abs(v.x) * dt + 1);
+    const padC = m.pongPad[m.challengerId], padT = m.pongPad[m.targetId];
+    const rightX = PONG_W - PONG_PAD_X;
+    if (v.x < 0 && b.x <= PONG_PAD_X && b.x > PONG_PAD_X - reach &&
+        Math.abs(b.y - padC) <= PONG_PAD_HH + 1.5) {
+      b.x = PONG_PAD_X + (PONG_PAD_X - b.x);
+      v.x = Math.abs(v.x);
+      v.y += (b.y - padC) * 2.5;   // edge hits add spin, center hits return flat
+      speedUp();
+    } else if (v.x > 0 && b.x >= rightX && b.x < rightX + reach &&
+        Math.abs(b.y - padT) <= PONG_PAD_HH + 1.5) {
+      b.x = rightX - (b.x - rightX);
+      v.x = -Math.abs(v.x);
+      v.y += (b.y - padT) * 2.5;
+      speedUp();
+    } else if (b.x < -3) {
+      pongPoint(m, m.targetId, m.challengerId);
+    } else if (b.x > PONG_W + 3) {
+      pongPoint(m, m.challengerId, m.targetId);
+    }
+  }
+  if (m.state !== "playing") return;   // pongPoint may have settled the match
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const state = {
+    challengeId: m.id, bx: r1(b.x), by: r1(b.y),
+    pl: r1(m.pongPad[m.challengerId]), pr: r1(m.pongPad[m.targetId]),
+    sl: m.pongScore[m.challengerId] ?? 0, sr: m.pongScore[m.targetId] ?? 0,
+    frozen: now < m.pongFreezeUntil,
+  };
+  io.to(m.challengerId).emit("pongState", state);
+  io.to(m.targetId).emit("pongState", state);
 }
 
 // ── Word Race helper ─────────────────────────────────────────────────────────
@@ -2795,6 +2956,35 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (m.game === "pool") {
+      // Turn-based meter shots — protocol in the Billiards helpers. rpsStart
+      // just opens the panel; the first poolState arms the opening shot.
+      m.state = "playing";
+      m.poolScores = { [m.challengerId]: 0, [m.targetId]: 0 };
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     target: POOL_TARGET });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), target: POOL_TARGET });
+      poolNextTurn(m, Math.random() < 0.5 ? m.challengerId : m.targetId);
+      return;
+    }
+
+    if (m.game === "pong") {
+      // Real-time rally — sim loop in the Ping Pong helpers. Challenger
+      // defends the LEFT paddle line, target the right; the client renders
+      // whichever side rpsStart names.
+      m.state = "playing";
+      m.pongScore = { [m.challengerId]: 0, [m.targetId]: 0 };
+      m.pongPad = { [m.challengerId]: PONG_H / 2, [m.targetId]: PONG_H / 2 };
+      m.pongPadTarget = { [m.challengerId]: PONG_H / 2, [m.targetId]: PONG_H / 2 };
+      m.pongStartAt = Date.now();
+      m.pongLastTick = Date.now();
+      pongServe(m, Math.random() < 0.5 ? m.challengerId : m.targetId);
+      const court = { w: PONG_W, h: PONG_H, padX: PONG_PAD_X, padHalf: PONG_PAD_HH };
+      io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     side: "left",  court, target: PONG_TARGET, maxMs: PONG_MAX_MS });
+      io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), side: "right", court, target: PONG_TARGET, maxMs: PONG_MAX_MS });
+      m.pongInterval = setInterval(() => pongTick(m), PONG_TICK_MS);
+      return;
+    }
+
     m.state = "picking";
     m.pickTimer = setTimeout(() => { rpsResolve(m).catch((err) => console.error("rps resolve failed:", err)); }, RPS_PICK_MS);
     io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     pickMs: RPS_PICK_MS });
@@ -2946,6 +3136,53 @@ io.on("connection", (socket) => {
     } else {
       socket.emit("wrWrong", { challengeId: m.id });
     }
+  });
+
+  // Billiards shot intent. The meter position derives from elapsed-ms since
+  // the shot was armed — client-measured, sanity-clamped to the server clock
+  // (see the Billiards helpers for the trust tradeoff). Bad payloads drop
+  // silently, same policy as a bad tttMove.
+  socket.on("poolShot", (payload) => {
+    const { challengeId, elapsedMs } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "pool" || m.state !== "playing") return;
+    if (m.poolTurn !== socket.id) return;   // not your cue (or mid-beat)
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > POOL_TURN_MS + POOL_SKEW_MS) return;
+    const serverElapsed = Date.now() - m.poolTurnAt;
+    const e = Math.abs(serverElapsed - elapsedMs) <= POOL_SKEW_MS ? elapsedMs : serverElapsed;
+    m.poolTurn = null;                      // lock the cue until the next arm
+    clearTimeout(m.moveTimer);
+    const pos = Math.round(poolMeterPos(e) * 10) / 10;
+    const half = poolHalfWidth(m.poolScores[socket.id] ?? 0);
+    const hit = Math.abs(pos - m.poolSpot) <= half;
+    if (hit) m.poolScores[socket.id] = (m.poolScores[socket.id] ?? 0) + 1;
+    const other = rpsOtherId(m, socket.id);
+    for (const [id, oid] of [[socket.id, other], [other, socket.id]]) {
+      io.to(id).emit("poolShotResult", {
+        challengeId: m.id, yours: id === socket.id, pos, center: m.poolSpot, half, hit,
+        scores: { you: m.poolScores[id] ?? 0, them: m.poolScores[oid] ?? 0 },
+      });
+    }
+    if ((m.poolScores[socket.id] ?? 0) >= POOL_TARGET) {
+      finishMatch(m, { winnerId: socket.id, loserId: other, extras: poolExtras(m) })
+        .catch((err) => console.error("pool resolve failed:", err));
+      return;
+    }
+    // Sink → keep the cue; miss → pass it. Short beat so the result flash
+    // lands before the meter re-arms (revealTimer is on the cleared set).
+    m.revealTimer = setTimeout(() => poolNextTurn(m, hit ? socket.id : other), POOL_BEAT_MS);
+  });
+
+  // Ping Pong paddle intent: just a target y — the sim loop walks the paddle
+  // toward it at a capped speed each tick. Pure in-memory assignment (no
+  // broadcast, no DB), so it deliberately has no token bucket; the ~30 Hz
+  // client send rate is self-throttled and excess writes are harmless.
+  socket.on("pongPaddle", (payload) => {
+    const { challengeId, y } = payload || {};
+    const m = rpsBySocket.get(socket.id);
+    if (!m || m.id !== challengeId || m.game !== "pong" || m.state !== "playing") return;
+    if (!Number.isFinite(y)) return;
+    m.pongPadTarget[socket.id] = Math.min(PONG_H - PONG_PAD_HH, Math.max(PONG_PAD_HH, y));
   });
 
   // Challenger withdraws a not-yet-answered challenge.
@@ -3510,16 +3747,21 @@ io.on("connection", (socket) => {
       socket.emit("fridgeSnack", { line: s.line, icon });
       io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
 
-    } else if (object === "arcade") {
+    } else if (object === "arcade" || object.startsWith("pool_table") || object === "pingpong_table") {
+      // Two-player game stations: the arcade opens the full game picker; the
+      // Game Room tables are dedicated — billiard tables start Billiards, the
+      // ping pong table starts Ping Pong. All reuse startRpsChallenge, so
+      // every duel cleanup seam applies automatically.
+      const station = object === "arcade" ? "arcade" : object.startsWith("pool_table") ? "pool" : "pong";
       if (rpsBySocket.has(socket.id)) {
         socket.emit("interactError", { message: "You're already in a match." });
         return;
       }
       if (inRound(socket.id)) {
-        socket.emit("interactError", { message: "No arcade during Office After Dark!" });
+        socket.emit("interactError", { message: "No games during Office After Dark!" });
         return;
       }
-      // Needs a second player standing at the cabinet; the nearest free one
+      // Needs a second player standing at the station; the nearest free one
       // gets the invite and the normal accept/decline flow takes over.
       let bestId = null, bestD = Infinity;
       for (const [oid, op] of Object.entries(players)) {
@@ -3529,12 +3771,18 @@ io.on("connection", (socket) => {
         if (d <= obj.r * obj.r && d < bestD) { bestId = oid; bestD = d; }
       }
       if (!bestId) {
-        socket.emit("interactError", { message: "The arcade needs two players — wave someone over! 🕹️" });
+        const msg = station === "arcade" ? "The arcade needs two players — wave someone over! 🕹️"
+                  : station === "pool"   ? "Billiards needs two players — wave someone over! 🎱"
+                  :                        "Ping pong needs two players — wave someone over! 🏓";
+        socket.emit("interactError", { message: msg });
         return;
       }
-      // The cabinet's game picker rides along on the interact intent; anything
-      // off the roster falls back to RPS. Always a friendly (0-wager) match.
-      const g = (typeof game === "string" && GAMES.has(game)) ? game : "rps";
+      // The arcade's game picker rides along on the interact intent (anything
+      // off the roster falls back to RPS); the tables force their own game.
+      // Always a friendly (0-wager) match.
+      const g = station === "arcade"
+        ? ((typeof game === "string" && GAMES.has(game)) ? game : "rps")
+        : station;
       startRpsChallenge(socket.id, bestId, 0, true, g);
     }
   });

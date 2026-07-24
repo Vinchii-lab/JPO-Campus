@@ -55,3 +55,5 @@ Additional traps learned while testing RPS challenges:
   are SILENT drops — assert via a second observer socket that a matching
   `playerMoved` broadcast does/doesn't arrive within a timeout, never via an error event.
 - To test proximity-gated `interact` objects headlessly, seed the approved row's x/y AT the object anchor before registering — restore places the server-side position there, so no movement (and no move-budget fight) is needed at all.
+- Rerunning a test within ~10s of the previous run's exit hits the disconnect GRACE window: re-registering the same email resumes the OLD in-memory session (stale position — DELETE+reseed doesn't help, it's not a DB read). Sleep ≥12s between runs or use fresh emails.
+- Real-time interval games (e.g. Ping Pong ~30Hz `pongState`): don't try to win rallies with timing — park both paddles at opposite extremes via a 100ms `pongPaddle` drip so every serve scores; a first-to-5 match then settles in ~15-25s, well inside the 115s foreground budget.

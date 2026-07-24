@@ -1013,6 +1013,39 @@
     .c4-cell.y { background: #f1c40f; border-color: #ffe37a; }
     .c4-cell.last { box-shadow: 0 0 0 3px rgba(255,255,255,.45); }
 
+    /* Billiards panel (inside #rps-match) */
+    #pool-panel { display: none; margin: 14px 0 6px; }
+    #pool-panel.show { display: block; }
+    #pool-score { font-size: 15px; color: #ddd; margin-bottom: 10px; min-height: 20px; }
+    #pool-meter {
+      position: relative; height: 30px; background: #10281a;
+      border: 2px solid #2e7d32; border-radius: 8px; overflow: hidden; margin-bottom: 10px;
+    }
+    #pool-spot {
+      position: absolute; top: 0; bottom: 0; background: rgba(46,204,113,.4);
+      border-left: 1px solid #2ecc71; border-right: 1px solid #2ecc71;
+    }
+    #pool-marker {
+      position: absolute; top: 0; bottom: 0; width: 3px; background: #fff;
+      box-shadow: 0 0 6px #fff; display: none;
+    }
+    #pool-panel.aiming #pool-marker { display: block; }
+    #pool-shoot {
+      width: 100%; padding: 12px; font-size: 17px; font-family: inherit;
+      background: #1f5c33; color: #fff; border: 2px solid #2ecc71;
+      border-radius: 10px; cursor: pointer;
+    }
+    #pool-shoot:disabled { opacity: .35; cursor: default; }
+    /* Ping Pong panel (inside #rps-match) */
+    #pong-panel { display: none; margin: 14px 0 6px; }
+    #pong-panel.show { display: block; }
+    #pong-score { font-size: 15px; color: #ddd; margin-bottom: 8px; min-height: 20px; }
+    #pong-court {
+      width: 100%; display: block; background: #0c1f14;
+      border: 2px solid #2e7d32; border-radius: 8px; cursor: ns-resize;
+      touch-action: none;
+    }
+    #pong-hint { font-size: 11px; color: #777; margin-top: 6px; }
     /* Word Race panel (inside #rps-match) */
     #wr-panel { display: none; margin: 14px 0 6px; }
     #wr-panel.show { display: block; }
@@ -1433,6 +1466,8 @@
         <button class="rps-game" data-game="wr" type="button">🔤<span>Word Race</span></button>
         <button class="rps-game" data-game="trivia" type="button">🧠<span>Trivia Duel</span></button>
         <button class="rps-game" data-game="c4" type="button">🔴<span>Connect Four</span></button>
+        <button class="rps-game" data-game="pool" type="button">🎱<span>Billiards</span></button>
+        <button class="rps-game" data-game="pong" type="button">🏓<span>Ping Pong</span></button>
       </div>
       <div id="rps-wager-fields">
         <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
@@ -1531,6 +1566,19 @@
         </div>
       </div>
       <div id="c4-board"></div>
+      <div id="pool-panel">
+        <div id="pool-score"></div>
+        <div id="pool-meter">
+          <div id="pool-spot"></div>
+          <div id="pool-marker"></div>
+        </div>
+        <button id="pool-shoot" type="button">🎱 Shoot! (Space)</button>
+      </div>
+      <div id="pong-panel">
+        <div id="pong-score"></div>
+        <canvas id="pong-court" width="400" height="240"></canvas>
+        <div id="pong-hint">Move: mouse / drag / W·S keys</div>
+      </div>
       <div id="rps-match-status"></div>
       <div id="rps-result" style="display:none">
         <div id="rps-result-picks"></div>
@@ -1873,6 +1921,15 @@
         hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
       { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
         hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
+      // Game Room tables (c194-198): dedicated 2-player stations — the server
+      // forces the game (billiards / ping pong), so E fires interact directly
+      // (no picker). Coords MUST match OBJECTS in server.js.
+      { id:'pool_table',      x:9408, y:3336, r:170, label:'Play billiards (2P)', touch:'Play',
+        hl:{ x:194*48, y:68*48, w:4*48, h:3*48 } },  // green billiard table, Game Room (c194-197, r68-70)
+      { id:'pool_table2',     x:9408, y:3096, r:170, label:'Play billiards (2P)', touch:'Play',
+        hl:{ x:194*48, y:63*48, w:4*48, h:3*48 } },  // blue billiard table, Game Room (c194-197, r63-65)
+      { id:'pingpong_table',  x:9480, y:2760, r:170, label:'Play ping pong (2P)', touch:'Play',
+        hl:{ x:196*48, y:56*48, w:3*48, h:3*48 } },  // ping pong table, Game Room (c196-198, r56-58)
       { id:'fridge',          x:5592, y:4008, r:190, label:'Buy a drink', touch:'Drinks',
         hl:{ x:116*48, y:82*48, w:48, h:3*48 } },    // drink-cooler stack, cafeteria serving area (c116, r82-84; two more stacks above/below share the radius) — PAID drinks menu
       { id:'kitchen_island',  x:5232, y:3624, r:240, label:'Buy a hot meal', touch:'Meals',
@@ -4238,6 +4295,16 @@
     let _trivLocked = false;       // Trivia: answered this round, no take-backs
     let _c4MyTurn = false;         // Connect Four: my drop?
     let _c4MyDisc = '?';           // Connect Four: 'R' | 'Y'
+    let _poolMyTurn = false;       // Billiards: my cue, meter running
+    let _poolArmAt = 0;            // performance.now() when my shot was armed (meter epoch)
+    let _poolPeriod = 1600;        // meter sweep ms — server-sent, mirrors POOL_PERIOD_MS
+    let _poolRaf = null;           // marker animation frame
+    let _pongSide = 'left';        // which paddle line is mine
+    let _pongCourt = { w: 100, h: 60, padX: 4, padHalf: 7 };  // server-sent court dims
+    let _pongTargetY = 30;         // where I want my paddle (court units)
+    let _pongLastSent = -1;
+    let _pongSendTimer = null;     // ~25 Hz paddle-intent sender
+    let _pongKeyDir = 0;           // -1 up / 1 down while W·S (or arrows) held
     const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
     // Ids MUST match the server's GAMES allowlist in server.js.
     const GAME_META = {
@@ -4248,6 +4315,8 @@
       wr:  { icon: '🔤',     label: 'Word Race' },
       trivia: { icon: '🧠',  label: 'Trivia Duel' },
       c4:  { icon: '🔴',     label: 'Connect Four' },
+      pool: { icon: '🎱',    label: 'Billiards' },
+      pong: { icon: '🏓',    label: 'Ping Pong' },
     };
     // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
     const CHALLENGE_RANGE_PX = 480;
@@ -4295,8 +4364,12 @@
       rpsEl('wr-input').blur();   // blur re-enables Phaser key capture
       rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
       rpsEl('c4-board').classList.remove('show', 'myturn');
+      rpsEl('pool-panel').classList.remove('show', 'aiming');
+      rpsEl('pong-panel').classList.remove('show');
       _ibAnswer = null; _ibGuess = null; _ibLocked = false;
       _trivLocked = false; _c4MyTurn = false;
+      _poolMyTurn = false; _poolStopRaf();
+      _pongStopSend();
       _rpsHideMenu();
       if (_rpsUiOpen) {
         _rpsUiOpen = false;
@@ -4395,7 +4468,7 @@
 
     // Shared win labels: keys match the server's WIN_KEYS (7 duel game ids +
     // 'dark' for Office After Dark). Unknown keys are ignored on render.
-    const WIN_LABELS = { rps: 'RPS', ttt: 'Tic-Tac-Toe', qd: 'Quick Draw', ib: 'Icebreakers', wr: 'Word Race', trivia: 'Trivia', c4: 'Connect 4', dark: 'After Dark' };
+    const WIN_LABELS = { rps: 'RPS', ttt: 'Tic-Tac-Toe', qd: 'Quick Draw', ib: 'Icebreakers', wr: 'Word Race', trivia: 'Trivia', c4: 'Connect 4', pool: 'Billiards', pong: 'Ping Pong', dark: 'After Dark' };
     function _winEntries(w) {
       return Object.entries(w || {})
         .filter(([k, n]) => WIN_LABELS[k] && Number.isFinite(n) && n > 0)
@@ -5022,6 +5095,94 @@
       if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _qdFire(); }
     });
 
+    // ── Billiards panel ──
+    // The shooter's marker sweeps via rAF using the SAME triangle-wave formula
+    // as the server's poolMeterPos (period is server-sent); the shot reports
+    // elapsed-ms since the arm, so render lag never skews the position.
+    function _poolStopRaf() { if (_poolRaf) { cancelAnimationFrame(_poolRaf); _poolRaf = null; } }
+    function _poolMeterPos(el) {
+      const phase = (el % _poolPeriod) / _poolPeriod;
+      return (phase < 0.5 ? phase * 2 : 2 - phase * 2) * 100;
+    }
+    function _poolAnimate() {
+      const mk = rpsEl('pool-marker');
+      _poolStopRaf();
+      const tick = () => {
+        if (_rpsPhase !== 'pool' || !_poolMyTurn) { _poolStopRaf(); return; }
+        mk.style.left = 'calc(' + _poolMeterPos(performance.now() - _poolArmAt).toFixed(2) + '% - 1px)';
+        _poolRaf = requestAnimationFrame(tick);
+      };
+      _poolRaf = requestAnimationFrame(tick);
+    }
+    function _poolFire() {
+      if (_rpsPhase !== 'pool' || !_poolMyTurn) return;
+      _poolMyTurn = false;   // optimistic lock; the server is the real gate
+      rpsEl('pool-shoot').disabled = true;
+      socket.emit('poolShot', { challengeId: _rpsChallengeId, elapsedMs: Math.round(performance.now() - _poolArmAt) });
+    }
+    rpsEl('pool-shoot').addEventListener('pointerdown', (e) => { e.preventDefault(); _poolFire(); });
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'pool') return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _poolFire(); }
+    });
+
+    // ── Ping Pong panel ──
+    // The server sim broadcasts the court ~30×/s; the client just draws the
+    // latest frame and sends a target paddle y (~25×/s, only when it moved).
+    function _pongStopSend() {
+      if (_pongSendTimer) { clearInterval(_pongSendTimer); _pongSendTimer = null; }
+      _pongKeyDir = 0;
+    }
+    function _pongStartSend() {
+      _pongStopSend();
+      _pongSendTimer = setInterval(() => {
+        if (_rpsPhase !== 'pong') { _pongStopSend(); return; }
+        if (_pongKeyDir) {
+          _pongTargetY = Math.max(0, Math.min(_pongCourt.h, _pongTargetY + _pongKeyDir * 3));
+        }
+        if (Math.abs(_pongTargetY - _pongLastSent) > 0.4) {
+          _pongLastSent = _pongTargetY;
+          socket.emit('pongPaddle', { challengeId: _rpsChallengeId, y: _pongTargetY });
+        }
+      }, 40);
+    }
+    function _pongDraw(st) {
+      const cv = rpsEl('pong-court'), ctx = cv.getContext('2d');
+      const sx = cv.width / _pongCourt.w, sy = cv.height / _pongCourt.h;
+      ctx.fillStyle = '#0c1f14'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(cv.width / 2, 0); ctx.lineTo(cv.width / 2, cv.height); ctx.stroke();
+      ctx.setLineDash([]);
+      const padW = 2.5 * sx, hh = _pongCourt.padHalf * sy;
+      const meLeft = _pongSide === 'left';
+      ctx.fillStyle = meLeft ? '#2ecc71' : '#e8e8e8';
+      ctx.fillRect(_pongCourt.padX * sx - padW / 2, (st.pl || 0) * sy - hh, padW, hh * 2);
+      ctx.fillStyle = meLeft ? '#e8e8e8' : '#2ecc71';
+      ctx.fillRect((_pongCourt.w - _pongCourt.padX) * sx - padW / 2, (st.pr || 0) * sy - hh, padW, hh * 2);
+      ctx.fillStyle = st.frozen ? '#f6c945' : '#ffffff';
+      ctx.beginPath(); ctx.arc((st.bx || 0) * sx, (st.by || 0) * sy, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    (() => {
+      const cv = rpsEl('pong-court');
+      const track = (e) => {
+        if (_rpsPhase !== 'pong') return;
+        const r = cv.getBoundingClientRect();
+        if (!r.height) return;
+        _pongTargetY = Math.max(0, Math.min(_pongCourt.h, ((e.clientY - r.top) / r.height) * _pongCourt.h));
+      };
+      cv.addEventListener('pointermove', track);
+      cv.addEventListener('pointerdown', (e) => { e.preventDefault(); track(e); });
+    })();
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'pong') return;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') { e.preventDefault(); _pongKeyDir = -1; }
+      else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') { e.preventDefault(); _pongKeyDir = 1; }
+    });
+    document.addEventListener('keyup', (e) => {
+      if ((e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') && _pongKeyDir === -1) _pongKeyDir = 0;
+      if ((e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') && _pongKeyDir === 1) _pongKeyDir = 0;
+    });
+
     // ── Icebreakers panel ──
     // Pick your own answer AND a guess of theirs; the moment both are chosen
     // the pair submits and locks (first submit locks server-side too).
@@ -5077,8 +5238,10 @@
       const meta = GAME_META[game] || GAME_META.rps;
       _rpsChallengeId = challengeId;
       _rpsPhase = 'waiting';
+      // Station-started invites name the venue (arcade vs Game Room tables).
+      const venue = game === 'pool' ? '🎱 at the pool table' : game === 'pong' ? '🏓 at the ping pong table' : '🕹️ at the arcade';
       rpsEl('rps-waiting-text').textContent = arcade
-        ? '🕹️ Invited ' + (toName || '?') + ' to ' + meta.label + ' at the arcade — waiting…'
+        ? 'Invited ' + (toName || '?') + ' to ' + meta.label + ' ' + venue + ' — waiting…'
         : meta.label + ' challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
       rpsEl('rps-waiting').classList.add('open');
     });
@@ -5090,10 +5253,11 @@
       closeAllRps();
       _rpsChallengeId = challengeId;
       _rpsPhase = 'incoming';
+      const inVenue = game === 'pool' ? 'at the pool table' : game === 'pong' ? 'at the ping pong table' : 'at the arcade';
       rpsEl('rps-incoming-text').textContent = arcade
-        ? '🕹️ ' + (fromName || '?') + ' wants to play ' + meta.icon + ' ' + meta.label + ' at the arcade! (friendly)'
+        ? meta.icon + ' ' + (fromName || '?') + ' wants to play ' + meta.label + ' ' + inVenue + '! (friendly)'
         : (fromName || '?') + ' challenges you to ' + meta.icon + ' ' + meta.label + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
-      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤', trivia: '🧠', c4: '🔴' }[game] || '✊');
+      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤', trivia: '🧠', c4: '🔴', pool: '🎱', pong: '🏓' }[game] || '✊');
       rpsEl('rps-incoming').classList.add('open');
       _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
     });
@@ -5104,7 +5268,7 @@
     });
     socket.on('rpsStart', (payload) => {
       const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs,
-              rounds, scramble, raceMs, yourDisc } = payload || {};
+              rounds, scramble, raceMs, yourDisc, target, side, court } = payload || {};
       closeAllRps();
       if (_chatOpen) closeChat();
       if (_dmOpen) closeDM();
@@ -5159,6 +5323,25 @@
         _rpsPhase = 'c4';
         _c4MyDisc = yourDisc || '?';
         _c4Render(Array(42).fill(null), !!yourTurn, moveMs, null);
+      } else if (g === 'pool') {
+        _rpsPhase = 'pool';
+        _poolMyTurn = false;
+        rpsEl('pool-score').textContent = 'You 0 · 0 Them — first to ' + (target || 5) + ' sinks';
+        rpsEl('pool-shoot').disabled = true;
+        const pp = rpsEl('pool-panel');
+        pp.classList.add('show'); pp.classList.remove('aiming');
+        rpsEl('rps-match-status').textContent = '🎱 Racking up — stop the slider inside the green zone!';
+      } else if (g === 'pong') {
+        _rpsPhase = 'pong';
+        _pongSide = side === 'right' ? 'right' : 'left';
+        if (court && court.w) _pongCourt = court;
+        _pongTargetY = _pongCourt.h / 2; _pongLastSent = -1; _pongKeyDir = 0;
+        rpsEl('pong-score').textContent = 'You 0 · 0 Them — first to ' + (target || 5);
+        rpsEl('pong-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          '🏓 You are the GREEN paddle (' + _pongSide + ' side) — don\'t let the ball past!';
+        _pongDraw({ bx: _pongCourt.w / 2, by: _pongCourt.h / 2, pl: _pongCourt.h / 2, pr: _pongCourt.h / 2, frozen: true });
+        _pongStartSend();
       } else {
         _rpsPhase = 'picking';
         rpsEl('rps-match-status').textContent = 'Make your pick!';
@@ -5178,6 +5361,58 @@
       if (_rpsPhase !== 'c4' || challengeId !== _rpsChallengeId) return;
       if (yourDisc) _c4MyDisc = yourDisc;
       _c4Render(board, !!yourTurn, moveMs, lastDrop);
+    });
+    socket.on('poolState', (payload) => {
+      const { challengeId, yourTurn, scores, spotCenter, spotHalf, periodMs, turnMs, target } = payload || {};
+      if (_rpsPhase !== 'pool' || challengeId !== _rpsChallengeId) return;
+      if (Number.isFinite(periodMs) && periodMs > 0) _poolPeriod = periodMs;
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('pool-score').textContent = 'You ' + sy + ' · ' + st + ' Them — first to ' + (target || 5) + ' sinks';
+      const c = Number.isFinite(spotCenter) ? spotCenter : 50;
+      const h = Number.isFinite(spotHalf) ? spotHalf : 7;
+      const lo = Math.max(0, c - h), hi = Math.min(100, c + h);
+      const spot = rpsEl('pool-spot');
+      spot.style.left = lo + '%'; spot.style.width = (hi - lo) + '%';
+      const panel = rpsEl('pool-panel'), btn = rpsEl('pool-shoot');
+      _poolMyTurn = !!yourTurn;
+      if (yourTurn) {
+        _poolArmAt = performance.now();   // meter epoch — formula mirrors server poolMeterPos
+        panel.classList.add('aiming');
+        btn.disabled = false;
+        rpsEl('rps-match-status').textContent = '🎱 Your shot — stop the slider in the green!';
+        _rpsCountdown(rpsEl('rps-match-count'), turnMs || 12000, 'Shot clock: ');
+        _poolAnimate();
+      } else {
+        panel.classList.remove('aiming');
+        _poolStopRaf();
+        btn.disabled = true;
+        _rpsStopCount(); rpsEl('rps-match-count').textContent = '';
+        rpsEl('rps-match-status').textContent = 'Their shot — watch the table…';
+      }
+    });
+    socket.on('poolShotResult', (payload) => {
+      const { challengeId, yours, pos, hit, scores } = payload || {};
+      if (_rpsPhase !== 'pool' || challengeId !== _rpsChallengeId) return;
+      _poolMyTurn = false; _poolStopRaf();
+      _rpsStopCount(); rpsEl('rps-match-count').textContent = '';
+      rpsEl('pool-shoot').disabled = true;
+      // Freeze the marker where the shot landed so both sides see the result.
+      rpsEl('pool-panel').classList.add('aiming');
+      rpsEl('pool-marker').style.left = 'calc(' + (Number.isFinite(pos) ? pos : 50) + '% - 1px)';
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('pool-score').textContent = 'You ' + sy + ' · ' + st + ' Them';
+      rpsEl('rps-match-status').textContent = hit
+        ? (yours ? '✅ Sunk it! You keep the cue…' : '✅ They sunk it — they shoot again…')
+        : (yours ? '❌ Missed — cue passes.' : '❌ They missed — your shot coming up!');
+    });
+    socket.on('pongState', (payload) => {
+      if (_rpsPhase !== 'pong' || !payload || payload.challengeId !== _rpsChallengeId) return;
+      _pongDraw(payload);
+      const meLeft = _pongSide === 'left';
+      const sy = (meLeft ? payload.sl : payload.sr) || 0, st = (meLeft ? payload.sr : payload.sl) || 0;
+      rpsEl('pong-score').textContent = 'You ' + sy + ' · ' + st + ' Them — first to 5';
+      if (payload.frozen) rpsEl('rps-match-status').textContent = '🏓 Serve incoming…';
+      else rpsEl('rps-match-status').textContent = '';
     });
     socket.on('qdSignal', (payload) => {
       const { challengeId } = payload || {};
@@ -5292,6 +5527,9 @@
       rpsEl('wr-input').blur();
       rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
       if (g !== 'c4') rpsEl('c4-board').classList.remove('show', 'myturn');
+      rpsEl('pool-panel').classList.remove('show', 'aiming');
+      rpsEl('pong-panel').classList.remove('show');
+      _poolMyTurn = false; _poolStopRaf(); _pongStopSend();
       rpsEl('rps-match-count').textContent = '';
 
       let picksLine = '', statusLine = '';
@@ -5343,6 +5581,16 @@
         statusLine = forfeit
           ? (outcome === 'win' ? 'They ran out of time — forfeit.' : 'You ran out of time — forfeit.')
           : '';
+      } else if (g === 'pool') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = '🎱 Final table — You ' + sy + ' · Them ' + st;
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They let the shot clock run out — forfeit.' : 'You let the shot clock run out — forfeit.')
+          : '';
+      } else if (g === 'pong') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = '🏓 Final score — You ' + sy + ' · Them ' + st;
+        statusLine = outcome === 'draw' ? 'Time! A dead-even rally.' : '';
       } else {
         picksLine =
           'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
