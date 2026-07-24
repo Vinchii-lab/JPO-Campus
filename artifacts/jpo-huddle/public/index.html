@@ -5562,6 +5562,15 @@
         const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
+        this.floorLayer     = floorLayer;
+        // The dark wall band at the bottom of the L&D classroom (row 97,
+        // c150-c190) is painted on the FLOOR layer (gid 1237) with no Wall-layer
+        // tile behind it — without this, players walk straight through it onto
+        // the concrete outside. Gid 1237 is used NOWHERE else on the map
+        // (verified: one contiguous run on row 97), so making the index solid
+        // is safe map-wide. The player collider is added with the others in
+        // the approved handler.
+        floorLayer.setCollision(1237);
         // A tile is a real seat if its GID is in FURN_SEATS. (The old map needed a
         // special case for classroom chairs buried under structural wall tiles; in
         // JPO_HQ.tmj seats legitimately share cells with Wall-layer desk/monitor/
@@ -5620,18 +5629,6 @@
         coolerTop.setCrop(0, 0, 16, 16);
         this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
         this.physics.add.existing(this._coolerBlock, true);
-        // L&D south wall hard barrier — covers the full width of row 82 (c162-c191).
-        // Uses a StaticGroup + invisible rectangle so Arcade Physics reliably blocks the
-        // player; bare zones with physics.add.existing are unreliable for colliders.
-        this._ldWallGroup = this.physics.add.staticGroup();
-        // 30 tiles × 48 px = 1440 wide; centre x = left-edge + half-width
-        const ldWallRect = this.add.rectangle(
-          162 * 48 + 30 * 48 / 2,   // cx: centre of c162-c191
-          82  * 48 + 24,             // cy: centre of row 82
-          30 * 48, 48                // w × h
-        ).setAlpha(0);
-        this._ldWallGroup.add(ldWallRect);
-        this._ldWallGroup.refresh();
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
@@ -5652,35 +5649,8 @@
             const empt = (L, cc, rr) => { const tt = L.getTileAt(cc, rr); return !tt || tt.index <= 0; };
             if (empt(floorLayer, c, r+1) && empt(wallLayer, c, r+1) && empt(furnitureLayer, c, r+1)) continue;
           }
-          // L&D south wall guard: structural tiles on row 82 (c162-c191) must never
-          // be opened regardless of adjacent furniture — chairs inside L&D share
-          // those cells with the wall and would otherwise punch holes in it.
-          if (r === 82 && c >= 162 && c <= 191 && t.index < 2017) continue;
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
-
-        // Fix: L&D room south wall (row 82) — two problems sealed here after the
-        // seat pass so they survive any future re-run of setCollision logic:
-        //
-        // Problem A (opened by seat pass): The structural wall tiles (W1821) at
-        // c163-c164 and c167-c168 co-occupy cells with furniture seat GIDs
-        // (2616/2617 = pod left-chair legs; 3336/3337 = tan armchair base).
-        // isSeatCell() fires on those cells and strips collision from the wall tile
-        // underneath — creating a ~2-tile gap at each position.  Players inside
-        // L&D access these chairs from row 81 (the middle-seat tile); row 82 is the
-        // alias/legs row and should never be walkable from the south corridor.
-        //
-        // Problem B (no tiles in original map): c183-c186 and c188-c190 have no
-        // wall tile at all in JPO_HQ.tmj (c187 has W2699), leaving a 7-tile hole.
-        // putTileAt adds W1821 tiles to fill the gap, then setCollision seals them.
-        [163, 164, 167, 168].forEach(col => {
-          const t = wallLayer.getTileAt(col, 82);
-          if (t && t.index > 0) t.setCollision(true, true, true, true);
-        });
-        [183, 184, 185, 186, 188, 189, 190].forEach(col => {
-          const t = wallLayer.putTileAt(1821, col, 82);
-          if (t) t.setCollision(true, true, true, true);
-        });
 
         // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
         // JPO_HQ.tmj is regenerated from the user's Tiled project and re-imported
@@ -5690,9 +5660,10 @@
         // regression shows up as a console message here instead of a bug report.
         (() => {
           const W = map.width, Hh = map.height, SPAWN = [110, 46];
-          // Gameplay walkability: a tile blocks if its wall OR furniture tile still
-          // collides after the seat/desk openings above (only seats & aisles are open).
-          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const w = wallLayer.getTileAt(c,r); if (w && w.collides) return false; const f = furnitureLayer.getTileAt(c,r); return !(f && f.collides); };
+          // Gameplay walkability: a tile blocks if its wall, furniture OR floor tile
+          // still collides after the seat/desk openings above (floor: the gid-1237
+          // dark band at row 97 is the only solid floor art).
+          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const w = wallLayer.getTileAt(c,r); if (w && w.collides) return false; const fl = floorLayer.getTileAt(c,r); if (fl && fl.collides) return false; const f = furnitureLayer.getTileAt(c,r); return !(f && f.collides); };
           const NB = [[0,1],[0,-1],[-1,0],[1,0]];
           const reached = new Set([SPAWN.join(',')]), stack = [SPAWN];
           while (stack.length) { const [c,r] = stack.pop();
@@ -6060,7 +6031,7 @@
         this.physics.add.collider(this.player, this.wallLayer);
         this.physics.add.collider(this.player, this.furnitureLayer);
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
-        if (this._ldWallGroup) this.physics.add.collider(this.player, this._ldWallGroup);
+        this.physics.add.collider(this.player, this.floorLayer);   // solid floor-painted walls (L&D bottom band, gid 1237)
 
         this.localNameTag = this._makeNameTag(startX, startY, _playerName);
 

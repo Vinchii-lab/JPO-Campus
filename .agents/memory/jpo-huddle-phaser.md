@@ -101,3 +101,16 @@ description: Non-obvious facts about the Adam player spritesheet, Phaser arcade 
 - **"Can't get to my desk" = a manager desk walled off by STRUCTURAL WALLS from spawn.** Manager desks (blue/green 2×3) are NOT in FURN_SEATS, so their wall tiles are NOT auto-opened by the workstation rule; the desk's 6 furniture tiles are now SOLID (not in FURN_SEATS), so a desk is usable via the adjacency E-scan: it needs a walkable NEIGHBOUR reachable from spawn (you sit by standing next to it, not on it). If a desk sits in a fully wall-sealed room, punch ONE Wall doorway tile (Office.tmj edit) AND mirror it in the Tiled source (map edits revert on re-import). This structural-seal case is the one thing still needing a map edit — everything else is code now. Verify by re-running the flood-fill.
 - **A load-time flood-fill guard runs in create() (after the wall-collision setup + workstation openings) and `console.warn`s any manager desk that's unreachable.** Its `walkable()` MUST mirror the gameplay colliders: a tile blocks if its Wall OR its Furniture tile still `collides` after the seat/desk openings (only seats + aisles are open). If you change the collision model, update this flood-fill in lockstep or the guard silently disagrees with reality. Scoped to DESK_FAMILIES only — chairs/sofas are all reachable now via walk-onto, so a clean load = zero warnings; a warning means a structural-wall regression sealed a desk room.
 - **tmj edits are REVERTED on the next Tiled re-import** (the map is regenerated from the user's Tiled project). Any desk-unblocking edit must be mirrored in the Tiled source by the user, or it silently regresses — the guard above is what catches that regression on reload.
+
+## Wall art can live on the FLOOR layer (no Wall tiles at all)
+The dark wall band at the bottom of the L&D classroom (row 97, c150-190) is
+painted only as Floor gid 1237 — the Wall layer is empty there, so it was
+fully passable. Fix: `floorLayer.setCollision(1237)` + a player↔floorLayer
+collider (safe because that gid appears nowhere else; verify with a map scan
+before making any floor gid solid).
+**Why:** "player walks through a wall" reports can't be triaged by the Wall
+layer alone; scan ALL layers at the reported spot. Also: when a user reports
+a wall bug with a screenshot, confirm WHICH wall by matching the surrounding
+art (plants, floor color) to map coordinates before fixing — a whole session
+was spent sealing intentional doorways on the wrong wall (row 82) while the
+real gap was 15 rows south.

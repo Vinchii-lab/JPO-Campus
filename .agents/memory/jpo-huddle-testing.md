@@ -89,7 +89,8 @@ works, stop debugging game code and drive a browser directly:
 - Naive greedy arrow-walking gets stuck on furniture. BFS-pathfind in
   `page.evaluate`: find TilemapLayers via
   `scene.children.list.filter(o => o.type === 'TilemapLayer')`, identify by
-  `l.layer.name` ('Wall'/'Furniture'), a tile is solid iff
+  `l.layer.name` ('Wall'/'Furniture' — AND 'Floor': the dark band at row 97
+  is solid floor art, gid 1237), a tile is solid iff
   `data[r][c].index > 0 && .collides`; player tile =
   `floor(x/48), floor((y+27)/48)` (feet offset); waypoint world px =
   `c*48+24, r*48+24-27`. Compress straight runs, then hold the arrow key
