@@ -208,3 +208,17 @@ phases that each fit foreground.
 
 ## Invisible-chair class of bug
 The Wall layer renders over Furniture, so a seat gid on a cell covered by solid Wall art is invisible but still seatable — the sitter gets buried and users report it as "sitting broken". When a sit-bug report doesn't match known seat tables, dump all three layers at the player's stored DB position (x/48, (y+27)/48) first; the real fixture there may not be what the screenshot suggests.
+
+## Multi-page Phaser runs are ~10x throttled — scale walk budgets, latch in-page
+Three Phaser WebGL games in ONE headless Chromium run each game loop at ~1/10
+wall speed (CPU contention; `bringToFront` does NOT fix it — it's not tab
+throttling). Symptom looks exactly like a game bug: an avatar with vy=-253
+"freezes" after covering only 0.4s of simulated distance in 2.5s of wall time.
+**How to apply:** (1) diagnose with an in-page recorder — if `performance.now()`
+gaps between fixed-interval samples are ~10x the requested interval, it's loop
+throttle, not game code; (2) multiply every held-key walk budget by ~10x for
+3-page runs; (3) detect transient states (e.g. crossing a 1-tile wall band)
+with an in-page `setInterval` latch (`window.__hit = true`), never by polling
+`page.evaluate` from Node — evaluate round-trips miss sub-second windows.
+Single-page runs are full speed (that's why a solo diag can pass while the
+3-player run fails on the identical code path).

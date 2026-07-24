@@ -1101,6 +1101,18 @@
       font-size: 13px; text-align: center; white-space: nowrap;
     }
     #round-chip.on { display: block; }
+    /* Participant list while a round is live (top-left, under the chat-log/
+       logout/help buttons). Names + alive/dead only — NEVER roles. */
+    #round-roster {
+      display: none; position: fixed; top: 64px; left: 14px; z-index: 240;
+      background: rgba(16,12,40,0.88); border: 1px solid rgba(148,132,255,0.45);
+      border-radius: 8px; padding: 8px 12px; font-family: monospace; color: #cfc8ff;
+      font-size: 12px; line-height: 1.8; max-width: 200px; max-height: 46vh; overflow-y: auto;
+    }
+    #round-roster.on { display: block; }
+    #round-roster .rn-rtitle { font-size: 10px; color: rgba(255,255,255,0.5); margin-bottom: 3px; letter-spacing: 0.5px; }
+    #round-roster .rn-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #round-roster .rn-row.dead { opacity: 0.5; text-decoration: line-through; }
     #round-invite {
       display: none; position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
       z-index: 230; background: rgba(16,12,40,0.95); border: 1px solid rgba(148,132,255,0.5);
@@ -1498,6 +1510,7 @@
   <!-- ── Office After Dark surfaces ── -->
   <div id="darkness"></div>
   <div id="round-chip"></div>
+  <div id="round-roster"><div class="rn-rtitle">🌙 IN THE ROUND</div><div id="round-roster-list"></div></div>
   <div id="round-invite">
     <div id="round-invite-text"></div>
     <div class="rn-count" id="round-invite-count"></div>
@@ -4740,6 +4753,65 @@
     window._roundIsHidden = (id) => _roundHiddenIds.has(id);
     window._roundGhostVis = _roundGhostVis;
 
+    // ── Killer noclip ──
+    // The killer (only) walks through walls/furniture while the round is live.
+    // Purely client-side: collision is client-only in this game (the server
+    // validates speed/bounds, never walls), and the toggle fires ONLY off the
+    // killer's own private roundBegin payload — nothing broadcast, so it can't
+    // leak who the killer is (crew can still SEE them ghost a wall up close,
+    // but in the dark that's part of the terror). World bounds stay on, and
+    // the _roundFrame guard below keeps them off UNPAINTED void tiles.
+    function _roundWalkableAt(sc, x, y) {
+      // Feet tile (BODY_DY), via getTileAt with TILE coords — the proven
+      // pattern on these 3×-scaled layers (world px / 48).
+      const c = Math.floor(x / 48), r = Math.floor((y + 27) / 48);
+      const f = sc.floorLayer && sc.floorLayer.getTileAt(c, r);
+      if (!f || f.index <= 0 || f.collides) return false;  // void / gid-1237 band
+      const w = sc.wallLayer && sc.wallLayer.getTileAt(c, r);
+      if (w && w.collides) return false;
+      const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
+      if (fu && fu.collides) return false;
+      return true;
+    }
+    function _roundSetNoclip(on) {
+      const sc = window._gameScene;
+      if (!sc || !sc._noclipColliders || !sc.player) return;
+      on = !!on;
+      if (on === !!sc._noclip) return;
+      for (const c of sc._noclipColliders) if (c) c.active = !on;
+      if (on) {
+        sc._noclipSafe = { x: sc.player.x, y: sc.player.y };
+      } else {
+        // Lights back on: a body left fully inside a wall can't be ejected by
+        // arcade tile separation — snap to the last open spot they crossed.
+        // Seated players are legitimately on colliding furniture tiles, so
+        // never snap while sitting (the stand-up path has its own _preSitPos).
+        if (!sc.sitting && sc._noclipSafe && !_roundWalkableAt(sc, sc.player.x, sc.player.y))
+          sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
+        sc._noclipSafe = null;
+      }
+      sc._noclip = on;
+    }
+
+    // ── Participant list (names + alive/dead only — NEVER roles) ──
+    let _roundRosterSig = '';
+    function _roundRosterRender() {
+      const list = _rnEl('round-roster-list');
+      if (!list) return;
+      const rows = [..._roundRoster].map(([id, m]) => ({ id, name: m.name || '???', alive: !!m.alive }));
+      rows.sort((a, b) => (b.alive - a.alive) || a.name.localeCompare(b.name));
+      const sig = rows.map(r => r.id + (r.alive ? '+' : '-')).join('|');
+      if (sig === _roundRosterSig) return;
+      _roundRosterSig = sig;
+      list.textContent = '';
+      for (const r of rows) {
+        const d = document.createElement('div');
+        d.className = 'rn-row' + (r.alive ? '' : ' dead');
+        d.textContent = (r.alive ? '🟢 ' : '💀 ') + r.name + (r.id === socket.id ? ' (you)' : '');
+        list.appendChild(d);
+      }
+    }
+
     function _roundChip(msg) {
       const c = _rnEl('round-chip');
       c.textContent = msg;
@@ -4753,13 +4825,16 @@
     function _roundReset() {
       _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
       _roundSpeedMult = 1;
+      _roundSetNoclip(false);
       _roundShowAllGhosts();
       _roundRoster.clear();
       _roundAccomplices.clear();
+      _roundRosterSig = '';
       _roundStopTick();
       clearTimeout(_roundInviteTimer); clearTimeout(_roundRoleTimer);
       document.body.classList.remove('round-dark');
       _rnEl('round-chip').classList.remove('on');
+      _rnEl('round-roster').classList.remove('on');
       _rnEl('round-invite').classList.remove('open');
       _rnEl('round-kill-btn').classList.remove('on');
       _rnEl('round-role').classList.remove('open');
@@ -4815,6 +4890,7 @@
     // 250ms HUD tick while a round is live: countdown chip + kill button state.
     function _roundHud() {
       if (_roundPhase !== 'active') return;
+      _roundRosterRender();
       const total = Math.max(0, Math.round((_roundEndsAt - Date.now()) / 1000));
       const clock = Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
       let aliveN = 0, all = 0;
@@ -4842,6 +4918,22 @@
       const sx = (sc.player.x - cam.worldView.x) * z;
       const sy = (sc.player.y - cam.worldView.y) * z;
       _rnEl('darkness').style.transform = `translate(${sx - 4000}px, ${sy - 4000}px) scale(${z})`;
+      // Killer noclip guard: remember the last fully-open spot; if the killer
+      // drifts into the true VOID (no art on ANY layer — wall cells usually
+      // have no Floor painted under them, so wall art must count as "world"),
+      // snap back — a round can never end with someone stranded in blackness.
+      if (sc._noclip) {
+        if (_roundWalkableAt(sc, sc.player.x, sc.player.y)) {
+          sc._noclipSafe = { x: sc.player.x, y: sc.player.y };
+        } else if (sc._noclipSafe) {
+          const c = Math.floor(sc.player.x / 48), r = Math.floor((sc.player.y + 27) / 48);
+          const f  = sc.floorLayer     && sc.floorLayer.getTileAt(c, r);
+          const w  = sc.wallLayer      && sc.wallLayer.getTileAt(c, r);
+          const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
+          const painted = (f && f.index > 0) || (w && w.index > 0) || (fu && fu.index > 0);
+          if (!painted) sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
+        }
+      }
     };
 
     socket.on('roundInvite', (d) => {
@@ -4905,7 +4997,10 @@
       _rnEl('round-role').classList.add('open');
       clearTimeout(_roundRoleTimer);
       _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
-      if (_roundRole === 'killer') _rnEl('round-kill-btn').classList.add('on');
+      if (_roundRole === 'killer') { _rnEl('round-kill-btn').classList.add('on'); _roundSetNoclip(true); }
+      _roundRosterSig = '';
+      _roundRosterRender();
+      _rnEl('round-roster').classList.add('on');
       _roundStopTick();
       _roundTick = setInterval(_roundHud, 250);
       _roundHud();
@@ -6556,11 +6651,17 @@
         this.player.body.setSize(12, 10).setOffset(2, 20);   // feet-centered body (fits 48px aisles, matches BODY_DY)
         this.player.setCollideWorldBounds(true);
         this.player.play(`idle_${texKey}`);
-        this.physics.add.collider(this.player, this.wallLayer);
-        this.physics.add.collider(this.player, this.furnitureLayer);
-        if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
-        if (this._gymBlocks) for (const z of this._gymBlocks) this.physics.add.collider(this.player, z);
-        this.physics.add.collider(this.player, this.floorLayer);   // solid floor-painted walls (L&D bottom band, gid 1237)
+        // Every player-blocking collider is kept in _noclipColliders so Office
+        // After Dark can let the KILLER (only) walk through walls/furniture by
+        // flipping .active — collision is entirely client-side in this game
+        // (the server validates speed/bounds, never walls), so no server seam.
+        this._noclipColliders = [
+          this.physics.add.collider(this.player, this.wallLayer),
+          this.physics.add.collider(this.player, this.furnitureLayer),
+        ];
+        if (this._coolerBlock) this._noclipColliders.push(this.physics.add.collider(this.player, this._coolerBlock));
+        if (this._gymBlocks) for (const z of this._gymBlocks) this._noclipColliders.push(this.physics.add.collider(this.player, z));
+        this._noclipColliders.push(this.physics.add.collider(this.player, this.floorLayer));   // solid floor-painted walls (L&D bottom band, gid 1237)
 
         this.localNameTag = this._makeNameTag(startX, startY, _playerName);
 
@@ -6754,14 +6855,25 @@
           out.push(this.add.image(cell.c * 48, cell.r * 48, key, frame)
             .setOrigin(0, 0).setScale(3).setDepth(900));
         }
-        // Beds: no tile occluders, but the lying pose gets a floating 💤 that
+        // Beds: no tile occluders, but the lying pose gets an animated zZZ that
         // rides in the occluder array so every stand-up/teardown path destroys
-        // it for free. STATIC text on purpose — a repeat -1 tween would keep
-        // running against a destroyed target and leak one tween per nap.
+        // it for free. The repeat -1 tweens are safe because _clearOccluders
+        // kills each object's tweens BEFORE destroying it — no leak per nap.
         if (BED_GIDS.has(seatGid)) {
           const bx = col * 48 + 24 + (SEAT_DX[seatGid] || 0);
           const by = row * 48 + 24 - BODY_DY - 46;
-          out.push(this.add.text(bx, by, '💤', { fontSize: '16px' }).setOrigin(0.5, 1).setDepth(901));
+          const zz = this.add.text(bx, by, '💤', { fontSize: '16px' }).setOrigin(0.5, 1).setDepth(901);
+          this.tweens.add({ targets: zz, y: by - 7, scale: { from: 0.92, to: 1.1 }, alpha: { from: 1, to: 0.65 },
+                            duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          out.push(zz);
+          // Two little z's drift up and fade on a staggered loop — the "zZZ".
+          for (const [dx, delay, size] of [[14, 0, '11px'], [5, 850, '9px']]) {
+            const z = this.add.text(bx + dx, by - 8, 'z', { fontSize: size, fontFamily: 'monospace', color: '#cfe3ff' })
+              .setOrigin(0.5, 1).setDepth(901).setAlpha(0);
+            this.tweens.add({ targets: z, y: by - 34, alpha: { from: 0.9, to: 0 },
+                              duration: 1700, delay, repeat: -1, ease: 'Sine.easeOut' });
+            out.push(z);
+          }
         }
         return out;
       }
@@ -6820,7 +6932,9 @@
         if (this.seatFacingAt[col + ',' + row] === 'up') return true;
         return SEAT_FACING[this.furnitureLayer.getTileAt(col, row)?.index || 0] === 'up';
       }
-      _clearOccluders(arr) { if (arr) arr.forEach(o => o.destroy()); }
+      // Kills each occluder's tweens BEFORE destroying it — the bed zZZ loops
+      // (repeat -1) would otherwise keep running against destroyed targets.
+      _clearOccluders(arr) { if (arr) arr.forEach(o => { this.tweens.killTweensOf(o); o.destroy(); }); }
 
       // Worn-cosmetic overlay: the server's `equipped` field ('' = nothing);
       // ownership lists don't render anything. Two kinds:
