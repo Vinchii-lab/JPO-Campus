@@ -916,10 +916,12 @@ function liveSocketsForEmail(email, exceptId) {
 // (a later task) will build on.
 function dropLiveByEmail(email, exceptId) {
   for (const id of liveSocketsForEmail(email, exceptId)) {
-    // Cancel any RPS match the dropped session was in. Usually the disconnect
-    // below triggers this anyway, but if the socket object is already gone
-    // there is no disconnect event — this call is the safety net.
-    cancelMatchFor(id, "They left the office — match cancelled, no coins moved.");
+    // Settle any match the dropped session was in: an ACTIVE match is a
+    // forfeit (the refresh-to-dodge-the-wager seam — the new session dropping
+    // this old socket IS the refresh case). Usually the disconnect below
+    // fires this anyway, but if the socket object is already gone there is
+    // no disconnect event — this call is the safety net.
+    forfeitMatchForLeave(id);
     // Same grace as a disconnect: the successor session for this email is
     // about to restore (login/resume/register all call restorePlayer next),
     // which rebinds the round spot. Paths with NO successor restore must call
@@ -1314,6 +1316,30 @@ function cancelMatchFor(id, reason) {
   const msg = reason || "Match cancelled — no coins moved.";
   io.to(m.challengerId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
   io.to(m.targetId).emit("rpsCancelled", { challengeId: m.id, reason: msg });
+}
+
+// A player LEFT (refresh, tab close, network drop, kick) with a match at
+// stake. A pending challenge just cancels (nothing locked yet), but an ACTIVE
+// match (picking/playing) settles as a FORFEIT by the leaver — the opponent
+// takes the wager, exactly like the move-timeout forfeits. Without this, a
+// losing player could refresh to dodge paying (live exploit, July 2026).
+// Callers must invoke this BEFORE deleting players[id]: rpsSettle captures
+// both player objects synchronously, so the coins move even though the
+// leaver's session is being torn down. Deliberate-cancel paths (nobody
+// picked / nobody drew / nobody answered) keep calling cancelMatchFor —
+// those are mutual no-shows, not a leaver dodging a loss.
+function forfeitMatchForLeave(id) {
+  const m = rpsBySocket.get(id);
+  if (!m) return;
+  if (m.state === "pending") {
+    cancelMatchFor(id, "They left the office — challenge cancelled.");
+    return;
+  }
+  if (m.state !== "picking" && m.state !== "playing") return;   // settling/done: result stands
+  finishMatch(m, {
+    winnerId: rpsOtherId(m, id), loserId: id, forfeit: true,
+    extras: () => ({ left: true }),
+  }).catch((err) => console.error("leave-forfeit settle failed:", err));
 }
 
 // Create a pending challenge and notify both sides. Shared by the direct
@@ -2659,8 +2685,9 @@ io.on("connection", (socket) => {
     const p = players[targetId];
     if (!p) return;
     // kickPlayer never disconnects the target socket, so the disconnect-based
-    // match cleanup would not fire — cancel their match explicitly.
-    cancelMatchFor(targetId, "Match cancelled — no coins moved.");
+    // match cleanup would not fire — settle their match explicitly (an active
+    // match is a forfeit: being kicked mid-match pays the opponent).
+    forfeitMatchForLeave(targetId);
     roundHandleLeave(targetId);
     delete players[targetId];
     io.to(targetId).emit("kicked");
@@ -4112,10 +4139,12 @@ io.on("connection", (socket) => {
 
   // ── Disconnect ───────────────────────────────────────────────────────
   socket.on("disconnect", async () => {
-    // A mid-match refresh/blip cancels the match immediately (no coins move) —
-    // even though the PLAYER gets a ~10s grace window, the MATCH does not:
-    // leaving an opponent staring at a hung pick screen is worse than a re-challenge.
-    cancelMatchFor(socket.id, "They left the office — match cancelled, no coins moved.");
+    // A mid-match refresh/blip settles the match immediately — even though
+    // the PLAYER gets a ~10s grace window, the MATCH does not (an opponent
+    // staring at a hung screen is worse than a re-challenge). An ACTIVE match
+    // is a FORFEIT by the leaver: refreshing while losing used to cancel with
+    // no coins moved, which let losers dodge the wager (July 2026 exploit).
+    forfeitMatchForLeave(socket.id);
     // The ROUND now gets the same grace as the player: an email-backed member
     // of the ACTIVE round is marked `gone` and their spot survives until the
     // grace timer below expires (which then applies the leave rules) or a

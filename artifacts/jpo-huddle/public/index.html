@@ -5768,7 +5768,7 @@
     socket.on('rpsResult', (payload) => {
       const { game, outcome, yourPick, theirPick, coinsDelta, forfeit,
               board, reactionMs, early, youFiredEarly,
-              scores, word, solveMs, unsolved } = payload || {};
+              scores, word, solveMs, unsolved, left } = payload || {};
       _rpsStopCount();
       clearTimeout(_rpsResultTimer);
       const g = GAME_META[game] ? game : 'rps';
@@ -5852,6 +5852,19 @@
         statusLine = forfeit
           ? (outcome === 'win' ? "They didn't pick in time — forfeit." : "You didn't pick in time — forfeit.")
           : '';
+      }
+      // Leave-forfeit (opponent refreshed/disconnected mid-match) overrides
+      // the per-game lines: no scores/board arrive with it, and the timeout
+      // wording ("ran out of time") would be misleading.
+      if (left) {
+        picksLine = '';
+        statusLine = outcome === 'win'
+          ? 'They left the match — you win by forfeit.'
+          : 'You left the match — forfeit.';
+        // No board ships with a leave-forfeit: make sure a mid-match TTT board
+        // isn't left looking interactive under the verdict.
+        rpsEl('ttt-board').classList.remove('myturn');
+        _tttMyTurn = false;
       }
       rpsEl('rps-result-picks').textContent = picksLine;
       const out = rpsEl('rps-result-outcome');

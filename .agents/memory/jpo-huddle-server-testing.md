@@ -59,3 +59,6 @@ Additional traps learned while testing RPS challenges:
 - Real-time interval games (e.g. Ping Pong ~30Hz `pongState`): don't try to win rallies with timing — park both paddles at opposite extremes via a 100ms `pongPaddle` drip so every serve scores; a first-to-5 match then settles in ~15-25s, well inside the 115s foreground budget.
 - **Temp-server port trap: the server listens on `PORT`; the test scripts read `TEST_PORT`.** Start the throwaway server with `PORT=<n>` (plus any round knobs) and the test with `TEST_PORT=<n>` — same number, two different env names. A mismatch does NOT fail loudly: with `reconnection:false` the client's failed connect leaves no pending handles, the event loop drains, and the test exits 0 after printing only its seed line — a silent FALSE PASS. Always assert the output contains `RESULT: PASS`, never trust the exit code alone.
 - `cd /tmp/... && <server> & ...` binds the `cd` into the background job — the foreground shell never changes directory and relative script paths resolve against the workspace root. Use absolute paths for both the server and the test script.
+- Coin-balance assertions on FRESHLY seeded rows must add the one-time +10 daily
+  login bonus: it lands on the first sign-in of the UTC day, so expected = seed
+  + wager delta + 10 (then the usual +2/min tick slack on top).
