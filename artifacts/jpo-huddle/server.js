@@ -1588,7 +1588,7 @@ setInterval(async () => {
 // ROUND_JOIN_MS / ROUND_DURATION_MS accept env overrides — TEST KNOBS ONLY
 // (headless integration tests can't wait 3 real minutes); never set in prod.
 const ROUND_JOIN_MS          = Math.max(3_000,  Number(process.env.ROUND_JOIN_MS) || 30_000);
-const ROUND_DURATION_MS      = Math.max(10_000, Number(process.env.ROUND_DURATION_MS) || 180_000);
+const ROUND_DURATION_MS      = Math.max(10_000, Number(process.env.ROUND_DURATION_MS) || 360_000);
 const ROUND_MIN_PLAYERS      = 3;
 const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well under RPS_RANGE_PX)
 // Desync slack for the server-side kill check ONLY (never advertised to the
@@ -1597,7 +1597,10 @@ const ROUND_KILL_RANGE_PX    = 200;     // ~4 tiles at render scale 3 (well unde
 // the client's own range check legitimately offered gets rejected "Get
 // closer…" mid-chase. The client still targets at ROUND_KILL_RANGE_PX.
 const ROUND_KILL_SLACK_PX    = 80;
-const ROUND_KILL_COOLDOWN_MS = 12_000;  // between kills — ALSO the arm delay before the first kill
+// Between kills AND the arm delay before the first one. 0 = strike instantly
+// (owner-requested); the roundBucket token limiter still caps kill spam, and
+// the client-side `|| fallback` seams must treat 0 as a real value.
+const ROUND_KILL_COOLDOWN_MS = 0;
 const ROUND_PRIZE            = 25;      // per winner
 // Killer speed edge: alive killers of the ACTIVE round walk this much faster
 // than base speed, so they can close a chase. Delivered ONLY in the killers'
@@ -1608,7 +1611,7 @@ const ROUND_PRIZE            = 25;      // per winner
 // with the SAME message for crew and killers, so a refusal can't out anyone;
 // group boosts skip everyone in the dark) and alive CREW have their move
 // budget clamped to base speed — a pre-round coffee can't erase the edge.
-const ROUND_KILLER_SPEED_MULT = 1.15;
+const ROUND_KILLER_SPEED_MULT = 1.3;
 
 let round = null;
 // { state:'joining'|'active'|'ending', starterId, starterName,

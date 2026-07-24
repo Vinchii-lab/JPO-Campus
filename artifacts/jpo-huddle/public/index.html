@@ -1031,7 +1031,7 @@
       display: none; position: fixed; left: 0; top: 0; width: 8000px; height: 8000px;
       pointer-events: none; z-index: 150; transform-origin: 50% 50%; will-change: transform;
       background: radial-gradient(circle at center,
-        rgba(0,0,0,0) 0px, rgba(0,0,0,0) 105px, rgba(0,0,0,0.9) 180px, rgba(0,0,0,1) 235px);
+        rgba(0,0,0,0) 0px, rgba(0,0,0,0) 160px, rgba(0,0,0,0.72) 290px, rgba(0,0,0,0.92) 420px);
     }
     body.round-dark #darkness { display: block; }
     #round-chip {
@@ -4613,8 +4613,9 @@
       _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
       _roundAccomplices = new Map((d.accomplices || []).map(a => [a.id, a.name]));
       _roundKillRange = d.killRangePx || 200;
-      _roundCoolMs = d.killCooldownMs || 12000;
-      _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown
+      // 0 is a REAL value here (instant kills) — never `|| fallback` it away.
+      _roundCoolMs = Number.isFinite(Number(d.killCooldownMs)) ? Number(d.killCooldownMs) : 12000;
+      _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown (0 = armed at once)
       _roundEndsAt = Date.now() + (d.durationMs || 180000);
       clearTimeout(_roundInviteTimer);
       _rnEl('round-invite').classList.remove('open');
@@ -4663,7 +4664,8 @@
     // Private ping to the killer whose strike landed — restarts only THEIR cooldown.
     socket.on('roundKillCooldown', (d) => {
       if (_roundPhase !== 'active' || _roundRole !== 'killer') return;
-      _roundKillReadyAt = Date.now() + ((d && d.cooldownMs) || _roundCoolMs);
+      const ms = d && Number.isFinite(Number(d.cooldownMs)) ? Number(d.cooldownMs) : _roundCoolMs;
+      _roundKillReadyAt = Date.now() + ms;   // 0 = ready again immediately
     });
     socket.on('roundLeft', (d) => {
       if (!d || !d.id) return;
