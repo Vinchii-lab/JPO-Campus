@@ -5620,6 +5620,13 @@
         coolerTop.setCrop(0, 0, 16, 16);
         this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
         this.physics.add.existing(this._coolerBlock, true);
+        // L&D south wall hard barrier — covers the full width of row 82 (c162-c191).
+        // Tilemap collision alone is unreliable here because furniture seat GIDs at
+        // that row cause the seat pass to strip collision from the wall tiles.
+        // A static physics zone guarantees the wall is solid regardless.
+        const LD_WALL_CX = (162 * 48) + (30 * 48 / 2);  // centre x of c162-c191 span
+        this._ldWallBlock = this.add.zone(LD_WALL_CX, 82 * 48 + 24, 30 * 48, 48);
+        this.physics.add.existing(this._ldWallBlock, true);
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
@@ -6044,6 +6051,7 @@
         this.physics.add.collider(this.player, this.wallLayer);
         this.physics.add.collider(this.player, this.furnitureLayer);
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
+        if (this._ldWallBlock) this.physics.add.collider(this.player, this._ldWallBlock);
 
         this.localNameTag = this._makeNameTag(startX, startY, _playerName);
 
