@@ -5621,12 +5621,17 @@
         this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
         this.physics.add.existing(this._coolerBlock, true);
         // L&D south wall hard barrier — covers the full width of row 82 (c162-c191).
-        // Tilemap collision alone is unreliable here because furniture seat GIDs at
-        // that row cause the seat pass to strip collision from the wall tiles.
-        // A static physics zone guarantees the wall is solid regardless.
-        const LD_WALL_CX = (162 * 48) + (30 * 48 / 2);  // centre x of c162-c191 span
-        this._ldWallBlock = this.add.zone(LD_WALL_CX, 82 * 48 + 24, 30 * 48, 48);
-        this.physics.add.existing(this._ldWallBlock, true);
+        // Uses a StaticGroup + invisible rectangle so Arcade Physics reliably blocks the
+        // player; bare zones with physics.add.existing are unreliable for colliders.
+        this._ldWallGroup = this.physics.add.staticGroup();
+        // 30 tiles × 48 px = 1440 wide; centre x = left-edge + half-width
+        const ldWallRect = this.add.rectangle(
+          162 * 48 + 30 * 48 / 2,   // cx: centre of c162-c191
+          82  * 48 + 24,             // cy: centre of row 82
+          30 * 48, 48                // w × h
+        ).setAlpha(0);
+        this._ldWallGroup.add(ldWallRect);
+        this._ldWallGroup.refresh();
         const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
         const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
         for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
@@ -5647,6 +5652,10 @@
             const empt = (L, cc, rr) => { const tt = L.getTileAt(cc, rr); return !tt || tt.index <= 0; };
             if (empt(floorLayer, c, r+1) && empt(wallLayer, c, r+1) && empt(furnitureLayer, c, r+1)) continue;
           }
+          // L&D south wall guard: structural tiles on row 82 (c162-c191) must never
+          // be opened regardless of adjacent furniture — chairs inside L&D share
+          // those cells with the wall and would otherwise punch holes in it.
+          if (r === 82 && c >= 162 && c <= 191 && t.index < 2017) continue;
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
 
@@ -6051,7 +6060,7 @@
         this.physics.add.collider(this.player, this.wallLayer);
         this.physics.add.collider(this.player, this.furnitureLayer);
         if (this._coolerBlock) this.physics.add.collider(this.player, this._coolerBlock);
-        if (this._ldWallBlock) this.physics.add.collider(this.player, this._ldWallBlock);
+        if (this._ldWallGroup) this.physics.add.collider(this.player, this._ldWallGroup);
 
         this.localNameTag = this._makeNameTag(startX, startY, _playerName);
 
