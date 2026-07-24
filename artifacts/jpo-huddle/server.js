@@ -121,6 +121,12 @@ app.post("/admin/purge", express.json(), async (req, res) => {
     for (const [id, p] of Object.entries(players)) {
       if (p.email === keep) continue;
       cancelMatchFor(id, "Match cancelled — no coins moved.");
+      // Round-leave seam, same as disconnect/kickPlayer/dropLiveByEmail —
+      // without it a purge mid-round leaves unkillable ghost members and the
+      // round zombie-runs to the timer. Keyed off round.members, so calling
+      // it before/after the players[] delete both work; order matches
+      // dropLiveByEmail (delete first is fine).
+      roundHandleLeave(id);
       delete players[id];
       io.to(id).emit("kicked");
       io.emit("playerLeft", id);
@@ -2456,7 +2462,14 @@ io.on("connection", (socket) => {
     if (!players[socket.id]) return;
     if (!takeToken(emoteBucket)) return;             // throttle emote spam (silently drop)
     if (typeof emote !== "string" || !EMOTES.has(emote)) return;
-    io.emit("playerEmote", { id: socket.id, emote });
+    // Same After Dark isolation as public chat: a lit outsider's emote must
+    // not reach alive participants (a pre-arranged emote code could call out
+    // positions just like a chat message would).
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("playerEmote", { id: socket.id, emote });
+    } else {
+      io.emit("playerEmote", { id: socket.id, emote });
+    }
   });
 
   // ── Private whispers (DMs) — delivered ONLY to the target, echoed to sender ──
