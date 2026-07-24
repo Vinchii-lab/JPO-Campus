@@ -5587,12 +5587,6 @@
         //      centre chairs, while structural room walls stay solid.
         // This is derived from the loaded map (not a hard-coded GID list), so it keeps
         // working across the periodic Tiled re-import.
-        // Fix: L&D room bottom wall gap — row 82 has W1821 from c163-c182 but
-        // no tiles at c183-c190 (c187 already has W2699), leaving a 7-tile hole
-        // that lets players walk through the south wall of the L&D room.
-        // Place matching W1821 tiles to seal the gap BEFORE setCollisionByExclusion
-        // so they're picked up by the collision pass automatically.
-        [183, 184, 185, 186, 188, 189, 190].forEach(col => wallLayer.putTileAt(1821, col, 82));
         wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
         furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
         // Furniture-removal seam (kept from the old map, currently empty): if a
@@ -5648,6 +5642,29 @@
           }
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
+
+        // Fix: L&D room south wall (row 82) — two problems sealed here after the
+        // seat pass so they survive any future re-run of setCollision logic:
+        //
+        // Problem A (opened by seat pass): The structural wall tiles (W1821) at
+        // c163-c164 and c167-c168 co-occupy cells with furniture seat GIDs
+        // (2616/2617 = pod left-chair legs; 3336/3337 = tan armchair base).
+        // isSeatCell() fires on those cells and strips collision from the wall tile
+        // underneath — creating a ~2-tile gap at each position.  Players inside
+        // L&D access these chairs from row 81 (the middle-seat tile); row 82 is the
+        // alias/legs row and should never be walkable from the south corridor.
+        //
+        // Problem B (no tiles in original map): c183-c186 and c188-c190 have no
+        // wall tile at all in JPO_HQ.tmj (c187 has W2699), leaving a 7-tile hole.
+        // putTileAt adds W1821 tiles to fill the gap, then setCollision seals them.
+        [163, 164, 167, 168].forEach(col => {
+          const t = wallLayer.getTileAt(col, 82);
+          if (t && t.index > 0) t.setCollision(true, true, true, true);
+        });
+        [183, 184, 185, 186, 188, 189, 190].forEach(col => {
+          const t = wallLayer.putTileAt(1821, col, 82);
+          if (t) t.setCollision(true, true, true, true);
+        });
 
         // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
         // JPO_HQ.tmj is regenerated from the user's Tiled project and re-imported
