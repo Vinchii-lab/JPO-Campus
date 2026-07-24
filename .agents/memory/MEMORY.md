@@ -7,4 +7,5 @@
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp.
 - [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — seed approved row w/ LOWERCASED email; hop+KeyE to sit; foreground `timeout ≤115` runs.
 - [Running long processes from the agent](agent-env-long-processes.md) — bash calls kill their process group on exit; use a temporary workflow + workspace log file.
+- [JPO Huddle production ops](jpo-huddle-production.md) — prod DB is separate & READ-ONLY; fixes must self-heal in server code + republish (map swaps strand saved positions).
 - [JPO Huddle env animated overlays](jpo-huddle-env-anims.md) — depth + placement pattern for animated Phaser sprites overlaid on map furniture.

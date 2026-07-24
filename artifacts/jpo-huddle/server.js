@@ -470,13 +470,14 @@ const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033]);
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.
 const WALL_WORK_SEAT_GIDS = new Set([5533, 5564, 5565]);
-const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (() => {
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, WORK_SEATS, FOOD_TABLES } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
     const h = tmj.height * tmj.tileheight * RENDER_SCALE;
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
       let outdoor = null;
+      let floored = null;
       const floor = tmj.layers?.find((l) => l.name === "Floor" && Array.isArray(l.data));
       // The exterior tileset is found BY NAME (not "last firstgid" — JPO_HQ.tmj
       // has tilesets after Ext), and the outdoor test is a bounded range so
@@ -488,6 +489,14 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (()
       } else {
         console.error("outdoor mask unavailable (no Floor layer or Ext tileset) — smoking disabled");
       }
+      // Painted-floor mask: FLOORED[i] === true where ANY Floor tile is painted.
+      // Everything walkable in the office (interior floors AND the grass) has
+      // floor art; the black void around/above the building has gid 0. Used to
+      // rescue restored players whose saved position predates a map change and
+      // now lands in the void (the July 2026 "respawning outside the map"
+      // production report — positions saved on the old layout restored into
+      // nothingness after publish).
+      if (floor) floored = floor.data.map((g) => (g & GID_MASK) !== 0);
       // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
       let workSeats = null;
       const foodTables = [];
@@ -514,13 +523,13 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, WORK_SEATS, FOOD_TABLES } = (()
       } else {
         console.error("work-seat mask unavailable (no Furniture layer) — work bonus disabled");
       }
-      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, FLOORED: floored, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
     }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
-  // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work masks (smoking + work bonus disabled).
-  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, WORK_SEATS: null, FOOD_TABLES: [] };
+  // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work/floor masks (smoking + work bonus + void rescue disabled).
+  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, FLOORED: null, WORK_SEATS: null, FOOD_TABLES: [] };
 })();
 
 // Register the cafeteria food spots as interactive objects, and group the
@@ -542,6 +551,24 @@ function isOutdoors(x, y) {
   const col = Math.floor(x / TILE_PX), row = Math.floor((y + BODY_DY) / TILE_PX);
   if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return false;
   return !!OUTDOOR[row * MAP_W + col];
+}
+
+// Grass respawn point for rescued players: tile (26, 47) — the lawn just west
+// of the building's main (west) entrance corridor at rows 44-50, verified all
+// Ext grass with no Wall/Furniture for several tiles around. World px follow
+// the client's position convention (x = col*48+24, y = row*48+24-BODY_DY).
+const GRASS_SPAWN = { x: 26 * TILE_PX + TILE_PX / 2, y: 47 * TILE_PX + TILE_PX / 2 - BODY_DY };
+// A restored position is "in the void" when its FEET tile has no painted Floor
+// art at all (the black nothing around the building) or is outside the map.
+// Deliberately conservative: ONLY unpainted tiles count — never walls or
+// furniture — so it can't misfire on seated players (workstation cells carry
+// Wall-layer monitor tiles) or anyone standing somewhere unusual but real.
+function isVoidPosition(x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+  const col = Math.floor(x / TILE_PX), row = Math.floor((y + BODY_DY) / TILE_PX);
+  if (col < 0 || row < 0 || col >= MAP_W || row >= MAP_H) return true;
+  if (!FLOORED) return false;   // no mask (map load failed) → never relocate anyone
+  return !FLOORED[row * MAP_W + col];
 }
 
 // Live socket ids within `radius` px of the given player (always includes the
@@ -893,6 +920,15 @@ async function restorePlayer(socket, row) {
   if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
     state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
     state.anim = g.anim === "sit" ? "sit" : "idle";
+  }
+
+  // Void rescue: a saved position that lands on an unpainted map tile (e.g. a
+  // position stored under an older layout, restored after a map change went
+  // live) would strand the player in the black nothing outside the building.
+  // Respawn them on the grass by the west entrance instead, standing.
+  if (isVoidPosition(state.x, state.y)) {
+    state.x = GRASS_SPAWN.x; state.y = GRASS_SPAWN.y;
+    state.dir = "down"; state.anim = "idle";
   }
 
   players[socket.id] = state;
