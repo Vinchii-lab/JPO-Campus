@@ -7,6 +7,7 @@ import { readFileSync } from "fs";
 import pg from "pg";
 import crypto from "crypto";
 import OpenAI from "openai";
+import { ReplitConnectors } from "@replit/connectors-sdk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -75,6 +76,81 @@ app.get('/healthz', (_req, res) => {
 app.get('/stamp', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ stamp: BUILD_STAMP });
+});
+
+// ── Voice ICE: STUN + minted TURN relay credentials ─────────────────────────
+// Proximity voice is peer-to-peer; pairs behind strict/carrier-grade NAT
+// (common on home ISPs) can't form a direct path and need a TURN relay.
+// Short-lived relay credentials are minted through the Twilio connection
+// (Network Traversal Service) and cached until 75% of their TTL. On ANY
+// failure the endpoint degrades to the same STUN-only list the client
+// defaults to — voice then behaves exactly as before this feature.
+const _ice = { cached: null, until: 0, sid: null, connectors: null };
+// Strategy 1 — direct: TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN secrets, plain
+// Basic auth against api.twilio.com. This is the reliable path.
+// Strategy 2 — connector proxy: the attached Twilio connection. As of
+// 2026-07 its stored credential is rejected by Twilio's classic REST API
+// (error 20003 on every path shape), so this only matters if the connector
+// gains classic-API support later — then it lights up on its own.
+async function mintTwilioDirect() {
+  const sid = process.env.TWILIO_ACCOUNT_SID, tok = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !tok) return null;   // not configured — let the caller try the proxy
+  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid.trim()}/Tokens.json`, {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + Buffer.from(`${sid.trim()}:${tok.trim()}`).toString("base64"),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "Ttl=14400",
+  });
+  if (!r.ok) throw new Error(`direct token mint ${r.status}`);
+  return r.json();
+}
+async function mintTwilioProxy() {
+  if (!_ice.connectors) _ice.connectors = new ReplitConnectors();
+  if (!_ice.sid) {
+    const r = await _ice.connectors.proxy("twilio", "/2010-04-01/Accounts.json", { method: "GET" });
+    if (!r.ok) throw new Error(`accounts lookup ${r.status}`);
+    _ice.sid = (await r.json())?.accounts?.[0]?.sid;
+    if (!_ice.sid) throw new Error("no account sid in accounts lookup");
+  }
+  const r = await _ice.connectors.proxy("twilio", `/2010-04-01/Accounts/${_ice.sid}/Tokens.json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "Ttl=14400",
+  });
+  if (!r.ok) throw new Error(`token mint ${r.status}`);
+  return r.json();
+}
+async function mintIceServers() {
+  if (_ice.cached && Date.now() < _ice.until) return _ice.cached;
+  let d = null, directErr = null;
+  try { d = await mintTwilioDirect(); }
+  catch (e) { directErr = e; console.warn(`voice-ice: direct mint failed (${e.message}) — trying connector proxy`); }
+  if (!d) {
+    try { d = await mintTwilioProxy(); }
+    catch (e) { throw directErr && directErr.message ? new Error(`${directErr.message}; proxy: ${e.message}`) : e; }
+  }
+  const servers = (d.ice_servers || []).map((s) => {
+    const e = { urls: s.urls || s.url };
+    if (s.username) e.username = s.username;
+    if (s.credential) e.credential = s.credential;
+    return e;
+  });
+  if (!servers.length) throw new Error("empty ice_servers");
+  const ttl = Number(d.ttl) || 14400;
+  _ice.cached = { iceServers: servers, ttl };
+  _ice.until = Date.now() + ttl * 750;   // 75% of ttl, in ms
+  return _ice.cached;
+}
+app.get('/voice-ice', async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  try {
+    res.json(await mintIceServers());
+  } catch (e) {
+    console.warn(`voice-ice: STUN-only fallback (${e.message})`);
+    res.json({ iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], ttl: 600, fallback: true });
+  }
 });
 
 // ── Admin office reset ───────────────────────────────────────────────────────

@@ -9,6 +9,7 @@
     "loadtest": "node loadtest/loadtest.mjs"
   },
   "dependencies": {
+    "@replit/connectors-sdk": "^0.4.1",
     "express": "^5.2.1",
     "openai": "^6.49.0",
     "pg": "^8.20.0",

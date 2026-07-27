@@ -4582,7 +4582,25 @@
     // QA hook so tests (and manual poking) can force cap behavior with 3
     // browsers instead of 11; real players never pass it.
     const VOICE_MAX_PEERS = Math.max(1, Number(new URLSearchParams(location.search).get('vmax')) || 10);
-    const VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+    // Relay-capable ICE: /voice-ice mints short-lived TURN credentials
+    // server-side. Without a relay, pairs behind strict/carrier-grade NAT
+    // (common on home ISPs) never connect even though signaling works fine.
+    // Until the fetch succeeds — or whenever it fails — this STUN-only
+    // default keeps voice working exactly as before, minus the relay.
+    let VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+    let _voiceIceTimer = null;
+    function _voiceIceRefresh() {
+      clearTimeout(_voiceIceTimer);
+      fetch('/voice-ice', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && Array.isArray(d.iceServers) && d.iceServers.length) VOICE_ICE = { iceServers: d.iceServers };
+          const ttl = (d && Number(d.ttl)) || 600;                    // seconds
+          _voiceIceTimer = setTimeout(_voiceIceRefresh, Math.min(Math.max(ttl * 750, 600000), 10800000)); // 75% of ttl, 10min..3h
+        })
+        .catch(() => { _voiceIceTimer = setTimeout(_voiceIceRefresh, 60000); });
+    }
+    _voiceIceRefresh();
     let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
     let _voiceHeld = false;       // PTT physically held
     let _voiceLive = false;       // actually transmitting (held + mic granted)
