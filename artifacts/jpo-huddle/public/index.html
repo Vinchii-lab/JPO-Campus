@@ -4604,12 +4604,14 @@
     let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
     let _voiceHeld = false;       // PTT physically held
     let _voiceLive = false;       // actually transmitting (held + mic granted)
-    let _voiceMic  = null;        // MediaStream after first grant; tracks enabled ONLY while held
+    let _voiceMic  = null;        // master mic stream after first grant; NEVER attached to a pc directly —
+                                  // senders get a fresh per-press CLONE, and no track at all while idle
     let _voiceMicBusy = false, _voiceMicDenied = false;
     let _voiceCtx = null;         // shared AudioContext (unlocked by any user gesture)
     let _voiceResendT = null;     // 4s "still talking" keepalive
     const _voicePeers = {};       // id → { pc, polite, pendIce, el, src, gain }
     const _voiceCool  = {};       // id → don't-redial-before ts (failed/broken attempts)
+    const _voiceHealAt = {};      // id → last zombie-heal ts (damper: one rebuild / 20s / peer)
     window._voiceBadges = {};     // id → { txt, until } — self-expiring Phaser 🎙️ badges
 
     // In-the-dark from THIS client's view. Only round members hold a roster;
@@ -4639,12 +4641,45 @@
 
     function _voiceSend(id, data) { socket.emit('voiceSignal', { targetId: id, data }); }
 
+    // Voice event ring buffer — every dial / answer / drop (with REASON) /
+    // state flip lands here. `window._voiceLog()` in the console reads it
+    // back; QA tests dump it on failure. 200 entries ≈ minutes of activity.
+    const _voiceLogBuf = [];
+    function _vlog(ev, id, extra) {
+      _voiceLogBuf.push(`${((Date.now() / 1000) % 1000).toFixed(1)} ${ev} ${(id || '').slice(0, 6)}${extra ? ' ' + extra : ''}`);
+      if (_voiceLogBuf.length > 200) _voiceLogBuf.shift();
+    }
+    window._voiceLog = () => _voiceLogBuf.slice();
+
+    // RMS of the last ~11ms an analyser saw. 0-ish = silence, speech ≥ ~0.05.
+    function _voiceRms(an) {
+      try {
+        const b = new Uint8Array(an.fftSize);
+        an.getByteTimeDomainData(b);
+        let s = 0;
+        for (let i = 0; i < b.length; i++) { const x = (b[i] - 128) / 128; s += x * x; }
+        return Math.sqrt(s / b.length);
+      } catch (_) { return -1; }
+    }
+
     function _voiceAttachMic(P) {
-      // replaceTrack on the pre-declared audio transceiver — this NEVER
-      // triggers a renegotiation, which is the whole reason the transceiver
-      // is added up-front in _voiceNewPeer.
+      // Sync this pc's sender with the PTT state, via replaceTrack on the
+      // pre-declared transceiver (NEVER renegotiates — the whole reason the
+      // transceiver is added up-front in _voiceNewPeer).
+      //   held  → attach a fresh enabled CLONE of the master mic. A stale
+      //           sender wedged into encoding dead air onto a 'connected'
+      //           call cannot survive a brand-new track object per press.
+      //   idle  → no track at all: nothing to wedge, no silence RTP burned.
       if (!_voiceMic) return;
-      try { P.pc.getTransceivers()[0].sender.replaceTrack(_voiceMic.getAudioTracks()[0] || null); } catch (_) {}
+      try {
+        const sender = P.pc.getTransceivers()[0].sender;
+        const old = sender.track;
+        const master = _voiceMic.getAudioTracks()[0];
+        const next = (_voiceHeld && master) ? master.clone() : null;
+        const done = sender.replaceTrack(next);
+        const bury = () => { if (old && old !== next) { try { old.stop(); } catch (_) {} } };
+        if (done && done.then) done.then(bury).catch(bury); else bury();
+      } catch (_) {}
     }
     function _voiceNewPeer(id, polite) {
       const P = { pc: new RTCPeerConnection(VOICE_ICE), polite, pendIce: [], el: null, src: null, gain: null,
@@ -4659,17 +4694,18 @@
       P.pc.ontrack = (e) => _voiceWireAudio(P, (e.streams && e.streams[0]) || new MediaStream([e.track]));
       P.pc.onconnectionstatechange = () => {
         const st = P.pc.connectionState;
+        _vlog('st', id, st);
         if (st === 'connected') { P.up = true; P.downAt = 0; }   // deadline over; blip recovered
         if (st === 'disconnected') {
           // Usually a transient ICE hiccup (wifi blip) that recovers by itself
           // in a second or two — give it a 4s grace in the roster tick instead
           // of hard-dropping and forcing a full 8s-cooldown redial.
           if (P.up && !P.downAt) P.downAt = Date.now();
-          if (!P.up) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id); }   // never connected → dead dial
+          if (!P.up) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id, 'neverup-disc'); }   // never connected → dead dial
         }
         if (st === 'failed' || st === 'closed') {
           _voiceCool[id] = Date.now() + 8000;   // silent per-peer failure: back off, retry later
-          _voiceDrop(id);
+          _voiceDrop(id, 'state-' + st);
         }
       };
       _voicePeers[id] = P;
@@ -4692,22 +4728,57 @@
           P.gain = _voiceCtx.createGain();
           P.gain.gain.value = 0;   // ramped by the falloff tick
           P.src.connect(P.gain); P.gain.connect(_voiceCtx.destination);
+          // Analyser tap on the RAW stream (pre-gain): _voiceDebug's `lvl`
+          // separates "no audio arriving" from "arriving but volume muted".
+          try { P.an = _voiceCtx.createAnalyser(); P.an.fftSize = 512; P.src.connect(P.an); } catch (_) {}
           return;
         } catch (_) {}
       }
       el.muted = false;            // WebAudio unavailable → element playback
       el.volume = 0;
     }
-    function _voiceDrop(id) {
+
+    // Rebuild ONLY the local WebAudio side (source → gain/analyser) from the
+    // receiver's live track. For the rare wedge where decode is healthy
+    // (energy flows) but our graph reads flat — no need to drop the call.
+    function _voiceRewire(id, P) {
+      try {
+        const rc = P.pc.getReceivers()[0];
+        const rt = rc && rc.track;
+        if (!rt || rt.readyState !== 'live' || !_voiceCtx) return;
+        try { if (P.src) P.src.disconnect(); } catch (_) {}
+        try { if (P.gain) P.gain.disconnect(); } catch (_) {}
+        try { if (P.an) P.an.disconnect(); } catch (_) {}
+        const g = P.gain ? P.gain.gain.value : 0;   // keep falloff volume — no pop
+        P.src = _voiceCtx.createMediaStreamSource(new MediaStream([rt]));
+        P.gain = _voiceCtx.createGain();
+        P.gain.gain.value = g;
+        P.src.connect(P.gain); P.gain.connect(_voiceCtx.destination);
+        try { P.an = _voiceCtx.createAnalyser(); P.an.fftSize = 512; P.src.connect(P.an); } catch (_) {}
+        _vlog('rewire', id);
+      } catch (_) {}
+    }
+    function _voiceDrop(id, why) {
       const P = _voicePeers[id];
       if (!P) return;
+      _vlog('drop', id, why || '?');
       delete _voicePeers[id];
+      // Tell the other end we hung up — otherwise their pc idles 'connecting'
+      // for the full 15s deadline (+8s cooldown) before they even redial.
+      // 'supersede' is the one drop that IS its own replacement: the peer's
+      // fresh offer caused it, so a bye would kill the very pc it's answering.
+      if (why !== 'supersede' && why !== 'bye') { try { _voiceSend(id, { k: 'bye' }); } catch (_) {} }
+      // Stop this pc's clone BEFORE close — closed pcs hide their transceivers.
+      try {
+        const tx = P.pc.getTransceivers()[0];
+        if (tx && tx.sender && tx.sender.track) tx.sender.track.stop();
+      } catch (_) {}
       try { P.pc.onicecandidate = P.pc.ontrack = P.pc.onconnectionstatechange = null; P.pc.close(); } catch (_) {}
       try { if (P.src)  P.src.disconnect(); }  catch (_) {}
       try { if (P.gain) P.gain.disconnect(); } catch (_) {}
       if (P.el) { try { P.el.srcObject = null; P.el.remove(); } catch (_) {} }
     }
-    function _voiceDropAll() { for (const id of Object.keys(_voicePeers)) _voiceDrop(id); }
+    function _voiceDropAll(why) { for (const id of Object.keys(_voicePeers)) _voiceDrop(id, why || 'all'); }
 
     // Is this player talking right now (per their broadcast badge)? Badges
     // self-expire and are keepalive-refreshed, so this is current within ~2s.
@@ -4741,17 +4812,18 @@
       // listeners packed around a talker can't ping-pong its slots.
       if (!newTalks && !(worstD2 > d2Of(newId) + 10000)) return false;
       _voiceCool[worst] = Date.now() + 3000;           // short damper so the pair doesn't flap
-      _voiceDrop(worst);
+      _voiceDrop(worst, 'evict-for-' + (newId || '').slice(0, 6));
       return true;
     }
 
     async function _voiceOffer(id) {
+      _vlog('dial', id);
       const P = _voiceNewPeer(id, false);
       try {
         const offer = await P.pc.createOffer();
         await P.pc.setLocalDescription(offer);
         _voiceSend(id, { k: 'offer', sdp: P.pc.localDescription });
-      } catch (_) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id); }
+      } catch (_) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id, 'offer-fail'); }
     }
 
     socket.on('voiceSignal', async (msg) => {
@@ -4764,9 +4836,10 @@
         if (data.k === 'offer') {
           // Deterministic roles kill offer-glare: the LOWER socket id dials,
           // the higher answers — both sides agree without a tiebreak dance.
-          if (socket.id < fromId) return;
-          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS && !_voiceEvictForPair(fromId)) return;
-          if (P) _voiceDrop(fromId);            // a fresh offer supersedes a stale pc
+          if (socket.id < fromId) { _vlog('ign-offer', fromId, 'we-dial'); return; }
+          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS && !_voiceEvictForPair(fromId)) { _vlog('refuse', fromId, 'cap'); return; }
+          if (P) _voiceDrop(fromId, 'supersede');   // a fresh offer supersedes a stale pc
+          _vlog('answer', fromId);
           P = _voiceNewPeer(fromId, true);
           await P.pc.setRemoteDescription(data.sdp);
           // Adopt the offer's transceiver and make it two-way BEFORE answering.
@@ -4785,11 +4858,16 @@
           if (!P) return;
           if (P.pc.remoteDescription) await P.pc.addIceCandidate(data.c).catch(() => {});
           else if (P.pendIce.length < 24) P.pendIce.push(data.c);   // pre-SDP buffer; legit flows use <10
-          else { _voiceCool[fromId] = Date.now() + 8000; _voiceDrop(fromId); }   // flood → hang up + back off
+          else { _voiceCool[fromId] = Date.now() + 8000; _voiceDrop(fromId, 'ice-flood'); }   // flood → hang up + back off
+        } else if (data.k === 'bye') {
+          // Peer hung up on purpose — free the slot now instead of waiting out
+          // the ICE 'disconnected' lag. Short cooldown so a redial (if still
+          // wanted) happens on the next tick or two, not in a tight loop.
+          if (P) { _voiceCool[fromId] = Math.max(_voiceCool[fromId] || 0, Date.now() + 2000); _voiceDrop(fromId, 'bye'); }
         }
-      } catch (_) {
+      } catch (e) {
         _voiceCool[fromId] = Date.now() + 8000;
-        _voiceDrop(fromId);
+        _voiceDrop(fromId, 'sig-err:' + String(e && e.name || e).slice(0, 24));
       }
     });
 
@@ -4800,7 +4878,12 @@
       const sc = window._gameScene;
       const playing = document.body.classList.contains('playing');
       if (!_voiceOn || !playing || !sc || !sc.player) {
-        if (Object.keys(_voicePeers).length) _voiceDropAll();
+        // Master off / logged out → hang up everything. But a scene still
+        // BOOTING (playing class set, Phaser player not spawned yet) is NOT a
+        // hang-up: pairs answered during load must survive to first render.
+        if ((!_voiceOn || !playing) && Object.keys(_voicePeers).length) {
+          _voiceDropAll(!_voiceOn ? 'master-off' : 'not-playing');
+        }
         return;
       }
       if (_voiceHeld && _voiceUiBlocked()) _voicePttUp();   // an overlay swallowed the keyup
@@ -4809,20 +4892,72 @@
       // bites it sheds silent bystanders and keeps the actual conversation
       const conn = Object.keys(_voicePeers).map((id) => {
         const e = sc.otherPlayers[id];
-        if (!e || !e.sprite || _voiceCrossDark(id)) return [id, Infinity, 1];
+        if (_voiceCrossDark(id)) return [id, Infinity, 1, 'dark'];
+        if (!e || !e.sprite) return [id, Infinity, 1, 'nopos'];
         const dx = e.sprite.x - px, dy = e.sprite.y - py;
-        return [id, dx * dx + dy * dy, _voiceTalkNow(id) ? 0 : 1];
+        return [id, dx * dx + dy * dy, _voiceTalkNow(id) ? 0 : 1, ''];
       }).sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
-      conn.forEach(([id, d2], i) => {
+      conn.forEach(([id, d2, , flag], i) => {
         // Handshake deadline: a pc that never reached 'connected' within 15s is
         // a dead dial (peer gone silent, STUN blocked, withheld answer) — kill
         // it so it can't pile up buffers or block redials forever. A connected
         // pc that's been in 'disconnected' >4s isn't coming back either.
         const P = _voicePeers[id];
-        if (P && !P.up && now - P.bornAt > 15000) { _voiceCool[id] = now + 8000; _voiceDrop(id); return; }
-        if (P && P.downAt && now - P.downAt > 4000) { _voiceCool[id] = now + 8000; _voiceDrop(id); return; }
-        if (d2 > VOICE_DROP_PX * VOICE_DROP_PX || i >= VOICE_MAX_PEERS) _voiceDrop(id);
+        if (P && !P.up && now - P.bornAt > 15000) { _voiceCool[id] = now + 8000; _voiceDrop(id, 'neverup-15s'); return; }
+        if (P && P.downAt && now - P.downAt > 4000) { _voiceCool[id] = now + 8000; _voiceDrop(id, 'down-4s'); return; }
+        // Zombie-pair heal. Their badge says TALKING, the pc is 'connected',
+        // they're well inside earshot — and nothing comes out. Two oracles:
+        //  · totalAudioEnergy — the browser's own CUMULATIVE decoded energy.
+        //    Immune to sampling gaps (word pauses, pulsed tones) and to a
+        //    suspended AudioContext. Flat for ~3.5s of live badge ⇒ the
+        //    transport/decode side is dead ⇒ REBUILD the pair.
+        //  · energy flowing but our analyser flat for 5s ⇒ decode is fine,
+        //    our local WebAudio graph is wedged ⇒ REWIRE it locally, no drop.
+        // Converts "I just can't hear them, for minutes" into a ~2s blip.
+        if (P && P.up && _voiceTalkNow(id) && d2 < VOICE_RANGE_PX * VOICE_RANGE_PX * 0.64) {
+          const Z = P.z || (P.z = { e0: -1, e: -1, t0: now, pending: false, r0: now });
+          if (!Z.pending) {
+            Z.pending = true;
+            P.pc.getStats().then((st) => {
+              Z.pending = false;
+              st.forEach((s) => {
+                if (s.type === 'inbound-rtp' && (s.kind || s.mediaType) === 'audio' && typeof s.totalAudioEnergy === 'number') Z.e = s.totalAudioEnergy;
+              });
+              if (Z.e0 < 0 && Z.e >= 0) { Z.e0 = Z.e; Z.t0 = Date.now(); }
+            }).catch(() => { Z.pending = false; });
+          }
+          if (Z.e0 >= 0 && Z.e - Z.e0 > 3e-4) {
+            Z.e0 = Z.e; Z.t0 = now;                  // real audio decoded — transport is alive
+            const r = P.an ? _voiceRms(P.an) : -1;
+            if (r >= 0.015) Z.r0 = now;              // …and our graph hears it
+            else if (now - Z.r0 > 5000 && (_voiceHealAt[id] || 0) < now - 15000) {
+              _voiceHealAt[id] = now;
+              _voiceRewire(id, P);
+              Z.r0 = now;
+            }
+          } else if (Z.e0 >= 0 && now - Z.t0 > 3500 && (_voiceHealAt[id] || 0) < now - 20000) {
+            _voiceHealAt[id] = now;
+            _voiceCool[id] = now + 1500;
+            _voiceDrop(id, 'zombie-heal');
+            return;
+          }
+        } else if (P) P.z = null;
+        // No sprite for them yet ≠ gone: right after a join, the pc can form a
+        // beat before positions land. Give young pairs 10s to learn where the
+        // other end is; only a STALE unknown means they actually left.
+        if (flag === 'nopos' && P && now - P.bornAt < 10000) return;
+        if (d2 > VOICE_DROP_PX * VOICE_DROP_PX) { _voiceDrop(id, flag || 'range'); return; }
+        if (i >= VOICE_MAX_PEERS) _voiceDrop(id, 'over-cap');
       });
+      // Pump watchdog: Chrome (background tabs, memory saver) can PAUSE the
+      // hidden <audio> that pumps a remote stream into WebAudio — the call
+      // stays 'connected' but decodes pure silence until nudged. Same for a
+      // suspended AudioContext. Revive both continuously.
+      if (_voiceCtx && _voiceCtx.state === 'suspended') { try { _voiceCtx.resume(); } catch (_) {} }
+      for (const id in _voicePeers) {
+        const el = _voicePeers[id].el;
+        if (el && el.paused) { try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
+      }
       // then dial-outs — only toward ids ordered after ours (they dial us)
       const cand = [];
       for (const id in sc.otherPlayers) {
@@ -4897,21 +5032,23 @@
           const s = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
           });
-          s.getAudioTracks().forEach((t) => { t.enabled = false; });   // hard-muted until held
+          // Master stays warm and UNATTACHED — nothing transmits without a
+          // sender track, so no enabled/disabled juggling can leak audio.
           _voiceMic = s; _voiceMicDenied = false;
-          for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);
         } catch (_) {
           _voiceMicDenied = true;
           _rpsToast('🎙️ Mic blocked — you can still hear people talk');
         } finally { _voiceMicBusy = false; }
       }
       if (!_voiceHeld || !_voiceMic) return;   // released mid-prompt, or denied
-      _voiceMic.getAudioTracks().forEach((t) => { t.enabled = true; });
+      for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);   // fresh clone to every pair
       _voiceSetLive(true);
     }
     function _voicePttUp() {
       _voiceHeld = false;
-      if (_voiceMic) _voiceMic.getAudioTracks().forEach((t) => { t.enabled = false; });
+      // Detach + stop every per-press clone: released means NO sender track
+      // anywhere, not a muted one. The master mic stays warm for next press.
+      for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);
       _voiceSetLive(false);
     }
     function _voiceSetLive(on) {
@@ -4940,7 +5077,16 @@
     });
     document.addEventListener('keyup', (e) => { if (e.code === 'KeyV') _voicePttUp(); });
     window.addEventListener('blur', _voicePttUp);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) _voicePttUp(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { _voicePttUp(); return; }
+      // Tab back in view: instantly revive whatever Chrome suspended while
+      // hidden (the 500ms watchdog would catch it anyway — this just beats it).
+      _voiceKickCtx();
+      for (const id in _voicePeers) {
+        const el = _voicePeers[id].el;
+        if (el && el.paused) { try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
+      }
+    });
 
     (function () {
       const tv = document.getElementById('touch-voice');
@@ -4964,7 +5110,7 @@
     window.toggleVoice = function () {
       _voiceOn = !_voiceOn;
       try { localStorage.setItem('jpo_voice_on', _voiceOn ? '1' : '0'); } catch (_) {}
-      if (!_voiceOn) { _voicePttUp(); _voiceDropAll(); }
+      if (!_voiceOn) { _voicePttUp(); _voiceDropAll('master-off'); }
       _voiceHudRender();
       _rpsToast(_voiceOn ? '🎙️ Voice on — hold V near someone to talk' : '🔇 Voice off');
     };
@@ -4989,16 +5135,89 @@
       B[id].until = Date.now() + 6500;   // self-expiring
     });
 
+    // Local capture check: RMS of OUR OWN mic as the audio graph sees it.
+    // Only meaningful while PTT is held — a released (disabled) track is
+    // silent by design. Distinguishes "my mic is dead" from "the pair is".
+    let _voiceMicAn = null;
+    function _voiceMicLvl() {
+      if (!_voiceMic || !_voiceCtx) return -1;
+      try {
+        if (!_voiceMicAn) {
+          _voiceMicAn = _voiceCtx.createAnalyser(); _voiceMicAn.fftSize = 512;
+          _voiceCtx.createMediaStreamSource(_voiceMic).connect(_voiceMicAn);
+        }
+        return _voiceRms(_voiceMicAn);
+      } catch (_) { return -1; }
+    }
+
     // Debug/test hook (used by the automated browser check).
     window._voiceDebug = () => ({
       on: _voiceOn, live: _voiceLive, held: _voiceHeld, micDenied: _voiceMicDenied,
-      peers: Object.keys(_voicePeers).map((id) => ({
-        id, st: _voicePeers[id].pc.connectionState,
-        wired: !!(_voicePeers[id].gain || _voicePeers[id].el),
-        dirs: _voicePeers[id].pc.getTransceivers().map((t) => t.currentDirection || t.direction),
-      })),
-      badges: Object.keys(window._voiceBadges)
+      ctx: _voiceCtx ? _voiceCtx.state : 'none',
+      peers: Object.keys(_voicePeers).map((id) => {
+        const P = _voicePeers[id];
+        const lvl = P.an ? _voiceRms(P.an) : -1;   // decoded remote stream RMS
+        let rtm = null;   // receiver track muted = browser reports no media arriving on it
+        try { const r = P.pc.getReceivers()[0]; if (r && r.track) rtm = r.track.muted; } catch (_) {}
+        let tx = -1;      // RMS of OUR outgoing sender track (what we actually feed the encoder)
+        try {
+          const sn = P.pc.getTransceivers()[0].sender;
+          if (sn && sn.track && sn.track.readyState === 'live' && _voiceCtx) {
+            if (P.txTrack !== sn.track) {
+              // Fresh clone per press = fresh track: tear down the previous
+              // debug tap or repeated _voiceDebug() polling accumulates nodes.
+              try { if (P.txSrc) P.txSrc.disconnect(); } catch (_) {}
+              try { if (P.txAn) P.txAn.disconnect(); } catch (_) {}
+              P.txTrack = sn.track;
+              P.txAn = _voiceCtx.createAnalyser(); P.txAn.fftSize = 512;
+              P.txSrc = _voiceCtx.createMediaStreamSource(new MediaStream([sn.track]));
+              P.txSrc.connect(P.txAn);
+            }
+            if (P.txAn) tx = _voiceRms(P.txAn);
+          }
+        } catch (_) {}
+        return {
+          id, st: P.pc.connectionState,
+          wired: !!(P.gain || P.el),
+          g: P.gain ? P.gain.gain.value : -1,   // post-falloff volume actually applied
+          lvl, tx,
+          elp: P.el ? P.el.paused : null,   // paused pump = decoded silence
+          rtm,
+          dirs: P.pc.getTransceivers().map((t) => t.currentDirection || t.direction),
+        };
+      }),
+      badges: Object.keys(window._voiceBadges),
+      micLvl: _voiceMicLvl()
     });
+    // Deep per-peer diagnostics (QA/console use): where is audio dying on
+    // this pair — sender not sending, transport not passing, or track muted?
+    window._voiceStats = async (id) => {
+      const P = _voicePeers[id];
+      if (!P) return null;
+      const out = {
+        st: P.pc.connectionState, ice: P.pc.iceConnectionState,
+        dirs: P.pc.getTransceivers().map((t) => t.currentDirection || t.direction),
+        inBytes: 0, outBytes: 0, sel: null,
+      };
+      try {
+        const rx = P.pc.getReceivers()[0];
+        if (rx && rx.track) { out.trackMuted = rx.track.muted; out.trackState = rx.track.readyState; }
+        const stats = await P.pc.getStats();
+        let selId = null;
+        stats.forEach((s) => {
+          if (s.type === 'transport' && s.selectedCandidatePairId) selId = s.selectedCandidatePairId;
+          if (s.type === 'inbound-rtp'  && s.kind === 'audio') out.inBytes  = s.bytesReceived || 0;
+          if (s.type === 'outbound-rtp' && s.kind === 'audio') out.outBytes = s.bytesSent || 0;
+        });
+        stats.forEach((s) => {
+          if (s.type === 'candidate-pair' && (s.id === selId || (!selId && s.selected))) {
+            const L = stats.get(s.localCandidateId), R = stats.get(s.remoteCandidateId);
+            out.sel = { state: s.state, l: L && L.candidateType, r: R && R.candidateType };
+          }
+        });
+      } catch (e) { out.err = String(e && e.message || e).slice(0, 80); }
+      return out;
+    };
 
     // ── Rock-Paper-Scissors challenges ─────────────────────────────────
     // Session-only and fully server-authoritative — the client just renders
