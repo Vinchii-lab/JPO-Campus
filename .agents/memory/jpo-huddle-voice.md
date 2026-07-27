@@ -13,6 +13,9 @@ Relay validation re-runs per message (not per session): both ends in `players`, 
 ## Hostile peers: bound every pre-handshake buffer + deadline every pc
 A withheld answer plus an ICE flood is a memory DoS on the *browser*: cap the pre-SDP `pendIce` buffer (~24; legit flows use <10) and drop+cooldown on overflow, give every pc a never-connected deadline (~15s → drop+cool — also unblocks redials after a dead dial), and cap ICE-kind relay messages far below offer-kind on the server (<4KB vs 40KB; one `data.k` read keeps the relay otherwise opaque).
 
+## Mesh slots must follow the conversation, not raw distance
+Nearest-N peer selection breaks in crowds: a silent bystander 50px away blocks the talker 300px away → "I can't hear them but she can" (position-dependent asymmetry that users read as turn-taking). Rank talkers first — the broadcast badge state is the shared talking signal every client already has — in ALL THREE slot decisions: dial candidates, keep/evict ranking, and inbound offers at cap (evict farthest silent peer, short 3s cool to damp flap; never evict a talker). One talker still only reaches cap-N listeners — bigger gatherings need an SFU.
+
 ## Presence badges: self-expiry + keepalive, never trust `off`
 Any "X is doing Y" indicator relayed through a rate-limited channel needs client-side expiry (~6.5s) plus sender keepalive (~4s) — a throttled/dropped `off` event otherwise wedges the indicator on forever.
 

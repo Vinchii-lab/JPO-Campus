@@ -2792,15 +2792,17 @@ io.on("connection", (socket) => {
   // they get a visible nag toast instead (re-armed on every reconnect, so
   // it keeps nudging until they refresh). Once every tab has handshake
   // code this toast becomes dead weight that never fires — by design.
-  let clientBuildSeen = false;
+  let clientBuildSeen = false, staleNagRepeat = null;
   socket.emit("buildStamp", { stamp: String(BUILD_STAMP) });
-  socket.on("clientBuild", () => { clientBuildSeen = true; });
-  const staleNag = setTimeout(() => {
-    if (!clientBuildSeen && socket.connected) {
-      socket.emit("interactError", { message: "🎙️ The office got an update — press F5 / refresh this page to grab it!" });
-    }
-  }, 5000);
-  socket.once("disconnect", () => clearTimeout(staleNag));
+  socket.on("clientBuild", () => { clientBuildSeen = true; if (staleNagRepeat) clearInterval(staleNagRepeat); });
+  const nagStale = () => {
+    if (clientBuildSeen || !socket.connected) { if (staleNagRepeat) clearInterval(staleNagRepeat); return; }
+    socket.emit("interactError", { message: "🎙️ The office got an update — press F5 / refresh this page to grab it!" });
+  };
+  // One toast is easy to miss mid-game: nag at 5s, then once a minute until
+  // they actually refresh (a handshaking client never sees any of this).
+  const staleNag = setTimeout(() => { nagStale(); staleNagRepeat = setInterval(nagStale, 60000); }, 5000);
+  socket.once("disconnect", () => { clearTimeout(staleNag); if (staleNagRepeat) clearInterval(staleNagRepeat); });
 
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).

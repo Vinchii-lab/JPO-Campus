@@ -4580,7 +4580,7 @@
     const VOICE_RANGE_PX  = 480;  // dial-in range — matches the server's earshot
     const VOICE_DROP_PX   = 620;  // hysteresis: pacing at the edge doesn't churn calls
     const VOICE_FULL_PX   = 130;  // full volume inside this, fading to 0 at RANGE
-    const VOICE_MAX_PEERS = 6;    // nearest N — a packed room stays a mesh, not a meltdown
+    const VOICE_MAX_PEERS = 10;   // cap on the mesh — audio-only pcs are cheap, but not free
     const VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
     let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
     let _voiceHeld = false;       // PTT physically held
@@ -4690,6 +4690,34 @@
     }
     function _voiceDropAll() { for (const id of Object.keys(_voicePeers)) _voiceDrop(id); }
 
+    // Is this player talking right now (per their broadcast badge)? Badges
+    // self-expire and are keepalive-refreshed, so this is current within ~2s.
+    function _voiceTalkNow(id) {
+      const b = window._voiceBadges[id];
+      return !!(b && b.until > Date.now());
+    }
+    // At the peer cap and a pair with a priority claim shows up (they're
+    // talking, or we are): kick the farthest SILENT peer to make room. In a
+    // packed room the slots must follow the conversation, not raw distance —
+    // otherwise a mute bystander can block the person you're listening to.
+    function _voiceEvictForPair(newId) {
+      if (!_voiceTalkNow(newId) && !_voiceLive) return false;
+      const sc = window._gameScene;
+      let worst = null, worstD2 = -1;
+      for (const id in _voicePeers) {
+        if (_voiceTalkNow(id)) continue;               // never bump a talker
+        const e = sc && sc.otherPlayers[id];
+        const d2 = (e && e.sprite && sc.player)
+          ? (e.sprite.x - sc.player.x) ** 2 + (e.sprite.y - sc.player.y) ** 2
+          : Infinity;
+        if (d2 > worstD2) { worstD2 = d2; worst = id; }
+      }
+      if (!worst) return false;                        // all ten are talking — genuinely full
+      _voiceCool[worst] = Date.now() + 3000;           // short damper so the pair doesn't flap
+      _voiceDrop(worst);
+      return true;
+    }
+
     async function _voiceOffer(id) {
       const P = _voiceNewPeer(id, false);
       try {
@@ -4710,7 +4738,7 @@
           // Deterministic roles kill offer-glare: the LOWER socket id dials,
           // the higher answers — both sides agree without a tiebreak dance.
           if (socket.id < fromId) return;
-          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS) return;
+          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS && !_voiceEvictForPair(fromId)) return;
           if (P) _voiceDrop(fromId);            // a fresh offer supersedes a stale pc
           P = _voiceNewPeer(fromId, true);
           await P.pc.setRemoteDescription(data.sdp);
@@ -4750,13 +4778,14 @@
       }
       if (_voiceHeld && _voiceUiBlocked()) _voicePttUp();   // an overlay swallowed the keyup
       const px = sc.player.x, py = sc.player.y, now = Date.now();
-      // hang-ups first (sorted so the cap keeps the NEAREST peers)
+      // hang-ups first — ranked TALKERS-first, then nearest, so when the cap
+      // bites it sheds silent bystanders and keeps the actual conversation
       const conn = Object.keys(_voicePeers).map((id) => {
         const e = sc.otherPlayers[id];
-        if (!e || !e.sprite || _voiceCrossDark(id)) return [id, Infinity];
+        if (!e || !e.sprite || _voiceCrossDark(id)) return [id, Infinity, 1];
         const dx = e.sprite.x - px, dy = e.sprite.y - py;
-        return [id, dx * dx + dy * dy];
-      }).sort((a, b) => a[1] - b[1]);
+        return [id, dx * dx + dy * dy, _voiceTalkNow(id) ? 0 : 1];
+      }).sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
       conn.forEach(([id, d2], i) => {
         // Handshake deadline: a pc that never reached 'connected' within 15s is
         // a dead dial (peer gone silent, STUN blocked, withheld answer) — kill
@@ -4774,9 +4803,10 @@
         const e = sc.otherPlayers[id];
         if (!e || !e.sprite || _voiceCrossDark(id)) continue;
         const dx = e.sprite.x - px, dy = e.sprite.y - py, d2 = dx * dx + dy * dy;
-        if (d2 <= VOICE_RANGE_PX * VOICE_RANGE_PX) cand.push([id, d2]);
+        if (d2 <= VOICE_RANGE_PX * VOICE_RANGE_PX) cand.push([id, d2, _voiceTalkNow(id) ? 0 : 1]);
       }
-      cand.sort((a, b) => a[1] - b[1]);
+      // talkers first, then nearest — in a crowd, dial the conversation
+      cand.sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
       let room = VOICE_MAX_PEERS - Object.keys(_voicePeers).length;
       for (const [id] of cand) {
         if (room <= 0) break;
