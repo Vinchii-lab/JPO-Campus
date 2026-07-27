@@ -1892,6 +1892,24 @@
   <script>
     const socket = io();
 
+    // ── Build handshake: stale tabs pull themselves forward ─────────────
+    // The server sends its BUILD_STAMP on every (re)connect; if it doesn't
+    // match the stamp baked into THIS page, a new build shipped while this
+    // tab was open — reload once to pick it up (auto-rejoin restores the
+    // session seamlessly). Guarded per-stamp so a broken storage or proxy
+    // can never reload-loop.
+    socket.on('connect', () => socket.emit('clientBuild', { b: String(window.__BUILD__) }));
+    socket.on('buildStamp', (p) => {
+      const srv = String((p && p.stamp) || '');
+      if (!srv || srv === String(window.__BUILD__)) return;
+      let seen = null;
+      try { seen = sessionStorage.getItem('jpo_reload_for'); } catch (_) {}
+      if (seen === srv || window.__reloadedFor === srv) return;   // once per build
+      window.__reloadedFor = srv;
+      try { sessionStorage.setItem('jpo_reload_for', srv); } catch (_) {}
+      location.reload();
+    });
+
     // ── Resume tokens: lightweight auto-rejoin (see server.js) ──────────
     // "Remember me" picks the storage: localStorage survives closing the
     // browser; sessionStorage only survives a refresh of THIS tab. Saving to

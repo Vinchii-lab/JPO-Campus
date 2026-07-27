@@ -2785,6 +2785,23 @@ function voicePairOk(aId, bId) {
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
+  // Build handshake — how "everyone gets the fix" works without chasing
+  // people down: the client compares this stamp to the one baked into its
+  // page and reloads itself on mismatch (new-code tabs). Tabs too old to
+  // even KNOW the handshake can't self-reload, so after a grace period
+  // they get a visible nag toast instead (re-armed on every reconnect, so
+  // it keeps nudging until they refresh). Once every tab has handshake
+  // code this toast becomes dead weight that never fires — by design.
+  let clientBuildSeen = false;
+  socket.emit("buildStamp", { stamp: String(BUILD_STAMP) });
+  socket.on("clientBuild", () => { clientBuildSeen = true; });
+  const staleNag = setTimeout(() => {
+    if (!clientBuildSeen && socket.connected) {
+      socket.emit("interactError", { message: "🎙️ The office got an update — press F5 / refresh this page to grab it!" });
+    }
+  }, 5000);
+  socket.once("disconnect", () => clearTimeout(staleNag));
+
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).
   const chatBucket  = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
