@@ -9,3 +9,4 @@
 - [Running long processes from the agent](agent-env-long-processes.md) — bash calls kill their process group on exit; use a temporary workflow + workspace log file.
 - [JPO Huddle production ops](jpo-huddle-production.md) — prod DB is separate & READ-ONLY; fixes must self-heal in server code + republish (map swaps strand saved positions).
 - [JPO Huddle env animated overlays](jpo-huddle-env-anims.md) — depth + placement pattern for animated Phaser sprites overlaid on map furniture.
+- [JPO Huddle NPC & AI coach](jpo-huddle-npc-coach.md) — NPCs live OUTSIDE players (own npc* events); socket-triggered AI needs pre-gate read + daily spend cap + atomic claim; form events use a talk-session stamp, not distance.

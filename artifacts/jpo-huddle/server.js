@@ -6,6 +6,7 @@ import path from "path";
 import { readFileSync } from "fs";
 import pg from "pg";
 import crypto from "crypto";
+import OpenAI from "openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -472,7 +473,7 @@ const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033]);
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.
 const WALL_WORK_SEAT_GIDS = new Set([5533, 5564, 5565]);
-const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, PAINTED, WORK_SEATS, FOOD_TABLES } = (() => {
+const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, PAINTED, WALKABLE, WORK_SEATS, FOOD_TABLES } = (() => {
   try {
     const tmj = JSON.parse(readFileSync(path.join(__dirname, "public", "assets", "JPO_HQ.tmj"), "utf8"));
     const w = tmj.width * tmj.tilewidth * RENDER_SCALE;
@@ -507,11 +508,18 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, PAINTED, WORK_SEATS, F
       // restore rescue stays floor-only while movement blocking uses the
       // any-layer rule (the client's _paintedWorldAt mirrors it exactly).
       let painted = null;
+      let walkable = null;
       if (floor) {
         painted = floor.data.map((g) => (g & GID_MASK) !== 0);
+        // Huddles' stroll mask: NPC-walkable = painted Floor art with NOTHING
+        // on Wall/Furniture — plain corridor/room floor only. Deliberately
+        // conservative (wall-notch doorway cells that carry Wall art are
+        // excluded); the NPC's BFS router only ever routes through these, and
+        // an unreachable tour stop is dropped with a boot log line.
+        walkable = floor.data.map((g) => (g & GID_MASK) !== 0);
         for (const ln of ["Wall", "Furniture"]) {
           const l = tmj.layers?.find((x) => x.name === ln && Array.isArray(x.data));
-          if (l) l.data.forEach((g, i) => { if ((g & GID_MASK) !== 0) painted[i] = true; });
+          if (l) l.data.forEach((g, i) => { if ((g & GID_MASK) !== 0) { painted[i] = true; walkable[i] = false; } });
         }
       }
       // Work-seat mask from the Furniture layer (same shape as OUTDOOR).
@@ -540,13 +548,13 @@ const { WORLD_W, WORLD_H, MAP_W, MAP_H, OUTDOOR, FLOORED, PAINTED, WORK_SEATS, F
       } else {
         console.error("work-seat mask unavailable (no Furniture layer) — work bonus disabled");
       }
-      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, FLOORED: floored, PAINTED: painted, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
+      return { WORLD_W: w, WORLD_H: h, MAP_W: tmj.width, MAP_H: tmj.height, OUTDOOR: outdoor, FLOORED: floored, PAINTED: painted, WALKABLE: walkable, WORK_SEATS: workSeats, FOOD_TABLES: foodTables };
     }
   } catch (err) {
     console.error("map bounds load failed, using fallback:", err);
   }
-  // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work/floor masks (smoking + work bonus + void rescue disabled).
-  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, FLOORED: null, PAINTED: null, WORK_SEATS: null, FOOD_TABLES: [] };
+  // Fallback: 210×128 tiles · 16px · scale 3, no outdoor/work/floor masks (smoking + work bonus + void rescue + NPC wandering disabled).
+  return { WORLD_W: 10080, WORLD_H: 6144, MAP_W: 210, MAP_H: 128, OUTDOOR: null, FLOORED: null, PAINTED: null, WALKABLE: null, WORK_SEATS: null, FOOD_TABLES: [] };
 })();
 
 // Register the cafeteria food spots as interactive objects, and group the
@@ -622,6 +630,141 @@ function nearbyIds(socketId, radius) {
   }
   return out;
 }
+
+// ── Huddles, the walking connection coach (server-driven NPC) ───────────────
+// A real character everyone sees at the same spot, strolling a tour of the
+// office's social hotspots. Deliberately NOT in `players`: dedicated npc*
+// events keep it out of the whisper roster, duel/profile target scans, After
+// Dark rounds, leaderboards and group payouts. Clients render it purely from
+// npcState (full snapshot, pulled via npcSync at scene create + pushed on
+// approval) and npcMoved ticks.
+const NPC = {
+  id: "npc:huddles", name: "Huddles", character: "amelia",
+  hairIdx: 3, skinIdx: 1, shirtIdx: 5, pantsIdx: 2,
+  x: GRASS_SPAWN.x, y: GRASS_SPAWN.y, dir: "down", anim: "idle",
+};
+const NPC_SPEED       = 110;      // px/s — a relaxed stroll (players run 195)
+const NPC_TICK_MS     = 100;
+const NPC_TALK_RADIUS = 200;      // server-side E-press proximity check, px
+const NPC_DWELL_MIN_MS = 20_000, NPC_DWELL_MAX_MS = 45_000;
+// Tour stops (ids in OBJECTS): the anchor is the machine/table itself; the
+// router walks to the nearest WALKABLE tile beside it. Order ≈ a loop around
+// the office; unreachable stops are skipped at runtime (logged once at boot).
+const NPC_STOPS = ["coffee_machine5", "water_cooler", "coffee_machine6", "kitchen_island", "arcade", "pool_table", "snack_counter"];
+
+const npcTileOf = (x, y) => [Math.floor(x / TILE_PX), Math.floor((y + BODY_DY) / TILE_PX)];
+const npcTileWalkable = (c, r) => c >= 0 && r >= 0 && c < MAP_W && r < MAP_H && !!(WALKABLE && WALKABLE[r * MAP_W + c]);
+
+// Nearest walkable tile to (c,r): ring-expanding BFS over the 4-neighbourhood,
+// ignoring walkability while searching (the anchor itself sits ON furniture).
+function npcNearestWalkable(c, r) {
+  const seen = new Set([c + "," + r]);
+  const q = [[c, r]];
+  for (let i = 0; i < q.length && i < 900; i++) {
+    const [cc, rr] = q[i];
+    if (npcTileWalkable(cc, rr)) return [cc, rr];
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const k = (cc + dc) + "," + (rr + dr);
+      if (!seen.has(k)) { seen.add(k); q.push([cc + dc, rr + dr]); }
+    }
+  }
+  return null;
+}
+
+// BFS shortest tile path (4-dir) across WALKABLE. Runs per leg (~27k tiles,
+// sub-millisecond) so the route self-heals across map edits — no baked paths.
+function npcPath(from, to) {
+  const key = (c, r) => r * MAP_W + c;
+  const prev = new Map([[key(from[0], from[1]), -1]]);
+  const q = [from];
+  for (let i = 0; i < q.length; i++) {
+    const [c, r] = q[i];
+    if (c === to[0] && r === to[1]) {
+      const path = [];
+      let k = key(c, r);
+      while (k !== -1) { path.push([k % MAP_W, Math.floor(k / MAP_W)]); k = prev.get(k); }
+      return path.reverse();
+    }
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr;
+      if (!npcTileWalkable(nc, nr) || prev.has(key(nc, nr))) continue;
+      prev.set(key(nc, nr), key(c, r));
+      q.push([nc, nr]);
+    }
+  }
+  return null;
+}
+
+// Park Huddles at the first reachable tour stop on boot (before any client
+// connects), so the office never opens with the coach standing on the lawn.
+if (WALKABLE) {
+  for (const id of NPC_STOPS) {
+    const o = OBJECTS[id];
+    const t = o && npcNearestWalkable(...npcTileOf(o.x, o.y));
+    if (t) { NPC.x = t[0] * TILE_PX + TILE_PX / 2; NPC.y = t[1] * TILE_PX + TILE_PX / 2 - BODY_DY; break; }
+  }
+} else {
+  console.error("Huddles: no walkable mask (map load failed) — the coach stands still");
+}
+
+const npcSnapshot = () => ({
+  id: NPC.id, name: NPC.name, character: NPC.character,
+  hairIdx: NPC.hairIdx, skinIdx: NPC.skinIdx, shirtIdx: NPC.shirtIdx, pantsIdx: NPC.pantsIdx,
+  x: Math.round(NPC.x), y: Math.round(NPC.y), dir: NPC.dir, anim: NPC.anim,
+});
+
+let npcLeg = null, npcLegIdx = 0, npcStopIdx = 0;
+let npcDwellUntil = Date.now() + 10_000;
+let npcLastTick = Date.now();
+
+// Build the next leg from the CURRENT position to the next reachable stop.
+// Recomputed live (not baked) so a skipped stop never strands the route.
+function npcNextLeg() {
+  if (!WALKABLE) return null;
+  const from = npcNearestWalkable(...npcTileOf(NPC.x, NPC.y));
+  if (!from) return null;
+  for (let tries = 0; tries < NPC_STOPS.length; tries++) {
+    npcStopIdx = (npcStopIdx + 1) % NPC_STOPS.length;
+    const o = OBJECTS[NPC_STOPS[npcStopIdx]];
+    if (!o) continue;
+    const to = npcNearestWalkable(...npcTileOf(o.x, o.y));
+    if (!to || (to[0] === from[0] && to[1] === from[1])) continue;
+    const p = npcPath(from, to);
+    if (p && p.length > 1) return p;
+    console.error(`Huddles: no walkable path toward ${NPC_STOPS[npcStopIdx]} — stop skipped`);
+  }
+  return null;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  const dt = Math.min(0.5, (now - npcLastTick) / 1000);
+  npcLastTick = now;
+  if (Object.keys(players).length === 0) return;   // empty office — the coach waits (and no pointless broadcasts)
+  if (now < npcDwellUntil) return;
+  if (!npcLeg) {
+    npcLeg = npcNextLeg();
+    npcLegIdx = 1;
+    if (!npcLeg) { npcDwellUntil = now + 60_000; return; }   // nowhere to go — nap, retry later
+  }
+  const t = npcLeg[npcLegIdx];
+  if (!t) {   // leg finished → dwell at this stop
+    npcLeg = null;
+    NPC.anim = "idle";
+    npcDwellUntil = now + NPC_DWELL_MIN_MS + Math.random() * (NPC_DWELL_MAX_MS - NPC_DWELL_MIN_MS);
+    io.emit("npcMoved", { x: Math.round(NPC.x), y: Math.round(NPC.y), dir: NPC.dir, anim: "idle" });
+    return;
+  }
+  const tx = t[0] * TILE_PX + TILE_PX / 2, ty = t[1] * TILE_PX + TILE_PX / 2 - BODY_DY;
+  const dx = tx - NPC.x, dy = ty - NPC.y;
+  const dist = Math.hypot(dx, dy);
+  const step = NPC_SPEED * dt;
+  if (dist <= step) { NPC.x = tx; NPC.y = ty; npcLegIdx++; }
+  else { NPC.x += (dx / dist) * step; NPC.y += (dy / dist) * step; }
+  NPC.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+  NPC.anim = "walk";
+  io.emit("npcMoved", { x: Math.round(NPC.x), y: Math.round(NPC.y), dir: NPC.dir, anim: "walk" });
+}, NPC_TICK_MS);
 
 // ── Work bonus (earn extra coins while seated at a computer/desk) ────────────
 // A player is "working" when their reported anim is 'sit' AND the seat tile
@@ -777,6 +920,339 @@ const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 // client's DEPARTMENTS array in public/index.html. '' = not set (legacy
 // accounts pick one, once, from their own profile card).
 const DEPARTMENTS = ["HR", "IT", "Operations", "Front Desk", "CMA", "QA", "L&D", "Claims", "Accounting"];
+
+// ── Huddles' daily connection missions ───────────────────────────────────────
+// One mission per player per UTC day, aimed at creating NEW connections
+// (v1: first-time pairings — the rematch/rivalry ladder is deliberately out).
+// Every mission is SERVER-VERIFIABLE: duels settle through finishMatch, the
+// whisper handler counts exchange facts (never content), coffee/snack moments
+// reuse the group-radius scan. The AI only PICKS from this template allowlist
+// using roster facts (index + first name + department + played-before flag —
+// emails never leave the server); anything off-menu falls back to a
+// deterministic mission so the coach keeps working with the AI down.
+const MISSION_REWARD = 50;
+const MISSION_TYPES = new Set(["play_new", "play_dept", "play_person", "whisper_person", "coffee_crowd"]);
+const COACH_GOALS = {
+  meet_new: "meet new people",
+  more_games: "play more mini-games with coworkers",
+  cross_team: "get to know other departments",
+  coffee_buddies: "more coffee-break company",
+};
+
+let _openaiClient = null;   // lazy singleton; false = env vars missing (fallback-only mode)
+function coachAiClient() {
+  if (_openaiClient !== null) return _openaiClient;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL, apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  _openaiClient = baseURL && apiKey ? new OpenAI({ baseURL, apiKey }) : false;
+  if (!_openaiClient) console.error("Huddles: AI integration env vars missing — deterministic fallback missions only");
+  return _openaiClient;
+}
+
+function liveSocketIdByEmail(email) {
+  for (const [sid, q] of Object.entries(players)) if (q.email === email) return sid;
+  return null;
+}
+
+// Roster facts for mission generation: recently-active approved coworkers
+// (entered the office within 14 days — last_daily_bonus is set on every
+// first-entry-of-day) plus a played-before flag from the pair history.
+async function coachCandidates(email) {
+  const { rows } = await pool.query(
+    `SELECT email, COALESCE(NULLIF(nickname,''), NULLIF(first_name,''), name) AS display, department
+       FROM jpo_players
+      WHERE approved = true AND dismissed = false AND email <> $1
+        AND last_daily_bonus IS NOT NULL AND last_daily_bonus > CURRENT_DATE - 14
+      ORDER BY last_daily_bonus DESC, updated_at DESC
+      LIMIT 30`, [email]);
+  const { rows: pairs } = await pool.query(
+    `SELECT email_a, email_b FROM jpo_pair_plays WHERE email_a = $1 OR email_b = $1`, [email]);
+  const played = new Set(pairs.map((r) => (r.email_a === email ? r.email_b : r.email_a)));
+  return rows.map((r) => ({ email: r.email, name: r.display, dept: r.department || "", playedBefore: played.has(r.email) }));
+}
+
+function missionLabel(m) {
+  switch (m?.type) {
+    case "play_new":       return "Play a mini-game with someone you've never played before";
+    case "play_dept":      return `Finish a mini-game with someone from ${m.dept}`;
+    case "play_person":    return `Play a mini-game with ${m.target_name}`;
+    case "whisper_person": return `Trade whispers with ${m.target_name} (one each way)`;
+    case "coffee_crowd":   return `Have a coffee or snack with ${m.n}+ coworkers around you`;
+    default:               return "";
+  }
+}
+
+function missionClientView(mission, done, rerolled) {
+  if (!mission) return null;
+  return {
+    label: missionLabel(mission), flavor: mission.flavor || "", type: mission.type,
+    targetName: mission.target_name || null, dept: mission.dept || null, n: mission.n || null,
+    reward: mission.reward || MISSION_REWARD, done: !!done, canReroll: !rerolled && !done,
+  };
+}
+
+// Deterministic mission when the AI is down/slow/off-menu — same catalog,
+// simple priority: fresh pairing > department mixer > whisper > coffee crowd.
+function coachFallbackMission(cands, avoid) {
+  const fresh = cands.filter((c) => !c.playedBefore);
+  const options = [];
+  if (fresh.length) options.push({ type: "play_new", flavor: "Break the ice — challenge someone brand new to a game today!" });
+  const deptCount = {};
+  for (const c of cands) if (c.dept) deptCount[c.dept] = (deptCount[c.dept] || 0) + 1;
+  const bestDept = Object.keys(deptCount).sort((a, b) => deptCount[b] - deptCount[a])[0];
+  if (bestDept) options.push({ type: "play_dept", dept: bestDept, flavor: `The ${bestDept} crew loves a challenger — go finish a game with one of them!` });
+  const t = fresh[0] || cands[0];
+  if (t) options.push({ type: "whisper_person", target_email: t.email, target_name: t.name, flavor: `Psst — ${t.name} could use a hello today. Trade whispers!` });
+  options.push({ type: "coffee_crowd", n: 2, flavor: "Coffee tastes better together — grab one with at least 2 coworkers around you!" });
+  const pick = options.find((o) => o.type !== avoid?.type) || options[options.length - 1];
+  return { ...pick, reward: MISSION_REWARD, by: "fallback" };
+}
+
+// Ask the AI to pick ONE mission from the allowlist using facts only. The
+// server rebuilds the mission from validated parts — the AI's only free text
+// is `flavor`, which is control-stripped and length-capped. Throws on any
+// off-menu answer; callers fall back deterministically.
+async function coachAiMission(player, intake, cands, avoid) {
+  const client = coachAiClient();
+  if (!client || !cands.length) return null;
+  const facts = {
+    player: {
+      name: player.name, department: player.department || "unknown",
+      wants: COACH_GOALS[intake?.goal] || COACH_GOALS.meet_new,
+      curiousAboutDepartments: Array.isArray(intake?.depts) ? intake.depts.slice(0, 3) : [],
+    },
+    coworkers: cands.map((c, i) => ({ i, name: c.name, department: c.dept || "unknown", playedBefore: c.playedBefore })),
+    missionTypes: {
+      play_new: "finish any mini-game duel with a coworker they have NEVER played before (no specific person)",
+      play_dept: "finish a mini-game duel with anyone from one department (set dept)",
+      play_person: "finish a mini-game duel with one specific coworker (set i)",
+      whisper_person: "exchange private whispers with one specific coworker, one message each way (set i)",
+      coffee_crowd: "have a coffee/snack moment while at least n coworkers stand nearby (set n: 2 or 3)",
+    },
+    ...(avoid ? { avoid: { type: avoid.type, name: avoid.target_name || null } } : {}),
+  };
+  const rsp = await Promise.race([
+    client.chat.completions.create({
+      model: "gpt-5.6-terra",
+      max_completion_tokens: 8192,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: "You are Huddles, the upbeat connection coach in a virtual office. Pick ONE daily mission for this player that is most likely to spark a NEW coworker connection. Strongly prefer never-played pairings; respect what the player wants and the departments they're curious about; never pick the 'avoid' entry. Reply with ONLY a JSON object: {\"type\": string, \"i\": number?, \"dept\": string?, \"n\": number?, \"flavor\": string}. flavor = ONE friendly sentence (max 110 chars, at most 1 emoji) telling the player why this mission — mention only names from the coworkers list.",
+        },
+        { role: "user", content: JSON.stringify(facts) },
+      ],
+    }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("coach AI timeout (9s)")), 9000)),
+  ]);
+  const raw = rsp?.choices?.[0]?.message?.content || "";
+  const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  if (!MISSION_TYPES.has(parsed.type)) throw new Error(`off-menu type ${parsed.type}`);
+  const flavor = String(parsed.flavor || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 140);
+  const m = { type: parsed.type, flavor, reward: MISSION_REWARD, by: "ai" };
+  if (parsed.type === "play_person" || parsed.type === "whisper_person") {
+    const c = cands[Number(parsed.i)];
+    if (!c) throw new Error("candidate index out of range");
+    m.target_email = c.email; m.target_name = c.name;
+  } else if (parsed.type === "play_dept") {
+    if (!DEPARTMENTS.includes(parsed.dept) || !cands.some((c) => c.dept === parsed.dept)) throw new Error("bad dept");
+    m.dept = parsed.dept;
+  } else if (parsed.type === "play_new") {
+    if (!cands.some((c) => !c.playedBefore)) throw new Error("play_new impossible — everyone already played");
+  } else if (parsed.type === "coffee_crowd") {
+    m.n = Math.min(3, Math.max(2, Math.round(Number(parsed.n) || 2)));
+  }
+  if (!m.flavor) m.flavor = missionLabel(m);
+  return m;
+}
+
+async function coachRow(email) {
+  const { rows } = await pool.query(
+    `SELECT intake, mission, rerolled,
+            (mission_date = CURRENT_DATE) AS is_today,
+            (mission_done_at IS NOT NULL) AS done
+       FROM jpo_coach WHERE email = $1`, [email]);
+  return rows[0] || null;
+}
+
+// Generate (or re-roll, when `avoid` is passed) today's mission. The
+// conditional UPDATE is the farm-proof day gate — double E-presses, duplicate
+// connections and restarts all funnel into ONE winning generation per day;
+// losers read back whatever won. In-flight set stops duplicate AI calls.
+const coachGenInFlight = new Set();
+
+// Defense-in-depth damper on AI spend: even a modified client replaying coach
+// events can burn at most COACH_AI_DAILY_CAP model calls per email per UTC day
+// (legit use is 2: initial + re-roll). Over cap → deterministic fallback, so a
+// real player is never blocked. In-memory on purpose — it is a cost damper,
+// not a correctness gate (the day-gate UPDATE below is the correctness gate),
+// and the map stays tiny (one entry per coach-curious email per process).
+const coachAiSpend = new Map();   // email → { day, n }
+const COACH_AI_DAILY_CAP = 6;
+
+// coachIntake/coachReroll are follow-up form events, not E-presses — the NPC
+// keeps strolling while the player fills the form, so a raw distance re-check
+// would reject honest submits. Instead they require a recent proximity-verified
+// talk (coachInteract stamps p.coachTalkAt only AFTER its distance check), which
+// a remote script can't forge without actually walking to Huddles.
+const COACH_SESSION_MS = 120000;
+const coachSessionOk = (p) => p?.coachTalkAt && Date.now() - p.coachTalkAt < COACH_SESSION_MS;
+function coachAiBudgetOk(email) {
+  const today = new Date().toISOString().slice(0, 10);   // UTC, like mission_date
+  const s = coachAiSpend.get(email);
+  if (!s || s.day !== today) { coachAiSpend.set(email, { day: today, n: 1 }); return true; }
+  if (s.n >= COACH_AI_DAILY_CAP) return false;
+  s.n++;
+  return true;
+}
+
+async function coachGenerateToday(p, avoid = null) {
+  if (!p?.email || coachGenInFlight.has(p.email)) return;
+  coachGenInFlight.add(p.email);
+  try {
+    const cur = await coachRow(p.email);
+    if (!cur?.intake) return;   // no intake row — the panel will re-ask
+    // Cheap idempotent path BEFORE any AI/candidate work: if today's mission
+    // already stands (and this isn't a claimed re-roll), just re-emit it.
+    // Replayed coachIntake/coachInteract events cost a SELECT, not a model call.
+    if (!avoid && cur.is_today && cur.mission) {
+      const sid0 = liveSocketIdByEmail(p.email);
+      const live0 = sid0 ? players[sid0] : null;
+      if (live0) { live0.coachMission = cur.mission; live0.coachDone = cur.done; }
+      if (sid0) io.to(sid0).emit("coachMission", { mission: missionClientView(cur.mission, cur.done, cur.rerolled) });
+      return;
+    }
+    const intake = cur.intake || {};
+    const cands = await coachCandidates(p.email);
+    let mission = null;
+    if (cands.length && coachAiBudgetOk(p.email)) {
+      try { mission = await coachAiMission(p, intake, cands, avoid); }
+      catch (err) { console.error("Huddles AI generation failed — deterministic fallback:", err?.message || err); }
+    }
+    if (!mission) mission = coachFallbackMission(cands, avoid);
+    const q = avoid
+      ? `UPDATE jpo_coach SET mission = $2::jsonb, mission_date = CURRENT_DATE
+          WHERE email = $1 AND mission_date = CURRENT_DATE AND mission_done_at IS NULL
+          RETURNING mission, rerolled`
+      : `UPDATE jpo_coach SET mission = $2::jsonb, mission_date = CURRENT_DATE, mission_done_at = NULL, rerolled = false
+          WHERE email = $1 AND (mission_date IS DISTINCT FROM CURRENT_DATE OR mission IS NULL)
+          RETURNING mission, rerolled`;
+    const { rows } = await pool.query(q, [p.email, JSON.stringify(mission)]);
+    let winner = rows[0]?.mission || null;
+    let done = false, rerolled = rows[0] ? rows[0].rerolled : !!avoid;
+    if (!winner) {   // lost the day-gate race (or a completion landed mid-reroll) — read what stands
+      const cur = await coachRow(p.email);
+      winner = cur?.is_today ? cur.mission : null;
+      done = !!cur?.done; rerolled = !!cur?.rerolled;
+    }
+    const sid = liveSocketIdByEmail(p.email);
+    const live = sid ? players[sid] : null;
+    if (live && winner) { live.coachMission = winner; live.coachDone = done; }
+    if (sid && winner) io.to(sid).emit("coachMission", { mission: missionClientView(winner, done, rerolled) });
+    if (winner) console.log(`🎯 Huddles' mission for ${p.name} (${winner.by}): ${missionLabel(winner)}`);
+  } catch (err) {
+    console.error("coach mission generation failed:", err);
+    const sid = liveSocketIdByEmail(p.email);
+    if (sid) io.to(sid).emit("interactError", { message: "Huddles fumbled his clipboard — press E to try again." });
+  } finally {
+    coachGenInFlight.delete(p.email);
+  }
+}
+
+// Atomic completion: the CTE flips mission_done_at (once — the WHERE guard
+// makes replays no-ops) and pays the reward in the SAME statement, so a crash
+// can never award twice or mark-done without paying.
+async function coachComplete(email) {
+  const { rows } = await pool.query(
+    `WITH m AS (
+       UPDATE jpo_coach SET mission_done_at = now()
+        WHERE email = $1 AND mission_date = CURRENT_DATE AND mission IS NOT NULL AND mission_done_at IS NULL
+        RETURNING email, mission
+     )
+     UPDATE jpo_players p SET coins = coins + $2, updated_at = now()
+       FROM m WHERE p.email = m.email
+       RETURNING p.coins, m.mission`,
+    [email, MISSION_REWARD]);
+  if (!rows[0]) return;
+  const sid = liveSocketIdByEmail(email);
+  const p = sid ? players[sid] : null;
+  if (!p) return;   // reward is banked; they'll see it next login
+  p.coins = rows[0].coins;
+  p.coachDone = true;
+  io.to(sid).emit("coinUpdate", { coins: p.coins });
+  io.to(sid).emit("missionComplete", { label: missionLabel(rows[0].mission), reward: MISSION_REWARD, coins: p.coins });
+  // Celebration over their head for everyone — with After Dark isolation
+  // (a lit outsider's confetti must not reach alive crew in the dark; same
+  // matching-light rule as chat/emotes/gymFx).
+  const cheer = { id: sid, name: p.name };
+  if (round && round.state === "active") {
+    const dark = inTheDark(sid);
+    for (const pid of Object.keys(players)) if (inTheDark(pid) === dark) io.to(pid).emit("missionCheer", cheer);
+  } else {
+    io.emit("missionCheer", cheer);
+  }
+  console.log(`🎯 ${p.name} completed Huddles' mission (+${MISSION_REWARD} coins)`);
+}
+
+// finishMatch hook (non-forfeit settles + draws): record the pair in the
+// lifetime play history, then check both sides' play missions. Forfeits are
+// deliberately NOT "playing together" — a dodged loss builds no connection.
+async function coachDuelPlayed(aId, bId) {
+  const a = players[aId], b = players[bId];
+  if (!a?.email || !b?.email || a.email === b.email) return;
+  const [ea, eb] = [a.email, b.email].sort();
+  let gamesAfter = 0;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO jpo_pair_plays (email_a, email_b, games) VALUES ($1, $2, 1)
+       ON CONFLICT (email_a, email_b) DO UPDATE SET games = jpo_pair_plays.games + 1, last_played_at = now()
+       RETURNING games`, [ea, eb]);
+    gamesAfter = rows[0]?.games || 0;
+  } catch (err) { console.error("pair-play record failed:", err); return; }
+  for (const [pl, opp] of [[a, b], [b, a]]) {
+    const m = pl.coachMission;
+    if (!m || pl.coachDone) continue;
+    const hit = (m.type === "play_new" && gamesAfter === 1)
+      || (m.type === "play_dept" && m.dept && opp.department === m.dept)
+      || (m.type === "play_person" && m.target_email && opp.email === m.target_email);
+    if (hit) coachComplete(pl.email).catch((err) => console.error("mission complete failed:", err));
+  }
+}
+
+// Whisper-mission facts: per-day per-pair exchange counters, IN MEMORY ONLY —
+// the content promise stays absolute (nothing about whispers is ever stored;
+// a restart forgets today's counts and the pair just whispers again).
+const whisperFacts = new Map();   // "YYYY-MM-DD|emailA|emailB" → {ab, ba}
+function coachWhisperExchanged(senderId, targetId) {
+  const s = players[senderId], t = players[targetId];
+  if (!s?.email || !t?.email || s.email === t.email) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const [ea, eb] = [s.email, t.email].sort();
+  const key = `${day}|${ea}|${eb}`;
+  if (whisperFacts.size > 4000) {
+    for (const k of whisperFacts.keys()) if (!k.startsWith(day)) whisperFacts.delete(k);
+  }
+  const f = whisperFacts.get(key) || { ab: 0, ba: 0 };
+  if (s.email === ea) f.ab++; else f.ba++;
+  whisperFacts.set(key, f);
+  if (f.ab < 1 || f.ba < 1) return;   // needs one message EACH way
+  for (const [pl, other] of [[s, t], [t, s]]) {
+    const m = pl.coachMission;
+    if (m && !pl.coachDone && m.type === "whisper_person" && m.target_email === other.email)
+      coachComplete(pl.email).catch((err) => console.error("mission complete failed:", err));
+  }
+}
+
+// Coffee/snack-moment hook (machine brews, coffee items, rounds, free snacks,
+// paid food): completes coffee_crowd when ≥n OTHER coworkers stand within the
+// group radius — the same scan group consumables use.
+function coachCoffeeMoment(socketId) {
+  const p = players[socketId];
+  const m = p?.coachMission;
+  if (!p?.email || !m || p.coachDone || m.type !== "coffee_crowd") return;
+  if (nearbyIds(socketId, GROUP_RADIUS).length - 1 >= (m.n || 2))
+    coachComplete(p.email).catch((err) => console.error("mission complete failed:", err));
+}
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -999,6 +1475,20 @@ async function restorePlayer(socket, row) {
   socket.emit("currentPlayers", players);
   socket.emit("announcerStatus", { canPost: state.isAnnouncer });
   socket.emit("announcements", await fetchAnnouncements());
+  // Huddles: current NPC snapshot (the scene also pulls via npcSync at create,
+  // covering the game-boots-after-this-emit ordering) + today's mission for
+  // the HUD chip, so a refresh never loses the mission display.
+  socket.emit("npcState", npcSnapshot());
+  if (state.email) {
+    coachRow(state.email).then((row) => {
+      if (players[socket.id] !== state) return;   // already reconnected as a new socket
+      if (row?.is_today && row.mission) {
+        state.coachMission = row.mission;
+        state.coachDone = row.done;
+        socket.emit("coachStatus", { mission: missionClientView(row.mission, row.done, row.rerolled) });
+      }
+    }).catch((err) => console.error("coach status load failed:", err));
+  }
 
   // Issue a resume token so this browser can auto-rejoin later (email-backed only).
   if (state.email) {
@@ -1440,6 +1930,9 @@ async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false
       });
     }
     io.emit("rpsIndicator", { draw: true, aId: cId, bId: tId });
+    // A draw still counts as "played together" for pair history + missions
+    // (the connection happened; only forfeits are excluded).
+    coachDuelPlayed(cId, tId).catch((err) => console.error("coach duel hook failed:", err));
     done();
     return;
   }
@@ -1467,6 +1960,9 @@ async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false
   // Lifetime win counter (profile card / leaderboard). Fire-and-forget: a
   // failed count must never affect the already-settled match.
   recordWin(winnerId, m.game).catch((err) => console.error("recordWin failed:", err));
+  // Pair history + play missions — NOT on forfeits (dodging a loss by leaving
+  // or timing out is no connection; see task rules). Win, lose or draw count.
+  if (!forfeit) coachDuelPlayed(winnerId, loserId).catch((err) => console.error("coach duel hook failed:", err));
   console.log(`${GAME_NAMES[m.game] || m.game}: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
   done();
 }
@@ -2899,6 +3395,78 @@ io.on("connection", (socket) => {
     }
     io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, message: text });
     socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
+    // Mission fact only — the COUNT of an exchange, never the content.
+    coachWhisperExchanged(socket.id, targetId);
+  });
+
+  // ── Huddles the coach: talk / intake / mission re-roll ────────────────
+  const coachBucket = makeBucket(3, 1200);   // guards E-mash / reroll spam
+
+  // Scene-create pull for the NPC snapshot (the restorePlayer push can land
+  // before the Phaser scene registers its listeners — pull covers that).
+  socket.on("npcSync", () => socket.emit("npcState", npcSnapshot()));
+
+  socket.on("coachInteract", async () => {
+    const p = players[socket.id];
+    if (!p || !takeToken(coachBucket)) return;
+    const dx = (p.x ?? 0) - NPC.x, dy = (p.y ?? 0) - NPC.y;
+    if (dx * dx + dy * dy > NPC_TALK_RADIUS * NPC_TALK_RADIUS) {
+      socket.emit("interactError", { message: "Walk over to Huddles first!" });
+      return;
+    }
+    p.coachTalkAt = Date.now();   // proximity verified — opens the intake/reroll window
+    if (!p.email) { socket.emit("coachPanel", { guest: true }); return; }   // session-only: no durable identity to coach
+    try {
+      const row = await coachRow(p.email);
+      if (!row?.intake) { socket.emit("coachPanel", { needIntake: true, departments: DEPARTMENTS }); return; }
+      if (row.is_today && row.mission) {
+        p.coachMission = row.mission;
+        p.coachDone = row.done;
+        socket.emit("coachPanel", { mission: missionClientView(row.mission, row.done, row.rerolled) });
+        return;
+      }
+      socket.emit("coachPanel", { generating: true });
+      await coachGenerateToday(p);   // emits coachMission when done (AI or fallback)
+    } catch (err) {
+      console.error("coachInteract failed:", err);
+      socket.emit("interactError", { message: "Huddles is lost in thought — try again in a moment." });
+    }
+  });
+
+  socket.on("coachIntake", async (payload) => {
+    const p = players[socket.id];
+    if (!p?.email || !takeToken(coachBucket)) return;
+    if (!coachSessionOk(p)) { socket.emit("interactError", { message: "Walk over to Huddles first!" }); return; }
+    p.coachTalkAt = Date.now();   // keep the window open for the re-roll decision
+    const { goal, depts } = payload || {};
+    // Structured multi-choice only — nothing free-form reaches the AI prompt.
+    const g = Object.hasOwn(COACH_GOALS, goal) ? goal : "meet_new";
+    const ds = (Array.isArray(depts) ? depts : []).filter((d) => DEPARTMENTS.includes(d)).slice(0, 3);
+    try {
+      await pool.query(
+        `INSERT INTO jpo_coach (email, intake, intake_at) VALUES ($1, $2::jsonb, now())
+         ON CONFLICT (email) DO UPDATE SET intake = $2::jsonb, intake_at = now()`,
+        [p.email, JSON.stringify({ goal: g, depts: ds })]);
+      socket.emit("coachPanel", { generating: true });
+      await coachGenerateToday(p);
+    } catch (err) { console.error("coachIntake failed:", err); }
+  });
+
+  socket.on("coachReroll", async () => {
+    const p = players[socket.id];
+    if (!p?.email || !takeToken(coachBucket)) return;
+    if (!coachSessionOk(p)) { socket.emit("interactError", { message: "Walk over to Huddles first!" }); return; }
+    try {
+      // Atomic once-a-day flip: only the FIRST reroll of the day matches.
+      const { rows } = await pool.query(
+        `UPDATE jpo_coach SET rerolled = true
+          WHERE email = $1 AND mission_date = CURRENT_DATE AND rerolled = false
+            AND mission_done_at IS NULL AND mission IS NOT NULL
+          RETURNING mission`, [p.email]);
+      if (!rows[0]) { socket.emit("interactError", { message: "No re-roll left today — see you tomorrow!" }); return; }
+      socket.emit("coachPanel", { generating: true });
+      await coachGenerateToday(p, rows[0].mission || {});
+    } catch (err) { console.error("coachReroll failed:", err); }
   });
 
   // ── Player profiles ───────────────────────────────────────────────────
@@ -3562,6 +4130,7 @@ io.on("connection", (socket) => {
     // Everyone nearby sees the food bubble — same event the free snacks use.
     io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: menuItem.icon });
     console.log(`${p.name} bought ${menuItem.name} (${menuItem.price} coins) at ${station}`);
+    coachCoffeeMoment(socket.id);
   });
 
   // ── Cosmetics: switch which owned item is worn ('' = take it off) ────────
@@ -3868,6 +4437,7 @@ io.on("connection", (socket) => {
       p.boostUntil = now + COFFEE_MS;
       io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT });
       console.log(`${p.name} drank a coffee (+${Math.round((COFFEE_MULT - 1) * 100)}% for ${COFFEE_MS / 1000}s)`);
+      coachCoffeeMoment(socket.id);
     } else if (item === "coffee_round" || item === "pizza_party") {
       // Group boost: everyone within GROUP_RADIUS (including the buyer) gets
       // the same speed boost. boostUntil only ever EXTENDS (max), so a short
@@ -3891,6 +4461,7 @@ io.on("connection", (socket) => {
       if (item === "pizza_party")
         io.emit("groupEffect", { effect: "pizza", x: p.x ?? 0, y: p.y ?? 0 });
       console.log(`${p.name} used ${item} — boosted ${ids.length} player(s) for ${dur / 1000}s`);
+      coachCoffeeMoment(socket.id);
     } else if (item === "confetti" || item === "fireworks") {
       // Pure visuals, broadcast like smoke puffs (everyone can see the show).
       io.emit("groupEffect", { effect: item, x: p.x ?? 0, y: p.y ?? 0 });
@@ -3947,6 +4518,7 @@ io.on("connection", (socket) => {
       // it, so only real machine brews animate the hardware.
       io.emit("coffeeBoost", { id: socket.id, durationMs: COFFEE_MS, mult: COFFEE_MULT, machine: object });
       console.log(`${p.name} brewed a free coffee at the machine`);
+      coachCoffeeMoment(socket.id);
 
     } else if (object === "water_cooler") {
       const key = p.email || socket.id;
@@ -3998,6 +4570,7 @@ io.on("connection", (socket) => {
       else                             { s = MEALS[mealIdx++ % MEALS.length]; icon = "🍽️"; }
       socket.emit("fridgeSnack", { line: s.line, icon });
       io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
+      coachCoffeeMoment(socket.id);
 
     } else if (object === "arcade" || object.startsWith("pool_table") || object === "pingpong_table") {
       // Two-player game stations: the arcade opens the full game picker; the
@@ -4253,6 +4826,31 @@ function _playerList() {
 // Self-healing schema nudge: `dismissed` was added after the app went live, so
 // a production database that predates it gets the column on boot (idempotent —
 // a no-op everywhere else). Awaited before listen so no query can race it.
+// Huddles' tables: CREATE IF NOT EXISTS keeps prod (whose DB is separate and
+// never migrated by drizzle push) self-healing on the first boot after a
+// publish — same policy as the column nudges below.
+try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_coach (
+    email text PRIMARY KEY,
+    intake jsonb,
+    intake_at timestamptz,
+    mission_date date,
+    mission jsonb,
+    mission_done_at timestamptz,
+    rerolled boolean NOT NULL DEFAULT false
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_pair_plays (
+    email_a text NOT NULL,
+    email_b text NOT NULL,
+    games integer NOT NULL DEFAULT 0,
+    first_played_at timestamptz NOT NULL DEFAULT now(),
+    last_played_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (email_a, email_b)
+  )`);
+} catch (err) {
+  console.error("schema nudge (coach tables) failed:", err);
+}
+
 try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS wins jsonb NOT NULL DEFAULT '{}'::jsonb`);

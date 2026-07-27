@@ -451,6 +451,47 @@
     .board-item-del:hover { opacity: 1; }
     .board-empty { color: #555; text-align: center; padding: 30px 8px; font-size: 13px; }
 
+    /* ── Huddles' coach panel (press E next to the walking coach) ── */
+    #coach-panel {
+      position: fixed; inset: 0; z-index: 10000; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55); padding: 20px;
+    }
+    #coach-panel.open { display: flex; }
+    #coach-card {
+      background: #14231a; border: 1px solid #2f5e3f; border-radius: 14px;
+      width: 440px; max-width: 100%; max-height: calc(100vh - 60px); overflow-y: auto;
+      font-family: monospace; color: #e7f5ea; box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+    #coach-card-header {
+      display: flex; align-items: center; gap: 10px; padding: 16px 20px;
+      border-bottom: 1px solid #21402c; position: sticky; top: 0; background: #14231a; z-index: 1;
+    }
+    #coach-card-header h2 { font-size: 16px; flex: 1; margin: 0; color: #86efac; }
+    #coach-close { background: none; border: none; color: #5d8a6b; font-size: 20px; cursor: pointer; line-height: 1; padding: 0 2px; }
+    #coach-close:hover { color: #e7f5ea; }
+    #coach-body { padding: 16px 20px 20px; font-size: 13px; line-height: 1.55; }
+    .coach-say { background: #1b3123; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+    .coach-mission-label {
+      font-size: 14px; color: #fff; background: #234630; border: 1px dashed #4ade80;
+      border-radius: 10px; padding: 12px 14px; margin: 10px 0;
+    }
+    .coach-btn {
+      font-family: monospace; font-size: 13px; border: none; border-radius: 8px;
+      padding: 9px 14px; cursor: pointer; background: #4ade80; color: #0b1f12; font-weight: bold;
+    }
+    .coach-btn.secondary { background: #21402c; color: #a7e8bb; }
+    .coach-btn:disabled { opacity: .45; cursor: default; }
+    .coach-opt { display: block; margin: 6px 0; cursor: pointer; }
+    .coach-opt input { margin-right: 8px; }
+    .coach-depts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+    .coach-dept {
+      border: 1px solid #2f5e3f; border-radius: 999px; padding: 4px 10px;
+      cursor: pointer; font-size: 12px; color: #a7e8bb; user-select: none;
+    }
+    .coach-dept.sel { background: #4ade80; color: #0b1f12; border-color: #4ade80; }
+    .coach-status-line { color: #6fae81; font-size: 11px; margin-top: 10px; }
+
     /* ── On-screen touch controls (mobile) ── */
     #touch-controls { display: none; }
     body.touch-device.playing #touch-controls { display: block; }
@@ -581,6 +622,26 @@
     #boost-chip.on ~ #work-chip.on { top: 96px; }
     #work-chip.on ~ #dm-log { top: 96px; }
     #boost-chip.on ~ #work-chip.on ~ #dm-log { top: 134px; }
+
+    /* ── Huddles' mission chip (🎯 today's connection mission). Joins the same
+       right-edge stack: sits under whichever of boost/work chips are up, and
+       pushes #dm-log below itself (rules AFTER the ones above so the cascade
+       lets these win when the mission chip is visible; sibling order:
+       boost-chip, work-chip, mission-chip, dm-log). ── */
+    #mission-chip {
+      display: none; position: fixed; top: 58px; right: 14px; z-index: 300;
+      background: rgba(16,42,25,0.85); border: 1px solid rgba(74,222,128,0.35);
+      border-radius: 8px; padding: 6px 12px; cursor: pointer; max-width: 320px;
+      font-family: monospace; color: #86efac; font-size: 13px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #mission-chip.on { display: block; }
+    #mission-chip.done { color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(45,35,10,0.85); }
+    #boost-chip.on ~ #mission-chip.on, #work-chip.on ~ #mission-chip.on { top: 96px; }
+    #boost-chip.on ~ #work-chip.on ~ #mission-chip.on { top: 134px; }
+    #mission-chip.on ~ #dm-log { top: 96px; }
+    #boost-chip.on ~ #mission-chip.on ~ #dm-log, #work-chip.on ~ #mission-chip.on ~ #dm-log { top: 134px; }
+    #boost-chip.on ~ #work-chip.on ~ #mission-chip.on ~ #dm-log { top: 172px; }
 
     /* ── DM (whisper) composer ── */
     #dm-bar {
@@ -1405,6 +1466,7 @@
        sibling rules can stack the chips and nudge the log down while they're up. -->
   <div id="boost-chip"></div>
   <div id="work-chip">💼 Working · +1 coin/min</div>
+  <div id="mission-chip"></div>
   <div id="dm-log"></div>
 
   <!-- ── Chat history log (session-only — messages since you joined) ── -->
@@ -1765,6 +1827,17 @@
         <textarea id="board-ann-input" class="op-ann-input" rows="2" maxlength="280" placeholder="Post an announcement to the office boards…"></textarea>
         <button class="o-btn o-btn-approve" onclick="postAnnouncementFromBoard()">Post announcement</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Huddles' coach panel (press E next to the walking coach) ── -->
+  <div id="coach-panel">
+    <div id="coach-card">
+      <div id="coach-card-header">
+        <h2>🌱 Huddles · Connection Coach</h2>
+        <button id="coach-close" onclick="closeCoachPanel()">✕</button>
+      </div>
+      <div id="coach-body"></div>
     </div>
   </div>
 
@@ -3164,6 +3237,126 @@
       if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
     });
 
+    // ── Huddles the connection coach ──────────────────────────────────
+    // Panel states arrive from the server (coachPanel = a direct E-press
+    // reply; coachMission = today's mission landed; coachStatus = silent
+    // chip refresh on approval). The chip re-opens the last known mission
+    // read-only from anywhere — re-rolling still means walking to Huddles
+    // (the server re-checks proximity on every coach event anyway).
+    let _coachPanelOpen = false;
+    let _coachState = null;          // today's mission as last told by the server
+    let _coachIntakeDepts = [];
+
+    function _missionChipRender() {
+      const chip = document.getElementById('mission-chip');
+      if (!_coachState) { chip.classList.remove('on'); return; }
+      chip.classList.add('on');
+      chip.classList.toggle('done', !!_coachState.done);
+      chip.textContent = (_coachState.done ? '✅ ' : '🎯 ') + _coachState.label;
+      chip.title = _coachState.flavor || _coachState.label;
+    }
+    document.getElementById('mission-chip').addEventListener('click', () => {
+      if (_coachState) openCoachPanel({ mission: _coachState, remote: true });
+    });
+
+    function closeCoachPanel() {
+      _coachPanelOpen = false;
+      document.getElementById('coach-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    document.getElementById('coach-panel').addEventListener('click', (e) => {
+      if (e.target.id === 'coach-panel') closeCoachPanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _coachPanelOpen) { e.preventDefault(); closeCoachPanel(); }
+    });
+
+    function openCoachPanel(d) {
+      _coachPanelOpen = true;
+      document.getElementById('coach-panel').classList.add('open');
+      const body = document.getElementById('coach-body');
+      if (d.guest) {
+        body.innerHTML = '<div class="coach-say">Hey! I\'m Huddles, the office connection coach. 🌱<br><br>' +
+          'I hand out daily missions (they pay coins!) to registered teammates — join with your email and come find me!</div>' +
+          '<button class="coach-btn" onclick="closeCoachPanel()">Got it</button>';
+        return;
+      }
+      if (d.needIntake) { _renderCoachIntake(body, d.departments || []); return; }
+      if (d.generating) {
+        body.innerHTML = '<div class="coach-say">Hmm, let me think about who you should meet today… 🤔</div>' +
+          '<div class="coach-status-line">✨ Huddles is picking your mission…</div>';
+        return;
+      }
+      if (d.mission) _renderCoachMission(body, d.mission, d.remote);
+    }
+
+    function _renderCoachIntake(body, departments) {
+      const goals = [
+        ['meet_new',       '👋 Meet new people'],
+        ['more_games',     '🎮 Play more mini-games'],
+        ['cross_team',     '🏢 Get to know other departments'],
+        ['coffee_buddies', '☕ More coffee-break company'],
+      ];
+      _coachIntakeDepts = [];
+      body.innerHTML =
+        '<div class="coach-say">Hey, I\'m Huddles! 🌱 My job is helping you actually <b>know</b> the people you work with. ' +
+        'Two quick questions and I\'ll start lining up daily missions — they pay coins, too.</div>' +
+        '<div><b>What do you want more of?</b></div>' +
+        goals.map(([v, l], i) => '<label class="coach-opt"><input type="radio" name="coach-goal" value="' + v + '"' + (i === 0 ? ' checked' : '') + '>' + l + '</label>').join('') +
+        '<div style="margin-top:12px"><b>Departments you\'re curious about</b> <span style="color:#6fae81">(up to 3, optional)</span></div>' +
+        '<div class="coach-depts">' + departments.map((d) => '<span class="coach-dept" data-dept="' + esc(d) + '">' + esc(d) + '</span>').join('') + '</div>' +
+        '<button class="coach-btn" id="coach-intake-save">Let\'s go →</button>';
+      body.querySelectorAll('.coach-dept').forEach((el) => el.addEventListener('click', () => {
+        const d = el.dataset.dept;
+        const i = _coachIntakeDepts.indexOf(d);
+        if (i >= 0) { _coachIntakeDepts.splice(i, 1); el.classList.remove('sel'); }
+        else if (_coachIntakeDepts.length < 3) { _coachIntakeDepts.push(d); el.classList.add('sel'); }
+      }));
+      body.querySelector('#coach-intake-save').addEventListener('click', () => {
+        const goal = body.querySelector('input[name="coach-goal"]:checked')?.value || 'meet_new';
+        socket.emit('coachIntake', { goal, depts: _coachIntakeDepts });
+        openCoachPanel({ generating: true });
+      });
+    }
+
+    function _renderCoachMission(body, m, remote) {
+      const status = m.done
+        ? '<div class="coach-status-line">✅ Done! +' + (m.reward || 50) + ' coins are yours. New mission tomorrow!</div>'
+        : '<div class="coach-status-line">Reward: 💰 ' + (m.reward || 50) + ' coins · a fresh mission every day</div>';
+      body.innerHTML =
+        '<div class="coach-say">' + esc(m.flavor || 'Here\'s your mission for today!') + '</div>' +
+        '<div class="coach-mission-label">' + (m.done ? '✅ ' : '🎯 ') + esc(m.label) + '</div>' + status +
+        '<div style="margin-top:12px; display:flex; gap:8px;">' +
+        (!m.done && m.canReroll
+          ? '<button class="coach-btn secondary" id="coach-reroll"' + (remote ? ' disabled title="Walk over to Huddles to re-roll"' : '') + '>🎲 Re-roll (1/day)</button>'
+          : '') +
+        '<button class="coach-btn" onclick="closeCoachPanel()">On it!</button></div>' +
+        (remote && !m.done && m.canReroll ? '<div class="coach-status-line">Find Huddles in the office to re-roll.</div>' : '');
+      body.querySelector('#coach-reroll')?.addEventListener('click', () => {
+        socket.emit('coachReroll');
+        openCoachPanel({ generating: true });
+      });
+    }
+
+    socket.on('coachPanel', (d) => openCoachPanel(d || {}));
+    socket.on('coachMission', (d) => {
+      _coachState = (d || {}).mission || null;
+      _missionChipRender();
+      if (_coachPanelOpen && _coachState) openCoachPanel({ mission: _coachState });
+    });
+    socket.on('coachStatus', (d) => { _coachState = (d || {}).mission || null; _missionChipRender(); });
+    socket.on('missionComplete', (d) => {
+      if (_coachState) { _coachState.done = true; _coachState.canReroll = false; }
+      _missionChipRender();
+      const t = document.getElementById('daily-toast');
+      t.textContent = '🎯 Mission complete! +' + ((d || {}).reward || 50) + ' coins';
+      t.classList.add('open');
+      clearTimeout(_dailyToastTimer);
+      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), 5000);
+      if (_coachPanelOpen && _coachState) openCoachPanel({ mission: _coachState });
+    });
+    socket.on('missionCheer', (d) => window._gameScene?._missionCheer?.(d || {}));
+
     // ── Cafeteria food menus ──────────────────────────────────────────
     // The server sends the whole menu (title/items/prices) in foodMenu — this
     // panel renders whatever arrives and NEVER hardcodes prices; buyFood
@@ -4005,7 +4198,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab') return;
       if (!document.body.classList.contains('playing')) return;
-      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return;
       if (document.getElementById('shop-modal').classList.contains('open')) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -4253,7 +4446,7 @@
     // Esc closes the log only when nothing modal is up (those own Esc already).
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !_logOpen) return;
-      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return;
       if (document.getElementById('shop-modal').classList.contains('open')) return;
       if (document.getElementById('food-modal').classList.contains('open')) return;
       if (document.getElementById('owner-pwd-modal').classList.contains('open')) return;
@@ -6558,6 +6751,30 @@
 
         socket.on('playerLeft', (id) => { this._removeOtherPlayer(id); });
 
+        // ── Huddles the NPC coach: dedicated events — deliberately NOT in
+        // otherPlayers, so whisper rosters, duel menus, rounds and the
+        // click-to-challenge menu never see it. ──
+        socket.on('npcState', (d) => this._npcSpawn(d));
+        socket.on('npcMoved', (d) => {
+          const n = this.npc;
+          if (!n || !d) return;
+          n.sprite.setPosition(d.x, d.y);
+          n.tag.setPosition(d.x, d.y - 40);
+          const rdir = DIR_START[d.dir] !== undefined ? d.dir : 'down';
+          if (d.anim === 'walk') {
+            const wk = `walk_${n.texKey}_${rdir}`;
+            if (n.sprite.anims.currentAnim?.key !== wk && this.anims.exists(wk)) n.sprite.play(wk);
+          } else {
+            n.sprite.anims.stop();
+            n.sprite.setFrame(DIR_START[rdir]);
+          }
+          n.lastDir = rdir;
+        });
+        // Pull the NPC snapshot NOW: on a fresh approval the server's push can
+        // land before this scene registered listeners — pulling at create
+        // makes that ordering irrelevant.
+        socket.emit('npcSync');
+
         socket.on('chatMessage', ({id,message}) => {
           if (id === socket.id) {
             this._showChatBubble(this.player, message, true);
@@ -6793,7 +7010,7 @@
         this.player.setInteractive({ useHandCursor: true });
         this.player.on('pointerdown', () => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen) {
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
             window._openProfile(socket.id);
           }
         });
@@ -7251,6 +7468,36 @@
         entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants);
       }
 
+      // ── Huddles the walking coach: rendered like a remote player (same
+      // texture builder + run sheets, insertion-order depth) but kept OUT of
+      // otherPlayers so no player-only interaction ever targets it. ──
+      _npcSpawn(d) {
+        if (!d) return;
+        if (this.npc) { this.npc.sprite.destroy(); this.npc.tag.destroy(); this.npc = null; }
+        const texKey = this._buildPlayerTex(d.character || 'amelia', d.hairIdx || 0, d.skinIdx || 0, d.shirtIdx || 0, d.pantsIdx || 0);
+        const sprite = this.add.sprite(d.x, d.y, texKey);
+        sprite.setScale(3).setOrigin(0.5, 0.5);
+        const dir = DIR_START[d.dir] !== undefined ? d.dir : 'down';
+        if (d.anim === 'walk') {
+          const wk = `walk_${texKey}_${dir}`;
+          sprite.play(this.anims.exists(wk) ? wk : `idle_${texKey}`);
+        } else {
+          sprite.anims.stop();
+          sprite.setFrame(DIR_START[dir]);
+        }
+        const tag = this._makeNameTag(d.x, d.y, '🌱 ' + (d.name || 'Huddles'));
+        tag.setColor('#bbf7d0');
+        tag.setBackgroundColor('#14532dd9');
+        this.npc = { sprite, tag, texKey, lastDir: dir };
+      }
+
+      // Confetti over whoever finished Huddles' mission (the server already
+      // filtered recipients for After Dark light isolation).
+      _missionCheer(d) {
+        const who = d.id === socket.id ? this.player : this.otherPlayers[d.id]?.sprite;
+        if (who) this._groupBurst('confetti', who.x, who.y);
+      }
+
       _makeNameTag(x, y, name) {
         return this.add.text(x, y-40, name, {
           fontSize:'14px', fontFamily:'monospace', color:'#fff',
@@ -7451,7 +7698,7 @@
         sprite.setInteractive({ useHandCursor: true });
         sprite.on('pointerdown', (pointer) => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen) {
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
             const ev = pointer && pointer.event;
             window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
           }
@@ -7490,6 +7737,7 @@
         else if (this.sitting)               { label = 'Stand'; avail = true; }
         else if (interact?.type === 'board') { label = 'Read';  avail = true; }
         else if (interact?.type === 'sit')   { label = interact.bed ? 'Lie' : 'Sit'; avail = true; }
+        else if (interact?.type === 'coach') { label = 'Talk';  avail = true; }
         else if (interact?.type === 'object'){ label = interact.obj.touch; avail = true; }
         if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
         if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
@@ -7529,7 +7777,7 @@
           if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta, oe.seated === true);
         }
 
-        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen) {
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) {
           player.setVelocity(0,0);
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
@@ -7601,6 +7849,12 @@
         // Interactive office objects: distance-based (not tile-adjacency) so the
         // whole "stand near it" zone works. Seats/boards win when both apply —
         // step one tile over if you want the object instead.
+        // Huddles the coach: E-talk when standing close (seats/boards from the
+        // adjacency scan above win — step aside if you want the chair).
+        if (!interact && !this.sitting && this.npc) {
+          const ndx = player.x - this.npc.sprite.x, ndy = player.y - this.npc.sprite.y;
+          if (ndx * ndx + ndy * ndy < 150 * 150) interact = { type: 'coach' };
+        }
         let objNear = null;
         if (!this.sitting && !interact) {
           for (const o of OFFICE_OBJECTS) {
@@ -7618,6 +7872,7 @@
 
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'coach') this.eHint.setText('[ E ] Talk to Huddles').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
@@ -7641,6 +7896,8 @@
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
+          } else if (interact?.type === 'coach') {
+            socket.emit('coachInteract');
           } else if (interact?.type === 'object') {
             // The arcade opens the game picker first; the modal then sends
             // interact {object:'arcade', game}. Everything else fires directly.
