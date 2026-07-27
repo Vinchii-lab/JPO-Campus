@@ -498,6 +498,7 @@
     /* while typing, hide the movement/action pads so the chat box is unobstructed */
     body.touch-device.playing.chatting #touch-joystick,
     body.touch-device.playing.chatting #touch-action,
+    body.touch-device.playing.chatting #touch-voice,
     body.touch-device.playing.chatting #touch-chat { display: none; }
 
     #touch-joystick {
@@ -530,6 +531,29 @@
       background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
     }
     #touch-chat:active { background: rgba(0,0,0,0.8); }
+
+    /* ── Push-to-talk (hold-to-talk touch button + HUD toggle) ── */
+    #touch-voice {
+      position: fixed; right: 26px; bottom: 300px; z-index: 250;
+      width: 62px; height: 62px; border-radius: 50%; font-size: 22px;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.4);
+      touch-action: none; -webkit-user-select: none; user-select: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.touch-device.playing #touch-voice { display: flex; }
+    #touch-voice.held { background: rgba(211,51,51,0.9); border-color: #ff9a9a; }
+    #voice-btn {
+      margin-left: 4px; padding: 2px 7px; font-size: 13px; line-height: 1.4;
+      background: #2e2b45; color: #fff; border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 5px; cursor: pointer;
+    }
+    #voice-btn.off { opacity: 0.4; filter: grayscale(1); }
+    #voice-btn.live { background: #c22f2f; border-color: #ff9a9a; animation: voice-pulse 1.1s ease-in-out infinite; }
+    @keyframes voice-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(220,60,60,0.65); }
+      50%      { box-shadow: 0 0 0 6px rgba(220,60,60,0); }
+    }
 
     /* ── Emote bar ── */
     #emote-bar {
@@ -1672,6 +1696,7 @@
     <button id="touch-chat" type="button" aria-label="Open chat">💬</button>
     <button id="touch-dm" type="button" aria-label="Send a private message">🤫</button>
     <button id="touch-challenge" type="button" aria-label="Challenge nearest player">⚔️</button>
+    <button id="touch-voice" type="button" aria-label="Hold to talk">🎙️</button>
     <button id="touch-action" type="button" class="disabled">E</button>
   </div>
 
@@ -1687,6 +1712,7 @@
   <div id="coin-hud">
     💰 <span id="coin-count">0</span>
     <button id="shop-btn" onclick="openShop()">Shop</button>
+    <button id="voice-btn" onclick="toggleVoice()" title="Voice: on — hold V to talk">🎙️</button>
   </div>
 
   <!-- ── Shop modal ── -->
@@ -4526,6 +4552,356 @@
       }
     }
 
+    // ── Push-to-talk proximity voice ───────────────────────────────────
+    // WebRTC mesh, audio-only, STUN-only: audio streams browser↔browser and
+    // never touches the server, which acts purely as a validating signaling
+    // switchboard (it re-checks range + the After Dark split on EVERY relayed
+    // message — none of the local gating below is trusted). Hold V (or the
+    // 🎙️ touch button) to talk; volume falls off with distance; the 🎙️ HUD
+    // toggle kills the whole feature (all calls dropped, offers ignored).
+    const VOICE_RANGE_PX  = 480;  // dial-in range — matches the server's earshot
+    const VOICE_DROP_PX   = 620;  // hysteresis: pacing at the edge doesn't churn calls
+    const VOICE_FULL_PX   = 130;  // full volume inside this, fading to 0 at RANGE
+    const VOICE_MAX_PEERS = 6;    // nearest N — a packed room stays a mesh, not a meltdown
+    const VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+    let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
+    let _voiceHeld = false;       // PTT physically held
+    let _voiceLive = false;       // actually transmitting (held + mic granted)
+    let _voiceMic  = null;        // MediaStream after first grant; tracks enabled ONLY while held
+    let _voiceMicBusy = false, _voiceMicDenied = false;
+    let _voiceCtx = null;         // shared AudioContext (unlocked by any user gesture)
+    let _voiceResendT = null;     // 4s "still talking" keepalive
+    const _voicePeers = {};       // id → { pc, polite, pendIce, el, src, gain }
+    const _voiceCool  = {};       // id → don't-redial-before ts (failed/broken attempts)
+    window._voiceBadges = {};     // id → { txt, until } — self-expiring Phaser 🎙️ badges
+
+    // In-the-dark from THIS client's view. Only round members hold a roster;
+    // for everyone else this is always false — which is fine, because the
+    // dark member's own client tears down the pair and either end closing
+    // kills the audio both ways. The server refuses new cross-split intros.
+    function _voiceInDark(id) {
+      if (_roundPhase !== 'active') return false;
+      const m = _roundRoster.get(id);
+      return !!(m && m.alive);
+    }
+    function _voiceCrossDark(id) { return _voiceInDark(id) !== _voiceInDark(socket.id); }
+
+    function _voiceKickCtx() {
+      try {
+        if (!_voiceCtx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) _voiceCtx = new AC();
+        }
+        if (_voiceCtx && _voiceCtx.state === 'suspended') _voiceCtx.resume();
+      } catch (_) {}
+    }
+    // Any gesture unlocks audio — the login click alone guarantees one long
+    // before the first peer could possibly connect.
+    document.addEventListener('pointerdown', _voiceKickCtx, true);
+    document.addEventListener('keydown', _voiceKickCtx, true);
+
+    function _voiceSend(id, data) { socket.emit('voiceSignal', { targetId: id, data }); }
+
+    function _voiceAttachMic(P) {
+      // replaceTrack on the pre-declared audio transceiver — this NEVER
+      // triggers a renegotiation, which is the whole reason the transceiver
+      // is added up-front in _voiceNewPeer.
+      if (!_voiceMic) return;
+      try { P.pc.getTransceivers()[0].sender.replaceTrack(_voiceMic.getAudioTracks()[0] || null); } catch (_) {}
+    }
+    function _voiceNewPeer(id, polite) {
+      const P = { pc: new RTCPeerConnection(VOICE_ICE), polite, pendIce: [], el: null, src: null, gain: null,
+                  bornAt: Date.now(), up: false };   // up = reached 'connected' at least once
+      // Only the DIALER declares the audio m-line up-front. The answerer must
+      // adopt the transceiver the remote offer creates instead — pre-adding
+      // its own risks the browser not recycling it, which yields a recvonly
+      // answer and one-way silence (no ontrack on the dialer, mic attached to
+      // an orphan transceiver here).
+      if (!polite) { P.pc.addTransceiver('audio', { direction: 'sendrecv' }); _voiceAttachMic(P); }
+      P.pc.onicecandidate = (e) => { if (e.candidate) _voiceSend(id, { k: 'ice', c: e.candidate.toJSON() }); };
+      P.pc.ontrack = (e) => _voiceWireAudio(P, (e.streams && e.streams[0]) || new MediaStream([e.track]));
+      P.pc.onconnectionstatechange = () => {
+        const st = P.pc.connectionState;
+        if (st === 'connected') P.up = true;      // handshake deadline no longer applies
+        if (st === 'failed' || st === 'closed' || st === 'disconnected') {
+          _voiceCool[id] = Date.now() + 8000;   // silent per-peer failure: back off, retry later
+          _voiceDrop(id);
+        }
+      };
+      _voicePeers[id] = P;
+      return P;
+    }
+    function _voiceWireAudio(P, stream) {
+      if (P.el) return;   // one audio path per peer
+      // Hidden MUTED element: Chrome/Safari won't pump a remote MediaStream
+      // into WebAudio unless a media element is also consuming it. Playback
+      // itself goes through the GainNode (distance falloff).
+      const el = document.createElement('audio');
+      el.autoplay = true; el.muted = true; el.setAttribute('playsinline', '');
+      el.srcObject = stream;
+      document.body.appendChild(el);
+      P.el = el;
+      _voiceKickCtx();
+      if (_voiceCtx) {
+        try {
+          P.src = _voiceCtx.createMediaStreamSource(stream);
+          P.gain = _voiceCtx.createGain();
+          P.gain.gain.value = 0;   // ramped by the falloff tick
+          P.src.connect(P.gain); P.gain.connect(_voiceCtx.destination);
+          return;
+        } catch (_) {}
+      }
+      el.muted = false;            // WebAudio unavailable → element playback
+      el.volume = 0;
+    }
+    function _voiceDrop(id) {
+      const P = _voicePeers[id];
+      if (!P) return;
+      delete _voicePeers[id];
+      try { P.pc.onicecandidate = P.pc.ontrack = P.pc.onconnectionstatechange = null; P.pc.close(); } catch (_) {}
+      try { if (P.src)  P.src.disconnect(); }  catch (_) {}
+      try { if (P.gain) P.gain.disconnect(); } catch (_) {}
+      if (P.el) { try { P.el.srcObject = null; P.el.remove(); } catch (_) {} }
+    }
+    function _voiceDropAll() { for (const id of Object.keys(_voicePeers)) _voiceDrop(id); }
+
+    async function _voiceOffer(id) {
+      const P = _voiceNewPeer(id, false);
+      try {
+        const offer = await P.pc.createOffer();
+        await P.pc.setLocalDescription(offer);
+        _voiceSend(id, { k: 'offer', sdp: P.pc.localDescription });
+      } catch (_) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id); }
+    }
+
+    socket.on('voiceSignal', async (msg) => {
+      const { fromId, data } = msg || {};
+      if (!_voiceOn || typeof fromId !== 'string' || !data || !data.k) return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_voiceCrossDark(fromId)) return;
+      let P = _voicePeers[fromId];
+      try {
+        if (data.k === 'offer') {
+          // Deterministic roles kill offer-glare: the LOWER socket id dials,
+          // the higher answers — both sides agree without a tiebreak dance.
+          if (socket.id < fromId) return;
+          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS) return;
+          if (P) _voiceDrop(fromId);            // a fresh offer supersedes a stale pc
+          P = _voiceNewPeer(fromId, true);
+          await P.pc.setRemoteDescription(data.sdp);
+          // Adopt the offer's transceiver and make it two-way BEFORE answering.
+          const tx = P.pc.getTransceivers()[0];
+          if (tx) { try { tx.direction = 'sendrecv'; } catch (_) {} }
+          _voiceAttachMic(P);
+          const ans = await P.pc.createAnswer();
+          await P.pc.setLocalDescription(ans);
+          _voiceSend(fromId, { k: 'answer', sdp: P.pc.localDescription });
+          for (const c of P.pendIce.splice(0)) await P.pc.addIceCandidate(c).catch(() => {});
+        } else if (data.k === 'answer') {
+          if (!P || P.polite) return;           // answers only land on our own dials
+          await P.pc.setRemoteDescription(data.sdp);
+          for (const c of P.pendIce.splice(0)) await P.pc.addIceCandidate(c).catch(() => {});
+        } else if (data.k === 'ice') {
+          if (!P) return;
+          if (P.pc.remoteDescription) await P.pc.addIceCandidate(data.c).catch(() => {});
+          else if (P.pendIce.length < 24) P.pendIce.push(data.c);   // pre-SDP buffer; legit flows use <10
+          else { _voiceCool[fromId] = Date.now() + 8000; _voiceDrop(fromId); }   // flood → hang up + back off
+        }
+      } catch (_) {
+        _voiceCool[fromId] = Date.now() + 8000;
+        _voiceDrop(fromId);
+      }
+    });
+
+    // Roster tick: dial the nearest few in earshot, hang up on anyone gone,
+    // past the hysteresis edge, over the cap, or across the dark line. The
+    // server can't cut a live P2P stream — on teardown, WE are the enforcement.
+    setInterval(() => {
+      const sc = window._gameScene;
+      const playing = document.body.classList.contains('playing');
+      if (!_voiceOn || !playing || !sc || !sc.player) {
+        if (Object.keys(_voicePeers).length) _voiceDropAll();
+        return;
+      }
+      if (_voiceHeld && _voiceUiBlocked()) _voicePttUp();   // an overlay swallowed the keyup
+      const px = sc.player.x, py = sc.player.y, now = Date.now();
+      // hang-ups first (sorted so the cap keeps the NEAREST peers)
+      const conn = Object.keys(_voicePeers).map((id) => {
+        const e = sc.otherPlayers[id];
+        if (!e || !e.sprite || _voiceCrossDark(id)) return [id, Infinity];
+        const dx = e.sprite.x - px, dy = e.sprite.y - py;
+        return [id, dx * dx + dy * dy];
+      }).sort((a, b) => a[1] - b[1]);
+      conn.forEach(([id, d2], i) => {
+        // Handshake deadline: a pc that never reached 'connected' within 15s is
+        // a dead dial (peer gone silent, STUN blocked, withheld answer) — kill
+        // it so it can't pile up buffers or block redials forever.
+        const P = _voicePeers[id];
+        if (P && !P.up && now - P.bornAt > 15000) { _voiceCool[id] = now + 8000; _voiceDrop(id); return; }
+        if (d2 > VOICE_DROP_PX * VOICE_DROP_PX || i >= VOICE_MAX_PEERS) _voiceDrop(id);
+      });
+      // then dial-outs — only toward ids ordered after ours (they dial us)
+      const cand = [];
+      for (const id in sc.otherPlayers) {
+        if (_voicePeers[id] || (_voiceCool[id] || 0) > now) continue;
+        const e = sc.otherPlayers[id];
+        if (!e || !e.sprite || _voiceCrossDark(id)) continue;
+        const dx = e.sprite.x - px, dy = e.sprite.y - py, d2 = dx * dx + dy * dy;
+        if (d2 <= VOICE_RANGE_PX * VOICE_RANGE_PX) cand.push([id, d2]);
+      }
+      cand.sort((a, b) => a[1] - b[1]);
+      let room = VOICE_MAX_PEERS - Object.keys(_voicePeers).length;
+      for (const [id] of cand) {
+        if (room <= 0) break;
+        if (socket.id && socket.id < id) { _voiceOffer(id); room--; }
+      }
+      // expired / orphaned badges
+      for (const id of Object.keys(window._voiceBadges)) {
+        const b = window._voiceBadges[id];
+        if (b.until < now || (id !== socket.id && !sc.otherPlayers[id])) {
+          try { b.txt.destroy(); } catch (_) {}
+          delete window._voiceBadges[id];
+        }
+      }
+    }, 500);
+
+    // Distance falloff: full inside VOICE_FULL_PX, silent by VOICE_RANGE_PX
+    // (the call itself lingers to VOICE_DROP_PX so edge-pacing stays seamless).
+    setInterval(() => {
+      const sc = window._gameScene;
+      if (!sc || !sc.player) return;
+      for (const id in _voicePeers) {
+        const P = _voicePeers[id], e = sc.otherPlayers[id];
+        if (!e || !e.sprite) continue;
+        const dx = e.sprite.x - sc.player.x, dy = e.sprite.y - sc.player.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        let v = d <= VOICE_FULL_PX ? 1 : 1 - (d - VOICE_FULL_PX) / (VOICE_RANGE_PX - VOICE_FULL_PX);
+        v = Math.max(0, Math.min(1, v)); v *= v;   // squared — natural-feeling rolloff
+        if (P.gain && _voiceCtx) P.gain.gain.setTargetAtTime(v, _voiceCtx.currentTime, 0.12);
+        else if (P.el && !P.el.muted) { try { P.el.volume = v; } catch (_) {} }
+      }
+    }, 150);
+
+    // ── PTT press / release ──
+    function _voiceUiBlocked() {
+      // Mirrors the Tab-guard: any typing surface or blocking overlay wins.
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return true;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return true;
+      if (document.getElementById('shop-modal').classList.contains('open')) return true;
+      const food = document.getElementById('food-modal');
+      return !!(food && food.classList.contains('open'));
+    }
+    async function _voicePttDown() {
+      if (_voiceHeld) return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_voiceUiBlocked()) return;
+      if (!_voiceOn) { _rpsToast('Voice is off — click the 🎙️ button up top to turn it on'); return; }
+      _voiceHeld = true;
+      _voiceKickCtx();
+      if (!_voiceMic && !_voiceMicBusy) {
+        _voiceMicBusy = true;
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+          s.getAudioTracks().forEach((t) => { t.enabled = false; });   // hard-muted until held
+          _voiceMic = s; _voiceMicDenied = false;
+          for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);
+        } catch (_) {
+          _voiceMicDenied = true;
+          _rpsToast('🎙️ Mic blocked — you can still hear people talk');
+        } finally { _voiceMicBusy = false; }
+      }
+      if (!_voiceHeld || !_voiceMic) return;   // released mid-prompt, or denied
+      _voiceMic.getAudioTracks().forEach((t) => { t.enabled = true; });
+      _voiceSetLive(true);
+    }
+    function _voicePttUp() {
+      _voiceHeld = false;
+      if (_voiceMic) _voiceMic.getAudioTracks().forEach((t) => { t.enabled = false; });
+      _voiceSetLive(false);
+    }
+    function _voiceSetLive(on) {
+      if (_voiceLive === on) return;
+      _voiceLive = on;
+      const hud = document.getElementById('voice-btn');
+      if (hud) hud.classList.toggle('live', on);
+      const tv = document.getElementById('touch-voice');
+      if (tv) tv.classList.toggle('held', on);
+      socket.emit('voiceTalking', { on });
+      clearInterval(_voiceResendT); _voiceResendT = null;
+      // Re-assert while held: badges self-expire, so a throttled/dropped
+      // `off` can never wedge someone's badge on permanently.
+      if (on) _voiceResendT = setInterval(() => socket.emit('voiceTalking', { on: true }), 4000);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyV' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      _voicePttDown();
+    });
+    document.addEventListener('keyup', (e) => { if (e.code === 'KeyV') _voicePttUp(); });
+    window.addEventListener('blur', _voicePttUp);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) _voicePttUp(); });
+
+    (function () {
+      const tv = document.getElementById('touch-voice');
+      if (!tv) return;
+      tv.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        try { tv.setPointerCapture(e.pointerId); } catch (_) {}
+        _voicePttDown();
+      });
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) tv.addEventListener(ev, _voicePttUp);
+    })();
+
+    // Master toggle (🎙️ in the coin HUD). Off means OFF: every call dropped,
+    // inbound offers ignored, nothing transmits until it's turned back on.
+    function _voiceHudRender() {
+      const b = document.getElementById('voice-btn');
+      if (!b) return;
+      b.classList.toggle('off', !_voiceOn);
+      b.title = _voiceOn ? 'Voice: on — hold V to talk, click to turn off' : 'Voice: off — click to turn on';
+    }
+    window.toggleVoice = function () {
+      _voiceOn = !_voiceOn;
+      try { localStorage.setItem('jpo_voice_on', _voiceOn ? '1' : '0'); } catch (_) {}
+      if (!_voiceOn) { _voicePttUp(); _voiceDropAll(); }
+      _voiceHudRender();
+      _rpsToast(_voiceOn ? '🎙️ Voice on — hold V near someone to talk' : '🔇 Voice off');
+    };
+    _voiceHudRender();
+
+    // 🎙️ badges — server-relayed with chat's exact After Dark isolation.
+    socket.on('voiceTalking', (msg) => {
+      const { id, on } = msg || {};
+      const sc = window._gameScene;
+      if (!sc || !sc.add || typeof id !== 'string') return;
+      const B = window._voiceBadges;
+      if (!on) {
+        if (B[id]) { try { B[id].txt.destroy(); } catch (_) {} delete B[id]; }
+        return;
+      }
+      if (window._roundIsHidden && window._roundIsHidden(id)) return;   // ghosts stay unseen
+      const spr = id === socket.id ? sc.player : (sc.otherPlayers[id] && sc.otherPlayers[id].sprite);
+      if (!spr) return;
+      if (!B[id]) {
+        B[id] = { txt: sc.add.text(spr.x, spr.y - 56, '🎙️', { fontSize: '15px', resolution: 2 }).setOrigin(0.5, 1).setDepth(995), until: 0 };
+      }
+      B[id].until = Date.now() + 6500;   // self-expiring
+    });
+
+    // Debug/test hook (used by the automated browser check).
+    window._voiceDebug = () => ({
+      on: _voiceOn, live: _voiceLive, held: _voiceHeld, micDenied: _voiceMicDenied,
+      peers: Object.keys(_voicePeers).map((id) => ({
+        id, st: _voicePeers[id].pc.connectionState,
+        wired: !!(_voicePeers[id].gain || _voicePeers[id].el),
+        dirs: _voicePeers[id].pc.getTransceivers().map((t) => t.currentDirection || t.direction),
+      })),
+      badges: Object.keys(window._voiceBadges)
+    });
+
     // ── Rock-Paper-Scissors challenges ─────────────────────────────────
     // Session-only and fully server-authoritative — the client just renders
     // phases: wager composing → waiting → (opponent: incoming) → picking →
@@ -6743,6 +7119,8 @@
             else entry.cosmetic.setPosition(data.x, data.y-68);
           }
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
+          const vb = window._voiceBadges && window._voiceBadges[data.id];
+          if (vb) vb.txt.setPosition(data.x, data.y-56);
           // Round ghost hiding: _placeWearable re-shows sprite wearables and
           // sit-downs recreate occluders — re-hide on EVERY move update, not
           // just the 250ms sweep, or a hidden ghost's cosmetic floats visibly.
@@ -7768,6 +8146,8 @@
         // Sprite wearables sit ON the body, so they don't raise the bubble —
         // only a floating emoji cosmetic does.
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
+        const lvb = window._voiceBadges && window._voiceBadges[socket.id];
+        if (lvb) lvb.txt.setPosition(player.x, player.y-56);
 
         // Pets trail their owners — local pet follows us, remote pets follow
         // their entry's sprite (whose position the playerMoved stream drives).

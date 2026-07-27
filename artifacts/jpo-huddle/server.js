@@ -2755,6 +2755,33 @@ function roundLeaveGoneByEmail(email) {
   }
 }
 
+// ── Push-to-talk proximity voice (WebRTC signaling switchboard) ──────────────
+// Voice audio NEVER touches this server: peers stream directly to each other
+// (STUN-only WebRTC, same privacy stance as whispers — nothing recorded,
+// nothing stored). The server is a validating relay for the SDP/ICE handshake
+// plus the 🎙 talking badge, and that validation IS the anti-cheat: it refuses
+// to introduce two players who aren't actually within earshot on the same side
+// of the After Dark light/dark split, so a modified client can't broker itself
+// an ear across the map. Handshake payloads are relayed opaquely (never parsed
+// as SDP) under a hard size cap. The NPC can never join a call: it lives
+// outside `players`, so voicePairOk fails on it by construction.
+const VOICE_RANGE_PX = 480;     // earshot — same "walk up to someone" reach as RPS_RANGE_PX
+const VOICE_SLACK_PX = 260;     // relay slack: two 50ms position streams + the client's 620px drop hysteresis
+const VOICE_SIG_MAX  = 40_000;  // bytes (JSON-encoded) — a full SDP offer runs ~4-8KB
+const VOICE_ICE_MAX  = 4_000;   // bytes — a single ICE candidate runs well under 1KB
+
+function voicePairOk(aId, bId) {
+  const a = players[aId], b = players[bId];
+  if (!a || !b) return false;
+  // Voice is BIDIRECTIONAL, so unlike chat's one-way rule the pair must sit on
+  // the SAME side of the light/dark split — a lit observer paired with an
+  // alive member would be a live position-callout channel into the dark.
+  if (inTheDark(aId) !== inTheDark(bId)) return false;
+  const dx = (a.x ?? 0) - (b.x ?? 0), dy = (a.y ?? 0) - (b.y ?? 0);
+  const r = VOICE_RANGE_PX + VOICE_SLACK_PX;
+  return dx * dx + dy * dy <= r * r;
+}
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
@@ -2770,6 +2797,8 @@ io.on("connection", (socket) => {
   const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
   const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
   const roundBucket = makeBucket(4, 1500);     // guards round start/join/kill spam
+  const voiceSigBucket  = makeBucket(80, 150); // WebRTC handshakes burst (~15 msgs × several peers entering a crowd), then go quiet
+  const voiceTalkBucket = makeBucket(8, 600);  // 🎙 badge flips + the 4s keepalive while the key is held
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
@@ -3397,6 +3426,43 @@ io.on("connection", (socket) => {
     socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
     // Mission fact only — the COUNT of an exchange, never the content.
     coachWhisperExchanged(socket.id, targetId);
+  });
+
+  // ── Push-to-talk voice: opaque signaling relay (see voicePairOk block) ──
+  // Every relay is re-validated HERE, per message — sender live, target live,
+  // within earshot + slack, same side of the After Dark split. Failures are
+  // silent drops, the same policy as chat/emote throttling: an error reply
+  // would hand a probing client a distance oracle for other players.
+  socket.on("voiceSignal", (payload) => {
+    const { targetId, data } = payload || {};
+    if (!players[socket.id]) return;
+    if (!takeToken(voiceSigBucket)) return;
+    if (typeof targetId !== "string" || targetId === socket.id || !data) return;
+    let size = 0;
+    try { size = JSON.stringify(data).length; } catch { return; }
+    if (!size || size > VOICE_SIG_MAX) return;
+    // ICE candidates are tiny (<1KB); a 40KB "candidate" is only useful as a
+    // memory-flood against the receiving browser. Per-kind cap, still opaque.
+    if (data.k === "ice" && size > VOICE_ICE_MAX) return;
+    if (!voicePairOk(socket.id, targetId)) return;
+    io.to(targetId).emit("voiceSignal", { fromId: socket.id, data });
+  });
+
+  // The 🎙 talking badge. Mirrors public chat's After Dark isolation exactly:
+  // a LIT player's badge must never reach alive round members (a pre-arranged
+  // "I hold the mic when the killer nears you" is a position call-out), while
+  // a dark player's badge is public drama like their chat. Client badges
+  // self-expire (~6.5s) and the sender re-asserts every 4s while holding, so
+  // a throttled/lost `off` can never wedge a badge on.
+  socket.on("voiceTalking", (payload) => {
+    if (!players[socket.id]) return;
+    if (!takeToken(voiceTalkBucket)) return;
+    const msg = { id: socket.id, on: !!(payload && payload.on) };
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("voiceTalking", msg);
+    } else {
+      io.emit("voiceTalking", msg);
+    }
   });
 
   // ── Huddles the coach: talk / intake / mission re-roll ────────────────
