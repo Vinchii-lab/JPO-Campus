@@ -1902,12 +1902,10 @@
     socket.on('buildStamp', (p) => {
       const srv = String((p && p.stamp) || '');
       if (!srv || srv === String(window.__BUILD__)) return;
-      let seen = null;
-      try { seen = sessionStorage.getItem('jpo_reload_for'); } catch (_) {}
-      if (seen === srv || window.__reloadedFor === srv) return;   // once per build
-      window.__reloadedFor = srv;
-      try { sessionStorage.setItem('jpo_reload_for', srv); } catch (_) {}
-      location.reload();
+      // Funnel into the page's ONE reload authority — the cache-buster above
+      // re-verifies against /stamp and applies its own jpo_cb_at guard (one
+      // reload / 5 min / tab). Never reload from two code paths.
+      if (window._checkStamp) window._checkStamp();
     });
 
     // ── Resume tokens: lightweight auto-rejoin (see server.js) ──────────
@@ -4580,7 +4578,10 @@
     const VOICE_RANGE_PX  = 480;  // dial-in range — matches the server's earshot
     const VOICE_DROP_PX   = 620;  // hysteresis: pacing at the edge doesn't churn calls
     const VOICE_FULL_PX   = 130;  // full volume inside this, fading to 0 at RANGE
-    const VOICE_MAX_PEERS = 10;   // cap on the mesh — audio-only pcs are cheap, but not free
+    // Cap on the mesh — audio-only pcs are cheap, but not free. ?vmax=N is a
+    // QA hook so tests (and manual poking) can force cap behavior with 3
+    // browsers instead of 11; real players never pass it.
+    const VOICE_MAX_PEERS = Math.max(1, Number(new URLSearchParams(location.search).get('vmax')) || 10);
     const VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
     let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
     let _voiceHeld = false;       // PTT physically held
@@ -4701,18 +4702,26 @@
     // packed room the slots must follow the conversation, not raw distance —
     // otherwise a mute bystander can block the person you're listening to.
     function _voiceEvictForPair(newId) {
-      if (!_voiceTalkNow(newId) && !_voiceLive) return false;
+      const newTalks = _voiceTalkNow(newId);
+      if (!newTalks && !_voiceLive) return false;
       const sc = window._gameScene;
+      const d2Of = (pid) => {
+        const e = sc && sc.otherPlayers[pid];
+        return (e && e.sprite && sc.player)
+          ? (e.sprite.x - sc.player.x) ** 2 + (e.sprite.y - sc.player.y) ** 2
+          : Infinity;
+      };
       let worst = null, worstD2 = -1;
       for (const id in _voicePeers) {
         if (_voiceTalkNow(id)) continue;               // never bump a talker
-        const e = sc && sc.otherPlayers[id];
-        const d2 = (e && e.sprite && sc.player)
-          ? (e.sprite.x - sc.player.x) ** 2 + (e.sprite.y - sc.player.y) ** 2
-          : Infinity;
+        const d2 = d2Of(id);
         if (d2 > worstD2) { worstD2 = d2; worst = id; }
       }
       if (!worst) return false;                        // all ten are talking — genuinely full
+      // A TALKING newcomer always beats a silent peer; a SILENT newcomer only
+      // displaces a clearly farther one (~100px margin), so the equidistant
+      // listeners packed around a talker can't ping-pong its slots.
+      if (!newTalks && !(worstD2 > d2Of(newId) + 10000)) return false;
       _voiceCool[worst] = Date.now() + 3000;           // short damper so the pair doesn't flap
       _voiceDrop(worst);
       return true;
@@ -4808,9 +4817,17 @@
       // talkers first, then nearest — in a crowd, dial the conversation
       cand.sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
       let room = VOICE_MAX_PEERS - Object.keys(_voicePeers).length;
-      for (const [id] of cand) {
-        if (room <= 0) break;
-        if (socket.id && socket.id < id) { _voiceOffer(id); room--; }
+      for (const [id, , talk] of cand) {
+        if (!(socket.id && socket.id < id)) continue;   // their side dials this pair
+        if (room <= 0) {
+          // At cap, a pair WITH A TALKER ON EITHER END still gets through by
+          // bumping a silent peer — mirrors the inbound-offer path, otherwise
+          // whichever side happens to be full (or to be the talker) simply
+          // never dials and the pair silently never forms.
+          if ((talk !== 0 && !_voiceLive) || !_voiceEvictForPair(id)) break;
+          room++;
+        }
+        _voiceOffer(id); room--;
       }
       // expired / orphaned badges
       for (const id of Object.keys(window._voiceBadges)) {

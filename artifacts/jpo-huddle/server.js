@@ -14,7 +14,13 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default
 // re-registering. When unset, auto-rejoin is disabled and everyone falls back to
 // the normal register flow. This is lightweight identity continuity, NOT auth.
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
-const BUILD_STAMP = Date.now();
+// Content-derived build stamp: identical across server instances running the
+// same code (boot-time stamps would make an autoscaled deployment hand a
+// reconnecting client alternating stamps → reload churn) and unchanged by a
+// restart that didn't touch the page — tabs reload only for real new code.
+const BUILD_STAMP = crypto.createHash("sha1")
+  .update(readFileSync(path.join(__dirname, "public", "index.html")))
+  .digest("hex").slice(0, 12);
 
 // ── Database ───────────────────────────────────────────────────────────────
 // The DB is the source of truth for everything durable (profiles, coins,
@@ -41,8 +47,9 @@ app.use((req, res, next) => {
 });
 
 // Serve index.html directly so it's never served from static-file cache.
-// Each server restart produces a new BUILD_STAMP injected into the page,
-// guaranteeing the browser fetches a fresh copy every time.
+// The content-hash BUILD_STAMP is injected into the page; it changes exactly
+// when the page's code changes, and the build handshake uses it to pull
+// already-open tabs forward after a deploy/restart that shipped new code.
 app.get('/', (_req, res) => {
   const html = readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
     .replace('__BUILD_STAMP_TOKEN__', BUILD_STAMP);

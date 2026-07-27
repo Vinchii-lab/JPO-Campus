@@ -42,3 +42,16 @@ Each prints `RESULT: PASS` / `RESULT: FAIL (…)` — assert on that line.
   so never assume a coordinate landed (TILE_PX = 48).
 - `browser-voice.cjs` needs the fake-media chromium flags and TWO incognito
   contexts (shared localStorage would auto-resume the first login).
+
+## crowd-voice.cjs — three-browser crowd behavior
+Proves simultaneous talkers both come through (badges + full-duplex pc) and
+that a client at its peer cap bumps a silent peer the moment an outsider
+starts talking — covering both the dial-side and offer-side eviction paths.
+Uses the `?vmax=1` query hook to force a one-slot cap so three browsers are
+enough to bind cap behavior. Same run recipe as browser-voice.cjs.
+
+## Rebuilding the /tmp throwaway env
+`/tmp/jpotest` gets wiped on container restarts. Recreate: copy these files
+there, `npm i socket.io-client puppeteer-core@20.7.2` — the puppeteer pin
+MUST stay at 20.7.2 to match the nix chromium 114 binary; a modern
+puppeteer-core silently hangs on goto (protocol mismatch).

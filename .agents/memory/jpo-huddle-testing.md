@@ -238,3 +238,10 @@ with an in-page `setInterval` latch (`window.__hit = true`), never by polling
 `page.evaluate` from Node — evaluate round-trips miss sub-second windows.
 Single-page runs are full speed (that's why a solo diag can pass while the
 3-player run fails on the identical code path).
+
+## Puppeteer ↔ pinned chromium version lock
+The nix chromium binary is 114.0.5735.90 — drive it with puppeteer-core@20.7.2
+(the Chrome-for-Testing 114 pairing). A freshly-installed modern puppeteer-core
+doesn't error; it just TIMES OUT on page.goto, which looks like an app bug.
+When a previously-green browser test suddenly times out on goto after a /tmp
+rebuild, suspect the pin before debugging the app.

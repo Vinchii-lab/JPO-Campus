@@ -31,7 +31,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 - **Kick = revoke** (flips `approved` back to `false`) — otherwise auto-restore would let a kicked player walk right back in.
 - **Coin/position writes batch to the once-per-minute coin tick** (+ final flush on disconnect). Coin awards and purchases use atomic relative SQL (`coins = coins + N … RETURNING`) so ticks and buys can't race.
 - **One live session per email:** a new connection disconnects the older socket (`dropLiveByEmail`).
-- **A workflow restart ships client fixes to every open tab.** The server emits its `BUILD_STAMP` on every (re)connect: tabs with handshake code reload themselves once on mismatch; older tabs get a repeating "refresh this page" toast (5s after connect, then every 60s). Auto-rejoin tokens make the restart itself seamless for players.
+- **A restart/deploy that changes the page ships it to every open tab** via the socket build handshake feeding the `_checkStamp` self-heal (see Client architecture); tabs too old to know the handshake get a repeating "refresh this page" toast (5s after connect, then every 60s). Auto-rejoin tokens make restarts seamless for players.
 
 ## Product
 
@@ -69,7 +69,7 @@ Places where two independent pieces of code must stay in lockstep, plus accepted
 - **The chat history log is PASSIVE and client-only by design** (user declined persistence). It's an ADDITIONAL DOM-level `chatMessage` listener + `_chatLogAdd` hooks in the whisper handlers; no input field, so it joins none of the `chatting` mutual-exclusion seams. `textContent` only, capped at `CHATLOG_MAX` (200) nodes, auto-scroll only when already at bottom. C-key guards on `body.playing` + no input focus; its Esc-close yields to every other panel flag.
 - **Display name ≠ full name.** `rowToPlayerState`: `name = nickname || first_name || name` (nametags/chat); `fullName` is for the admin panel. Announcements snapshot the author's display name at post time (accepted: old posts keep old names).
 - **Empty-email clients get session-only play** (email is the PK); only affects non-standard clients.
-- **Stale-client self-heal runs on page load AND socket reconnect.** Server injects `BUILD_STAMP` + serves `/stamp`; `_checkStamp()` force-reloads on mismatch (reconnect hook exists because weeks-old open tabs shipped stale clients). `BUILD_STAMP` is per-process, so autoscale instances differ — the `jpo_cb_at` sessionStorage guard (one reload / 5 min / tab) prevents reload loops; keep it.
+- **Stale-client self-heal runs on page load, socket reconnect, AND server push.** Server injects `BUILD_STAMP` + serves `/stamp`; `_checkStamp()` force-reloads on mismatch (guarded by `jpo_cb_at`, one reload / 5 min / tab — keep it). The socket `buildStamp` push on every (re)connect ALSO funnels into `_checkStamp()`: one reload authority, never two. `BUILD_STAMP` is a content hash of `index.html` (July 2026), so autoscale instances agree on it and a restart that didn't change the page reloads nobody.
 
 ### Auth & sessions
 
