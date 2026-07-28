@@ -2758,18 +2758,20 @@
       pet_turtle: { dx: 11, dy: -22 },
       pet_dragon: { dx: 6,  dy: -30 },
     };
-    // Per-accessory FIT off the species head anchor — tuned against in-game
-    // screenshots (July 2026: a bell at raw head-anchor floated in front of
-    // the cat's face). mx scales dx (collars tuck IN toward the neck, not out
-    // at the nose), my scales dy down the body (neck ≈ 55% of head height),
-    // dy is a final pixel nudge (hats perch above the crown).
+    // Per-accessory FIT off the species head anchor. Deliberately SIMPLE
+    // (user call, July 2026): everything is headwear — no neck/collar
+    // placement. Two fits only: on top of the head, or on the face.
+    // mx scales dx toward the facing side, my scales dy up the body,
+    // dy is a final pixel nudge (+2 sinks past the emoji box's padding).
+    const FIT_CROWN = { mx: 0.8, my: 1.0,  dy: 2 };  // sits ON the head
+    const FIT_FACE  = { mx: 1.1, my: 0.85, dy: 0 };  // on the face / eye line
     const PET_ACC_FIT = {
-      petacc_bow:    { mx: 0.6, my: 0.8, dy: 0 },    // on the head, between the ears
-      petacc_bell:   { mx: 0.4, my: 0.55, dy: 0 },   // hangs at the neck
-      petacc_scarf:  { mx: 0.4, my: 0.55, dy: 2 },   // wraps the neck
-      petacc_shades: { mx: 1.1, my: 0.85, dy: 0 },   // on the eye line, toward the face
-      petacc_tophat: { mx: 0.8, my: 1.0,  dy: 2 },   // sits ON the crown (emoji box has ~3px internal padding)
-      petacc_crown:  { mx: 0.8, my: 1.0,  dy: 2 },
+      petacc_bow:    FIT_CROWN,
+      petacc_tophat: FIT_CROWN,
+      petacc_crown:  FIT_CROWN,
+      petacc_bell:   FIT_FACE,
+      petacc_scarf:  FIT_FACE,
+      petacc_shades: FIT_FACE,
     };
     let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
 
