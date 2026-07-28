@@ -33,8 +33,12 @@ function queue(socket, name) {
   });
   q.next = (timeoutMs = 15000, label = name) => new Promise((res, rej) => {
     if (q.items.length) return res(q.items.shift());
-    const t = setTimeout(() => rej(new Error(`timeout waiting for ${label}`)), timeoutMs);
-    q.waiters.push((d) => { clearTimeout(t); res(d); });
+    // On timeout the waiter MUST be removed, or the next real event is
+    // swallowed by the dead waiter (bit us: a 50ms silent-drain before a
+    // later .next() on the same queue ate the awaited playerJoined).
+    const w = (d) => { clearTimeout(t); res(d); };
+    const t = setTimeout(() => { const i = q.waiters.indexOf(w); if (i >= 0) q.waiters.splice(i, 1); rej(new Error(`timeout waiting for ${label}`)); }, timeoutMs);
+    q.waiters.push(w);
   });
   // Negative assertion helper: true if the event did NOT arrive in the window.
   q.silent = async (ms) => { try { await q.next(ms, "silent-check"); return false; } catch { return true; } };
@@ -126,9 +130,14 @@ try {
   ok(/not enough/i.test(await bErr.next(8000, "shopError(poor)")), "50-coin buyer rejected");
 
   // 6. Persistence: real reconnect OUTSIDE the grace window → DB restore path.
+  // Wait for B to SEE A leave (grace expired) rather than sleeping a fixed
+  // 13s — under real-player load the grace sweep can lag past GRACE_MS, and a
+  // reconnect that lands in-grace resumes silently (no playerJoined). Filter
+  // by id: real players on a busy dev server also come and go.
+  const bLeft = queue(B.s, "playerLeft");
   A.s.disconnect();
-  console.log("  (waiting out the disconnect grace window…)");
-  await sleep(13000);
+  console.log("  (waiting for A's grace to expire…)");
+  for (;;) { const d = await bLeft.next(30000, "playerLeft(A)"); if (d === aId || (d && d.id === aId)) break; }   // server emits the raw id
   const A2 = connect(EMAIL_A, "Alpha");
   const a2Approved = queue(A2.s, "approved");
   await A2.ready;

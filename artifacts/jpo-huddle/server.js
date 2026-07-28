@@ -322,11 +322,15 @@ const PETS = {
 const PET_ACCESSORIES = {
   petacc_bow:    2000,
   petacc_bell:   2500,
-  petacc_scarf:  3500,
-  petacc_shades: 4500,
   petacc_tophat: 6000,
   petacc_crown:  8000,
 };
+// Retired accessories (user call, July 2026: headwear only — scarf/shades
+// made no sense hovering on heads). A startup nudge refunds owners the full
+// price, strips the id from cosmetics, and bares any pet still wearing one —
+// idempotent, so prod self-heals on first boot after deploy (prod DB can't be
+// migrated by hand). Never reuse these ids.
+const RETIRED_PET_ACCS = { petacc_scarf: 3500, petacc_shades: 4500 };
 
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or
 // both in a single change). The server is authoritative — the client's price
@@ -5156,6 +5160,19 @@ try {
   // true in every environment.
   await pool.query(`ALTER TABLE jpo_players ALTER COLUMN x SET DEFAULT ${GRASS_SPAWN.x}`);
   await pool.query(`ALTER TABLE jpo_players ALTER COLUMN y SET DEFAULT ${GRASS_SPAWN.y}`);
+  // Retired pet accessories: refund + strip + un-equip (see RETIRED_PET_ACCS).
+  // WHERE owns the idempotency — a refunded player no longer matches.
+  for (const [id, refund] of Object.entries(RETIRED_PET_ACCS)) {
+    const { rowCount } = await pool.query(
+      `UPDATE jpo_players
+          SET coins = coins + $2,
+              cosmetics = array_remove(cosmetics, $1),
+              equipped_pet_acc = CASE WHEN equipped_pet_acc = $1 THEN '' ELSE equipped_pet_acc END,
+              updated_at = now()
+        WHERE $1 = ANY(cosmetics)`,
+      [id, refund]);
+    if (rowCount) console.log(`retired ${id}: refunded ${refund} coins to ${rowCount} player(s)`);
+  }
 } catch (err) {
   console.error("schema nudge (columns) failed:", err);
 }

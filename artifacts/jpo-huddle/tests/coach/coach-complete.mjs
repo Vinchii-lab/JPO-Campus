@@ -25,8 +25,12 @@ function queue(socket, name) {
   socket.on(name, (d) => { const w = q.waiters.shift(); if (w) w(d); else q.items.push(d); });
   q.next = (timeoutMs = 15000, label = name) => new Promise((res, rej) => {
     if (q.items.length) return res(q.items.shift());
-    const t = setTimeout(() => rej(new Error(`timeout waiting for ${label}`)), timeoutMs);
-    q.waiters.push((d) => { clearTimeout(t); res(d); });
+    // On timeout the waiter MUST be removed, or the next real event is
+    // swallowed by the dead waiter (bit us: a 50ms silent-drain before a
+    // later .next() on the same queue ate the awaited playerJoined).
+    const w = (d) => { clearTimeout(t); res(d); };
+    const t = setTimeout(() => { const i = q.waiters.indexOf(w); if (i >= 0) q.waiters.splice(i, 1); rej(new Error(`timeout waiting for ${label}`)); }, timeoutMs);
+    q.waiters.push(w);
   });
   return q;
 }

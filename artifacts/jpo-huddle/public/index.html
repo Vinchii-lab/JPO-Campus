@@ -2740,8 +2740,6 @@
     const PET_ACCESSORIES = [
       { id: 'petacc_bow',    emoji: '🎀', name: 'Bow',         cost: 2000, desc: 'a dainty bow for a dapper pet' },
       { id: 'petacc_bell',   emoji: '🔔', name: 'Bell Collar', cost: 2500, desc: 'hear them coming' },
-      { id: 'petacc_scarf',  emoji: '🧣', name: 'Scarf',       cost: 3500, desc: 'cozy office-winter chic' },
-      { id: 'petacc_shades', emoji: '🕶️', name: 'Pet Shades',  cost: 4500, desc: 'deal with it' },
       { id: 'petacc_tophat', emoji: '🎩', name: 'Top Hat',     cost: 6000, desc: 'a most distinguished companion' },
       { id: 'petacc_crown',  emoji: '👑', name: 'Tiny Crown',  cost: 8000, desc: 'royalty on four legs' },
     ];
@@ -2758,21 +2756,11 @@
       pet_turtle: { dx: 11, dy: -22 },
       pet_dragon: { dx: 6,  dy: -30 },
     };
-    // Per-accessory FIT off the species head anchor. Deliberately SIMPLE
-    // (user call, July 2026): everything is headwear — no neck/collar
-    // placement. Two fits only: on top of the head, or on the face.
-    // mx scales dx toward the facing side, my scales dy up the body,
-    // dy is a final pixel nudge (+2 sinks past the emoji box's padding).
-    const FIT_CROWN = { mx: 0.8, my: 1.0,  dy: 2 };  // sits ON the head
-    const FIT_FACE  = { mx: 1.1, my: 0.85, dy: 0 };  // on the face / eye line
-    const PET_ACC_FIT = {
-      petacc_bow:    FIT_CROWN,
-      petacc_tophat: FIT_CROWN,
-      petacc_crown:  FIT_CROWN,
-      petacc_bell:   FIT_FACE,
-      petacc_scarf:  FIT_FACE,
-      petacc_shades: FIT_FACE,
-    };
+    // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
+    // and hovers on the head — one fit for all, off the species head anchor.
+    // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
+    // internal padding. Scarf/shades were retired (server refunds owners).
+    const PET_ACC_FIT_ALL = { mx: 0.8, my: 1.0, dy: 2 };
     let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
 
     // Department allowlist — MUST stay identical (same values, same order) to
@@ -8177,7 +8165,7 @@
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
             .setOrigin(0.5, 1).setDepth(3);
           const an = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
-          const fit = PET_ACC_FIT[acc] || { mx: 1, my: 1, dy: 0 };
+          const fit = PET_ACC_FIT_ALL;
           obj._accOffX = an.dx * fit.mx;                 // mirrored by flip in _placePetAcc
           obj._accOffY = an.dy * fit.my + fit.dy;
           this._placePetAcc(obj);

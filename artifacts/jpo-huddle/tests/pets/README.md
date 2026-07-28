@@ -1,6 +1,6 @@
 # Pet accessories regression tests
 
-Buyable emoji accessories (bow/bell/scarf/shades/top hat/crown, `petacc_` ids)
+Buyable emoji accessories (bow/bell/top hat/crown, `petacc_` ids; scarf/shades retired with auto-refund)
 drawn ON the active pet — one worn slot (`jpo_players.equipped_pet_acc`,
 `''` = bare pet), ownership shared with the `cosmetics` array, buy auto-equips.
 
