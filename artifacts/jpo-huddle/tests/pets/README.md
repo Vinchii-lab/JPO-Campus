@@ -11,8 +11,10 @@ Both scripts run against the LIVE dev server + dev database, seed throwaway
 
 ```bash
 cd artifacts/jpo-huddle
-TEST_PORT=<port> node tests/pets/petacc.mjs          # headless socket: buy/equip/broadcast/rejections/restore
-TEST_PORT=<port> node tests/pets/browser-petacc.cjs  # puppeteer: overlay renders, tracks, flips, dies with pet
+TEST_PORT=<port> node tests/pets/petacc.mjs            # headless socket: buy/equip/broadcast/rejections/restore
+TEST_PORT=<port> node tests/pets/browser-petacc.cjs    # puppeteer: overlay renders, tracks, flips, dies with pet
+TEST_PORT=<port> node tests/pets/variants.mjs          # headless socket: breed variants adopt/switch/broadcast/restore
+TEST_PORT=<port> node tests/pets/browser-variants.cjs  # puppeteer: variant textures load (never __MISSING), pixel-distinct, species anchors
 ```
 
 Get `<port>` from the `artifacts/jpo-huddle: web` boot log ("running on port

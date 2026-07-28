@@ -287,13 +287,27 @@ const SHOP = {
 // active pet lives in jpo_players.equipped_pet ('' = none): a separate slot
 // from equipped_cosmetic, so you can wear shades AND walk your dog. Ids MUST
 // match the client PETS catalog in public/index.html (emoji/names live there).
+// Breed/color variants (July 2026) are simply their own pet ids
+// (pet_<species>_<variant>) — the whole adopt/bring/persist/broadcast
+// pipeline reuses them untouched, and existing owners' ids ARE the classic
+// looks (zero migration). Classic prices unchanged; fancy looks cost more.
+// Ids MUST match the client PETS catalog in public/index.html.
 const PETS = {
-  pet_duck:   10000,
-  pet_cat:    12500,
-  pet_dog:    12500,
-  pet_bunny:  15000,
-  pet_turtle: 20000,
-  pet_dragon: 30000,
+  pet_duck:             10000,
+  pet_duck_snow:        14000,
+  pet_cat:              12500,
+  pet_cat_black:        16000,
+  pet_cat_snow:         18000,
+  pet_dog:              12500,
+  pet_dog_choco:        16000,
+  pet_dog_husky:        18000,
+  pet_bunny:            15000,
+  pet_bunny_cocoa:      19000,
+  pet_turtle:           20000,
+  pet_turtle_sapphire:  26000,
+  pet_dragon:           30000,
+  pet_dragon_crimson:   38000,
+  pet_dragon_obsidian:  45000,
 };
 
 // ── Pet accessories catalog ──────────────────────────────────────────────────

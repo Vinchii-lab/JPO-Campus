@@ -2697,15 +2697,34 @@
     // Ownership shares _ownedItems (the cosmetics array — 'pet_' ids never
     // collide with wearable ids); the active pet is _equippedPet ('' = none),
     // a separate slot from the worn cosmetic.
+    // Breed/color variants (July 2026): each look is its OWN pet id
+    // (pet_<species>_<variant>) so the entire adopt/bring/persist/broadcast
+    // pipeline is reused untouched, and existing ids ARE the classic looks
+    // (no migration). Grouped by species (the `species` label drives the
+    // shop's group headers); classic price unchanged, fancy looks tiered up.
+    // Ids MUST stay in lockstep with the server PETS map (authoritative
+    // prices). Variant PNGs are recolors from tools/pet-variant-gen.cjs.
     const PETS = [
-      { id: 'pet_duck',   emoji: '🦆', name: 'Duck',        cost: 10000, desc: 'waddles along behind you' },
-      { id: 'pet_cat',    emoji: '🐱', name: 'Office Cat',  cost: 12500, desc: 'follows you, when it feels like it' },
-      { id: 'pet_dog',    emoji: '🐶', name: 'Office Dog',  cost: 12500, desc: 'a very good boy' },
-      { id: 'pet_bunny',  emoji: '🐰', name: 'Bunny',       cost: 15000, desc: 'hops after you everywhere' },
-      { id: 'pet_turtle', emoji: '🐢', name: 'Turtle',      cost: 20000, desc: 'takes his sweet time' },
-      { id: 'pet_dragon', emoji: '🐉', name: 'Baby Dragon', cost: 30000, desc: 'the ultimate office flex' },
+      { id: 'pet_duck',            species: 'Duck',        emoji: '🦆', name: 'Duck',           cost: 10000, desc: 'waddles along behind you' },
+      { id: 'pet_duck_snow',       species: 'Duck',        emoji: '🦢', name: 'Snow Duck',      cost: 14000, desc: 'fresh out of a winter pond' },
+      { id: 'pet_cat',             species: 'Office Cat',  emoji: '🐱', name: 'Tabby',          cost: 12500, desc: 'follows you, when it feels like it' },
+      { id: 'pet_cat_black',       species: 'Office Cat',  emoji: '🐈‍⬛', name: 'Black Cat',      cost: 16000, desc: 'crosses your path on purpose' },
+      { id: 'pet_cat_snow',        species: 'Office Cat',  emoji: '🤍', name: 'Snow Cat',       cost: 18000, desc: 'sheds on every dark outfit' },
+      { id: 'pet_dog',             species: 'Office Dog',  emoji: '🐶', name: 'Golden',         cost: 12500, desc: 'a very good boy' },
+      { id: 'pet_dog_choco',       species: 'Office Dog',  emoji: '🐕', name: 'Chocolate',      cost: 16000, desc: 'a very good boy, in dark mode' },
+      { id: 'pet_dog_husky',       species: 'Office Dog',  emoji: '🐺', name: 'Husky',          cost: 18000, desc: 'howls at stand-up' },
+      { id: 'pet_bunny',           species: 'Bunny',       emoji: '🐰', name: 'Snowball',       cost: 15000, desc: 'hops after you everywhere' },
+      { id: 'pet_bunny_cocoa',     species: 'Bunny',       emoji: '🐇', name: 'Cocoa Bunny',    cost: 19000, desc: 'espresso-brown and twice as fast' },
+      { id: 'pet_turtle',          species: 'Turtle',      emoji: '🐢', name: 'Turtle',         cost: 20000, desc: 'takes his sweet time' },
+      { id: 'pet_turtle_sapphire', species: 'Turtle',      emoji: '🌀', name: 'Sapphire Turtle', cost: 26000, desc: 'rare deep-sea colorway' },
+      { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
+      { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
+      { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
+    // Species base id for any pet id: 'pet_dragon_crimson' → 'pet_dragon'.
+    // Accessory anchors key by species, so variants inherit placement free.
+    const petSpeciesId = (id) => (id || '').split('_').slice(0, 2).join('_');
     const PET_GAP     = 36; // px the pet trails behind its owner (follow-at-distance)
     const PET_PX      = 42; // longest-side px of a pet sprite in the world (~half a player)
     const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
@@ -3878,9 +3897,18 @@
         // Accessories (petacc_ rows, paged after the pets): Buy / Put on /
         // On ✓ — one slot, putting on a new one swaps it, On ✓ takes it off.
         petsBox.textContent = '';
-        let accHeaderDone = false;
+        let accHeaderDone = false, lastSpecies = null;
         for (const c of slice) {
           const isAcc = c.id.startsWith('petacc_');
+          // Species group headers: one per species run on the current page
+          // (variants are ordered by species in PETS, so runs are contiguous).
+          if (!isAcc && c.species && c.species !== lastSpecies) {
+            lastSpecies = c.species;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = c.species;
+            petsBox.append(h);
+          }
           if (isAcc && !accHeaderDone) {
             accHeaderDone = true;
             const h = document.createElement('div');
@@ -8136,7 +8164,7 @@
         if (accEmoji) {
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
             .setOrigin(0.5, 1).setDepth(3);
-          obj._accAnchor = PET_ACC_ANCHOR[pet] || { dx: 5, dy: -30 };
+          obj._accAnchor = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
           obj._accDy = PET_ACC_DY[acc] || 0;
           this._placePetAcc(obj);
         }
