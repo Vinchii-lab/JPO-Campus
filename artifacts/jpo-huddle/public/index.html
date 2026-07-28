@@ -2778,7 +2778,7 @@
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
     // internal padding. Scarf/shades were retired (server refunds owners).
-    const PET_ACC_FIT_ALL = { mx: 0.8, my: 1.0, dy: 2 };
+    const PET_ACC_FIT_ALL = { mx: 0.8, my: 1.0, dy: -12 };   // hover clearly ABOVE the head, not on it
     let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
 
     // Department allowlist — MUST stay identical (same values, same order) to
@@ -4195,6 +4195,13 @@
     let _mmOpen = false, _mmBg = null, _mmTimer = null, _mmScale = 1;
     const _mmEl = document.getElementById('minimap');
     const _mmCv = document.getElementById('minimapCanvas');
+    // Pretty background: a pre-rendered shot of the ACTUAL office art
+    // (assets/minimap.png, regenerate with the capture script after map edits).
+    // The blocky tile raster below stays as the fallback if it fails to load.
+    const _mmImg = new Image();
+    let _mmImgOk = false;
+    _mmImg.onload = () => { _mmImgOk = true; _mmBg = null; };
+    _mmImg.src = '/assets/minimap.png';
 
     function _mmBuildBg(map) {
       // Fit the whole map inside ~92vw × 78vh, whole-pixel tiles for crispness.
@@ -4203,6 +4210,11 @@
       const bg = document.createElement('canvas');
       bg.width = map.width * _mmScale; bg.height = map.height * _mmScale;
       const g = bg.getContext('2d');
+      if (_mmImgOk) {   // real map art, scaled to fit — no tile raster needed
+        g.imageSmoothingEnabled = true;
+        g.drawImage(_mmImg, 0, 0, bg.width, bg.height);
+        return bg;
+      }
       g.fillStyle = '#10131f'; g.fillRect(0, 0, bg.width, bg.height);
       const paint = (layerName, color) => {
         const layer = map.getLayer(layerName);
