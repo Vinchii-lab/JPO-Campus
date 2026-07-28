@@ -4906,12 +4906,14 @@
       //           sender wedged into encoding dead air onto a 'connected'
       //           call cannot survive a brand-new track object per press.
       //   idle  → no track at all: nothing to wedge, no silence RTP burned.
-      if (!_voiceMic) return;
+      // NO early-return on a missing master: release must ALWAYS drive
+      // replaceTrack(null), even if the mic died (onended nulls _voiceMic)
+      // mid-press — otherwise an ended sender track stays attached.
       try {
         const sender = P.pc.getTransceivers()[0].sender;
         const old = sender.track;
-        const master = _voiceMic.getAudioTracks()[0];
-        const next = (_voiceHeld && master) ? master.clone() : null;
+        const master = _voiceMic && _voiceMic.getAudioTracks()[0];
+        const next = (_voiceHeld && master && master.readyState === 'live') ? master.clone() : null;
         const done = sender.replaceTrack(next);
         const bury = () => { if (old && old !== next) { try { old.stop(); } catch (_) {} } };
         if (done && done.then) done.then(bury).catch(bury); else bury();
@@ -5262,6 +5264,14 @@
       if (!_voiceOn) { _rpsToast('Voice is off — click the 🎙️ button up top to turn it on'); return; }
       _voiceHeld = true;
       _voiceKickCtx();
+      // Dead-master guard: a mic track can END behind our back (headset
+      // unplugged, Bluetooth profile switch, Zoom/Teams stealing the device).
+      // Cloning an ended track transmits pure silence forever — so if the
+      // warm master isn't live anymore, throw it away and re-acquire.
+      if (_voiceMic && _voiceMic.getAudioTracks()[0]?.readyState !== 'live') {
+        try { _voiceMic.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        _voiceMic = null;
+      }
       if (!_voiceMic && !_voiceMicBusy) {
         _voiceMicBusy = true;
         try {
@@ -5271,9 +5281,18 @@
           // Master stays warm and UNATTACHED — nothing transmits without a
           // sender track, so no enabled/disabled juggling can leak audio.
           _voiceMic = s; _voiceMicDenied = false;
-        } catch (_) {
+          // If the device dies later, drop the master so the NEXT press
+          // re-acquires instead of cloning a corpse.
+          const mt = s.getAudioTracks()[0];
+          if (mt) mt.onended = () => { if (_voiceMic === s) _voiceMic = null; };
+        } catch (err) {
           _voiceMicDenied = true;
-          _rpsToast('🎙️ Mic blocked — you can still hear people talk');
+          const n = err && err.name;
+          _rpsToast(n === 'NotFoundError' || n === 'DevicesNotFoundError'
+              ? '🎙️ No microphone found — plug one in, then hold V again'
+            : n === 'NotReadableError' || n === 'TrackStartError'
+              ? '🎙️ Another app is using your mic (Zoom/Teams?) — close it, then hold V again'
+              : '🎙️ Mic blocked — allow the microphone in your browser (click the 🔒 by the address bar)');
         } finally { _voiceMicBusy = false; }
       }
       if (!_voiceHeld || !_voiceMic) return;   // released mid-prompt, or denied
