@@ -1179,6 +1179,23 @@
         rgba(0,0,0,0) 0px, rgba(0,0,0,0) 160px, rgba(0,0,0,0.72) 290px, rgba(0,0,0,0.92) 420px);
     }
     body.round-dark #darkness { display: block; }
+
+    /* ── Minimap (M key) ─────────────────────────────────────────────
+       Whole-office overview with live player dots. Deliberately BLOCKED
+       while an After Dark round is on — seeing everyone's position would
+       ruin the hide-and-hunt. */
+    #minimap {
+      display: none; position: fixed; inset: 0; z-index: 900;
+      background: rgba(8, 10, 18, 0.82);
+      align-items: center; justify-content: center; flex-direction: column; gap: 10px;
+    }
+    #minimap.open { display: flex; }
+    #minimapCanvas {
+      border: 2px solid #3a4668; border-radius: 10px;
+      background: #10131f; box-shadow: 0 12px 48px rgba(0,0,0,.6);
+      max-width: 92vw; max-height: 80vh;
+    }
+    #minimap .mm-hint { color: #8fa0c8; font-size: 13px; letter-spacing: .04em; }
     #round-chip {
       display: none; position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
       z-index: 300; background: rgba(16,12,40,0.88); border: 1px solid rgba(148,132,255,0.45);
@@ -1595,6 +1612,7 @@
 
   <!-- ── Office After Dark surfaces ── -->
   <div id="darkness"></div>
+  <div id="minimap"><canvas id="minimapCanvas"></canvas><div class="mm-hint">M or Esc to close</div></div>
   <div id="round-chip"></div>
   <div id="round-roster"><div class="rn-rtitle">🌙 IN THE ROUND</div><div id="round-roster-list"></div></div>
   <div id="round-invite">
@@ -4168,6 +4186,100 @@
       if (n >= 1 && n <= EMOTES.length) { e.preventDefault(); sendEmote(EMOTES[n - 1].id); }
     });
 
+    // ── Minimap (M key) ─────────────────────────────────────────────────
+    // Whole-office overview with live player dots. The static office layout
+    // (Floor / Wall / Furniture) is rasterised ONCE into an offscreen canvas
+    // (1 tile → mmScale px); only the dots are redrawn on a timer while open.
+    // BLOCKED during After Dark (lobby AND active) — a live position map
+    // would ruin the hide-and-hunt — and force-closed if a round begins.
+    let _mmOpen = false, _mmBg = null, _mmTimer = null, _mmScale = 1;
+    const _mmEl = document.getElementById('minimap');
+    const _mmCv = document.getElementById('minimapCanvas');
+
+    function _mmBuildBg(map) {
+      // Fit the whole map inside ~92vw × 78vh, whole-pixel tiles for crispness.
+      _mmScale = Math.max(1, Math.floor(Math.min(
+        (window.innerWidth * 0.92) / map.width, (window.innerHeight * 0.78) / map.height)));
+      const bg = document.createElement('canvas');
+      bg.width = map.width * _mmScale; bg.height = map.height * _mmScale;
+      const g = bg.getContext('2d');
+      g.fillStyle = '#10131f'; g.fillRect(0, 0, bg.width, bg.height);
+      const paint = (layerName, color) => {
+        const layer = map.getLayer(layerName);
+        if (!layer) return;
+        g.fillStyle = color;
+        for (let ty = 0; ty < map.height; ty++)
+          for (let tx = 0; tx < map.width; tx++) {
+            const t = layer.data[ty][tx];
+            if (t && t.index > 0) g.fillRect(tx * _mmScale, ty * _mmScale, _mmScale, _mmScale);
+          }
+      };
+      paint('Floor',     '#2a3149');
+      paint('Furniture', '#4a5578');
+      paint('Wall',      '#6b779e');
+      return bg;
+    }
+
+    function _mmDraw() {
+      const sc = window._gameScene;
+      if (!sc || !sc._tileMap) return;
+      if (_roundPhase) { _mmClose(); return; }   // round started while open
+      const map = sc._tileMap;
+      if (!_mmBg) _mmBg = _mmBuildBg(map);
+      _mmCv.width = _mmBg.width; _mmCv.height = _mmBg.height;
+      const g = _mmCv.getContext('2d');
+      g.drawImage(_mmBg, 0, 0);
+      // world px → minimap px (layers render at setScale(3))
+      const k = _mmScale / (map.tileWidth * 3);
+      const dot = (x, y, color, ring) => {
+        g.beginPath(); g.arc(x * k, y * k, ring ? 5 : 4, 0, Math.PI * 2);
+        g.fillStyle = color; g.fill();
+        if (ring) { g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
+      };
+      const label = (x, y, text) => {
+        g.font = '10px sans-serif'; g.textAlign = 'center';
+        g.fillStyle = 'rgba(0,0,0,.55)';
+        const w = g.measureText(text).width;
+        g.fillRect(x * k - w / 2 - 3, y * k - 19, w + 6, 12);
+        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, y * k - 10);
+      };
+      for (const id in sc.otherPlayers) {
+        const e = sc.otherPlayers[id];
+        if (!e || !e.sprite) continue;
+        dot(e.sprite.x, e.sprite.y, '#5ad1ff');
+        label(e.sprite.x, e.sprite.y, e.nameTag?.text || '?');
+      }
+      if (sc.player) {
+        dot(sc.player.x, sc.player.y, '#ffd84d', true);
+        label(sc.player.x, sc.player.y, 'You');
+      }
+    }
+
+    function _mmClose() {
+      _mmOpen = false; _mmEl.classList.remove('open');
+      if (_mmTimer) { clearInterval(_mmTimer); _mmTimer = null; }
+      _mmBg = null;   // rebuild next open — window may have been resized
+    }
+    function _mmToggle() {
+      if (_mmOpen) return _mmClose();
+      if (_roundPhase) return;                       // no map during After Dark
+      if (!window._gameScene?._tileMap) return;      // scene not ready yet
+      _mmOpen = true; _mmEl.classList.add('open');
+      _mmDraw();
+      _mmTimer = setInterval(_mmDraw, 400);
+    }
+    _mmEl.addEventListener('click', _mmClose);
+
+    document.addEventListener('keydown', e => {
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === 'KeyM') { e.preventDefault(); _mmToggle(); }
+      else if (e.key === 'Escape' && _mmOpen) { e.preventDefault(); _mmClose(); }
+    });
+
     // ── Private DMs (whispers) ─────────────────────────────────────────
     // In-session only: whispers are never persisted. The composer resolves a
     // display name to ONE specific live session (socket id) via the online
@@ -5980,6 +6092,7 @@
       if (_roundPhase) return;                     // already in — ignore stray invites
       if (d.starterId === socket.id) {             // the starter goes straight to the lobby
         _roundPhase = 'lobby';
+        _mmClose();   // minimap must never stay up once in a round
         _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
         return;
       }
@@ -5994,6 +6107,7 @@
     socket.on('roundJoined', (d) => {
       d = d || {};
       _roundPhase = 'lobby';
+      _mmClose();   // minimap must never stay up once in a round
       _rnEl('round-invite').classList.remove('open');
       clearTimeout(_roundInviteTimer);
       _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
@@ -6016,6 +6130,7 @@
     // already-dead roster entries get re-hidden (fresh scene = fresh sprites).
     function _roundEnterActive(d, { resume = false } = {}) {
       _roundPhase = 'active'; _roundRole = d.role || 'crew';
+      _mmClose();   // minimap must never stay up once in a round
       _roundAlive = resume ? d.alive !== false : true;
       // Speed edge arrives only in the killers' payload; sanity-clamp so a
       // malformed value can never slow the killer below base or go wild.
@@ -7246,6 +7361,7 @@
         _phaserKbd = this.input.keyboard;
 
         const map      = this.make.tilemap({ key: 'map' });
+        this._tileMap  = map;   // minimap reads layer data + dimensions from here
         // Tiled tileset name → the texture key loaded in preload(). MUST cover
         // every tileset in JPO_HQ.tmj or its tiles render as black squares.
         const tilesets = Object.entries(TILESET_NAMES).map(([tiledName, key]) =>
