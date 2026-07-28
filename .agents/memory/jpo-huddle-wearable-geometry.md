@@ -17,3 +17,6 @@ All values in world px relative to the avatar sprite origin (center of the 16×3
 # Testing seated wearables with seeded rows
 
 Seed `anim='sit'` + on-seat x/y and the client restores the pose, but the wearable's visibility follows the seeded `dir` — `dir='up'` hides the overlay by design (back view). Seed the `dir` an actual E-press would set for that seat (e.g. 'left' for a pod chair with the desk to its left) or the wearable will "mysteriously" not render.
+
+## Pet accessories (July 2026)
+Accessory emoji overlays on pets anchor per-species from the pet's bottom-center origin (`PET_ACC_ANCHOR` + per-accessory `PET_ACC_DY`); side-view quadrupeds (duck/cat/dog/turtle) carry heads at the FACING edge → dx ~9–11, upright pets (bunny/dragon) dx ~3–6. dx mirrors with `flipX`. Headless chromium has no color-emoji font — accessory glyphs screenshot as tofu boxes; verify position numerically in page context, not by eyeballing pixels.

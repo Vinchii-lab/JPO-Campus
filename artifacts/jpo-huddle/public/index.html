@@ -2711,6 +2711,39 @@
     const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
     let _equippedPet = '';  // active pet ('' = none); server-authoritative
 
+    // Pet accessories: cosmetic add-ons drawn ON the active pet (one slot,
+    // '' = bare pet). Ids MUST stay in lockstep with the server
+    // PET_ACCESSORIES map in server.js (the server is authoritative on price
+    // — these labels are display-only). Ownership shares _ownedItems (the
+    // 'petacc_' prefix never collides with wearable or pet ids); the worn
+    // slot is _equippedPetAcc — it applies to whichever pet is out, and waits
+    // invisibly when no pet is out.
+    const PET_ACCESSORIES = [
+      { id: 'petacc_bow',    emoji: '🎀', name: 'Bow',         cost: 2000, desc: 'a dainty bow for a dapper pet' },
+      { id: 'petacc_bell',   emoji: '🔔', name: 'Bell Collar', cost: 2500, desc: 'hear them coming' },
+      { id: 'petacc_scarf',  emoji: '🧣', name: 'Scarf',       cost: 3500, desc: 'cozy office-winter chic' },
+      { id: 'petacc_shades', emoji: '🕶️', name: 'Pet Shades',  cost: 4500, desc: 'deal with it' },
+      { id: 'petacc_tophat', emoji: '🎩', name: 'Top Hat',     cost: 6000, desc: 'a most distinguished companion' },
+      { id: 'petacc_crown',  emoji: '👑', name: 'Tiny Crown',  cost: 8000, desc: 'royalty on four legs' },
+    ];
+    const PET_ACC_EMOJI = Object.fromEntries(PET_ACCESSORIES.map(a => [a.id, a.emoji]));
+    // Where an accessory sits on each species, relative to the pet object's
+    // origin (0.5, 1 — bottom-center): dy up from the feet to the head line,
+    // dx toward the FACING side (pets are drawn facing right; the offset
+    // mirrors when the pet flips). A duck's head is not a dragon's head.
+    const PET_ACC_ANCHOR = {
+      pet_duck:   { dx: 9,  dy: -30 },
+      pet_cat:    { dx: 10, dy: -30 },
+      pet_dog:    { dx: 10, dy: -32 },
+      pet_bunny:  { dx: 3,  dy: -36 },
+      pet_turtle: { dx: 11, dy: -22 },
+      pet_dragon: { dx: 6,  dy: -38 },
+    };
+    // Per-accessory nudge off the species head anchor: hats ride higher,
+    // collar/scarf/bell sit down at the neck, shades on the eye line.
+    const PET_ACC_DY = { petacc_bow: -2, petacc_bell: 12, petacc_scarf: 10, petacc_shades: 4, petacc_tophat: -8, petacc_crown: -8 };
+    let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
+
     // Department allowlist — MUST stay identical (same values, same order) to
     // the server's DEPARTMENTS in server.js. Feeds BOTH the registration
     // dropdown and the profile card's one-time legacy picker.
@@ -3235,6 +3268,7 @@
       _ownedItems     = data.cosmetics || [];
       _equippedCosmetic = data.equipped || '';
       _equippedPet    = data.pet || '';
+      _equippedPetAcc = data.petAcc || '';
       _playerItems    = data.items || {};
       _renderItemBar();
 
@@ -3515,9 +3549,10 @@
 
     // ── Pets ──────────────────────────────────────────────────────────
     // Purchase confirmed (coins already taken — coinUpdate arrives separately).
-    socket.on('petSuccess', ({ item, pet }) => {
+    socket.on('petSuccess', ({ item, pet, petAcc }) => {
       if (!_ownedItems.includes(item)) _ownedItems.push(item);
       _equippedPet = pet ?? item;   // adopting auto-brings the pet out
+      _equippedPetAcc = petAcc ?? _equippedPetAcc;   // accessory carries over to the new pet
       _refreshShopUI();
       const meta = PETS.find(p => p.id === item);
       document.getElementById('shop-msg').style.color = '#27ae60';
@@ -3526,14 +3561,36 @@
     });
 
     // Free bring/send-home confirmation (no purchase involved).
-    socket.on('petUpdate', ({ pet }) => {
+    socket.on('petUpdate', ({ pet, petAcc }) => {
       _equippedPet = pet || '';
+      _equippedPetAcc = petAcc ?? _equippedPetAcc;
       _refreshShopUI();
       window._gameScene?._setLocalPet(_equippedPet);
     });
 
-    socket.on('playerPetUpdate', ({ id, pet }) => {
-      window._gameScene?._updatePlayerPet(id, pet);
+    // Accessory purchase confirmed (coins already taken — coinUpdate arrives
+    // separately). Buying auto-equips, like adopting a pet does.
+    socket.on('petAccSuccess', ({ item, petAcc }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedPetAcc = petAcc ?? item;
+      _refreshShopUI();
+      const meta = PET_ACCESSORIES.find(a => a.id === item);
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = _equippedPet
+        ? `${meta ? meta.name : 'Accessory'} on — looking sharp!`
+        : `${meta ? meta.name : 'Accessory'} bought — it'll show when a pet is with you.`;
+      window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
+    });
+
+    // Free put-on/take-off confirmation ('' = bare pet).
+    socket.on('petAccUpdate', ({ petAcc }) => {
+      _equippedPetAcc = petAcc || '';
+      _refreshShopUI();
+      window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
+    });
+
+    socket.on('playerPetUpdate', ({ id, pet, petAcc }) => {
+      window._gameScene?._updatePlayerPet(id, pet, petAcc);
     });
 
     // ── Usable items (cigarettes, coffee) ─────────────────────────────
@@ -3702,6 +3759,8 @@
     function buyUsable(item) { socket.emit('buyUsable', { item }); }
     function buyPet(item) { socket.emit('buyPet', { item }); }
     function equipPet(item) { socket.emit('equipPet', { item }); }         // '' = send it home
+    function buyPetAcc(item) { socket.emit('buyPetAcc', { item }); }
+    function equipPetAcc(item) { socket.emit('equipPetAcc', { item }); }   // '' = take it off
     function useItem(item) {
       socket.emit('useItem', { item });
       document.querySelector('canvas')?.focus();   // give movement keys back after the click
@@ -3769,7 +3828,7 @@
 
       // Page window for the active (paged) tab; clamp so a shrinking catalog
       // or stale page index can never show an empty page.
-      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : _shopTab === 'pets' ? PETS : null;
+      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES) : null;
       let pages = 1;
       if (catalog) {
         pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
@@ -3816,11 +3875,36 @@
       } else if (_shopTab === 'pets') {
         // Pets: Adopt (not owned) / Bring (owned, not out — free) /
         // With you ✓ (out — click to send it home). Mirrors the wearables tab.
+        // Accessories (petacc_ rows, paged after the pets): Buy / Put on /
+        // On ✓ — one slot, putting on a new one swaps it, On ✓ takes it off.
         petsBox.textContent = '';
+        let accHeaderDone = false;
         for (const c of slice) {
+          const isAcc = c.id.startsWith('petacc_');
+          if (isAcc && !accHeaderDone) {
+            accHeaderDone = true;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = _ownedItems.some(o => o.startsWith('pet_'))
+              ? 'Accessories — dress up your pet'
+              : 'Accessories — adopt a pet first to show these off';
+            petsBox.append(h);
+          }
           const btn = document.createElement('button');
           btn.className = 'buy-btn';
-          if (!_ownedItems.includes(c.id)) {
+          if (isAcc) {
+            if (!_ownedItems.includes(c.id)) {
+              btn.textContent = 'Buy';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyPetAcc(c.id);
+            } else if (_equippedPetAcc === c.id) {
+              btn.textContent = 'On ✓'; btn.classList.add('wearing');
+              btn.onclick = () => equipPetAcc('');      // take it off
+            } else {
+              btn.textContent = 'Put on'; btn.classList.add('wear');
+              btn.onclick = () => equipPetAcc(c.id);    // swap, free
+            }
+          } else if (!_ownedItems.includes(c.id)) {
             btn.textContent = 'Adopt';
             if (_playerCoins < c.cost) btn.classList.add('poor');
             btn.onclick = () => buyPet(c.id);
@@ -8031,17 +8115,49 @@
       // its owner's sprite each frame (see _stepPet in update()), so pets
       // cost zero movement traffic. Depth 2: above the floor and the player
       // bodies (default 0) but below seat occluders (900) and nametags (990).
-      _makePet(pet, x, y) {
+      _makePet(pet, x, y, acc) {
         const emoji = PET_EMOJI[pet];
         if (!emoji) return null;                    // unknown id — not a pet
+        let obj;
         if (this.textures.exists(pet)) {            // pixel-art sprite (preloaded per PETS id)
-          const img = this.add.image(x - PET_GAP, y + 10, pet).setOrigin(0.5, 1).setDepth(2);
-          img.setScale(PET_PX / Math.max(img.width, img.height));
-          return img;
+          obj = this.add.image(x - PET_GAP, y + 10, pet).setOrigin(0.5, 1).setDepth(2);
+          obj.setScale(PET_PX / Math.max(obj.width, obj.height));
+        } else {
+          // Fallback: texture failed to load — the old emoji companion.
+          obj = this.add.text(x - PET_GAP, y + 10, emoji, { fontSize: '22px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(2);
         }
-        // Fallback: texture failed to load — the old emoji companion.
-        return this.add.text(x - PET_GAP, y + 10, emoji, { fontSize: '22px', resolution: 2 })
-          .setOrigin(0.5, 1).setDepth(2);
+        // Accessory overlay: an emoji riding the pet at depth 3 — above the
+        // pet (2), below seat occluders (900) and nametags (990). Anchored
+        // per species + per-accessory nudge; _placePetAcc owns its position
+        // (called here and every _stepPet frame, so it rides through walks,
+        // the seated ring, and teleport snaps). Torn down via _destroyPet.
+        const accEmoji = PET_ACC_EMOJI[acc];
+        if (accEmoji) {
+          obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(3);
+          obj._accAnchor = PET_ACC_ANCHOR[pet] || { dx: 5, dy: -30 };
+          obj._accDy = PET_ACC_DY[acc] || 0;
+          this._placePetAcc(obj);
+        }
+        return obj;
+      }
+
+      // Pin the accessory to its pet: dy up from the feet to the species'
+      // head line (+ per-accessory nudge), dx toward the side the pet faces
+      // (sprites are drawn facing right; flipX mirrors the offset).
+      _placePetAcc(petObj) {
+        const a = petObj._acc;
+        if (!a) return;
+        const an = petObj._accAnchor;
+        a.setPosition(petObj.x + (petObj.flipX ? -an.dx : an.dx), petObj.y + an.dy + petObj._accDy);
+      }
+
+      // A pet and its accessory overlay live and die together.
+      _destroyPet(petObj) {
+        if (!petObj) return;
+        if (petObj._acc) petObj._acc.destroy();
+        petObj.destroy();
       }
 
       // Follow-at-distance: the pet stands still until its owner is more than
@@ -8057,7 +8173,7 @@
         const ty = py + 10;                       // anchor beside the feet
         let dx = petObj.x - px, dy = petObj.y - ty;
         let dist = Math.hypot(dx, dy) || 1;
-        if (dist > 300) { petObj.setPosition(px - gap, ty); return; }
+        if (dist > 300) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
         if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
@@ -8068,6 +8184,7 @@
           // direction (idle keeps the last facing). Tiny drifts don't flip.
           if (petObj.setFlipX && Math.abs(mx) > 0.3) petObj.setFlipX(mx < 0);
         }
+        this._placePetAcc(petObj);   // accessory rides along every frame
       }
 
       // One-shot brew animation at a coffee machine (triggered by a machine
@@ -8121,16 +8238,16 @@
       }
 
       _setLocalPet(pet) {
-        if (this.localPet) { this.localPet.destroy(); this.localPet = null; }
+        if (this.localPet) { this._destroyPet(this.localPet); this.localPet = null; }
         if (!this.player) return;
-        this.localPet = this._makePet(pet, this.player.x, this.player.y);
+        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc);
       }
 
-      _updatePlayerPet(id, pet) {
+      _updatePlayerPet(id, pet, petAcc) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
-        if (entry.pet) { entry.pet.destroy(); entry.pet = null; }
-        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y);
+        if (entry.pet) { this._destroyPet(entry.pet); entry.pet = null; }
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc);
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -8333,7 +8450,7 @@
         if (!e) return;
         e.sprite.destroy(); e.nameTag.destroy();
         if (e.cosmetic)   e.cosmetic.destroy();
-        if (e.pet)        e.pet.destroy();
+        if (e.pet)        this._destroyPet(e.pet);
         if (e.chatBubble) e.chatBubble.destroy();
         this._clearOccluders(e.occluders);
         delete this.otherPlayers[id];
@@ -8404,7 +8521,7 @@
         const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir);
         const cosmetic = made ? made.obj : null;
         const cosmeticDef = made ? made.def : null;
-        const pet = this._makePet(data.pet, data.x, data.y);
+        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc);
 
         this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add

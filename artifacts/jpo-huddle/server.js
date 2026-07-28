@@ -296,6 +296,24 @@ const PETS = {
   pet_dragon: 30000,
 };
 
+// ── Pet accessories catalog ──────────────────────────────────────────────────
+// Cosmetic add-ons drawn ON the active pet (one slot). Ownership shares the
+// same cosmetics array — the 'petacc_' prefix keeps the id space disjoint from
+// both wearables (SHOP) and pets (PETS), so every other equip handler rejects
+// these ids for free and vice versa. The worn accessory lives in
+// jpo_players.equipped_pet_acc ('' = bare pet); it applies to whichever pet is
+// out, and owning one with no pet out is fine — it shows when a pet is out.
+// Priced as a follow-up treat, deliberately well under the pets themselves.
+// Ids MUST match the client PET_ACCESSORIES catalog in public/index.html.
+const PET_ACCESSORIES = {
+  petacc_bow:    2000,
+  petacc_bell:   2500,
+  petacc_scarf:  3500,
+  petacc_shades: 4500,
+  petacc_tophat: 6000,
+  petacc_crown:  8000,
+};
+
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or
 // both in a single change). The server is authoritative — the client's price
 // label is display-only. Indexes are validated against CLOTH_MAX.
@@ -1359,6 +1377,7 @@ function rowToPlayerState(row) {
     cosmetics: row.cosmetics || [],
     equipped:  row.equipped_cosmetic || "",
     pet:       row.equipped_pet || "",
+    petAcc:    row.equipped_pet_acc || "",
     items:     row.items || {},
     isAnnouncer: row.is_announcer,
     department:  row.department || "",
@@ -1546,6 +1565,7 @@ async function restorePlayer(socket, row) {
     cosmetics: state.cosmetics,
     equipped:  state.equipped || "",
     pet:       state.pet || "",
+    petAcc:    state.petAcc || "",
     items:     state.items || {},
     x:         state.x,
     y:         state.y,
@@ -3229,14 +3249,14 @@ io.on("connection", (socket) => {
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
-          coins: 50, cosmetics: [], equipped: "", pet: "", items: {}, isAnnouncer: false,
+          coins: 50, cosmetics: [], equipped: "", pet: "", petAcc: "", items: {}, isAnnouncer: false,
           department: reg.department || "", wins: {}, hobby: "", createdAt: Date.now(),
         };
         players[targetId] = state;
         io.to(targetId).emit("approved", {
           name: state.name, character: state.character,
           hairIdx: state.hairIdx, skinIdx: state.skinIdx, shirtIdx: state.shirtIdx, pantsIdx: state.pantsIdx,
-          coins: state.coins, cosmetics: state.cosmetics, equipped: state.equipped, pet: state.pet, items: state.items,
+          coins: state.coins, cosmetics: state.cosmetics, equipped: state.equipped, pet: state.pet, petAcc: state.petAcc, items: state.items,
         });
         io.to(targetId).emit("currentPlayers", players);
         io.to(targetId).emit("announcerStatus", { canPost: false });
@@ -4358,8 +4378,8 @@ io.on("connection", (socket) => {
       p.cosmetics.push(item);
       p.pet = item;   // buying auto-adopts
       socket.emit("coinUpdate", { coins: p.coins });
-      socket.emit("petSuccess", { item, pet: p.pet });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet });
+      socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
       console.log(`${p.name} adopted ${item} (session-only)`);
       return;
     }
@@ -4384,8 +4404,8 @@ io.on("connection", (socket) => {
       p.cosmetics = rows[0].cosmetics || [];
       p.pet = rows[0].equipped_pet || "";
       socket.emit("coinUpdate", { coins: p.coins });
-      socket.emit("petSuccess", { item, pet: p.pet });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet });
+      socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
       console.log(`${p.name} adopted ${item}`);
     } catch (err) { console.error("buyPet failed:", err); }
   });
@@ -4406,8 +4426,8 @@ io.on("connection", (socket) => {
     if (!p.email) {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = item;
-      socket.emit("petUpdate", { pet: p.pet });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet });
+      socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
       return;
     }
 
@@ -4421,9 +4441,98 @@ io.on("connection", (socket) => {
       );
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = rows[0].equipped_pet || "";
-      socket.emit("petUpdate", { pet: p.pet });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet });
+      socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
     } catch (err) { console.error("equipPet failed:", err); }
+  });
+
+  // ── Pet accessories: buy one (auto-puts it on) ───────────────────────────
+  // Mirrors buyPet exactly: same throttle, same mid-match/mid-round blocks
+  // (coins move), and the same one-statement atomicity — the coins guard, the
+  // "not already owned" guard, the ownership append (shared cosmetics array)
+  // and the auto-equip into equipped_pet_acc all commit together.
+  socket.on("buyPetAcc", async (payload) => {
+    const { item } = payload || {};
+    const p = players[socket.id], cost = PET_ACCESSORIES[item];
+    if (!p || !cost) return;
+    if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
+    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
+
+    // Session-only players (no email): memory-only purchase.
+    if (!p.email) {
+      if (p.cosmetics.includes(item)) { socket.emit("shopError", "Already owned!"); return; }
+      if (p.coins < cost) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins -= cost;
+      p.cosmetics.push(item);
+      p.petAcc = item;   // buying auto-equips
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      console.log(`${p.name} bought ${item} (session-only)`);
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins - $2,
+                cosmetics = array_append(cosmetics, $3),
+                equipped_pet_acc = $3,
+                updated_at = now()
+          WHERE email = $1 AND coins >= $2 AND NOT ($3 = ANY(cosmetics))
+          RETURNING coins, cosmetics, equipped_pet_acc`,
+        [p.email, cost, item],
+      );
+      if (rows.length === 0) {
+        if (p.cosmetics.includes(item)) socket.emit("shopError", "Already owned!");
+        else socket.emit("shopError", "Not enough coins!");
+        return;
+      }
+      p.coins = rows[0].coins;
+      p.cosmetics = rows[0].cosmetics || [];
+      p.petAcc = rows[0].equipped_pet_acc || "";
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      console.log(`${p.name} bought ${item}`);
+    } catch (err) { console.error("buyPetAcc failed:", err); }
+  });
+
+  // ── Pet accessories: put on / take off ('' = bare pet) ───────────────────
+  // Free (no coin movement), so like equipPet it is NOT blocked mid-match.
+  // Ownership is enforced inside the UPDATE's WHERE clause, and only
+  // PET_ACCESSORIES ids pass — pet/wearable ids can't land in this slot.
+  socket.on("equipPetAcc", async (payload) => {
+    const raw = (payload || {}).item;
+    const item = typeof raw === "string" ? raw : null;
+    const p = players[socket.id];
+    if (!p || item === null) return;
+    if (item !== "" && !PET_ACCESSORIES[item]) return;   // unknown accessory id
+    if (!takeToken(buyBucket)) return;                   // shares the shop's spam throttle
+    if ((p.petAcc || "") === item) return;               // no-op
+
+    if (!p.email) {
+      if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
+      p.petAcc = item;
+      socket.emit("petAccUpdate", { petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET equipped_pet_acc = $2, updated_at = now()
+          WHERE email = $1 AND ($2 = '' OR $2 = ANY(cosmetics))
+          RETURNING equipped_pet_acc`,
+        [p.email, item],
+      );
+      if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
+      p.petAcc = rows[0].equipped_pet_acc || "";
+      socket.emit("petAccUpdate", { petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+    } catch (err) { console.error("equipPetAcc failed:", err); }
   });
 
   // ── Wardrobe: pay to change shirt/trouser colours ────────────────────────
@@ -5023,6 +5132,9 @@ try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS wins jsonb NOT NULL DEFAULT '{}'::jsonb`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS hobby text NOT NULL DEFAULT ''`);
+  // Pet accessories (July 2026): the worn accessory slot ('' = bare pet).
+  // Idempotent self-heal so prod gets the column on first boot after deploy.
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_pet_acc text NOT NULL DEFAULT ''`);
   // New-registrant spawn moved to the west-entrance lawn (GRASS_SPAWN, July
   // 2026). The registration INSERT relies on these column defaults, and
   // drizzle push only runs against dev — so prod gets the new defaults here
