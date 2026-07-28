@@ -2756,11 +2756,21 @@
       pet_dog:    { dx: 10, dy: -32 },
       pet_bunny:  { dx: 3,  dy: -36 },
       pet_turtle: { dx: 11, dy: -22 },
-      pet_dragon: { dx: 6,  dy: -38 },
+      pet_dragon: { dx: 6,  dy: -30 },
     };
-    // Per-accessory nudge off the species head anchor: hats ride higher,
-    // collar/scarf/bell sit down at the neck, shades on the eye line.
-    const PET_ACC_DY = { petacc_bow: -2, petacc_bell: 12, petacc_scarf: 10, petacc_shades: 4, petacc_tophat: -8, petacc_crown: -8 };
+    // Per-accessory FIT off the species head anchor — tuned against in-game
+    // screenshots (July 2026: a bell at raw head-anchor floated in front of
+    // the cat's face). mx scales dx (collars tuck IN toward the neck, not out
+    // at the nose), my scales dy down the body (neck ≈ 55% of head height),
+    // dy is a final pixel nudge (hats perch above the crown).
+    const PET_ACC_FIT = {
+      petacc_bow:    { mx: 0.6, my: 0.8, dy: 0 },    // on the head, between the ears
+      petacc_bell:   { mx: 0.4, my: 0.55, dy: 0 },   // hangs at the neck
+      petacc_scarf:  { mx: 0.4, my: 0.55, dy: 2 },   // wraps the neck
+      petacc_shades: { mx: 1.1, my: 0.85, dy: 0 },   // on the eye line, toward the face
+      petacc_tophat: { mx: 0.8, my: 1.0,  dy: 2 },   // sits ON the crown (emoji box has ~3px internal padding)
+      petacc_crown:  { mx: 0.8, my: 1.0,  dy: 2 },
+    };
     let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
 
     // Department allowlist — MUST stay identical (same values, same order) to
@@ -8164,8 +8174,10 @@
         if (accEmoji) {
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
             .setOrigin(0.5, 1).setDepth(3);
-          obj._accAnchor = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
-          obj._accDy = PET_ACC_DY[acc] || 0;
+          const an = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
+          const fit = PET_ACC_FIT[acc] || { mx: 1, my: 1, dy: 0 };
+          obj._accOffX = an.dx * fit.mx;                 // mirrored by flip in _placePetAcc
+          obj._accOffY = an.dy * fit.my + fit.dy;
           this._placePetAcc(obj);
         }
         return obj;
@@ -8177,8 +8189,7 @@
       _placePetAcc(petObj) {
         const a = petObj._acc;
         if (!a) return;
-        const an = petObj._accAnchor;
-        a.setPosition(petObj.x + (petObj.flipX ? -an.dx : an.dx), petObj.y + an.dy + petObj._accDy);
+        a.setPosition(petObj.x + (petObj.flipX ? -petObj._accOffX : petObj._accOffX), petObj.y + petObj._accOffY);
       }
 
       // A pet and its accessory overlay live and die together.

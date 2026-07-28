@@ -103,7 +103,7 @@ async function cleanup() {
     console.log("  state:", JSON.stringify(st));
     ok(st.texKey === "pet_dragon_obsidian", `local pet uses the variant texture (${st.texKey})`);
     ok(st.hasAcc && st.accText === "👑", "crown overlay present on the variant");
-    ok(st.dxAbs !== null && st.dxAbs <= 12 && st.dyUp >= 30 && st.dyUp <= 60,
+    ok(st.dxAbs !== null && st.dxAbs <= 12 && st.dyUp >= 20 && st.dyUp <= 45,
        `accessory inherits the dragon species anchor (dx=${st.dxAbs}, dyUp=${st.dyUp})`);
     ok(pageErrors.length === 0, `no client errors in-office ${pageErrors.length ? "(" + pageErrors.join(" ; ") + ")" : ""}`);
   } catch (err) {
