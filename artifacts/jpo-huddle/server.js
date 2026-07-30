@@ -390,6 +390,97 @@ function clearTrade(t, notifyMsg) {
   }
 }
 
+// ── Bid stores / office market (July 2026) ──────────────────────────────────
+// Ragnarok-style persistent player stores: list a pet/wearable/accessory at a
+// minimum bid, collect bids while you're online OR offline, accept the one
+// you like. Money safety rules:
+//   • Bids are ESCROWED — the coins leave the bidder's balance the moment the
+//     bid lands (one guarded UPDATE), so a winning bid can never bounce.
+//     Raising your bid refunds the old escrow and takes the new one in the
+//     same transaction; withdrawing/losing/unlisting refunds it.
+//   • Accepting settles in ONE transaction: item leaves the seller (un-equips
+//     if worn), joins the winner (who must not already own it), the escrow
+//     credits the seller, every other bid refunds, listing dies. Any guard
+//     failing rolls the whole thing back.
+//   • Offline parties get their outcome queued in jpo_store_msgs and toasted
+//     on next login (the DB is the store; sockets are just the storefront).
+const STORE_BID_MIN = 1, STORE_BID_MAX = 1_000_000;
+// Strict integer parse for market payloads: decimals, huge values, and
+// non-numeric junk become NaN (rejected) instead of silently rounding.
+function storeInt(v) {
+  const n = Number(v);
+  return Number.isSafeInteger(n) ? n : NaN;
+}
+// Human label for a catalog id in server-side toasts (the pretty names live
+// in the client catalogs; the server only has price maps).
+function itemLabel(id) {
+  return String(id).replace(/^(petacc_|pet_)/, "").replace(/_/g, " ");
+}
+
+function socketIdByEmail(email) {
+  // Grace-window trap: a player who just closed the tab lingers in `players`
+  // for ~10s (reconnect grace). Only a socket that is actually CONNECTED can
+  // receive a toast — anyone else must get their outcome queued as mail, or
+  // it's silently lost to a dead socket.
+  for (const [id, p] of Object.entries(players))
+    if (p.email === email && io.sockets.sockets.has(id)) return id;
+  return null;
+}
+async function queueStoreMsg(email, message) {
+  try {
+    await pool.query(`INSERT INTO jpo_store_msgs (email, message) VALUES ($1, $2)`, [email, message]);
+  } catch (err) { console.error("queueStoreMsg failed:", err); }
+}
+// Toast an outcome to a live socket, or park it for their next login.
+async function storeNotify(email, message) {
+  const id = socketIdByEmail(email);
+  if (id) io.to(id).emit("storeOk", { message });
+  else await queueStoreMsg(email, message);
+}
+// Keep a live player's cached balance honest after an escrow/refund/credit
+// touched their row (wager caps and shop affordability read the cache).
+async function syncCoins(email) {
+  const id = socketIdByEmail(email);
+  if (!id) return;
+  try {
+    const { rows } = await pool.query(`SELECT coins FROM jpo_players WHERE email = $1`, [email]);
+    if (rows[0] && players[id]) {
+      players[id].coins = rows[0].coins;
+      io.to(id).emit("coinUpdate", { coins: rows[0].coins });
+    }
+  } catch (err) { console.error("syncCoins failed:", err); }
+}
+
+// Full market snapshot for one viewer. Own listings include the whole bid
+// list (with bidder names); everyone else's show min/top/count + your bid.
+async function marketSnapshot(myEmail) {
+  const { rows: listings } = await pool.query(
+    `SELECT l.id, l.seller_email, l.item_id, l.min_bid, p.name AS seller_name
+       FROM jpo_store_listings l JOIN jpo_players p ON p.email = l.seller_email
+      ORDER BY l.id DESC`);
+  const { rows: bids } = await pool.query(
+    `SELECT b.id, b.listing_id, b.bidder_email, b.amount, p.name AS bidder_name
+       FROM jpo_store_bids b JOIN jpo_players p ON p.email = b.bidder_email
+      ORDER BY b.amount DESC, b.id ASC`);
+  const byListing = new Map();
+  for (const b of bids) {
+    if (!byListing.has(b.listing_id)) byListing.set(b.listing_id, []);
+    byListing.get(b.listing_id).push(b);
+  }
+  return listings.map((l) => {
+    const lb = byListing.get(l.id) || [];
+    const mine = l.seller_email === myEmail;
+    const my = lb.find((b) => b.bidder_email === myEmail);
+    return {
+      id: l.id, item: l.item_id, minBid: l.min_bid,
+      sellerName: l.seller_name, mine,
+      topBid: lb.length ? lb[0].amount : 0, bidCount: lb.length,
+      myBid: my ? my.amount : 0,
+      bids: mine ? lb.map((b) => ({ bidId: b.id, name: b.bidder_name, amount: b.amount })) : undefined,
+    };
+  });
+}
+
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or
 // both in a single change). The server is authoritative — the client's price
 // label is display-only. Indexes are validated against CLOTH_MAX.
@@ -1667,6 +1758,34 @@ async function restorePlayer(socket, row) {
         socket.emit("coachStatus", { mission: missionClientView(row.mission, row.done, row.rerolled) });
       }
     }).catch((err) => console.error("coach status load failed:", err));
+  }
+
+  // Bid-store mail: deliver queued outcomes (won/refunded while offline) and
+  // nudge sellers whose stalls collected bids overnight. Fire-and-forget —
+  // login must never block on market bookkeeping.
+  if (state.email) {
+    (async () => {
+      const { rows: msgs } = await pool.query(
+        `DELETE FROM jpo_store_msgs WHERE email = $1 RETURNING message`, [state.email]);
+      const { rows: cnt } = await pool.query(
+        `SELECT count(*)::int AS n FROM jpo_store_bids b
+           JOIN jpo_store_listings l ON l.id = b.listing_id
+          WHERE l.seller_email = $1`, [state.email]);
+      const messages = msgs.map((m) => m.message);
+      if (cnt[0]?.n > 0) messages.push(`🏪 Your store has ${cnt[0].n} bid${cnt[0].n === 1 ? "" : "s"} waiting — check the Market tab!`);
+      if (messages.length && players[socket.id] === state) socket.emit("storeToasts", { messages });
+      // A queued "you won X" means the DB row gained an item while this
+      // client was away — refresh its collection cache so the shop/market
+      // tabs reflect it without a re-login.
+      if (msgs.length) {
+        const { rows } = await pool.query(`SELECT coins, cosmetics FROM jpo_players WHERE email = $1`, [state.email]);
+        if (rows[0] && players[socket.id] === state) {
+          state.coins = rows[0].coins; state.cosmetics = rows[0].cosmetics || [];
+          socket.emit("coinUpdate", { coins: state.coins });
+          socket.emit("collectionUpdate", { cosmetics: state.cosmetics });
+        }
+      }
+    })().catch((err) => console.error("store mail failed:", err));
   }
 
   // Issue a resume token so this browser can auto-rejoin later (email-backed only).
@@ -4737,6 +4856,17 @@ io.on("connection", (socket) => {
     const c = Math.round(Number(coins ?? 0));
     if (!Number.isInteger(c) || c < 0) { fail("Coin sweetener must be 0 or more."); return; }
     if (c > (p.coins ?? 0)) { fail("Not enough coins for that sweetener."); return; }
+    // A pet that's up for bids in someone's store is spoken for — trading it
+    // away would strand every escrowed bid on the listing (accept-time guards
+    // in BOTH settle transactions back this check up).
+    try {
+      const { rows: listed } = await pool.query(
+        `SELECT seller_email, item_id FROM jpo_store_listings
+          WHERE (seller_email = $1 AND item_id = $2) OR (seller_email = $3 AND item_id = $4)`,
+        [p.email, offerPet, target.email, askPet]);
+      if (listed.some((l) => l.seller_email === p.email)) { fail("That pet is listed in your store — unlist it first."); return; }
+      if (listed.some((l) => l.seller_email === target.email)) { fail(`That pet is up for bids in ${target.name}'s store.`); return; }
+    } catch (err) { console.error("trade listing check failed:", err); fail("Trade hiccup — try again."); return; }
 
     const t = {
       id: ++tradeSeq, state: "pending",
@@ -4783,6 +4913,7 @@ io.on("connection", (socket) => {
                 equipped_pet = $3,
                 updated_at = now()
           WHERE email = $1 AND $2 = ANY(cosmetics) AND NOT ($3 = ANY(cosmetics)) AND coins >= $4
+            AND NOT EXISTS (SELECT 1 FROM jpo_store_listings sl WHERE sl.seller_email = $1 AND sl.item_id = $2)
           RETURNING coins, cosmetics, equipped_pet`,
         [from.email, t.offerPet, t.askPet, t.coins],
       );
@@ -4794,6 +4925,7 @@ io.on("connection", (socket) => {
                 equipped_pet = $3,
                 updated_at = now()
           WHERE email = $1 AND $2 = ANY(cosmetics) AND NOT ($3 = ANY(cosmetics))
+            AND NOT EXISTS (SELECT 1 FROM jpo_store_listings sl WHERE sl.seller_email = $1 AND sl.item_id = $2)
           RETURNING coins, cosmetics, equipped_pet`,
         [to.email, t.askPet, t.offerPet, t.coins],
       );
@@ -4834,6 +4966,281 @@ io.on("connection", (socket) => {
     clearTrade(t, socket.id === t.toId
       ? `${who?.name || "They"} declined the trade.`
       : `${who?.name || "They"} withdrew the trade.`);
+  });
+
+  // ── Bid stores / office market ───────────────────────────────────────────
+  // All handlers are email-backed only (stores and escrow live in the DB).
+  // After any mutation: push a fresh snapshot to the actor and ping everyone
+  // else with marketDirty (open market panels re-request their own snapshot).
+  const storeFail = (message) => socket.emit("storeError", { message });
+  async function pushMarket() {
+    const p = players[socket.id];
+    if (!p?.email) return;
+    try { socket.emit("marketState", { listings: await marketSnapshot(p.email) }); }
+    catch (err) { console.error("marketSnapshot failed:", err); }
+  }
+  const marketPing = () => socket.broadcast.emit("marketDirty");
+
+  socket.on("marketOpen", async (payload) => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!p.email) { storeFail("Sign in with your email to use the market."); return; }
+    if (!takeToken(profileBucket)) return;
+    // Clicked a coworker's avatar → tell the client whose stall to focus.
+    const targetId = payload?.targetId;
+    const filterName = targetId && players[targetId] ? players[targetId].name : null;
+    try {
+      socket.emit("marketState", { listings: await marketSnapshot(p.email), filterName });
+    } catch (err) { console.error("marketOpen failed:", err); storeFail("The market is having a moment — try again."); }
+  });
+
+  // Put one of your items up for bids.
+  socket.on("storeList", async (payload) => {
+    const { item, minBid } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(buyBucket)) return;
+    if (!p.email) { storeFail("Sign in with your email to open a store."); return; }
+    const cat = catalogOf(item);
+    if (!cat) { storeFail("That item can't be listed."); return; }
+    if (!(p.cosmetics || []).includes(item)) { storeFail("You don't own that."); return; }
+    const min = storeInt(minBid);
+    if (!Number.isFinite(min) || min < STORE_BID_MIN || min > STORE_BID_MAX) {
+      storeFail(`Minimum bid must be ${STORE_BID_MIN}–${STORE_BID_MAX.toLocaleString()} coins.`); return;
+    }
+    try {
+      // UNIQUE(seller_email, item_id) turns a double-list into a friendly error.
+      await pool.query(
+        `INSERT INTO jpo_store_listings (seller_email, item_id, min_bid) VALUES ($1, $2, $3)`,
+        [p.email, item, min]);
+      socket.emit("storeOk", { message: `${itemLabel(item)} is up for bids (min ${min.toLocaleString()}).` });
+      console.log(`Market: ${p.name} listed ${item} (min ${min})`);
+      await pushMarket(); marketPing();
+    } catch (err) {
+      if (String(err.code) === "23505") storeFail("You already have that item listed.");
+      else { console.error("storeList failed:", err); storeFail("Couldn't list that — try again."); }
+    }
+  });
+
+  // Close one of your listings: every escrowed bid refunds.
+  socket.on("storeUnlist", async (payload) => {
+    const listingId = storeInt(payload?.listingId);
+    const p = players[socket.id];
+    if (!p?.email || !Number.isFinite(listingId)) return;
+    if (!takeToken(buyBucket)) return;
+    const client = await pool.connect();
+    let refunded = [];
+    try {
+      await client.query("BEGIN");
+      const { rows: lrows } = await client.query(
+        `SELECT id, item_id FROM jpo_store_listings WHERE id = $1 AND seller_email = $2 FOR UPDATE`,
+        [listingId, p.email]);
+      if (!lrows.length) { await client.query("ROLLBACK"); storeFail("That listing is already gone."); return; }
+      const { rows: brows } = await client.query(
+        `SELECT bidder_email, amount FROM jpo_store_bids WHERE listing_id = $1 FOR UPDATE`, [listingId]);
+      for (const b of brows)
+        await client.query(`UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`, [b.amount, b.bidder_email]);
+      await client.query(`DELETE FROM jpo_store_listings WHERE id = $1`, [listingId]);   // bids cascade
+      await client.query("COMMIT");
+      refunded = brows;
+      const label = itemLabel(lrows[0].item_id);
+      socket.emit("storeOk", { message: `${label} pulled from your store.` });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("storeUnlist failed:", err); storeFail("Couldn't close that listing — try again.");
+      return;
+    } finally { client.release(); }
+    for (const b of refunded) {
+      await storeNotify(b.bidder_email, `Bid refunded: ${b.amount.toLocaleString()} coins back (listing closed).`);
+      await syncCoins(b.bidder_email);
+    }
+    await pushMarket(); marketPing();
+  });
+
+  // Place or raise a bid. Coins are escrowed NOW; raising swaps the escrow.
+  socket.on("storeBid", async (payload) => {
+    const listingId = storeInt(payload?.listingId);
+    const amt = storeInt(payload?.amount);
+    const p = players[socket.id];
+    if (!p || !Number.isFinite(listingId)) return;
+    if (!takeToken(buyBucket)) return;
+    if (!p.email) { storeFail("Sign in with your email to bid."); return; }
+    if (rpsBySocket.has(socket.id)) { storeFail("Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { storeFail("The lights are out — no bidding until the round ends!"); return; }
+    if (!Number.isFinite(amt) || amt < STORE_BID_MIN || amt > STORE_BID_MAX) { storeFail("That's not a valid bid."); return; }
+    const client = await pool.connect();
+    let outcome = null;
+    try {
+      await client.query("BEGIN");
+      const { rows: lrows } = await client.query(
+        `SELECT id, seller_email, item_id, min_bid FROM jpo_store_listings WHERE id = $1 FOR UPDATE`, [listingId]);
+      if (!lrows.length) { await client.query("ROLLBACK"); storeFail("That listing just closed."); return; }
+      const l = lrows[0];
+      if (l.seller_email === p.email) { await client.query("ROLLBACK"); storeFail("That's your own store!"); return; }
+      if (amt < l.min_bid) { await client.query("ROLLBACK"); storeFail(`Bids start at ${l.min_bid.toLocaleString()} coins.`); return; }
+      // Winning would hand you the item — no point escrowing if you own it.
+      const { rows: own } = await client.query(
+        `SELECT 1 FROM jpo_players WHERE email = $1 AND $2 = ANY(cosmetics)`, [p.email, l.item_id]);
+      if (own.length) { await client.query("ROLLBACK"); storeFail("You already own that!"); return; }
+      const { rows: old } = await client.query(
+        `SELECT id, amount FROM jpo_store_bids WHERE listing_id = $1 AND bidder_email = $2 FOR UPDATE`,
+        [listingId, p.email]);
+      const oldAmt = old.length ? old[0].amount : 0;
+      // Escrow swap in one guarded update: refund the old bid, take the new.
+      const { rows: paid } = await client.query(
+        `UPDATE jpo_players SET coins = coins + $1 - $2 WHERE email = $3 AND coins + $1 >= $2 RETURNING coins`,
+        [oldAmt, amt, p.email]);
+      if (!paid.length) { await client.query("ROLLBACK"); storeFail("Not enough coins for that bid."); return; }
+      if (old.length) await client.query(`UPDATE jpo_store_bids SET amount = $1, created_at = now() WHERE id = $2`, [amt, old[0].id]);
+      else await client.query(`INSERT INTO jpo_store_bids (listing_id, bidder_email, amount) VALUES ($1, $2, $3)`, [listingId, p.email, amt]);
+      await client.query("COMMIT");
+      outcome = { l, coins: paid[0].coins, raised: !!old.length };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("storeBid failed:", err); storeFail("Bid didn't go through — try again.");
+      return;
+    } finally { client.release(); }
+    if (p === players[socket.id]) { p.coins = outcome.coins; socket.emit("coinUpdate", { coins: outcome.coins }); }
+    const label = itemLabel(outcome.l.item_id);
+    socket.emit("storeOk", { message: `${outcome.raised ? "Bid raised" : "Bid placed"}: ${amt.toLocaleString()} coins on ${label}. Coins held until it settles.` });
+    const sellerSock = socketIdByEmail(outcome.l.seller_email);
+    if (sellerSock) io.to(sellerSock).emit("storeOk", { message: `${p.name} bid ${amt.toLocaleString()} coins on your ${label}!` });
+    console.log(`Market: ${p.name} bid ${amt} on listing ${listingId}`);
+    await pushMarket(); marketPing();
+  });
+
+  // Take your bid (and its escrow) back.
+  socket.on("storeWithdraw", async (payload) => {
+    const listingId = storeInt(payload?.listingId);
+    const p = players[socket.id];
+    if (!p?.email || !Number.isFinite(listingId)) return;
+    if (!takeToken(buyBucket)) return;
+    const client = await pool.connect();
+    let coins = null;
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `DELETE FROM jpo_store_bids WHERE listing_id = $1 AND bidder_email = $2 RETURNING amount`,
+        [listingId, p.email]);
+      if (!rows.length) { await client.query("ROLLBACK"); storeFail("No bid to withdraw."); return; }
+      const { rows: paid } = await client.query(
+        `UPDATE jpo_players SET coins = coins + $1 WHERE email = $2 RETURNING coins`, [rows[0].amount, p.email]);
+      await client.query("COMMIT");
+      coins = paid[0].coins;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("storeWithdraw failed:", err); storeFail("Couldn't withdraw — try again.");
+      return;
+    } finally { client.release(); }
+    if (p === players[socket.id]) { p.coins = coins; socket.emit("coinUpdate", { coins }); }
+    socket.emit("storeOk", { message: "Bid withdrawn — coins are back in your pocket." });
+    await pushMarket(); marketPing();
+  });
+
+  // Seller picks the winning bid. One transaction settles everything.
+  socket.on("storeAccept", async (payload) => {
+    const listingId = storeInt(payload?.listingId);
+    const bidId = storeInt(payload?.bidId);
+    const p = players[socket.id];
+    if (!p?.email || !Number.isFinite(listingId) || !Number.isFinite(bidId)) return;
+    if (!takeToken(buyBucket)) return;
+    if (rpsBySocket.has(socket.id)) { storeFail("Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { storeFail("The lights are out — no deals until the round ends!"); return; }
+    const client = await pool.connect();
+    let done = null;
+    try {
+      await client.query("BEGIN");
+      const { rows: lrows } = await client.query(
+        `SELECT id, item_id FROM jpo_store_listings WHERE id = $1 AND seller_email = $2 FOR UPDATE`,
+        [listingId, p.email]);
+      if (!lrows.length) { await client.query("ROLLBACK"); storeFail("That listing is already gone."); return; }
+      const item = lrows[0].item_id;
+      const { rows: brows } = await client.query(
+        `SELECT id, bidder_email, amount FROM jpo_store_bids WHERE listing_id = $1 FOR UPDATE`, [listingId]);
+      const win = brows.find((b) => b.id === bidId);
+      if (!win) { await client.query("ROLLBACK"); storeFail("That bid was withdrawn."); return; }
+      // Seller + winner updates run in EMAIL ORDER (same deterministic
+      // player-row lock order everywhere → no deadlocks against a concurrent
+      // trade or another sale touching the same rows).
+      const sellSql = () => client.query(
+        `UPDATE jpo_players SET
+           cosmetics = array_remove(cosmetics, $1),
+           coins = coins + $2,
+           equipped_cosmetic = CASE WHEN equipped_cosmetic = $1 THEN '' ELSE equipped_cosmetic END,
+           equipped_pet      = CASE WHEN equipped_pet      = $1 THEN '' ELSE equipped_pet      END,
+           equipped_pet_acc  = CASE WHEN equipped_pet_acc  = $1 THEN '' ELSE equipped_pet_acc  END
+         WHERE email = $3 AND $1 = ANY(cosmetics)
+         RETURNING coins, cosmetics, equipped_cosmetic, equipped_pet, equipped_pet_acc`,
+        [item, win.amount, p.email]);
+      const winSql = () => client.query(
+        `UPDATE jpo_players SET cosmetics = array_append(cosmetics, $1)
+         WHERE email = $2 AND NOT ($1 = ANY(cosmetics)) RETURNING coins`,
+        [item, win.bidder_email]);
+      const sellerFirst = p.email <= win.bidder_email;
+      const rA = await (sellerFirst ? sellSql() : winSql());
+      const rB = await (sellerFirst ? winSql() : sellSql());
+      const sold = sellerFirst ? rA.rows : rB.rows;
+      const won  = sellerFirst ? rB.rows : rA.rows;
+      if (!sold.length) {
+        // The item left the seller's hands since listing (e.g. a trade the
+        // guards missed, or an older build). The listing is DEAD — but every
+        // escrowed coin must go home IN THIS SAME TRANSACTION, or the bid
+        // rows cascade away and the escrow is destroyed with them.
+        for (const b of [...brows].sort((x, y) => x.bidder_email < y.bidder_email ? -1 : 1))
+          await client.query(`UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`, [b.amount, b.bidder_email]);
+        await client.query(`DELETE FROM jpo_store_listings WHERE id = $1`, [listingId]);   // bids cascade AFTER refunds
+        await client.query("COMMIT");
+        storeFail("You no longer own that item — listing closed and every bid refunded.");
+        for (const b of brows) {
+          await storeNotify(b.bidder_email, `Bid refunded: ${b.amount.toLocaleString()} coins back (the ${itemLabel(item)} listing was voided).`);
+          await syncCoins(b.bidder_email);
+        }
+        await pushMarket(); marketPing();
+        return;
+      }
+      if (!won.length) { await client.query("ROLLBACK"); storeFail("The winner already owns that now — pick another bid."); return; }
+      // Everyone else's escrow goes home (email order, same lock discipline).
+      const losers = brows.filter((b) => b.id !== bidId).sort((x, y) => x.bidder_email < y.bidder_email ? -1 : 1);
+      for (const b of losers)
+        await client.query(`UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`, [b.amount, b.bidder_email]);
+      await client.query(`DELETE FROM jpo_store_listings WHERE id = $1`, [listingId]);   // bids cascade
+      await client.query("COMMIT");
+      done = { item, win, losers, sellerRow: sold[0] };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("storeAccept failed:", err); storeFail("The sale fell through — nothing changed.");
+      return;
+    } finally { client.release(); }
+
+    const label = itemLabel(done.item);
+    // Seller memory + broadcasts (they're online — they just clicked Accept).
+    if (p === players[socket.id]) {
+      p.coins = done.sellerRow.coins;
+      p.cosmetics = done.sellerRow.cosmetics;
+      const hadPet = p.pet, hadCos = p.equipped, hadAcc = p.petAcc;
+      p.equipped = done.sellerRow.equipped_cosmetic || "";
+      p.pet = done.sellerRow.equipped_pet || "";
+      p.petAcc = done.sellerRow.equipped_pet_acc || "";
+      socket.emit("coinUpdate", { coins: p.coins });
+      if (hadCos !== p.equipped) io.emit("playerCosmeticUpdate", { id: socket.id, item: p.equipped });
+      if (hadPet !== p.pet || hadAcc !== p.petAcc) io.emit("playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc });
+    }
+    socket.emit("storeOk", { message: `Sold! ${label} went for ${done.win.amount.toLocaleString()} coins.` });
+    // Winner: live sync or queued note.
+    const winSock = socketIdByEmail(done.win.bidder_email);
+    if (winSock && players[winSock]) {
+      players[winSock].cosmetics = [...(players[winSock].cosmetics || []), done.item];
+      io.to(winSock).emit("storeOk", { message: `You won the ${label} for ${done.win.amount.toLocaleString()} coins — it's in your collection!` });
+      io.to(winSock).emit("collectionUpdate", { cosmetics: players[winSock].cosmetics });
+    } else {
+      await queueStoreMsg(done.win.bidder_email, `You won the ${label} for ${done.win.amount.toLocaleString()} coins — it's in your collection!`);
+    }
+    for (const b of done.losers) {
+      await storeNotify(b.bidder_email, `Outbid: the ${label} sold to someone else — your ${b.amount.toLocaleString()} coins are back.`);
+      await syncCoins(b.bidder_email);
+    }
+    console.log(`Market: ${p.name} sold ${done.item} for ${done.win.amount} to ${done.win.bidder_email}`);
+    await pushMarket(); marketPing();
   });
 
   // ── Wardrobe: pay to change shirt/trouser colours ────────────────────────
@@ -5482,6 +5889,35 @@ try {
   }
 } catch (err) {
   console.error("schema nudge (shop prices) failed:", err);
+}
+
+// Bid stores: listings + escrowed bids + queued outcome messages. Same
+// self-healing CREATE IF NOT EXISTS policy — prod builds these on first boot.
+try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_store_listings (
+    id serial PRIMARY KEY,
+    seller_email text NOT NULL,
+    item_id text NOT NULL,
+    min_bid integer NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (seller_email, item_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_store_bids (
+    id serial PRIMARY KEY,
+    listing_id integer NOT NULL REFERENCES jpo_store_listings(id) ON DELETE CASCADE,
+    bidder_email text NOT NULL,
+    amount integer NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (listing_id, bidder_email)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_store_msgs (
+    id serial PRIMARY KEY,
+    email text NOT NULL,
+    message text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+} catch (err) {
+  console.error("schema nudge (bid stores) failed:", err);
 }
 
 const port = process.env.PORT || 3000;

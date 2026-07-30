@@ -1546,6 +1546,7 @@
     <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
     <button id="rps-menu-gift" type="button">💰 Send coins</button>
     <button id="rps-menu-trade" type="button">🐾 Trade pets</button>
+    <button id="rps-menu-store" type="button">🏪 Their store</button>
   </div>
 
   <!-- ── Player profile card (non-blocking; values set via textContent only) ── -->
@@ -1814,6 +1815,7 @@
         <button class="shop-tab"     id="shop-tab-btn-items"    onclick="shopTab('items')">🎒 Items</button>
         <button class="shop-tab"     id="shop-tab-btn-pets"     onclick="shopTab('pets')">🐾 Pets</button>
         <button class="shop-tab"     id="shop-tab-btn-wardrobe" onclick="shopTab('wardrobe')">👕 Wardrobe</button>
+        <button class="shop-tab"     id="shop-tab-btn-market"   onclick="shopTab('market')">🏪 Market</button>
       </div>
       <!-- Cosmetic rows are generated from the COSMETICS catalog. -->
       <div id="shop-cosmetics"></div>
@@ -1821,6 +1823,9 @@
       <div id="shop-usables" style="display:none"></div>
       <!-- Pet rows are generated from the PETS catalog. -->
       <div id="shop-pets" style="display:none"></div>
+      <!-- ── Market: bid stores. Rendered from the server's marketState
+           snapshot — nothing here is hardcoded; textContent only. -->
+      <div id="shop-market" style="display:none"></div>
       <!-- ── Wardrobe: paid shirt/trouser colour changes ──
            Swatches are generated from CLOTH_COLORS; the 25-coin label is
            display-only (the server's WARDROBE_PRICE is authoritative). -->
@@ -3910,7 +3915,11 @@
     const SHOP_PAGE_SIZE = 6;
     let _shopTab  = 'wear';   // 'wear' | 'items' | 'pets' | 'wardrobe'
     let _shopPage = 0;
-    function shopTab(t)  { _shopTab = t; _shopPage = 0; _refreshShopUI(); }
+    function shopTab(t)  {
+      _shopTab = t; _shopPage = 0;
+      if (t === 'market') { _marketFilter = null; socket.emit('marketOpen', {}); }   // fresh snapshot, unfiltered
+      _refreshShopUI();
+    }
     function shopPage(d) { _shopPage += d; _refreshShopUI(); }
 
     function _shopRow(c, btn) {
@@ -3952,16 +3961,19 @@
     // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
-      for (const t of ['wear', 'items', 'pets', 'wardrobe'])
+      for (const t of ['wear', 'items', 'pets', 'wardrobe', 'market'])
         document.getElementById('shop-tab-btn-' + t).classList.toggle('sel', _shopTab === t);
       const cosBox  = document.getElementById('shop-cosmetics');
       const useBox  = document.getElementById('shop-usables');
       const petsBox = document.getElementById('shop-pets');
       const wardBox = document.getElementById('shop-wardrobe');
+      const mktBox  = document.getElementById('shop-market');
       cosBox.style.display  = _shopTab === 'wear'     ? '' : 'none';
       useBox.style.display  = _shopTab === 'items'    ? '' : 'none';
       petsBox.style.display = _shopTab === 'pets'     ? '' : 'none';
       wardBox.style.display = _shopTab === 'wardrobe' ? '' : 'none';
+      mktBox.style.display  = _shopTab === 'market'   ? '' : 'none';
+      if (_shopTab === 'market') _renderMarket();
 
       // Page window for the active (paged) tab; clamp so a shrinking catalog
       // or stale page index can never show an empty page.
@@ -5838,6 +5850,183 @@
       const id = _rpsMenuTargetId; _rpsHideMenu();
       if (id) openTrade(id);
     });
+    rpsEl('rps-menu-store').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openStoreOf(id);
+    });
+
+    // ── Bid stores / office market ─────────────────────────────────────
+    // Everything renders from the server's marketState snapshot (textContent
+    // only — bidder/seller names are user data). Coins are escrowed server-
+    // side the moment a bid lands; this panel is just the storefront.
+    let _marketData = [];        // last marketState.listings
+    let _marketFilter = null;    // seller name filter (click-avatar "Their store")
+    function _marketMeta(id) {
+      return COSMETICS.find(c => c.id === id) || PETS.find(c => c.id === id)
+          || PET_ACCESSORIES.find(c => c.id === id) || { id, name: id, emoji: '🎁' };
+    }
+    function _mkGuard(el) {   // keep typing out of Phaser
+      el.addEventListener('keydown', (e) => e.stopPropagation());
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    }
+    function openStoreOf(targetId) {
+      openShop();
+      _shopTab = 'market'; _shopPage = 0;
+      socket.emit('marketOpen', { targetId });   // reply carries filterName
+      _refreshShopUI();
+    }
+    socket.on('marketState', ({ listings, filterName } = {}) => {
+      _marketData = listings || [];
+      if (filterName !== undefined && filterName !== null) _marketFilter = filterName;
+      if (_shopTab === 'market' && document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+    });
+    // Someone else changed the market — refresh only if we're looking at it.
+    socket.on('marketDirty', () => {
+      if (_shopTab === 'market' && document.getElementById('shop-modal').classList.contains('open'))
+        socket.emit('marketOpen', {});
+    });
+    socket.on('storeOk',    ({ message } = {}) => { if (message) _rpsToast(`🏪 ${message}`); });
+    socket.on('storeError', ({ message } = {}) => { if (message) _rpsToast(`🏪 ${message}`); });
+    // Login mail: outcomes that happened while offline, staggered so none vanish.
+    socket.on('storeToasts', ({ messages } = {}) => {
+      (messages || []).forEach((m, i) => setTimeout(() => _rpsToast(`🏪 ${m}`), i * 3200));
+    });
+    // Won an auction while away (or mid-session): adopt the fresh collection.
+    socket.on('collectionUpdate', ({ cosmetics } = {}) => {
+      if (Array.isArray(cosmetics)) { _ownedItems = cosmetics; _refreshShopUI(); }
+    });
+
+    function _mkLine(txt, css) {
+      const d = document.createElement('div');
+      d.style.cssText = css || 'font-size:12px;opacity:.75;margin:8px 2px 2px;';
+      d.textContent = txt;
+      return d;
+    }
+    function _renderMarket() {
+      const box = document.getElementById('shop-market');
+      box.textContent = '';
+
+      if (_marketFilter !== null) {
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 2px 6px;';
+        bar.append(_mkLine(`🏪 ${_marketFilter}'s store`, 'font-weight:bold;'));
+        const all = document.createElement('button');
+        all.className = 'buy-btn'; all.textContent = 'Show all';
+        all.onclick = () => { _marketFilter = null; _renderMarket(); };
+        bar.append(all);
+        box.append(bar);
+      }
+
+      const mineListings  = _marketData.filter(l => l.mine);
+      const otherListings = _marketData.filter(l => !l.mine && (_marketFilter === null || l.sellerName === _marketFilter));
+
+      // ── Your store (hidden while peeking at someone else's stall) ──
+      if (_marketFilter === null) {
+        box.append(_mkLine('Your store — list something and let the bids roll in'));
+        const listedIds = new Set(mineListings.map(l => l.item));
+        const sellable = _ownedItems.filter(id =>
+          !listedIds.has(id) &&
+          (COSMETICS.some(c => c.id === id) || PETS.some(c => c.id === id) || PET_ACCESSORIES.some(c => c.id === id)));
+        const form = document.createElement('div');
+        form.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:2px 2px 6px;';
+        const sel = document.createElement('select');
+        sel.style.cssText = 'flex:1;min-width:130px;padding:5px;border-radius:6px;';
+        if (!sellable.length) {
+          const o = document.createElement('option');
+          o.textContent = 'Nothing left to list'; o.value = '';
+          sel.append(o); sel.disabled = true;
+        } else for (const id of sellable) {
+          const m = _marketMeta(id);
+          const o = document.createElement('option');
+          o.value = id; o.textContent = `${m.emoji} ${m.name}`;
+          sel.append(o);
+        }
+        const min = document.createElement('input');
+        min.type = 'number'; min.min = '1'; min.placeholder = 'Min bid';
+        min.style.cssText = 'width:80px;padding:5px;border-radius:6px;';
+        const btn = document.createElement('button');
+        btn.className = 'buy-btn'; btn.textContent = 'List it';
+        btn.disabled = !sellable.length;
+        btn.onclick = () => {
+          const amount = parseInt(min.value, 10);
+          if (!sel.value || !Number.isInteger(amount) || amount < 1) { _rpsToast('🏪 Pick an item and a minimum bid.'); return; }
+          socket.emit('storeList', { item: sel.value, minBid: amount });
+          min.value = '';
+        };
+        _mkGuard(sel); _mkGuard(min);
+        form.append(sel, min, btn);
+        box.append(form);
+
+        for (const l of mineListings) {
+          const m = _marketMeta(l.item);
+          const row = document.createElement('div');
+          row.style.cssText = 'border:1px solid #ddd;border-radius:8px;padding:6px 8px;margin:4px 0;';
+          const head = document.createElement('div');
+          head.style.cssText = 'display:flex;align-items:center;gap:8px;';
+          head.append(_mkLine(`${m.emoji} ${m.name} — min ${l.minBid.toLocaleString()}`, 'flex:1;font-weight:bold;font-size:13px;'));
+          const un = document.createElement('button');
+          un.className = 'buy-btn'; un.textContent = 'Unlist';
+          un.onclick = () => socket.emit('storeUnlist', { listingId: l.id });
+          head.append(un);
+          row.append(head);
+          if (!(l.bids || []).length) row.append(_mkLine('No bids yet — patience, merchant.', 'font-size:12px;opacity:.6;margin:4px 2px 0;'));
+          for (const b of (l.bids || [])) {
+            const br = document.createElement('div');
+            br.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0 0;';
+            br.append(_mkLine(`${b.name} — ${b.amount.toLocaleString()} coins`, 'flex:1;font-size:12px;'));
+            const acc = document.createElement('button');
+            acc.className = 'buy-btn wear'; acc.textContent = 'Accept 🤝';
+            acc.onclick = () => socket.emit('storeAccept', { listingId: l.id, bidId: b.bidId });
+            br.append(acc);
+            row.append(br);
+          }
+          box.append(row);
+        }
+      }
+
+      // ── Everyone else's stalls ──
+      box.append(_mkLine(_marketFilter === null ? 'Open stalls around the office' : 'Up for bids'));
+      if (!otherListings.length)
+        box.append(_mkLine(_marketFilter === null ? 'No stalls open right now — be the first!' : 'Their store is empty right now.', 'font-size:12px;opacity:.6;margin:4px 2px;'));
+      for (const l of otherListings) {
+        const m = _marketMeta(l.item);
+        const row = document.createElement('div');
+        row.style.cssText = 'border:1px solid #ddd;border-radius:8px;padding:6px 8px;margin:4px 0;';
+        const top = l.topBid ? ` · top bid ${l.topBid.toLocaleString()}` : ' · no bids yet';
+        const mineBit = l.myBid ? ` · yours: ${l.myBid.toLocaleString()} ⏳` : '';
+        row.append(_mkLine(`${m.emoji} ${m.name} — ${l.sellerName}`, 'font-weight:bold;font-size:13px;'));
+        row.append(_mkLine(`min ${l.minBid.toLocaleString()}${top}${mineBit}`, 'font-size:12px;opacity:.75;margin:2px 2px 4px;'));
+        if (_ownedItems.includes(l.item)) {
+          row.append(_mkLine('You already own this one.', 'font-size:12px;opacity:.6;'));
+        } else {
+          const bar = document.createElement('div');
+          bar.style.cssText = 'display:flex;gap:6px;align-items:center;';
+          const inp = document.createElement('input');
+          inp.type = 'number'; inp.min = String(l.minBid);
+          inp.placeholder = String(Math.max(l.minBid, l.topBid + 1));
+          inp.style.cssText = 'width:90px;padding:5px;border-radius:6px;';
+          const bid = document.createElement('button');
+          bid.className = 'buy-btn'; bid.textContent = l.myBid ? 'Raise' : 'Bid';
+          bid.onclick = () => {
+            const amount = parseInt(inp.value, 10);
+            if (!Number.isInteger(amount) || amount < l.minBid) { _rpsToast(`🏪 Bids start at ${l.minBid.toLocaleString()} coins.`); return; }
+            socket.emit('storeBid', { listingId: l.id, amount });
+          };
+          _mkGuard(inp);
+          bar.append(inp, bid);
+          if (l.myBid) {
+            const wd = document.createElement('button');
+            wd.className = 'buy-btn'; wd.textContent = 'Withdraw';
+            wd.onclick = () => socket.emit('storeWithdraw', { listingId: l.id });
+            bar.append(wd);
+          }
+          row.append(bar);
+        }
+        box.append(row);
+      }
+    }
 
     // ── Player profile card ────────────────────────────────────────────
     // Non-blocking (movement stays live, like the rps waiting/incoming cards —
