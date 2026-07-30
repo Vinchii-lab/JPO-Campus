@@ -332,6 +332,64 @@ const PET_ACCESSORIES = {
 // migrated by hand). Never reuse these ids.
 const RETIRED_PET_ACCS = { petacc_scarf: 3500, petacc_shades: 4500 };
 
+// ── Live price overrides (admin superpower, July 2026) ──────────────────────
+// The owner can change any SHOP/PETS/PET_ACCESSORIES price live from the F8
+// panel — no redeploy. Overrides persist in jpo_shop_prices (created at boot,
+// same self-healing policy as the other schema nudges) and are folded into
+// the in-memory catalogs on startup, so every buy handler keeps reading the
+// same maps it always did. DEFAULT_PRICES snapshots the shipped prices so the
+// panel can show "default" and setting an item back to it deletes the row.
+const DEFAULT_PRICES = { ...SHOP, ...PETS, ...PET_ACCESSORIES };
+const PRICE_MIN = 1, PRICE_MAX = 1_000_000;
+function catalogOf(item) {
+  if (Object.hasOwn(SHOP, item)) return SHOP;
+  if (Object.hasOwn(PETS, item)) return PETS;
+  if (Object.hasOwn(PET_ACCESSORIES, item)) return PET_ACCESSORIES;
+  return null;
+}
+function allPrices() { return { ...SHOP, ...PETS, ...PET_ACCESSORIES }; }
+
+// ── Coin gifting (July 2026) ─────────────────────────────────────────────────
+// Player→player coin sends. Per-sender daily cap keeps "send me coins"
+// pressure and funneling in check. The cap ledger is in-memory (resets on
+// restart) — it's a soft social guardrail, not a financial invariant; the
+// transfer itself reuses the rpsSettle atomic pattern so a partial move is
+// impossible.
+const GIFT_DAILY_CAP = 5000;
+const giftLedger = new Map();   // senderKey (email or socket id) → { day, sent }
+function giftRoomToday(key) {
+  const day = new Date().toISOString().slice(0, 10);
+  const e = giftLedger.get(key);
+  if (!e || e.day !== day) return GIFT_DAILY_CAP;
+  return Math.max(0, GIFT_DAILY_CAP - e.sent);
+}
+function giftRecord(key, amount) {
+  const day = new Date().toISOString().slice(0, 10);
+  const e = giftLedger.get(key);
+  if (!e || e.day !== day) giftLedger.set(key, { day, sent: amount });
+  else e.sent += amount;
+}
+
+// ── Pet trades (July 2026) ───────────────────────────────────────────────────
+// Direct offers only (no open marketplace): "my cat + 2000 coins for your
+// dragon". Both sides must be email-backed (a trade must persist), the
+// settle is ONE SQL transaction with ownership/coins guards re-checked
+// inside it, and each received pet auto-adopts — same feel as buying.
+const TRADE_ACCEPT_MS = 60_000;
+let tradeSeq = 0;
+const tradeBySocket = new Map();   // socketId → trade (both parties point at the same object)
+function clearTrade(t, notifyMsg) {
+  if (!t || t.state === "done") return;
+  t.state = "done";
+  clearTimeout(t.timer);
+  tradeBySocket.delete(t.fromId);
+  tradeBySocket.delete(t.toId);
+  if (notifyMsg) {
+    io.to(t.fromId).emit("tradeEnded", { tradeId: t.id, message: notifyMsg });
+    io.to(t.toId).emit("tradeEnded",   { tradeId: t.id, message: notifyMsg });
+  }
+}
+
 // Wardrobe: one flat price to change shirt and/or trouser colours (either or
 // both in a single change). The server is authoritative — the client's price
 // label is display-only. Indexes are validated against CLOTH_MAX.
@@ -2925,6 +2983,11 @@ io.on("connection", (socket) => {
   const staleNag = setTimeout(() => { nagStale(); staleNagRepeat = setInterval(nagStale, 60000); }, 5000);
   socket.once("disconnect", () => { clearTimeout(staleNag); if (staleNagRepeat) clearInterval(staleNagRepeat); });
 
+  // Live prices: send the full current price map on every connect so the
+  // shop labels are right even after an admin price change (drift only ever
+  // mislabels the UI — the server stays authoritative on every buy).
+  socket.emit("priceList", allPrices());
+
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).
   const chatBucket  = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
@@ -3237,6 +3300,41 @@ io.on("connection", (socket) => {
     socket.emit("adminAuthOk");
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
     socket.emit("playerList",  _playerList());
+  });
+
+  // ── Admin: live shop price control ───────────────────────────────────
+  // Persists to jpo_shop_prices, updates the in-memory catalog (every buy
+  // handler reads it), and broadcasts the new label to every open client.
+  // Setting an item back to its shipped default deletes the override row.
+  socket.on("adminSetPrice", async (payload) => {
+    if (!admins.has(socket.id)) return;
+    const { item, price } = payload || {};
+    if (typeof item !== "string") return;
+    const cat = catalogOf(item);
+    if (!cat) { socket.emit("adminPriceResult", { ok: false, message: "Unknown item." }); return; }
+    const p = Math.round(Number(price));
+    if (!Number.isInteger(p) || p < PRICE_MIN || p > PRICE_MAX) {
+      socket.emit("adminPriceResult", { ok: false, message: `Price must be ${PRICE_MIN}–${PRICE_MAX.toLocaleString()} coins.` });
+      return;
+    }
+    try {
+      if (p === DEFAULT_PRICES[item]) {
+        await pool.query(`DELETE FROM jpo_shop_prices WHERE item_id = $1`, [item]);
+      } else {
+        await pool.query(
+          `INSERT INTO jpo_shop_prices (item_id, price) VALUES ($1, $2)
+           ON CONFLICT (item_id) DO UPDATE SET price = $2`,
+          [item, p],
+        );
+      }
+      cat[item] = p;
+      io.emit("priceUpdate", { item, price: p });
+      socket.emit("adminPriceResult", { ok: true, message: `${item} is now ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (default)" : ""}.` });
+      console.log(`ADMIN price change: ${item} → ${p}`);
+    } catch (err) {
+      console.error("adminSetPrice failed:", err);
+      socket.emit("adminPriceResult", { ok: false, message: "Saving the price failed — try again." });
+    }
   });
 
   // Pull-based refresh: the open admin panel re-requests both lists every few
@@ -4553,6 +4651,191 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("equipPetAcc failed:", err); }
   });
 
+  // ── Coin gifting: send coins to another player ───────────────────────────
+  // Same money rules as the shop: buy throttle, blocked mid-match for the
+  // SENDER (spending would break the wager invariant; the receiver only
+  // gains, which is always safe), blocked in an After Dark round. The move
+  // itself reuses rpsSettle (receiver "wins" the amount from the sender), so
+  // a partial transfer is impossible in every email/session combination.
+  socket.on("sendCoins", async (payload) => {
+    const { targetId, amount } = payload || {};
+    const p = players[socket.id];
+    const target = typeof targetId === "string" ? players[targetId] : null;
+    const fail = (message) => socket.emit("giftResult", { ok: false, message });
+    if (!p) return;
+    if (!takeToken(buyBucket)) return;
+    if (!target || targetId === socket.id) { fail("They're not in the office right now."); return; }
+    // Block if EITHER side is in a challenge/match. The sender block protects
+    // the wager invariant (spending mid-match); the receiver block keeps the
+    // no-coin-movement-mid-match rule simple and absolute (a gift landing
+    // mid-settle is harmless — coins only ADD — but "nobody's balance moves
+    // during a match except the wager" is easier to reason about and test).
+    if (rpsBySocket.has(socket.id)) { fail("Finish your match first!"); return; }
+    if (rpsBySocket.has(targetId)) { fail(`${target.name} is mid-match — wait for it to finish.`); return; }
+    if (inActiveRound(socket.id)) { fail("The lights are out — no gifting until the round ends!"); return; }
+    const amt = Math.round(Number(amount));
+    if (!Number.isInteger(amt) || amt < 1) { fail("Enter an amount of at least 1 coin."); return; }
+    const senderKey = p.email || socket.id;
+    const room = giftRoomToday(senderKey);
+    if (amt > room) {
+      fail(room > 0
+        ? `Daily gift limit: you can still send ${room.toLocaleString()} coins today.`
+        : `You've hit today's ${GIFT_DAILY_CAP.toLocaleString()}-coin gift limit — try again tomorrow.`);
+      return;
+    }
+    if ((p.coins ?? 0) < amt) { fail("Not enough coins!"); return; }
+    try {
+      const moved = await rpsSettle(targetId, socket.id, amt);
+      if (!moved) { fail("Not enough coins!"); return; }
+      giftRecord(senderKey, moved);
+      socket.emit("coinUpdate", { coins: p.coins });
+      io.to(targetId).emit("coinUpdate", { coins: target.coins });
+      socket.emit("giftResult", { ok: true, message: `Sent ${moved.toLocaleString()} coins to ${target.name}! 💝` });
+      io.to(targetId).emit("giftReceived", { fromName: p.name, amount: moved });
+      console.log(`GIFT: ${p.name} → ${target.name} (${moved} coins)`);
+    } catch (err) { console.error("sendCoins failed:", err); fail("Sending failed — try again."); }
+  });
+
+  // ── Pet trades: direct offer → accept/decline ────────────────────────────
+  // "My cat + N coins for your dragon." Both sides must be email-backed (the
+  // swap has to persist); every ownership/coins guard is re-checked INSIDE
+  // one SQL transaction at accept time, so nothing the two players do in the
+  // 60s window (spend coins, buy the same pet, disconnect) can half-apply a
+  // trade. Received pets auto-adopt, same feel as buying one.
+  // Trade composer data: the pets each side owns RIGHT NOW (the client
+  // doesn't track other players' inventories). Display-only — every id is
+  // re-validated at offer time and again inside the accept transaction.
+  socket.on("tradePetsOf", (payload) => {
+    const { targetId } = payload || {};
+    const p = players[socket.id];
+    const target = typeof targetId === "string" ? players[targetId] : null;
+    if (!p || !target) return;
+    if (!takeToken(profileBucket)) return;
+    const petsOf = (pl) => (pl.cosmetics || []).filter((c) => Object.hasOwn(PETS, c));
+    socket.emit("tradePets", { targetId, targetName: target.name, mine: petsOf(p), theirs: petsOf(target) });
+  });
+
+  socket.on("tradeOffer", async (payload) => {
+    const { targetId, offerPet, askPet, coins } = payload || {};
+    const p = players[socket.id];
+    const target = typeof targetId === "string" ? players[targetId] : null;
+    const fail = (message) => socket.emit("tradeError", { message });
+    if (!p) return;
+    if (!takeToken(buyBucket)) return;
+    if (!target || targetId === socket.id) { fail("They're not in the office right now."); return; }
+    if (!p.email || !target.email) { fail("Trades need saved accounts on both sides."); return; }
+    if (rpsBySocket.has(socket.id) || rpsBySocket.has(targetId)) { fail("No trading mid-match!"); return; }
+    if (inActiveRound(socket.id) || inActiveRound(targetId)) { fail("The lights are out — no trading until the round ends!"); return; }
+    if (tradeBySocket.has(socket.id)) { fail("You already have a trade open."); return; }
+    if (tradeBySocket.has(targetId)) { fail(`${target.name} is already in a trade.`); return; }
+    if (typeof offerPet !== "string" || !PETS[offerPet]) { fail("Pick one of your pets to offer."); return; }
+    if (typeof askPet !== "string" || !PETS[askPet]) { fail("Pick one of their pets to ask for."); return; }
+    if (!p.cosmetics.includes(offerPet)) { fail("You don't own that pet."); return; }
+    if (!target.cosmetics.includes(askPet)) { fail("They don't own that pet."); return; }
+    if (p.cosmetics.includes(askPet)) { fail("You already own that pet."); return; }
+    if (target.cosmetics.includes(offerPet)) { fail(`${target.name} already owns that pet.`); return; }
+    const c = Math.round(Number(coins ?? 0));
+    if (!Number.isInteger(c) || c < 0) { fail("Coin sweetener must be 0 or more."); return; }
+    if (c > (p.coins ?? 0)) { fail("Not enough coins for that sweetener."); return; }
+
+    const t = {
+      id: ++tradeSeq, state: "pending",
+      fromId: socket.id, toId: targetId, offerPet, askPet, coins: c,
+      timer: setTimeout(() => clearTrade(t, "Trade offer expired."), TRADE_ACCEPT_MS),
+    };
+    tradeBySocket.set(socket.id, t);
+    tradeBySocket.set(targetId, t);
+    io.to(targetId).emit("tradeIncoming", {
+      tradeId: t.id, fromId: socket.id, fromName: p.name,
+      offerPet, askPet, coins: c, timeoutMs: TRADE_ACCEPT_MS,
+    });
+    socket.emit("tradeSent", { tradeId: t.id, toName: target.name, offerPet, askPet, coins: c });
+    console.log(`TRADE offer: ${p.name} → ${target.name} (${offerPet} + ${c} coins for ${askPet})`);
+  });
+
+  // Accept is IRREVOCABLE once pressed: the SQL transaction commits against
+  // the durable rows, so a disconnect mid-settle doesn't (and must not) void
+  // it — the DB is the source of truth and a reconnect restores the traded
+  // state. Disconnect cleanup therefore only cancels PENDING trades.
+  socket.on("tradeAccept", async () => {
+    const t = tradeBySocket.get(socket.id);
+    if (!t || t.state !== "pending" || t.toId !== socket.id) return;
+    t.state = "settling";   // synchronous flip — a repeat tap or the timeout can't double-settle
+    clearTimeout(t.timer);
+    const from = players[t.fromId], to = players[t.toId];
+    const abort = (msg) => {
+      t.state = "done";
+      tradeBySocket.delete(t.fromId);
+      tradeBySocket.delete(t.toId);
+      io.to(t.fromId).emit("tradeEnded", { tradeId: t.id, message: msg });
+      io.to(t.toId).emit("tradeEnded",   { tradeId: t.id, message: msg });
+    };
+    if (!from || !to) { abort("Trade fell through — someone left the office."); return; }
+    const client = await pool.connect();
+    let ok = false, fromRow, toRow;
+    try {
+      await client.query("BEGIN");
+      // Offerer: loses offerPet + coins, gains askPet (auto-adopted).
+      const r1 = await client.query(
+        `UPDATE jpo_players
+            SET cosmetics = array_append(array_remove(cosmetics, $2), $3),
+                coins = coins - $4,
+                equipped_pet = $3,
+                updated_at = now()
+          WHERE email = $1 AND $2 = ANY(cosmetics) AND NOT ($3 = ANY(cosmetics)) AND coins >= $4
+          RETURNING coins, cosmetics, equipped_pet`,
+        [from.email, t.offerPet, t.askPet, t.coins],
+      );
+      // Accepter: loses askPet, gains offerPet (auto-adopted) + coins.
+      const r2 = await client.query(
+        `UPDATE jpo_players
+            SET cosmetics = array_append(array_remove(cosmetics, $2), $3),
+                coins = coins + $4,
+                equipped_pet = $3,
+                updated_at = now()
+          WHERE email = $1 AND $2 = ANY(cosmetics) AND NOT ($3 = ANY(cosmetics))
+          RETURNING coins, cosmetics, equipped_pet`,
+        [to.email, t.askPet, t.offerPet, t.coins],
+      );
+      if (r1.rowCount === 1 && r2.rowCount === 1) {
+        await client.query("COMMIT");
+        ok = true; fromRow = r1.rows[0]; toRow = r2.rows[0];
+      } else {
+        await client.query("ROLLBACK");
+      }
+    } catch (err) {
+      console.error("tradeAccept failed:", err);
+      try { await client.query("ROLLBACK"); } catch {}
+    } finally {
+      client.release();
+    }
+    if (!ok) { abort("Trade fell through — a pet or the coins moved since the offer."); return; }
+
+    for (const [id, pl, row] of [[t.fromId, from, fromRow], [t.toId, to, toRow]]) {
+      pl.coins = row.coins;
+      pl.cosmetics = row.cosmetics || [];
+      pl.pet = row.equipped_pet || "";
+      io.to(id).emit("coinUpdate", { coins: pl.coins });
+      io.emit("playerPetUpdate", { id, pet: pl.pet, petAcc: pl.petAcc || "" });
+      io.emit("playerCosmeticUpdate", { id, cosmetics: pl.cosmetics, equipped: pl.equipped || "" });
+    }
+    t.state = "done";
+    tradeBySocket.delete(t.fromId);
+    tradeBySocket.delete(t.toId);
+    io.to(t.fromId).emit("tradeComplete", { tradeId: t.id, got: t.askPet,   gave: t.offerPet, coins: -t.coins, otherName: to.name });
+    io.to(t.toId).emit("tradeComplete",   { tradeId: t.id, got: t.offerPet, gave: t.askPet,   coins: t.coins,  otherName: from.name });
+    console.log(`TRADE done: ${from.name} ⇄ ${to.name} (${t.offerPet} + ${t.coins} coins ⇄ ${t.askPet})`);
+  });
+
+  socket.on("tradeDecline", () => {
+    const t = tradeBySocket.get(socket.id);
+    if (!t || t.state !== "pending") return;
+    const who = players[socket.id];
+    clearTrade(t, socket.id === t.toId
+      ? `${who?.name || "They"} declined the trade.`
+      : `${who?.name || "They"} withdrew the trade.`);
+  });
+
   // ── Wardrobe: pay to change shirt/trouser colours ────────────────────────
   // One flat WARDROBE_PRICE per change (either or both colours in the same
   // purchase). Same money rules as buyCosmetic: atomic coins-guard SQL for
@@ -5061,6 +5344,10 @@ io.on("connection", (socket) => {
         io.emit("playerLeft", socket.id);
       }
     }
+    // A pending trade can't survive either side leaving — the accept-time SQL
+    // would fail anyway (no live player), so end it cleanly and tell the peer.
+    const t = tradeBySocket.get(socket.id);
+    if (t && t.state === "pending") clearTrade(t, "Trade cancelled — they left the office.");
     admins.delete(socket.id);
     _notifyAdmins();
   });
@@ -5175,6 +5462,26 @@ try {
   }
 } catch (err) {
   console.error("schema nudge (columns) failed:", err);
+}
+
+// Live price overrides: create the table (self-healing, same policy as the
+// nudges above) and fold saved overrides into the in-memory catalogs BEFORE
+// listen — every buy handler and every priceList emit then just works.
+try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_shop_prices (
+    item_id text PRIMARY KEY,
+    price integer NOT NULL
+  )`);
+  const { rows } = await pool.query(`SELECT item_id, price FROM jpo_shop_prices`);
+  for (const r of rows) {
+    const cat = catalogOf(r.item_id);
+    if (cat && Number.isInteger(r.price) && r.price >= PRICE_MIN && r.price <= PRICE_MAX) {
+      cat[r.item_id] = r.price;
+      console.log(`price override: ${r.item_id} → ${r.price}`);
+    }
+  }
+} catch (err) {
+  console.error("schema nudge (shop prices) failed:", err);
 }
 
 const port = process.env.PORT || 3000;

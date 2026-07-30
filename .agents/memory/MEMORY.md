@@ -10,4 +10,5 @@
 - [JPO Huddle production ops](jpo-huddle-production.md) — prod DB is separate & READ-ONLY; fixes must self-heal in server code + republish (map swaps strand saved positions).
 - [JPO Huddle env animated overlays](jpo-huddle-env-anims.md) — depth + placement pattern for animated Phaser sprites overlaid on map furniture.
 - [JPO Huddle NPC & AI coach](jpo-huddle-npc-coach.md) — NPCs live OUTSIDE players (own npc* events); socket-triggered AI needs pre-gate read + daily spend cap + atomic claim; form events use a talk-session stamp, not distance.
+- [JPO Huddle economy features](jpo-huddle-economy.md) — gifting/trades/price overrides: block mid-match, settle in one guarded SQL transaction, client price labels display-only.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.

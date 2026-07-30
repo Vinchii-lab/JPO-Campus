@@ -870,11 +870,30 @@
     }
     #rps-menu button:hover { background: rgba(108,99,255,0.25); }
 
-    #rps-wager-modal, #rps-match {
+    #rps-wager-modal, #rps-match, #gift-modal, #trade-modal {
       position: fixed; inset: 0; z-index: 8500; display: none;
       align-items: center; justify-content: center; background: rgba(0,0,0,0.6);
     }
-    #rps-wager-modal.open, #rps-match.open { display: flex; }
+    #rps-wager-modal.open, #rps-match.open, #gift-modal.open, #trade-modal.open { display: flex; }
+    #gift-amount-input, #trade-coins-input {
+      width: 130px; padding: 9px 12px; font-size: 16px; font-family: monospace; text-align: center;
+      background: #111; border: 2px solid #444; border-radius: 8px; color: #eee; outline: none;
+    }
+    #gift-amount-input:focus, #trade-coins-input:focus { border-color: #6c63ff; }
+    #trade-offer-select, #trade-ask-select {
+      width: 100%; padding: 9px 12px; font-size: 14px; font-family: monospace;
+      background: #111; border: 2px solid #444; border-radius: 8px; color: #eee;
+      outline: none; cursor: pointer;
+    }
+    #trade-offer-select:focus, #trade-ask-select:focus { border-color: #6c63ff; }
+    #trade-incoming {
+      position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); z-index: 232;
+      display: none; flex-direction: column; gap: 8px; text-align: center;
+      background: rgba(30,30,48,0.96); border: 1px solid #f1c40f; border-radius: 12px;
+      padding: 14px 20px; font-family: monospace; color: #eee; font-size: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.55); max-width: 92vw;
+    }
+    #trade-incoming.open { display: flex; }
 
     /* ── Player profile card ── (below the rps modals so an incoming challenge stays visible) */
     #profile-modal {
@@ -1525,6 +1544,8 @@
     <button id="rps-menu-profile" type="button">👤 View profile</button>
     <button id="rps-menu-dm" type="button">💬 Whisper</button>
     <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
+    <button id="rps-menu-gift" type="button">💰 Send coins</button>
+    <button id="rps-menu-trade" type="button">🐾 Trade pets</button>
   </div>
 
   <!-- ── Player profile card (non-blocking; values set via textContent only) ── -->
@@ -1593,6 +1614,53 @@
         <button id="rps-wager-send" class="rps-btn primary" type="button">Send challenge</button>
         <button id="rps-wager-cancel" class="rps-btn" type="button">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Send coins (from the avatar menu) ── -->
+  <div id="gift-modal">
+    <div class="rps-card">
+      <h3>💰 Send coins</h3>
+      <p class="rps-sub" id="gift-sub">Send coins to a coworker</p>
+      <div id="rps-wager-fields">
+        <label class="rps-wager-label" for="gift-amount-input">Amount (daily limit: 5,000)</label>
+        <input id="gift-amount-input" type="number" min="1" step="1" value="100" inputmode="numeric" autocomplete="off" />
+      </div>
+      <div id="gift-error" style="color:#e74c3c;font-size:12px;min-height:16px;"></div>
+      <div class="rps-btn-row">
+        <button id="gift-send" class="rps-btn primary" type="button">Send</button>
+        <button id="gift-cancel" class="rps-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pet trade composer (from the avatar menu) ── -->
+  <div id="trade-modal">
+    <div class="rps-card">
+      <h3>🐾 Trade pets</h3>
+      <p class="rps-sub" id="trade-sub">Offer one of yours for one of theirs</p>
+      <div id="rps-wager-fields">
+        <label class="rps-wager-label" for="trade-offer-select">You give</label>
+        <select id="trade-offer-select"></select>
+        <label class="rps-wager-label" for="trade-ask-select" style="margin-top:8px;">You get</label>
+        <select id="trade-ask-select"></select>
+        <label class="rps-wager-label" for="trade-coins-input" style="margin-top:8px;">Sweeten with coins (optional)</label>
+        <input id="trade-coins-input" type="number" min="0" step="1" value="0" inputmode="numeric" autocomplete="off" />
+      </div>
+      <div id="trade-error" style="color:#e74c3c;font-size:12px;min-height:16px;"></div>
+      <div class="rps-btn-row">
+        <button id="trade-send" class="rps-btn primary" type="button">Send offer</button>
+        <button id="trade-cancel" class="rps-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Incoming trade offer ── -->
+  <div id="trade-incoming">
+    <div id="trade-incoming-text"></div>
+    <div class="rps-btn-row">
+      <button id="trade-accept" class="rps-btn primary" type="button">Accept 🤝</button>
+      <button id="trade-decline" class="rps-btn" type="button">Decline</button>
     </div>
   </div>
 
@@ -1843,6 +1911,15 @@
         <h3>Announcements</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Announcements are posted by walking up to a room's board in-game and pressing E. This list shows every room's posts so you can remove any.</p>
         <div id="op-ann-list" class="op-ann-list"></div>
+      </div>
+      <div class="owner-section">
+        <h3>Shop Prices</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Change any shop price live — everyone's shop updates instantly, no redeploy. Set an item back to its default to clear the override. Great for flash sales. 🎉</p>
+        <table class="owner-table">
+          <thead><tr><th>Item</th><th>Default</th><th>Current</th><th>New price</th><th></th></tr></thead>
+          <tbody id="op-price-tbody"></tbody>
+        </table>
+        <div id="op-price-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
       <div class="owner-section">
         <h3>Reset a Password</h3>
@@ -3348,6 +3425,29 @@
       document.getElementById('food-coin-display').textContent = coins;
       // Affordability (the greyed "Buy" state) depends on the balance.
       if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+    });
+
+    // ── Live shop prices ────────────────────────────────────────────────
+    // The server sends the full price map on connect (priceList) and a
+    // one-item broadcast whenever the owner changes a price (priceUpdate).
+    // These labels are display-only — the server enforces the real price on
+    // every buy — so applying them just keeps the shop UI honest.
+    function _applyPrice(item, price) {
+      if (!Number.isInteger(price)) return;
+      for (const cat of [COSMETICS, PETS, PET_ACCESSORIES]) {
+        const row = cat.find(c => c.id === item);
+        if (row) { row.cost = price; return; }
+      }
+    }
+    socket.on('priceList', (map) => {
+      for (const [item, price] of Object.entries(map || {})) _applyPrice(item, price);
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (typeof _opRenderPrices === 'function') _opRenderPrices();
+    });
+    socket.on('priceUpdate', ({ item, price } = {}) => {
+      _applyPrice(item, price);
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (typeof _opRenderPrices === 'function') _opRenderPrices();
     });
 
     // ── Huddles the connection coach ──────────────────────────────────
@@ -5620,6 +5720,125 @@
       if (id) openProfile(id);
     });
 
+    // ── Send coins + pet trades (July 2026) ─────────────────────────────
+    // Both live in the avatar context menu next to Challenge. Gift = a tiny
+    // amount modal → sendCoins. Trade = composer modal (server sends both
+    // sides' pet lists) → tradeOffer; the other side gets an accept/decline
+    // card like an incoming challenge. Server is authoritative on all of it.
+    const _petLabel = (id) => {
+      const c = PETS.find(p => p.id === id);
+      return c ? `${c.emoji} ${c.species} — ${c.name}` : id;
+    };
+    let _giftTargetId = null, _tradeTargetId = null;
+
+    function openGift(targetId) {
+      _giftTargetId = targetId;
+      const name = _online[targetId]?.name || 'them';
+      rpsEl('gift-sub').textContent = `Send coins to ${name} (you have ${_playerCoins.toLocaleString()})`;
+      rpsEl('gift-error').textContent = '';
+      rpsEl('gift-modal').classList.add('open');
+      const inp = rpsEl('gift-amount-input');
+      inp.value = '100';
+      setTimeout(() => inp.focus(), 0);
+    }
+    function closeGift() { rpsEl('gift-modal').classList.remove('open'); _giftTargetId = null; if (!IS_TOUCH) document.querySelector('canvas')?.focus(); }
+    rpsEl('gift-cancel').addEventListener('click', closeGift);
+    rpsEl('gift-send').addEventListener('click', () => {
+      const amt = parseInt(rpsEl('gift-amount-input').value, 10);
+      if (!Number.isInteger(amt) || amt < 1) { rpsEl('gift-error').textContent = 'Enter at least 1 coin.'; return; }
+      if (amt > _playerCoins) { rpsEl('gift-error').textContent = "You don't have that many coins."; return; }
+      if (!_giftTargetId) { closeGift(); return; }
+      socket.emit('sendCoins', { targetId: _giftTargetId, amount: amt });
+      closeGift();
+    });
+    socket.on('giftResult', ({ ok, message } = {}) => { _rpsToast(message || (ok ? 'Sent!' : 'Sending failed.')); });
+    socket.on('giftReceived', ({ fromName, amount } = {}) => {
+      _rpsToast(`💝 ${fromName} sent you ${(amount || 0).toLocaleString()} coins!`);
+    });
+
+    function openTrade(targetId) {
+      _tradeTargetId = targetId;
+      socket.emit('tradePetsOf', { targetId });   // composer opens when the lists arrive
+    }
+    function closeTrade() { rpsEl('trade-modal').classList.remove('open'); _tradeTargetId = null; if (!IS_TOUCH) document.querySelector('canvas')?.focus(); }
+    rpsEl('trade-cancel').addEventListener('click', closeTrade);
+    socket.on('tradePets', ({ targetId, targetName, mine, theirs } = {}) => {
+      if (targetId !== _tradeTargetId) return;
+      const myPets = (mine || []), theirPets = (theirs || []);
+      if (!myPets.length)   { _rpsToast('You need a pet to trade — adopt one in the shop first!'); _tradeTargetId = null; return; }
+      if (!theirPets.length) { _rpsToast(`${targetName} doesn't have a pet to trade yet.`); _tradeTargetId = null; return; }
+      const fill = (sel, ids, excludeOwned) => {
+        sel.innerHTML = '';
+        ids.forEach(id => {
+          if (excludeOwned && _ownedItems.includes(id)) return;   // can't receive a pet you already own
+          const o = document.createElement('option');
+          o.value = id; o.textContent = _petLabel(id);
+          sel.appendChild(o);
+        });
+      };
+      fill(rpsEl('trade-offer-select'), myPets, false);
+      fill(rpsEl('trade-ask-select'), theirPets, true);
+      if (!rpsEl('trade-ask-select').options.length) {
+        _rpsToast(`You already own every pet ${targetName} has — nothing to trade for.`);
+        _tradeTargetId = null; return;
+      }
+      rpsEl('trade-sub').textContent = `Offer ${targetName} a pet swap`;
+      rpsEl('trade-error').textContent = '';
+      rpsEl('trade-coins-input').value = '0';
+      rpsEl('trade-modal').classList.add('open');
+    });
+    rpsEl('trade-send').addEventListener('click', () => {
+      const offerPet = rpsEl('trade-offer-select').value;
+      const askPet   = rpsEl('trade-ask-select').value;
+      const coins    = parseInt(rpsEl('trade-coins-input').value, 10) || 0;
+      if (!offerPet || !askPet) { rpsEl('trade-error').textContent = 'Pick a pet on both sides.'; return; }
+      if (coins < 0 || coins > _playerCoins) { rpsEl('trade-error').textContent = "You don't have that many coins."; return; }
+      if (!_tradeTargetId) { closeTrade(); return; }
+      socket.emit('tradeOffer', { targetId: _tradeTargetId, offerPet, askPet, coins });
+      closeTrade();
+    });
+    // Keep typing in the composer inputs from steering the avatar.
+    ['gift-amount-input', 'trade-coins-input', 'trade-offer-select', 'trade-ask-select'].forEach(id => {
+      const el = rpsEl(id);
+      el.addEventListener('keydown', (e) => e.stopPropagation());
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+    rpsEl('gift-amount-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') rpsEl('gift-send').click();
+      if (e.key === 'Escape') closeGift();
+    });
+
+    socket.on('tradeSent', ({ toName, offerPet, askPet, coins } = {}) => {
+      _rpsToast(`🐾 Offer sent to ${toName}: your ${_petLabel(offerPet)}${coins ? ` + ${coins.toLocaleString()} coins` : ''} for their ${_petLabel(askPet)}`);
+    });
+    socket.on('tradeIncoming', ({ fromName, offerPet, askPet, coins } = {}) => {
+      rpsEl('trade-incoming-text').textContent =
+        `🐾 ${fromName} offers their ${_petLabel(offerPet)}${coins ? ` + ${coins.toLocaleString()} coins` : ''} for your ${_petLabel(askPet)}`;
+      rpsEl('trade-incoming').classList.add('open');
+    });
+    const _tradeIncomingClose = () => rpsEl('trade-incoming').classList.remove('open');
+    rpsEl('trade-accept').addEventListener('click', () => { socket.emit('tradeAccept'); _tradeIncomingClose(); });
+    rpsEl('trade-decline').addEventListener('click', () => { socket.emit('tradeDecline'); _tradeIncomingClose(); });
+    socket.on('tradeEnded', ({ message } = {}) => { _tradeIncomingClose(); _rpsToast(`🐾 ${message || 'Trade ended.'}`); });
+    socket.on('tradeError', ({ message } = {}) => { _rpsToast(`🐾 ${message || 'Trade failed.'}`); });
+    socket.on('tradeComplete', ({ got, gave, coins, otherName } = {}) => {
+      _tradeIncomingClose();
+      const coinBit = coins ? (coins > 0 ? ` (+${coins.toLocaleString()} coins)` : ` (${coins.toLocaleString()} coins)`) : '';
+      _rpsToast(`🤝 Trade with ${otherName} done! Your ${_petLabel(gave)} → their place, ${_petLabel(got)} is yours${coinBit}`);
+    });
+
+    rpsEl('rps-menu-gift').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openGift(id);
+    });
+    rpsEl('rps-menu-trade').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openTrade(id);
+    });
+
     // ── Player profile card ────────────────────────────────────────────
     // Non-blocking (movement stays live, like the rps waiting/incoming cards —
     // it deliberately does NOT join the chatting/_rpsUiOpen mutual-exclusion
@@ -7088,7 +7307,7 @@
     // zombie socket) must never leave the panel stale until a page refresh.
     let _adminPollTimer = null;
     function openOwnerPanel() {
-      _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements();
+      _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); _opRenderPrices();
       socket.emit('adminRefresh');
       clearInterval(_adminPollTimer);
       _adminPollTimer = setInterval(() => { if (socket.connected) socket.emit('adminRefresh'); }, 10000);
@@ -7307,6 +7526,48 @@
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
       msg.textContent = message || (ok ? 'Done.' : 'Failed.');
       if (ok) document.getElementById('op-reset-email').value = '';
+    });
+
+    // ── Owner panel: live shop prices ──────────────────────────────────
+    // Defaults are snapshotted at load (the catalogs' shipped costs) BEFORE
+    // any priceList/priceUpdate mutates them, so the Default column stays
+    // honest. Rows re-render on every price broadcast; a row being edited
+    // (focused input) is left alone so typing doesn't get wiped.
+    const _opDefaultCosts = Object.fromEntries(
+      [...COSMETICS, ...PETS, ...PET_ACCESSORIES].map(c => [c.id, c.cost]));
+    function _opRenderPrices() {
+      const tbody = document.getElementById('op-price-tbody');
+      if (!tbody) return;
+      if (tbody.contains(document.activeElement)) return;   // don't wipe an edit in progress
+      const rows = [...COSMETICS.map(c => ({ ...c, kind: 'Wearable' })),
+                    ...PETS.map(c => ({ ...c, kind: 'Pet' })),
+                    ...PET_ACCESSORIES.map(c => ({ ...c, kind: 'Pet acc.' }))];
+      tbody.innerHTML = rows.map(c => `
+        <tr>
+          <td>${esc(c.emoji)} ${esc(c.name)} <span style="color:#888;font-size:10px;">${esc(c.kind)}</span></td>
+          <td style="color:#888;">${_opDefaultCosts[c.id]}</td>
+          <td style="${c.cost !== _opDefaultCosts[c.id] ? 'color:#e67e22;font-weight:bold;' : ''}">💰 ${c.cost}</td>
+          <td><input type="number" min="1" step="1" id="op-price-${esc(c.id)}" placeholder="${c.cost}"
+                 style="width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" /></td>
+          <td><button class="o-btn o-btn-approve" onclick="ownerSetPrice('${esc(c.id)}')">Set</button></td>
+        </tr>`).join('');
+    }
+    window._opRenderPrices = _opRenderPrices;
+    function ownerSetPrice(item) {
+      const inp = document.getElementById(`op-price-${item}`);
+      const msg = document.getElementById('op-price-msg');
+      const price = parseInt(inp?.value, 10);
+      if (!Number.isInteger(price) || price < 1) { msg.style.color = '#e74c3c'; msg.textContent = 'Enter a whole number of coins (1+).'; return; }
+      msg.style.color = '#888'; msg.textContent = 'Saving…';
+      socket.emit('adminSetPrice', { item, price });
+      inp.value = '';
+      if (document.activeElement === inp) inp.blur();
+    }
+    window.ownerSetPrice = ownerSetPrice;
+    socket.on('adminPriceResult', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-price-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Saved.' : 'Failed.');
     });
     (() => {
       const inp = document.getElementById('op-reset-email');
