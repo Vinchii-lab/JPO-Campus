@@ -1574,6 +1574,7 @@
         <button id="pf-hobby-save" class="rps-btn primary" type="button">Save hobby</button>
       </div>
       <div class="rps-btn-row">
+        <button id="pf-market-btn" class="rps-btn" type="button">🏪 Market</button>
         <button id="pf-lb-btn" class="rps-btn" type="button">🏆 Leaderboard</button>
         <button id="pf-close" class="rps-btn" type="button">Close</button>
       </div>
@@ -1815,7 +1816,8 @@
         <button class="shop-tab"     id="shop-tab-btn-items"    onclick="shopTab('items')">🎒 Items</button>
         <button class="shop-tab"     id="shop-tab-btn-pets"     onclick="shopTab('pets')">🐾 Pets</button>
         <button class="shop-tab"     id="shop-tab-btn-wardrobe" onclick="shopTab('wardrobe')">👕 Wardrobe</button>
-        <button class="shop-tab"     id="shop-tab-btn-market"   onclick="shopTab('market')">🏪 Market</button>
+        <!-- Market lives on the profile card (pf-market-btn), not the shop tab bar -->
+        <button class="shop-tab"     id="shop-tab-btn-market"   onclick="shopTab('market')" style="display:none">🏪 Market</button>
       </div>
       <!-- Cosmetic rows are generated from the COSMETICS catalog. -->
       <div id="shop-cosmetics"></div>
@@ -6151,6 +6153,14 @@
 
     // ── Office leaderboard (opened from the profile card's 🏆 button) ──
     // Rendered with createElement/textContent ONLY — names are user text.
+    pfEl('pf-market-btn').addEventListener('click', () => {
+      closeProfile();
+      _marketFilter = null;
+      openShop();
+      _shopTab = 'market'; _shopPage = 0;
+      socket.emit('marketOpen', {});
+      _refreshShopUI();
+    });
     pfEl('pf-lb-btn').addEventListener('click', () => socket.emit('getLeaderboard'));
     function closeLeaderboard() { pfEl('lb-modal').classList.remove('open'); }
     pfEl('lb-close').addEventListener('click', closeLeaderboard);
@@ -8418,7 +8428,8 @@
         this.player.setInteractive({ useHandCursor: true });
         this.player.on('pointerdown', () => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !document.getElementById('shop-modal').classList.contains('open')) {
             window._openProfile(socket.id);
           }
         });
@@ -9140,7 +9151,8 @@
         sprite.setInteractive({ useHandCursor: true });
         sprite.on('pointerdown', (pointer) => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !document.getElementById('shop-modal').classList.contains('open')) {
             const ev = pointer && pointer.event;
             window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
           }
