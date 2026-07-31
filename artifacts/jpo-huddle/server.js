@@ -3527,7 +3527,11 @@ io.on("connection", (socket) => {
   socket.on("adminAuth", (payload) => {
     const { password } = payload || {};
     if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
-    if (!admins.has(socket.id)) logAdmin(socket, "Panel unlocked", "Entered the owner password (F8).");
+    // Log the unlock only when we know WHO this socket is. A reconnecting
+    // client silently re-sends adminAuth BEFORE its resume/register completes,
+    // which produced useless "Unknown admin — Panel unlocked" spam. Real,
+    // human F8 unlocks happen in-game, where the player identity exists.
+    if (!admins.has(socket.id) && players[socket.id]) logAdmin(socket, "Panel unlocked", "Entered the owner password (F8).");
     admins.add(socket.id);
     socket.emit("adminAuthOk");
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
