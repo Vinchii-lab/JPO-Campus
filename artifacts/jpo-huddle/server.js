@@ -3565,9 +3565,9 @@ io.on("connection", (socket) => {
     const em = players[socket.id]?.email;
     if (bingo && em && bingo.players.has(em)) {
       const bp = bingo.players.get(em);
-      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode });
-      if (admins.has(socket.id) && bingo.state === "active") {
-        socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, message: `Bingo is live (${bingo.mode} calling).` });
+      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode, msLeft: bingo.state === "joining" ? Math.max(0, bingo.joinDeadline - Date.now()) : 0 });
+      if (admins.has(socket.id)) {
+        socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, phase: bingo.state, message: bingo.state === "active" ? `Bingo is live (${bingo.mode} calling).` : "Bingo lobby is open — game starts soon." });
       }
     } else if (bingo && bingo.state === "joining") {
       socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
@@ -3593,7 +3593,7 @@ io.on("connection", (socket) => {
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,
     };
     io.emit("bingoLobby", { gameId: bingo.id, prize, msLeft: BINGO_JOIN_MS });
-    socket.emit("adminBingoResult", { ok: true, mode, active: true, message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : "auto-calling"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
+    socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : "auto-calling"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
     console.log(`ADMIN bingo start: prize ${prize}, ${mode}`);
   });
   socket.on("adminBingoCancel", () => {
@@ -3612,7 +3612,7 @@ io.on("connection", (socket) => {
     bingoCallNext();
     if (bingo) {
       const last = bingo.called[bingo.called.length - 1];
-      socket.emit("adminBingoResult", { ok: true, mode: "manual", active: true, message: `Called ${"BINGO"[Math.floor((last - 1) / 15)]}-${last} (${bingo.called.length}/75).` });
+      socket.emit("adminBingoResult", { ok: true, mode: "manual", active: true, phase: "active", message: `Called ${"BINGO"[Math.floor((last - 1) / 15)]}-${last} (${bingo.called.length}/75).` });
     }
   });
   // Flip auto ↔ manual mid-game (e.g. host goes AFK → let it run itself).
@@ -3620,7 +3620,7 @@ io.on("connection", (socket) => {
     if (!admins.has(socket.id) || !bingo) return;
     const mode = payload?.mode === "manual" ? "manual" : "auto";
     bingoSetMode(mode);
-    socket.emit("adminBingoResult", { ok: true, mode, active: true, message: mode === "auto" ? "Auto-calling ON — a ball every few seconds." : "Manual mode — press “Call next ball” to deal." });
+    socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: bingo.state, message: mode === "auto" ? "Auto-calling ON — a ball every few seconds." : "Manual mode — press “Call next ball” to deal." });
     console.log(`ADMIN bingo mode: ${mode}`);
   });
 
@@ -3631,7 +3631,7 @@ io.on("connection", (socket) => {
     if (bingo.players.has(p.email)) return;
     const card = makeBingoCard();
     bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
-    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining" });
+    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
   });
 

@@ -6007,14 +6007,16 @@
     // ── Office Bingo ────────────────────────────────────────────────────
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
-    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false;
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null;
     // Host controls live IN the bingo panel (not just F8) for authed admins.
     // An admin who didn't join still gets the panel with just the host row.
     function _bingoHostRefresh() {
       const show = _bingoActive && _adminAuthed;
       document.getElementById('bingo-host-row').style.display = show ? 'block' : 'none';
       if (show) {
-        document.getElementById('bingo-host-call').style.display = _bingoMode === 'manual' ? 'block' : 'none';
+        // "Call next ball" only makes sense once the game is live — during the
+        // join countdown the server refuses to deal, so don't show a dead button.
+        document.getElementById('bingo-host-call').style.display = (_bingoMode === 'manual' && _bingoPhase === 'active') ? 'block' : 'none';
         document.getElementById('bingo-host-switch').textContent = _bingoMode === 'manual' ? '🤖 Switch to auto-calling' : '🎤 Switch to manual (I call)';
         document.getElementById('bingo-panel').style.display = 'block';
       }
@@ -6036,12 +6038,16 @@
     // this script's scope, so raw onclick="socket.emit(...)" silently fails.
     window.ownerBingoCall   = () => socket.emit('adminBingoCall');
     window.ownerBingoCancel = () => socket.emit('adminBingoCancel');
-    socket.on('adminBingoResult', ({ ok, mode, active, message } = {}) => {
+    socket.on('adminBingoResult', ({ ok, mode, active, phase, message } = {}) => {
       const msg = _bgEl('op-bingo-msg');
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
       msg.textContent = message || (ok ? 'Done.' : 'Failed.');
       if (mode) { _bingoAdminMode = mode; _bingoMode = mode; }
       if (active) _bingoActive = true;
+      if (phase) _bingoPhase = phase;
+      // The F8 message box is usually closed — surface host feedback as a
+      // toast too, so a rejected/accepted click is never silent.
+      if (message && (!ok || !_bingoCard)) _rpsToast(`🎱 ${message}`);
       // F8 host controls (mirror of the in-panel ones)
       _bgEl('op-bingo-host').style.display = active ? 'flex' : 'none';
       _bgEl('op-bingo-switch').textContent = _bingoAdminMode === 'manual' ? 'Switch to auto' : 'Switch to manual';
@@ -6052,7 +6058,7 @@
       _bgEl('bingo-panel').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
-      _bingoActive = false;
+      _bingoActive = false; _bingoPhase = null;
       document.getElementById('bingo-host-row').style.display = 'none';
     }
     function _bingoRenderGrid() {
@@ -6115,7 +6121,7 @@
         wrap.appendChild(box);
       }
     })();
-    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode } = {}) => {
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, msLeft } = {}) => {
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
       _bingoMode = mode || _bingoMode;
       _bingoGameId = gameId ?? _bingoGameId;
@@ -6125,9 +6131,21 @@
       _bgEl('bingo-panel').style.display = 'block';
       const last = _bingoCalled[_bingoCalled.length - 1];
       _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
-      _bgEl('bingo-call-sub').textContent = state === 'active'
-        ? `call ${_bingoCalled.length}/75 — click your numbers!` : "you're in! waiting for the game to start…";
+      if (state === 'active') {
+        _bgEl('bingo-call-sub').textContent = `call ${_bingoCalled.length}/75 — click your numbers!`;
+      } else {
+        // Joined during the lobby: keep the countdown ticking on the card
+        // itself (the lobby box is gone once you have a card).
+        const deadline = Date.now() + (msLeft ?? 60000);
+        const tick = () => {
+          const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          _bgEl('bingo-call-sub').textContent = s > 0 ? `you're in! game starts in ${s}s…` : 'starting…';
+          if (s <= 0) { clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null; }
+        };
+        _bingoLobbyTimer = setInterval(tick, 500); tick();
+      }
       _bgEl('bingo-called-list').textContent = _bingoCalled.length ? `Called: ${_bingoCalled.join(', ')}` : '';
+      _bingoPhase = state || _bingoPhase;
       if (state === 'active') _bingoActive = true;
       _bingoRenderGrid();
       _bingoHostRefresh();
@@ -6135,7 +6153,7 @@
     socket.on('bingoStart', ({ playerCount, mode } = {}) => {
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
-      _bingoActive = true; _bingoMode = mode || _bingoMode;
+      _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
       if (_bingoCard) {
         _bingoState = 'active';
         _bgEl('bingo-call-sub').textContent = _bingoMode === 'manual'
