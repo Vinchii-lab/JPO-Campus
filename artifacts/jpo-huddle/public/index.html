@@ -379,7 +379,20 @@
       line-height: 1; padding: 0 2px;
     }
     #owner-close:hover { color: #eee; }
+    #owner-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 22px 0; border-bottom: 1px solid #2a2a40; padding-bottom: 12px; }
+    .o-tab { background: #22223a; color: #aaa; border: 1px solid #2a2a40; border-radius: 999px; padding: 7px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+    .o-tab:hover { color: #fff; }
+    .o-tab.active { background: #4f6ef7; border-color: #4f6ef7; color: #fff; }
+    .o-tab-badge { background: #e14b4b; color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 700; margin-left: 4px; }
+    .op-log-row { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid #2a2a40; font-size: 12.5px; line-height: 1.5; align-items: baseline; }
+    .op-log-row:last-child { border-bottom: none; }
+    .op-log-ts { color: #777; white-space: nowrap; flex-shrink: 0; min-width: 118px; }
+    .op-log-who { color: #8fb4ff; font-weight: 600; }
+    .op-log-act { color: #eee; font-weight: 600; }
+    .op-log-detail { color: #aaa; }
     .owner-section { padding: 18px 22px; border-bottom: 1px solid #2a2a40; }
+    .owner-section[data-otab] { display: none; }
+    .owner-section.otab-show { display: block; }
     .owner-section:last-child { border-bottom: none; }
     .owner-section h3 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
     .owner-badge {
@@ -1948,7 +1961,16 @@
         <h2>⚙️ Owner Settings</h2>
         <button id="owner-close" onclick="closeOwnerPanel()">✕</button>
       </div>
-      <div class="owner-section">
+      <div id="owner-tabs">
+        <button class="o-tab active" data-otab-btn="reg" onclick="ownerTab('reg')">📝 Registration <span class="o-tab-badge" id="op-tab-pending" style="display:none;">0</span></button>
+        <button class="o-tab" data-otab-btn="online" onclick="ownerTab('online')">🟢 Online Players</button>
+        <button class="o-tab" data-otab-btn="prices" onclick="ownerTab('prices')">🏷️ In-game Prices</button>
+        <button class="o-tab" data-otab-btn="ann" onclick="ownerTab('ann')">📢 Announcements</button>
+        <button class="o-tab" data-otab-btn="events" onclick="ownerTab('events')">🎉 Events</button>
+        <button class="o-tab" data-otab-btn="log" onclick="ownerTab('log')">🕒 Activity Log</button>
+        <button class="o-tab" data-otab-btn="settings" onclick="ownerTab('settings')">🔧 Settings</button>
+      </div>
+      <div class="owner-section" data-otab="reg">
         <h3>Pending Registrations <span class="owner-badge" id="op-pending-count">0</span></h3>
         <table class="owner-table">
           <thead><tr><th>Name</th><th>Email</th><th>Char</th><th></th></tr></thead>
@@ -1957,7 +1979,7 @@
           </tbody>
         </table>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="online">
         <h3>Online Players <span class="owner-badge green" id="op-player-count">0</span></h3>
         <table class="owner-table">
           <thead><tr><th>Name</th><th>Dept</th><th>Coins</th><th>Items</th><th>Post</th><th></th></tr></thead>
@@ -1966,12 +1988,12 @@
           </tbody>
         </table>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="ann">
         <h3>Announcements</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Announcements are posted by walking up to a room's board in-game and pressing E. This list shows every room's posts so you can remove any.</p>
         <div id="op-ann-list" class="op-ann-list"></div>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="prices">
         <h3>Shop Prices</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Change any shop price live — everyone's shop updates instantly, no redeploy. Set an item back to its default to clear the override. Great for flash sales. 🎉</p>
         <table class="owner-table">
@@ -1980,7 +2002,7 @@
         </table>
         <div id="op-price-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="events">
         <h3>📣 Office Banner</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Puts a message on EVERY screen until each person dismisses it. Posting a new one replaces the old one. Late logins see it too.</p>
         <textarea id="op-banner-input" class="op-ann-input" rows="2" maxlength="300" placeholder="e.g. Bingo in 5 minutes at the pantry! 🎱"></textarea>
@@ -1990,7 +2012,7 @@
         </div>
         <div id="op-banner-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="events">
         <h3>🎱 Office Bingo</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, first valid line (row / column / diagonal) wins the prize — paid by the house, no entry fee. Needs at least 2 players. Pick how balls get called: automatic, or you deal them like a real host. You can switch anytime mid-game.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -2009,7 +2031,18 @@
         </div>
         <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
-      <div class="owner-section">
+      <div class="owner-section" data-otab="log">
+        <h3>🕒 Admin Activity Log</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Everything done from this panel, newest first — who unlocked it, price changes (old → new), banners, bingo games, approvals, kicks, password resets. Individual bingo ball calls aren't listed to keep this readable. Written by the server, so it can't be edited from here.</p>
+        <div id="op-log-list"></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+          <button class="o-btn" id="op-log-prev" onclick="ownerLogGo(_ownerLogPage-1)">← Newer</button>
+          <span id="op-log-pageinfo" style="font-size:12px;color:#888;">—</span>
+          <button class="o-btn" id="op-log-next" onclick="ownerLogGo(_ownerLogPage+1)">Older →</button>
+          <button class="o-btn o-btn-approve" style="margin-left:auto;" onclick="ownerLogGo(_ownerLogPage)">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="owner-section" data-otab="settings">
         <h3>Reset a Password</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">Clears the password for an email (works even if they're offline). They'll set a new one the next time they register with that email.</p>
         <div style="display:flex;gap:8px;">
@@ -7875,9 +7908,48 @@
     // While the panel is open, poll for fresh lists every few seconds (plus
     // once on open) — pushes cover the instant case, but a missed push (blip,
     // zombie socket) must never leave the panel stale until a page refresh.
+    // ── Owner panel tabs + activity log ──
+    let _ownerLogPage = 1;
+    let _ownerTab = 'reg';
+    window.ownerTab = function (tab) {
+      _ownerTab = tab;
+      document.querySelectorAll('#owner-card .owner-section[data-otab]').forEach(s => {
+        s.classList.toggle('otab-show', s.dataset.otab === tab);
+      });
+      document.querySelectorAll('#owner-tabs .o-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.otabBtn === tab);
+      });
+      if (tab === 'log') window.ownerLogGo(_ownerLogPage);
+    };
+    window.ownerLogGo = function (page) {
+      _ownerLogPage = Math.max(1, page || 1);
+      window._ownerLogPage = _ownerLogPage;   // inline onclick handlers read window scope
+      socket.emit('adminLogGet', { page: _ownerLogPage });
+    };
+    window._ownerLogPage = _ownerLogPage;
+    socket.on('adminLogPage', (d) => {
+      if (!d || !Array.isArray(d.rows)) return;
+      _ownerLogPage = d.page; window._ownerLogPage = d.page;
+      const list = document.getElementById('op-log-list');
+      if (!d.rows.length) {
+        list.innerHTML = '<div style="color:#888;font-size:12px;padding:8px 0;">Nothing logged yet — actions taken from this panel will show up here.</div>';
+      } else {
+        const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        list.innerHTML = d.rows.map(r => {
+          const t = new Date(r.ts);
+          const ts = t.toLocaleDateString([], { month:'short', day:'numeric' }) + ' ' + t.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+          return `<div class="op-log-row"><span class="op-log-ts">${ts}</span><span><span class="op-log-who">${esc(r.admin_name)}</span> — <span class="op-log-act">${esc(r.action)}</span>${r.detail ? ` <span class="op-log-detail">${esc(r.detail)}</span>` : ''}</span></div>`;
+        }).join('');
+      }
+      document.getElementById('op-log-pageinfo').textContent = `Page ${d.page} of ${d.pages} (${d.total} entr${d.total === 1 ? 'y' : 'ies'})`;
+      document.getElementById('op-log-prev').disabled = d.page <= 1;
+      document.getElementById('op-log-next').disabled = d.page >= d.pages;
+    });
+
     let _adminPollTimer = null;
     function openOwnerPanel() {
       _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); _opRenderPrices();
+      window.ownerTab(_ownerTab);
       socket.emit('adminRefresh');
       clearInterval(_adminPollTimer);
       _adminPollTimer = setInterval(() => { if (socket.connected) socket.emit('adminRefresh'); }, 10000);
@@ -8048,6 +8120,11 @@
       }
       _knownPendingKeys = keys;
       document.getElementById('op-pending-count').textContent = list.length;
+      // Tab badge: pending approvals stay visible even when the owner is on
+      // another tab (the section itself is hidden then).
+      const tb = document.getElementById('op-tab-pending');
+      tb.textContent = list.length;
+      tb.style.display = list.length ? '' : 'none';
       const tbody = document.getElementById('op-pending-tbody');
       if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
       tbody.innerHTML = list.map(p => `

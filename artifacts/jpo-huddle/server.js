@@ -240,6 +240,30 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
 
+// ── Admin activity log ───────────────────────────────────────────────────────
+// Every mutation made from the F8 panel is written to jpo_admin_log with WHO
+// did it (the admin's player name+email at that moment), so the owner can see
+// exactly what other password-holders touched. Fire-and-forget: a log failure
+// must never break the admin action itself.
+const ADMIN_LOG_MAX = 5000;   // newest rows kept; older ones pruned on write
+function logAdmin(socket, action, detail = "") {
+  const p = players[socket.id];
+  const who = p ? `${p.name}${p.email ? ` (${p.email})` : ""}` : "Unknown admin";
+  pool
+    .query(`INSERT INTO jpo_admin_log (admin_name, action, detail) VALUES ($1, $2, $3)`,
+      [who.slice(0, 120), String(action).slice(0, 60), String(detail).slice(0, 400)])
+    .then(() => {
+      // Retention: keep the newest ADMIN_LOG_MAX rows so the table can't grow
+      // without bound. Cheap enough to run per write at this office's scale.
+      return pool.query(
+        `DELETE FROM jpo_admin_log
+          WHERE id <= (SELECT id FROM jpo_admin_log ORDER BY id DESC OFFSET $1 LIMIT 1)`,
+        [ADMIN_LOG_MAX],
+      );
+    })
+    .catch((err) => console.error("admin log write failed:", err));
+}
+
 // ── Admin broadcast banner (ephemeral, per server process) ────────────────────
 // One office-wide banner every client shows until THEY dismiss it (dismissal is
 // client-side by banner id). Late logins still see the current banner.
@@ -3503,6 +3527,7 @@ io.on("connection", (socket) => {
   socket.on("adminAuth", (payload) => {
     const { password } = payload || {};
     if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
+    if (!admins.has(socket.id)) logAdmin(socket, "Panel unlocked", "Entered the owner password (F8).");
     admins.add(socket.id);
     socket.emit("adminAuthOk");
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
@@ -3538,7 +3563,9 @@ io.on("connection", (socket) => {
           [item, p],
         );
       }
+      const oldPrice = cat[item];
       cat[item] = p;
+      if (oldPrice !== p) logAdmin(socket, "Price change", `${item}: ${Number(oldPrice).toLocaleString()} → ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (back to default)" : ""}`);
       io.emit("priceUpdate", { item, price: p });
       socket.emit("adminPriceResult", { ok: true, message: `${item} is now ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (default)" : ""}.` });
       console.log(`ADMIN price change: ${item} → ${p}`);
@@ -3558,12 +3585,14 @@ io.on("connection", (socket) => {
       adminBanner = null;
       io.emit("bannerUpdate", { banner: null });
       socket.emit("adminPriceResult", { ok: true, message: "Banner cleared." });
+      logAdmin(socket, "Banner cleared", "");
       console.log("ADMIN banner cleared");
       return;
     }
     adminBanner = { id: ++bannerSeq, text, ts: Date.now() };
     io.emit("bannerUpdate", { banner: adminBanner });
     socket.emit("adminPriceResult", { ok: true, message: "Banner is up on every screen." });
+    logAdmin(socket, "Banner posted", `"${text}"`);
     console.log(`ADMIN banner: ${text.slice(0, 60)}`);
   });
 
@@ -3604,6 +3633,7 @@ io.on("connection", (socket) => {
     };
     io.emit("bingoLobby", { gameId: bingo.id, prize, msLeft: BINGO_JOIN_MS });
     socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : "auto-calling"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
+    logAdmin(socket, "Bingo started", `Prize ${prize.toLocaleString()} coins, ${mode === "auto" ? "auto-calling" : "manual calling"}`);
     console.log(`ADMIN bingo start: prize ${prize}, ${mode}`);
   });
   socket.on("adminBingoCancel", () => {
@@ -3611,6 +3641,7 @@ io.on("connection", (socket) => {
     const gameId = bingo.id;
     bingoStop();
     io.emit("bingoOver", { gameId, winnerName: null, message: "Bingo was cancelled by the office." });
+    logAdmin(socket, "Bingo cancelled", "");
     socket.emit("adminBingoResult", { ok: true, message: "Bingo cancelled." });
     console.log("ADMIN bingo cancelled");
   });
@@ -3630,6 +3661,7 @@ io.on("connection", (socket) => {
     if (!admins.has(socket.id) || !bingo) return;
     const mode = payload?.mode === "manual" ? "manual" : "auto";
     bingoSetMode(mode);
+    logAdmin(socket, "Bingo mode switched", mode === "auto" ? "Auto-calling" : "Manual calling");
     socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: bingo.state, message: mode === "auto" ? "Auto-calling ON — a ball every few seconds." : "Manual mode — press “Call next ball” to deal." });
     console.log(`ADMIN bingo mode: ${mode}`);
   });
@@ -3701,6 +3733,23 @@ io.on("connection", (socket) => {
   // Pull-based refresh: the open admin panel re-requests both lists every few
   // seconds (and once on open), so a missed push — connection blip, zombie
   // socket, anything — can never leave the panel stale until a page refresh.
+  // ── Admin: activity log (paged, newest first) ─────────────────────────
+  socket.on("adminLogGet", async (payload) => {
+    if (!admins.has(socket.id)) return;
+    const PER = 15;
+    let page = Math.max(1, Math.floor(Number(payload?.page)) || 1);
+    try {
+      const total = Number((await pool.query(`SELECT count(*) AS c FROM jpo_admin_log`)).rows[0].c);
+      const pages = Math.max(1, Math.ceil(total / PER));
+      if (page > pages) page = pages;
+      const { rows } = await pool.query(
+        `SELECT admin_name, action, detail, ts FROM jpo_admin_log ORDER BY id DESC LIMIT $1 OFFSET $2`,
+        [PER, (page - 1) * PER],
+      );
+      socket.emit("adminLogPage", { rows, page, pages, total });
+    } catch (err) { console.error("adminLogGet failed:", err); }
+  });
+
   socket.on("adminRefresh", () => {
     if (!admins.has(socket.id)) return;
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminRefresh failed:", err));
@@ -3742,6 +3791,7 @@ io.on("connection", (socket) => {
           if (pid !== targetId) io.to(pid).emit("playerJoined", { id: targetId, ...state });
         }
         _notifyAdmins();
+        logAdmin(socket, "Registration approved", `${reg.name} (session-only)`);
         console.log(`Approved (session-only): ${reg.name}`);
         return;
       }
@@ -3769,6 +3819,7 @@ io.on("connection", (socket) => {
       }
       if (targetSocket) await restorePlayer(targetSocket, row);
       _notifyAdmins();
+      logAdmin(socket, "Registration approved", `${row.name}${row.email ? ` (${row.email})` : ""}`);
       console.log(`Approved: ${row.name}${targetSocket ? "" : " (offline — enters on next visit)"}`);
     } catch (err) {
       console.error("approvePlayer failed:", err);
@@ -3798,6 +3849,7 @@ io.on("connection", (socket) => {
       } catch (err) { console.error("rejectPlayer dismiss failed:", err); }
     }
     _notifyAdmins();
+    logAdmin(socket, "Registration rejected", `${reg?.name || em || "unknown"}${em ? ` (${em})` : ""}`);
     console.log(`Rejected: ${reg?.name || em || targetId}`);
   });
 
@@ -3827,6 +3879,7 @@ io.on("connection", (socket) => {
       } catch (err) { console.error("kick revoke failed:", err); }
     }
     _notifyAdmins();
+    logAdmin(socket, "Player kicked", `${p.name}${p.email ? ` (${p.email})` : ""} — approval revoked`);
     console.log(`Kicked (revoked): ${p.name}`);
   });
 
@@ -3845,6 +3898,7 @@ io.on("connection", (socket) => {
       p.isAnnouncer = !!canPost;
       io.to(targetId).emit("announcerStatus", { canPost: !!canPost });
       _notifyAdmins();
+      logAdmin(socket, canPost ? "Announcer granted" : "Announcer revoked", `${p.name}${p.email ? ` (${p.email})` : ""}`);
       console.log(`Announcer ${canPost ? "granted" : "revoked"}: ${p.name}`);
     } catch (err) { console.error("setAnnouncer failed:", err); }
   });
@@ -3875,6 +3929,7 @@ io.on("connection", (socket) => {
       cancelGrace(em);
       roundLeaveGoneByEmail(em);   // no successor session is coming — the round spot leaves NOW
       _notifyAdmins();
+      logAdmin(socket, "Password reset", `${rows[0].name} (${em})`);
       socket.emit("resetPasswordDone", { ok: true, message: `Password cleared for ${em}. They set a new one on their next Join.` });
       console.log(`Password reset by admin: <${em}>`);
     } catch (err) {
@@ -4691,7 +4746,8 @@ io.on("connection", (socket) => {
     const numId = parseInt(id, 10);
     if (!Number.isInteger(numId)) return;
     try {
-      await pool.query(`DELETE FROM jpo_announcements WHERE id = $1`, [numId]);
+      const { rows: delRows } = await pool.query(`DELETE FROM jpo_announcements WHERE id = $1 RETURNING name, text`, [numId]);
+      if (delRows[0]) logAdmin(socket, "Announcement deleted", `${delRows[0].name}: "${String(delRows[0].text).slice(0, 120)}"`);
       io.emit("announcementsUpdate", await fetchAnnouncements());
     } catch (err) { console.error("deleteAnnouncement failed:", err); }
   });
@@ -6183,6 +6239,18 @@ try {
 // Live price overrides: create the table (self-healing, same policy as the
 // nudges above) and fold saved overrides into the in-memory catalogs BEFORE
 // listen — every buy handler and every priceList emit then just works.
+// Admin activity log: every F8 mutation with who/what/when.
+try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_admin_log (
+    id serial PRIMARY KEY,
+    admin_name text NOT NULL,
+    action text NOT NULL,
+    detail text NOT NULL DEFAULT '',
+    ts timestamptz NOT NULL DEFAULT now()
+  )`);
+} catch (err) {
+  console.error("schema nudge (admin log) failed:", err);
+}
 try {
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_shop_prices (
     item_id text PRIMARY KEY,
