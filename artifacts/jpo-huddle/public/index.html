@@ -1989,10 +1989,10 @@
             <option value="manual">🎤 I call the balls</option>
           </select>
           <button class="o-btn o-btn-approve" onclick="ownerStartBingo()">Start Bingo</button>
-          <button class="o-btn o-btn-reject" onclick="socket.emit('adminBingoCancel')">Cancel game</button>
+          <button class="o-btn o-btn-reject" onclick="ownerBingoCancel()">Cancel game</button>
         </div>
         <div id="op-bingo-host" style="display:none;gap:8px;margin-top:10px;">
-          <button class="o-btn o-btn-approve" style="font-size:15px;padding:10px 16px;" onclick="socket.emit('adminBingoCall')">📢 Call next ball</button>
+          <button class="o-btn o-btn-approve" style="font-size:15px;padding:10px 16px;" onclick="ownerBingoCall()">📢 Call next ball</button>
           <button class="o-btn" id="op-bingo-switch" onclick="ownerBingoSwitch()">Switch to auto</button>
         </div>
         <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
@@ -6032,6 +6032,10 @@
       socket.emit('adminBingoMode', { mode: _bingoAdminMode === 'manual' ? 'auto' : 'manual' });
     }
     window.ownerBingoSwitch = ownerBingoSwitch;
+    // Inline onclick handlers only see window globals — `socket` lives inside
+    // this script's scope, so raw onclick="socket.emit(...)" silently fails.
+    window.ownerBingoCall   = () => socket.emit('adminBingoCall');
+    window.ownerBingoCancel = () => socket.emit('adminBingoCancel');
     socket.on('adminBingoResult', ({ ok, mode, active, message } = {}) => {
       const msg = _bgEl('op-bingo-msg');
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
