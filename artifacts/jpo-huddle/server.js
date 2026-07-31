@@ -11,6 +11,7 @@ import { ReplitConnectors } from "@replit/connectors-sdk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD || "";  // OPTIONAL second key: unlocks F8 like ADMIN_PASSWORD *plus* owner-only tools (coin adjust). Disabled until set.
 // Signs the resume tokens that let a returning browser auto-rejoin without
 // re-registering. When unset, auto-rejoin is disabled and everyone falls back to
 // the normal register flow. This is lightweight identity continuity, NOT auth.
@@ -239,6 +240,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, shirtIdx, pantsIdx }
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
+const owners  = new Set();   // subset of admins who entered OWNER_PASSWORD — unlocks owner-only tools
 
 // ── Admin activity log ───────────────────────────────────────────────────────
 // Every mutation made from the F8 panel is written to jpo_admin_log with WHO
@@ -3526,14 +3528,16 @@ io.on("connection", (socket) => {
   // ── Admin auth ───────────────────────────────────────────────────────
   socket.on("adminAuth", (payload) => {
     const { password } = payload || {};
-    if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { socket.emit("adminAuthFail"); return; }
+    const isOwner = !!(OWNER_PASSWORD && password === OWNER_PASSWORD);
+    if (!isOwner && (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD)) { socket.emit("adminAuthFail"); return; }
+    if (isOwner) owners.add(socket.id);
     // Log the unlock only when we know WHO this socket is. A reconnecting
     // client silently re-sends adminAuth BEFORE its resume/register completes,
     // which produced useless "Unknown admin — Panel unlocked" spam. Real,
     // human F8 unlocks happen in-game, where the player identity exists.
     if (!admins.has(socket.id) && players[socket.id]) logAdmin(socket, "Panel unlocked", "Entered the owner password (F8).");
     admins.add(socket.id);
-    socket.emit("adminAuthOk");
+    socket.emit("adminAuthOk", { owner: owners.has(socket.id) });
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
     socket.emit("playerList",  _playerList());
     // A refreshed host (silent re-auth) gets their bingo host controls back.
@@ -3737,6 +3741,36 @@ io.on("connection", (socket) => {
   // Pull-based refresh: the open admin panel re-requests both lists every few
   // seconds (and once on open), so a missed push — connection blip, zombie
   // socket, anything — can never leave the panel stale until a page refresh.
+  // ── Owner-only: adjust a player's coin balance ────────────────────────
+  // Gated on the OWNER_PASSWORD tier (not plain admins). By the owner's own
+  // request this is NOT written to the activity log. Updates the DB row and,
+  // if the person is online, the in-memory balance too (memory is what gets
+  // saved back, so touching only the DB would be silently overwritten).
+  socket.on("adminAdjustCoins", async (payload) => {
+    if (!owners.has(socket.id)) return;
+    const em = String(payload?.email || "").trim().toLowerCase().slice(0, 80);
+    const delta = Math.round(Number(payload?.delta));
+    if (!em || !Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > 1000000) {
+      socket.emit("adminCoinResult", { ok: false, message: "Enter an email and a non-zero amount up to ±1,000,000." });
+      return;
+    }
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players SET coins = GREATEST(0, coins + $2), updated_at = now()
+          WHERE email = $1 RETURNING name, coins`,
+        [em, delta],
+      );
+      if (!rows[0]) { socket.emit("adminCoinResult", { ok: false, message: "No account with that email." }); return; }
+      for (const [sid, p] of Object.entries(players)) {
+        if (p.email === em) { p.coins = rows[0].coins; io.to(sid).emit("coinUpdate", { coins: p.coins }); }
+      }
+      socket.emit("adminCoinResult", { ok: true, message: `${rows[0].name} now has ${Number(rows[0].coins).toLocaleString()} coins.` });
+    } catch (err) {
+      console.error("adminAdjustCoins failed:", err);
+      socket.emit("adminCoinResult", { ok: false, message: "Something went wrong — try again." });
+    }
+  });
+
   // ── Admin: activity log (paged, newest first) ─────────────────────────
   socket.on("adminLogGet", async (payload) => {
     if (!admins.has(socket.id)) return;
@@ -6124,6 +6158,7 @@ io.on("connection", (socket) => {
     const t = tradeBySocket.get(socket.id);
     if (t && t.state === "pending") clearTrade(t, "Trade cancelled — they left the office.");
     admins.delete(socket.id);
+    owners.delete(socket.id);
     _notifyAdmins();
   });
 });

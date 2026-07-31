@@ -2051,6 +2051,18 @@
           <button class="o-btn o-btn-reject" style="padding:8px 14px;" onclick="ownerResetPassword()">Reset</button>
         </div>
         <div id="op-reset-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+        <div id="op-owner-coins" style="display:none;margin-top:22px;border-top:1px solid #2a2a40;padding-top:16px;">
+          <h3>💰 Adjust Coins <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
+          <p style="font-size:12px;color:#888;margin:0 0 10px">Add or remove coins for any account (yours included). Positive adds, negative removes; balances never go below 0. Only visible when F8 is unlocked with the owner key.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input id="op-coin-email" type="email" placeholder="person@company.com" maxlength="80"
+                   style="flex:1;min-width:180px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+            <input id="op-coin-amount" type="number" step="100" placeholder="+5000 or -5000"
+                   style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+            <button class="o-btn o-btn-approve" onclick="ownerAdjustCoins()">Apply</button>
+          </div>
+          <div id="op-coin-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -7946,6 +7958,19 @@
       document.getElementById('op-log-next').disabled = d.page >= d.pages;
     });
 
+    window.ownerAdjustCoins = function () {
+      const email = document.getElementById('op-coin-email').value.trim();
+      const delta = Number(document.getElementById('op-coin-amount').value);
+      socket.emit('adminAdjustCoins', { email, delta });
+    };
+    socket.on('adminCoinResult', (d) => {
+      const m = document.getElementById('op-coin-msg');
+      if (!m || !d) return;
+      m.textContent = d.message || '';
+      m.style.color = d.ok ? '#7fd77f' : '#e77';
+      if (d.ok) document.getElementById('op-coin-amount').value = '';
+    });
+
     let _adminPollTimer = null;
     function openOwnerPanel() {
       _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); _opRenderPrices();
@@ -7961,7 +7986,9 @@
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('adminAuthOk', () => {
+    socket.on('adminAuthOk', (d) => {
+      // Owner key (OWNER_PASSWORD) unlocks the owner-only tools too.
+      document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
       // Silent path = automatic re-auth after a reconnect (pwd modal not open):
       // refresh the flags but do NOT pop the owner panel open mid-game.
       const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
