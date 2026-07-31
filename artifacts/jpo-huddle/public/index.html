@@ -6096,6 +6096,14 @@
       _bingoLobbyTimer = setInterval(tick, 500); tick();
     });
     _bgEl('bingo-join-btn').addEventListener('click', () => socket.emit('bingoJoin'));
+    // The panel sits over the game world — swallow pointer events so a daub
+    // click can't ALSO hit the avatar/canvas underneath (opened profiles etc).
+    for (const id of ['bingo-panel', 'bingo-lobby']) {
+      const el = _bgEl(id);
+      for (const ev of ['pointerdown', 'pointerup', 'click']) {
+        el.addEventListener(ev, (e) => e.stopPropagation());
+      }
+    }
     // "How to win" mini-diagrams: any row, any column, or a diagonal.
     (() => {
       const wrap = _bgEl('bingo-howto');
