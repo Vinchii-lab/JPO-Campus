@@ -3497,6 +3497,10 @@ io.on("connection", (socket) => {
     socket.emit("adminAuthOk");
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
     socket.emit("playerList",  _playerList());
+    // A refreshed host (silent re-auth) gets their bingo host controls back.
+    if (bingo && bingo.state === "active") {
+      socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, message: `Bingo is live (${bingo.mode} calling).` });
+    }
   });
 
   // ── Admin: live shop price control ───────────────────────────────────
@@ -3562,6 +3566,9 @@ io.on("connection", (socket) => {
     if (bingo && em && bingo.players.has(em)) {
       const bp = bingo.players.get(em);
       socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode });
+      if (admins.has(socket.id) && bingo.state === "active") {
+        socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, message: `Bingo is live (${bingo.mode} calling).` });
+      }
     } else if (bingo && bingo.state === "joining") {
       socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     }

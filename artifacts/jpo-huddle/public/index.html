@@ -1898,6 +1898,11 @@
       <div id="bingo-call-sub" style="text-align:center;font-size:11px;color:#8f83b8;margin-bottom:8px;">waiting for the game to start…</div>
       <div id="bingo-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;"></div>
       <button id="bingo-claim-btn" class="rps-btn primary" type="button" style="width:100%;margin-top:10px;">BINGO! 🎉</button>
+      <div id="bingo-host-row" style="display:none;margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
+        <div style="font-size:11px;font-weight:700;color:#ffd76a;margin-bottom:6px;">🎤 Host controls</div>
+        <button id="bingo-host-call" type="button" style="width:100%;padding:10px 0;border-radius:8px;border:1px solid #ffb400;background:#5a4300;color:#ffd76a;font-weight:800;font-size:14px;cursor:pointer;">📢 Call next ball</button>
+        <button id="bingo-host-switch" type="button" style="width:100%;margin-top:6px;padding:6px 0;border-radius:8px;border:1px solid #4a3d78;background:#2b2250;color:#bba9ff;font-size:12px;cursor:pointer;">Switch to auto</button>
+      </div>
       <div style="margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
         <div style="font-size:11px;font-weight:700;color:#bba9ff;margin-bottom:6px;">How to win — complete any ONE line:</div>
         <div id="bingo-howto" style="display:flex;gap:10px;justify-content:center;align-items:center;"></div>
@@ -6002,7 +6007,19 @@
     // ── Office Bingo ────────────────────────────────────────────────────
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
-    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto';
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false;
+    // Host controls live IN the bingo panel (not just F8) for authed admins.
+    // An admin who didn't join still gets the panel with just the host row.
+    function _bingoHostRefresh() {
+      const show = _bingoActive && _adminAuthed;
+      document.getElementById('bingo-host-row').style.display = show ? 'block' : 'none';
+      if (show) {
+        document.getElementById('bingo-host-call').style.display = _bingoMode === 'manual' ? 'block' : 'none';
+        document.getElementById('bingo-host-switch').textContent = _bingoMode === 'manual' ? '🤖 Switch to auto-calling' : '🎤 Switch to manual (I call)';
+        document.getElementById('bingo-panel').style.display = 'block';
+      }
+      document.getElementById('bingo-claim-btn').style.display = _bingoCard ? 'block' : 'none';
+    }
     let _bingoLobbyTimer = null;
     const _bgEl = (id) => document.getElementById(id);
     function ownerStartBingo() {
@@ -6019,17 +6036,20 @@
       const msg = _bgEl('op-bingo-msg');
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
       msg.textContent = message || (ok ? 'Done.' : 'Failed.');
-      if (mode) _bingoAdminMode = mode;
-      // Host controls show whenever a game is live in manual mode.
-      _bgEl('op-bingo-host').style.display = (active && _bingoAdminMode === 'manual') ? 'flex' : 'none';
+      if (mode) { _bingoAdminMode = mode; _bingoMode = mode; }
+      if (active) _bingoActive = true;
+      // F8 host controls (mirror of the in-panel ones)
+      _bgEl('op-bingo-host').style.display = active ? 'flex' : 'none';
       _bgEl('op-bingo-switch').textContent = _bingoAdminMode === 'manual' ? 'Switch to auto' : 'Switch to manual';
-      if (active && _bingoAdminMode === 'auto') _bgEl('op-bingo-host').style.display = 'flex';   // keep the switch visible mid-game
+      _bingoHostRefresh();
     });
     function _bingoHideAll() {
       _bgEl('bingo-lobby').style.display = 'none';
       _bgEl('bingo-panel').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
+      _bingoActive = false;
+      document.getElementById('bingo-host-row').style.display = 'none';
     }
     function _bingoRenderGrid() {
       const grid = _bgEl('bingo-grid');
@@ -6104,18 +6124,25 @@
       _bgEl('bingo-call-sub').textContent = state === 'active'
         ? `call ${_bingoCalled.length}/75 — click your numbers!` : "you're in! waiting for the game to start…";
       _bgEl('bingo-called-list').textContent = _bingoCalled.length ? `Called: ${_bingoCalled.join(', ')}` : '';
+      if (state === 'active') _bingoActive = true;
       _bingoRenderGrid();
+      _bingoHostRefresh();
     });
     socket.on('bingoStart', ({ playerCount, mode } = {}) => {
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bingoActive = true; _bingoMode = mode || _bingoMode;
       if (_bingoCard) {
-        _bingoState = 'active'; _bingoMode = mode || _bingoMode;
+        _bingoState = 'active';
         _bgEl('bingo-call-sub').textContent = _bingoMode === 'manual'
           ? `${playerCount} playing — the host is calling the balls!`
           : `${playerCount} playing — click your numbers as they're called!`;
         _rpsToast('🎱 Bingo is ON — watch the calls!');
+      } else if (_adminAuthed) {
+        // hosting without playing: open the panel with just the host controls
+        _bgEl('bingo-call-sub').textContent = `${playerCount} playing — you're hosting!`;
       }
+      _bingoHostRefresh();
     });
     socket.on('bingoCall', ({ n, letter, count } = {}) => {
       if (!_bingoCard) return;
@@ -6127,6 +6154,8 @@
     socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
     socket.on('bingoError', ({ message } = {}) => { if (message) _rpsToast(`🎱 ${message}`); });
     _bgEl('bingo-claim-btn').addEventListener('click', () => socket.emit('bingoClaim'));
+    _bgEl('bingo-host-call').addEventListener('click', () => socket.emit('adminBingoCall'));
+    _bgEl('bingo-host-switch').addEventListener('click', () => ownerBingoSwitch());
     socket.on('bingoOver', ({ gameId, message } = {}) => {
       // A late "game over" from an OLD game (e.g. a slow payout) must never
       // tear down the UI of a newer game we've since joined.
