@@ -6167,6 +6167,11 @@
       _bgEl('op-bingo-switch').textContent = _bingoAdminMode === 'manual' ? 'Switch to auto' : 'Switch to manual';
       _bingoHostRefresh();
     });
+    // Avatar-click gates check this so profile cards / whisper menus can't
+    // layer on top of an active bingo lobby or card.
+    window._bingoUiOpen = () =>
+      _bgEl('bingo-lobby').style.display !== 'none' ||
+      _bgEl('bingo-panel').style.display !== 'none';
     function _bingoHideAll() {
       _bgEl('bingo-lobby').style.display = 'none';
       _bgEl('bingo-panel').style.display = 'none';
@@ -8904,6 +8909,7 @@
         this.player.on('pointerdown', () => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
               && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !window._bingoUiOpen?.()
               && !document.getElementById('shop-modal').classList.contains('open')) {
             window._openProfile(socket.id);
           }
@@ -9656,6 +9662,7 @@
         sprite.on('pointerdown', (pointer) => {
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
               && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !window._bingoUiOpen?.()
               && !document.getElementById('shop-modal').classList.contains('open')) {
             const ev = pointer && pointer.event;
             window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
