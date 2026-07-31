@@ -240,6 +240,73 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
 
+// ── Admin broadcast banner (ephemeral, per server process) ────────────────────
+// One office-wide banner every client shows until THEY dismiss it (dismissal is
+// client-side by banner id). Late logins still see the current banner.
+let adminBanner = null;   // { id, text, ts } | null
+let bannerSeq = 0;
+
+// ── Office Bingo (admin-triggered event, ephemeral) ──────────────────────────
+// One game at a time. Players keyed by EMAIL so a refresh mid-game keeps the
+// same card. Server owns the cards, the calls, and the win check — the client
+// only daubs and claims. Prize is paid by the house (no entry fee).
+let bingo = null;   // { id, state:'joining'|'active', prize, players: Map(email -> {name, card, daubs:Set}), pool, called:[], joinTimer, callTimer }
+let bingoGameSeq = 0;   // every game gets a fresh id; late async emits from an old game carry it so clients can ignore them
+// Env-tunable so integration tests can run a fast game (prod stays 60s/4s).
+const BINGO_JOIN_MS = Number(process.env.BINGO_JOIN_MS) || 60_000;
+const BINGO_CALL_MS = Number(process.env.BINGO_CALL_MS) || 4_000;
+const BINGO_PRIZE_MIN = 100, BINGO_PRIZE_MAX = 100_000;
+function makeBingoCard() {
+  // Column-ranged like real bingo: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75.
+  // card[row][col]; center (2,2) is FREE = 0.
+  const cols = [];
+  for (let c = 0; c < 5; c++) {
+    const pool = Array.from({ length: 15 }, (_, i) => c * 15 + i + 1);
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    cols.push(pool.slice(0, 5));
+  }
+  const card = Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => cols[c][r]));
+  card[2][2] = 0;
+  return card;
+}
+function bingoHasLine(card, daubs) {
+  const hit = (r, c) => card[r][c] === 0 || daubs.has(card[r][c]);
+  for (let r = 0; r < 5; r++) if ([0,1,2,3,4].every((c) => hit(r, c))) return `row ${r + 1}`;
+  for (let c = 0; c < 5; c++) if ([0,1,2,3,4].every((r) => hit(r, c))) return `column ${c + 1}`;
+  if ([0,1,2,3,4].every((i) => hit(i, i))) return "diagonal";
+  if ([0,1,2,3,4].every((i) => hit(i, 4 - i))) return "diagonal";
+  return null;
+}
+function bingoStop() {
+  if (!bingo) return;
+  clearTimeout(bingo.joinTimer);
+  clearInterval(bingo.callTimer);
+  bingo = null;
+}
+// Join window over → start calling (needs 2+ players for a real game).
+function bingoBegin() {
+  if (!bingo || bingo.state !== "joining") return;
+  if (bingo.players.size < 2) {
+    io.emit("bingoOver", { gameId: bingo.id, winnerName: null, message: "Bingo cancelled — not enough players joined." });
+    bingoStop();
+    return;
+  }
+  bingo.state = "active";
+  io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize });
+  console.log(`BINGO active: ${bingo.players.size} players`);
+  bingo.callTimer = setInterval(() => {
+    if (!bingo || bingo.state !== "active") return;
+    const n = bingo.pool.shift();
+    if (n === undefined) {
+      io.emit("bingoOver", { gameId: bingo.id, winnerName: null, message: "All 75 numbers called — no bingo! The office keeps its coins." });
+      bingoStop();
+      return;
+    }
+    bingo.called.push(n);
+    io.emit("bingoCall", { gameId: bingo.id, n, letter: "BINGO"[Math.floor((n - 1) / 15)], count: bingo.called.length });
+  }, BINGO_CALL_MS);
+}
+
 // email → { oldId, name, x, y, dir, timer }. A gracefully-disconnected player is
 // parked here for GRACE_MS so a quick refresh / network blip resumes the SAME
 // session without the avatar vanishing for everyone else. The frozen sprite (still
@@ -3453,6 +3520,133 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("adminSetPrice failed:", err);
       socket.emit("adminPriceResult", { ok: false, message: "Saving the price failed — try again." });
+    }
+  });
+
+  // ── Admin: office-wide banner ─────────────────────────────────────────
+  // Set = replaces the current banner on every screen (until each person
+  // dismisses it); empty text = clear it everywhere.
+  socket.on("adminBanner", (payload) => {
+    if (!admins.has(socket.id)) return;
+    const text = String(payload?.text ?? "").trim().slice(0, 300);
+    if (!text) {
+      adminBanner = null;
+      io.emit("bannerUpdate", { banner: null });
+      socket.emit("adminPriceResult", { ok: true, message: "Banner cleared." });
+      console.log("ADMIN banner cleared");
+      return;
+    }
+    adminBanner = { id: ++bannerSeq, text, ts: Date.now() };
+    io.emit("bannerUpdate", { banner: adminBanner });
+    socket.emit("adminPriceResult", { ok: true, message: "Banner is up on every screen." });
+    console.log(`ADMIN banner: ${text.slice(0, 60)}`);
+  });
+
+  // Client asks for current office state on (re)connect: banner + a bingo
+  // card resync if their email is already in the running game.
+  socket.on("uiSync", () => {
+    if (!takeToken(profileBucket)) return;   // cheap, but don't let a hacked client turn it into a broadcast pump
+    socket.emit("bannerUpdate", { banner: adminBanner });
+    const em = players[socket.id]?.email;
+    if (bingo && em && bingo.players.has(em)) {
+      const bp = bingo.players.get(em);
+      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state });
+    } else if (bingo && bingo.state === "joining") {
+      socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
+    }
+  });
+
+  // ── Admin: Office Bingo ───────────────────────────────────────────────
+  socket.on("adminBingoStart", (payload) => {
+    if (!admins.has(socket.id)) return;
+    if (bingo) { socket.emit("adminPriceResult", { ok: false, message: "A bingo game is already running." }); return; }
+    if (round) { socket.emit("adminPriceResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
+    const prize = Math.round(Number(payload?.prize));
+    if (!Number.isSafeInteger(prize) || prize < BINGO_PRIZE_MIN || prize > BINGO_PRIZE_MAX) {
+      socket.emit("adminPriceResult", { ok: false, message: `Prize must be ${BINGO_PRIZE_MIN}–${BINGO_PRIZE_MAX.toLocaleString()} coins.` });
+      return;
+    }
+    const pool = Array.from({ length: 75 }, (_, i) => i + 1);
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    bingo = {
+      id: ++bingoGameSeq, state: "joining", prize, players: new Map(), pool, called: [],
+      joinDeadline: Date.now() + BINGO_JOIN_MS,
+      joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,
+    };
+    io.emit("bingoLobby", { gameId: bingo.id, prize, msLeft: BINGO_JOIN_MS });
+    socket.emit("adminPriceResult", { ok: true, message: `Bingo announced — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
+    console.log(`ADMIN bingo start: prize ${prize}`);
+  });
+  socket.on("adminBingoCancel", () => {
+    if (!admins.has(socket.id) || !bingo) return;
+    const gameId = bingo.id;
+    bingoStop();
+    io.emit("bingoOver", { gameId, winnerName: null, message: "Bingo was cancelled by the office." });
+    socket.emit("adminPriceResult", { ok: true, message: "Bingo cancelled." });
+    console.log("ADMIN bingo cancelled");
+  });
+
+  socket.on("bingoJoin", () => {
+    const p = players[socket.id];
+    if (!p?.email || !bingo || bingo.state !== "joining") return;
+    if (!takeToken(interactBucket)) return;
+    if (bingo.players.has(p.email)) return;
+    const card = makeBingoCard();
+    bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
+    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining" });
+    console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
+  });
+
+  // Manual daub only — no auto-marking. A daub must be a number that's on
+  // YOUR card and has actually been called.
+  socket.on("bingoDaub", (payload) => {
+    const p = players[socket.id];
+    const em = p?.email;
+    if (!em || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
+    const n = Math.round(Number(payload?.n));
+    if (!Number.isSafeInteger(n)) return;
+    const bp = bingo.players.get(em);
+    if (!bingo.called.includes(n) || !bp.card.some((row) => row.includes(n))) return;
+    bp.daubs.add(n);
+    socket.emit("bingoDaubOk", { n });
+  });
+
+  socket.on("bingoClaim", async () => {
+    const p = players[socket.id];
+    const em = p?.email;
+    if (!em || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
+    if (!takeToken(interactBucket)) return;
+    const bp = bingo.players.get(em);
+    const line = bingoHasLine(bp.card, bp.daubs);
+    if (!line) { socket.emit("bingoError", { message: "Not a bingo yet — keep daubing!" }); return; }
+    // Winner! Freeze the game synchronously (no await before bingoStop) so a
+    // racing second claim loses. Capture what we need, then pay, THEN announce
+    // — the announcement must reflect what actually happened in the DB, and it
+    // carries the gameId so it can never clobber a newer game's UI.
+    const { prize, id: gameId } = bingo;
+    const winnerName = bp.name;
+    bingoStop();
+    let paid = false;
+    for (let attempt = 0; attempt < 2 && !paid; attempt++) {
+      try {
+        const { rows } = await pool.query(
+          `UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`,
+          [em, prize]);
+        if (rows.length) {
+          paid = true;
+          if (players[socket.id]?.email === em) {
+            players[socket.id].coins = rows[0].coins;
+            socket.emit("coinUpdate", { coins: rows[0].coins });
+          }
+        }
+      } catch (err) { console.error(`bingo payout attempt ${attempt + 1} failed:`, err); }
+    }
+    if (paid) {
+      io.emit("bingoOver", { gameId, winnerName, prize, line, message: `🎉 BINGO! ${winnerName} wins ${prize.toLocaleString()} coins (${line})!` });
+      console.log(`BINGO winner: ${winnerName} +${prize} (${line})`);
+    } else {
+      io.emit("bingoOver", { gameId, winnerName: null, message: `${winnerName} hit a valid bingo, but the prize payout failed — an admin needs to award the ${prize.toLocaleString()} coins manually.` });
+      console.error(`BINGO PAYOUT FAILED for ${em} (+${prize}) — award manually`);
     }
   });
 

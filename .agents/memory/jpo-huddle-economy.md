@@ -21,3 +21,10 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - Server catalogs are plain id→price maps with NO display names — use itemLabel() to prettify ids for toasts.
 - Grace-window toast trap: a just-disconnected player lingers in `players` ~10s; any "notify or queue mail" helper must require `io.sockets.sockets.has(id)` or the message dies on a dead socket. Disconnect flush only writes x/y/dir/anim, and all coin writes are delta-based (`coins = coins ± n`) — safe against overwriting refunds.
 - Integration-test gotcha: the server pushes a fresh marketState after every mutation and pings sellers on new bids — always drain() event queues before re-requesting a snapshot or awaiting a specific storeOk, or stale items race the test ahead.
+
+## Office Bingo + admin banner
+- Bingo is ephemeral in-memory, keyed by EMAIL (refresh-safe); every game gets a monotonic gameId carried on all bingo events — clients ignore `bingoOver` with an older id, so a slow async payout can never tear down a newer game's UI.
+- Winner claim: freeze game synchronously (bingoStop before any await), pay via guarded delta SQL with one retry, and only announce the win AFTER the DB row returns; failure announces an explicit "admin must award manually" message instead of a fake success.
+- `uiSync` (client emits on approved) re-serves banner + bingo card; it is bucket-throttled. Bingo start is blocked while a lights-out round is running.
+- Test timers are env-tunable (BINGO_JOIN_MS/BINGO_CALL_MS); tests/economy/bingo.mjs spawns a THROWAWAY server on its own port with fast timers instead of hitting the dev server.
+- Banner is one in-memory {id,text}; dismissal is client-side localStorage by banner id, so a new post re-shows for everyone.

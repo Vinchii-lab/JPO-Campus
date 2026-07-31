@@ -1871,6 +1871,37 @@
     </div>
   </div>
 
+  <!-- ── Admin office banner (stays until dismissed) ── -->
+  <div id="admin-banner" style="display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:8400;max-width:min(560px,92vw);background:#2b2140;color:#f1eaff;border:1px solid #7c5cff;border-radius:12px;padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.45);display:none;align-items:flex-start;gap:10px;font-size:14px;line-height:1.4;">
+    <span style="flex:0 0 auto;">📣</span>
+    <span id="admin-banner-text" style="flex:1;white-space:pre-wrap;word-break:break-word;"></span>
+    <button id="admin-banner-x" style="flex:0 0 auto;background:none;border:none;color:#bba9ff;font-size:16px;cursor:pointer;padding:0 2px;">✕</button>
+  </div>
+
+  <!-- ── Bingo join card ── -->
+  <div id="bingo-lobby" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8300;background:#1d1733;color:#f1eaff;border:1px solid #ffb400;border-radius:14px;padding:14px 18px;box-shadow:0 8px 28px rgba(0,0,0,.5);text-align:center;">
+    <div style="font-size:16px;font-weight:700;">🎱 OFFICE BINGO!</div>
+    <div id="bingo-lobby-info" style="font-size:13px;margin:6px 0 10px;color:#cfc4f5;"></div>
+    <button id="bingo-join-btn" class="rps-btn primary" type="button">Join — it's free!</button>
+  </div>
+
+  <!-- ── Bingo card panel ── -->
+  <div id="bingo-panel" style="display:none;position:fixed;right:12px;top:64px;z-index:7500;width:246px;background:#1d1733;color:#f1eaff;border:1px solid #4a3d78;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:13px;">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #352a5c;">
+      <span style="font-weight:700;">🎱 BINGO</span>
+      <span id="bingo-prize-label" style="color:#ffd76a;font-size:12px;"></span>
+      <span style="flex:1"></span>
+      <button id="bingo-min-btn" style="background:none;border:none;color:#bba9ff;cursor:pointer;font-size:14px;">▾</button>
+    </div>
+    <div id="bingo-body" style="padding:10px;">
+      <div id="bingo-call" style="text-align:center;font-size:26px;font-weight:800;color:#ffd76a;min-height:34px;">—</div>
+      <div id="bingo-call-sub" style="text-align:center;font-size:11px;color:#8f83b8;margin-bottom:8px;">waiting for the game to start…</div>
+      <div id="bingo-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;"></div>
+      <button id="bingo-claim-btn" class="rps-btn primary" type="button" style="width:100%;margin-top:10px;">BINGO! 🎉</button>
+      <div id="bingo-called-list" style="margin-top:8px;font-size:11px;color:#8f83b8;word-break:break-word;line-height:1.5;"></div>
+    </div>
+  </div>
+
   <!-- ── Owner password modal ── -->
   <div id="owner-pwd-modal">
     <div id="owner-pwd-card">
@@ -1927,6 +1958,27 @@
           <tbody id="op-price-tbody"></tbody>
         </table>
         <div id="op-price-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
+      <div class="owner-section">
+        <h3>📣 Office Banner</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Puts a message on EVERY screen until each person dismisses it. Posting a new one replaces the old one. Late logins see it too.</p>
+        <textarea id="op-banner-input" class="op-ann-input" rows="2" maxlength="300" placeholder="e.g. Bingo in 5 minutes at the pantry! 🎱"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="o-btn o-btn-approve" onclick="ownerPostBanner()">Post banner</button>
+          <button class="o-btn o-btn-reject" onclick="ownerClearBanner()">Clear banner</button>
+        </div>
+        <div id="op-banner-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
+      <div class="owner-section">
+        <h3>🎱 Office Bingo</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, numbers call automatically, first valid line (row / column / diagonal) wins the prize — paid by the house, no entry fee. Needs at least 2 players.</p>
+        <div style="display:flex;gap:8px;">
+          <input id="op-bingo-prize" type="number" min="100" max="100000" step="100" value="2000" placeholder="Prize (coins)"
+                 style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-approve" onclick="ownerStartBingo()">Start Bingo</button>
+          <button class="o-btn o-btn-reject" onclick="socket.emit('adminBingoCancel')">Cancel game</button>
+        </div>
+        <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
       <div class="owner-section">
         <h3>Reset a Password</h3>
@@ -3403,6 +3455,7 @@
       document.body.classList.add('playing');
       document.getElementById('coin-hud').classList.add('visible');
       document.getElementById('coin-count').textContent = _playerCoins;
+      socket.emit('uiSync');   // office banner + bingo card resync (fresh login OR blip resume)
 
       const scene = window._gameScene;
       if (scene) scene._onApproved(data);
@@ -5898,6 +5951,139 @@
     // Won an auction while away (or mid-session): adopt the fresh collection.
     socket.on('collectionUpdate', ({ cosmetics } = {}) => {
       if (Array.isArray(cosmetics)) { _ownedItems = cosmetics; _refreshShopUI(); }
+    });
+
+    // ── Admin office banner ─────────────────────────────────────────────
+    // Shows until THIS person dismisses it (per banner id, survives refresh).
+    let _bannerId = null;
+    function _renderBanner(banner) {
+      const el = document.getElementById('admin-banner');
+      if (!banner || String(localStorage.getItem('jpo_banner_dismissed')) === String(banner.id)) {
+        el.style.display = 'none'; _bannerId = null; return;
+      }
+      _bannerId = banner.id;
+      document.getElementById('admin-banner-text').textContent = banner.text;
+      el.style.display = 'flex';
+    }
+    socket.on('bannerUpdate', ({ banner } = {}) => _renderBanner(banner));
+    document.getElementById('admin-banner-x').addEventListener('click', () => {
+      if (_bannerId != null) localStorage.setItem('jpo_banner_dismissed', String(_bannerId));
+      document.getElementById('admin-banner').style.display = 'none';
+    });
+    function ownerPostBanner() {
+      const text = document.getElementById('op-banner-input').value.trim();
+      if (!text) { document.getElementById('op-banner-msg').textContent = 'Type a message first.'; return; }
+      socket.emit('adminBanner', { text });
+      document.getElementById('op-banner-msg').textContent = 'Posted!';
+    }
+    function ownerClearBanner() {
+      socket.emit('adminBanner', { text: '' });
+      document.getElementById('op-banner-input').value = '';
+      document.getElementById('op-banner-msg').textContent = 'Cleared.';
+    }
+    window.ownerPostBanner = ownerPostBanner; window.ownerClearBanner = ownerClearBanner;
+    const _bnIn = document.getElementById('op-banner-input');
+    _bnIn.addEventListener('keydown', (e) => e.stopPropagation());
+    _bnIn.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+    _bnIn.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+
+    // ── Office Bingo ────────────────────────────────────────────────────
+    // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
+    // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null;
+    let _bingoLobbyTimer = null;
+    const _bgEl = (id) => document.getElementById(id);
+    function ownerStartBingo() {
+      const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
+      socket.emit('adminBingoStart', { prize });
+    }
+    window.ownerStartBingo = ownerStartBingo;
+    function _bingoHideAll() {
+      _bgEl('bingo-lobby').style.display = 'none';
+      _bgEl('bingo-panel').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
+    }
+    function _bingoRenderGrid() {
+      const grid = _bgEl('bingo-grid');
+      grid.replaceChildren();
+      for (const L of 'BINGO'.split('')) {
+        const h = document.createElement('div');
+        h.textContent = L;
+        h.style.cssText = 'text-align:center;font-weight:800;color:#7c5cff;font-size:12px;';
+        grid.appendChild(h);
+      }
+      if (!_bingoCard) return;
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+        const n = _bingoCard[r][c];
+        const b = document.createElement('button');
+        const daubed = n === 0 || _bingoDaubs.has(n);
+        b.textContent = n === 0 ? '★' : n;
+        b.style.cssText = 'padding:6px 0;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid ' +
+          (daubed ? '#ffb400;background:#5a4300;color:#ffd76a;font-weight:700;' : '#4a3d78;background:#2b2250;color:#e8e2ff;');
+        if (n !== 0 && !daubed) b.onclick = () => socket.emit('bingoDaub', { n });
+        grid.appendChild(b);
+      }
+    }
+    socket.on('bingoLobby', ({ gameId, prize, msLeft } = {}) => {
+      if (_bingoCard) return;   // already joined (resync)
+      _bingoGameId = gameId ?? _bingoGameId;
+      _bgEl('bingo-lobby').style.display = 'block';
+      let deadline = Date.now() + (msLeft ?? 60000);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _bgEl('bingo-lobby-info').textContent = `Prize: ${(prize ?? 0).toLocaleString()} coins • starts in ${s}s`;
+        if (s <= 0) { clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null; _bgEl('bingo-lobby').style.display = 'none'; }
+      };
+      clearInterval(_bingoLobbyTimer);
+      _bingoLobbyTimer = setInterval(tick, 500); tick();
+    });
+    _bgEl('bingo-join-btn').addEventListener('click', () => socket.emit('bingoJoin'));
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state } = {}) => {
+      _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
+      _bingoGameId = gameId ?? _bingoGameId;
+      _bgEl('bingo-lobby').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bgEl('bingo-prize-label').textContent = `${(prize ?? 0).toLocaleString()} 🪙`;
+      _bgEl('bingo-panel').style.display = 'block';
+      const last = _bingoCalled[_bingoCalled.length - 1];
+      _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
+      _bgEl('bingo-call-sub').textContent = state === 'active'
+        ? `call ${_bingoCalled.length}/75 — click your numbers!` : "you're in! waiting for the game to start…";
+      _bgEl('bingo-called-list').textContent = _bingoCalled.length ? `Called: ${_bingoCalled.join(', ')}` : '';
+      _bingoRenderGrid();
+    });
+    socket.on('bingoStart', ({ playerCount } = {}) => {
+      _bgEl('bingo-lobby').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      if (_bingoCard) {
+        _bingoState = 'active';
+        _bgEl('bingo-call-sub').textContent = `${playerCount} playing — click your numbers as they're called!`;
+        _rpsToast('🎱 Bingo is ON — watch the calls!');
+      }
+    });
+    socket.on('bingoCall', ({ n, letter, count } = {}) => {
+      if (!_bingoCard) return;
+      _bingoCalled.push(n);
+      _bgEl('bingo-call').textContent = `${letter}-${n}`;
+      _bgEl('bingo-call-sub').textContent = `call ${count}/75 — click your numbers!`;
+      _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
+    });
+    socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
+    socket.on('bingoError', ({ message } = {}) => { if (message) _rpsToast(`🎱 ${message}`); });
+    _bgEl('bingo-claim-btn').addEventListener('click', () => socket.emit('bingoClaim'));
+    socket.on('bingoOver', ({ gameId, message } = {}) => {
+      // A late "game over" from an OLD game (e.g. a slow payout) must never
+      // tear down the UI of a newer game we've since joined.
+      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      if (message) _rpsToast(`🎱 ${message}`);
+      _bingoHideAll();
+    });
+    _bgEl('bingo-min-btn').addEventListener('click', () => {
+      const body = _bgEl('bingo-body');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? 'block' : 'none';
+      _bgEl('bingo-min-btn').textContent = hidden ? '▾' : '▸';
     });
 
     function _mkLine(txt, css) {
