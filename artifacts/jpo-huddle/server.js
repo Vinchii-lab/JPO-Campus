@@ -1297,7 +1297,7 @@ const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 // Department allowlist — MUST stay identical (same values, same order) to the
 // client's DEPARTMENTS array in public/index.html. '' = not set (legacy
 // accounts pick one, once, from their own profile card).
-const DEPARTMENTS = ["HR", "IT", "Operations", "Front Desk", "CMA", "QA", "L&D", "Claims", "Accounting"];
+const DEPARTMENTS = ["HR", "IT", "Operations", "Front Desk", "CMA", "QA", "L&D", "Claims", "Accounting", "Developer"];
 
 // ── Huddles' daily connection missions ───────────────────────────────────────
 // One mission per player per UTC day, aimed at creating NEW connections
