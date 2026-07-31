@@ -1898,6 +1898,10 @@
       <div id="bingo-call-sub" style="text-align:center;font-size:11px;color:#8f83b8;margin-bottom:8px;">waiting for the game to start…</div>
       <div id="bingo-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;"></div>
       <button id="bingo-claim-btn" class="rps-btn primary" type="button" style="width:100%;margin-top:10px;">BINGO! 🎉</button>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
+        <div style="font-size:11px;font-weight:700;color:#bba9ff;margin-bottom:6px;">How to win — complete any ONE line:</div>
+        <div id="bingo-howto" style="display:flex;gap:10px;justify-content:center;align-items:center;"></div>
+      </div>
       <div id="bingo-called-list" style="margin-top:8px;font-size:11px;color:#8f83b8;word-break:break-word;line-height:1.5;"></div>
     </div>
   </div>
@@ -1971,12 +1975,20 @@
       </div>
       <div class="owner-section">
         <h3>🎱 Office Bingo</h3>
-        <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, numbers call automatically, first valid line (row / column / diagonal) wins the prize — paid by the house, no entry fee. Needs at least 2 players.</p>
-        <div style="display:flex;gap:8px;">
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, first valid line (row / column / diagonal) wins the prize — paid by the house, no entry fee. Needs at least 2 players. Pick how balls get called: automatic, or you deal them like a real host. You can switch anytime mid-game.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input id="op-bingo-prize" type="number" min="100" max="100000" step="100" value="2000" placeholder="Prize (coins)"
-                 style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+                 style="width:120px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <select id="op-bingo-mode" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+            <option value="auto">🤖 Auto-call (every 4s)</option>
+            <option value="manual">🎤 I call the balls</option>
+          </select>
           <button class="o-btn o-btn-approve" onclick="ownerStartBingo()">Start Bingo</button>
           <button class="o-btn o-btn-reject" onclick="socket.emit('adminBingoCancel')">Cancel game</button>
+        </div>
+        <div id="op-bingo-host" style="display:none;gap:8px;margin-top:10px;">
+          <button class="o-btn o-btn-approve" style="font-size:15px;padding:10px 16px;" onclick="socket.emit('adminBingoCall')">📢 Call next ball</button>
+          <button class="o-btn" id="op-bingo-switch" onclick="ownerBingoSwitch()">Switch to auto</button>
         </div>
         <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
@@ -5990,14 +6002,29 @@
     // ── Office Bingo ────────────────────────────────────────────────────
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
-    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null;
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto';
     let _bingoLobbyTimer = null;
     const _bgEl = (id) => document.getElementById(id);
     function ownerStartBingo() {
       const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
-      socket.emit('adminBingoStart', { prize });
+      socket.emit('adminBingoStart', { prize, mode: _bgEl('op-bingo-mode').value });
     }
     window.ownerStartBingo = ownerStartBingo;
+    let _bingoAdminMode = 'auto';
+    function ownerBingoSwitch() {
+      socket.emit('adminBingoMode', { mode: _bingoAdminMode === 'manual' ? 'auto' : 'manual' });
+    }
+    window.ownerBingoSwitch = ownerBingoSwitch;
+    socket.on('adminBingoResult', ({ ok, mode, active, message } = {}) => {
+      const msg = _bgEl('op-bingo-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (mode) _bingoAdminMode = mode;
+      // Host controls show whenever a game is live in manual mode.
+      _bgEl('op-bingo-host').style.display = (active && _bingoAdminMode === 'manual') ? 'flex' : 'none';
+      _bgEl('op-bingo-switch').textContent = _bingoAdminMode === 'manual' ? 'Switch to auto' : 'Switch to manual';
+      if (active && _bingoAdminMode === 'auto') _bgEl('op-bingo-host').style.display = 'flex';   // keep the switch visible mid-game
+    });
     function _bingoHideAll() {
       _bgEl('bingo-lobby').style.display = 'none';
       _bgEl('bingo-panel').style.display = 'none';
@@ -6039,8 +6066,34 @@
       _bingoLobbyTimer = setInterval(tick, 500); tick();
     });
     _bgEl('bingo-join-btn').addEventListener('click', () => socket.emit('bingoJoin'));
-    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state } = {}) => {
+    // "How to win" mini-diagrams: any row, any column, or a diagonal.
+    (() => {
+      const wrap = _bgEl('bingo-howto');
+      const patterns = [
+        { label: 'row',      hit: (r, c) => r === 2 },
+        { label: 'column',   hit: (r, c) => c === 2 },
+        { label: 'diagonal', hit: (r, c) => r === c },
+      ];
+      for (const p of patterns) {
+        const box = document.createElement('div');
+        box.style.cssText = 'text-align:center;';
+        const g = document.createElement('div');
+        g.style.cssText = 'display:grid;grid-template-columns:repeat(5,7px);gap:2px;justify-content:center;';
+        for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+          const d = document.createElement('div');
+          d.style.cssText = `width:7px;height:7px;border-radius:2px;background:${p.hit(r, c) ? '#ffb400' : '#3a2f63'};`;
+          g.appendChild(d);
+        }
+        const l = document.createElement('div');
+        l.textContent = p.label;
+        l.style.cssText = 'font-size:9px;color:#8f83b8;margin-top:3px;';
+        box.appendChild(g); box.appendChild(l);
+        wrap.appendChild(box);
+      }
+    })();
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode } = {}) => {
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
+      _bingoMode = mode || _bingoMode;
       _bingoGameId = gameId ?? _bingoGameId;
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
@@ -6053,12 +6106,14 @@
       _bgEl('bingo-called-list').textContent = _bingoCalled.length ? `Called: ${_bingoCalled.join(', ')}` : '';
       _bingoRenderGrid();
     });
-    socket.on('bingoStart', ({ playerCount } = {}) => {
+    socket.on('bingoStart', ({ playerCount, mode } = {}) => {
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       if (_bingoCard) {
-        _bingoState = 'active';
-        _bgEl('bingo-call-sub').textContent = `${playerCount} playing — click your numbers as they're called!`;
+        _bingoState = 'active'; _bingoMode = mode || _bingoMode;
+        _bgEl('bingo-call-sub').textContent = _bingoMode === 'manual'
+          ? `${playerCount} playing — the host is calling the balls!`
+          : `${playerCount} playing — click your numbers as they're called!`;
         _rpsToast('🎱 Bingo is ON — watch the calls!');
       }
     });
@@ -6078,6 +6133,8 @@
       if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
       if (message) _rpsToast(`🎱 ${message}`);
       _bingoHideAll();
+      const host = document.getElementById('op-bingo-host');
+      if (host) host.style.display = 'none';   // game over → hide the admin host controls
     });
     _bgEl('bingo-min-btn').addEventListener('click', () => {
       const body = _bgEl('bingo-body');

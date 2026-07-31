@@ -81,7 +81,7 @@ try {
 
   const A = connect(E_A, "Admina", "adam"), B = connect(E_B, "Winnie", "bob"), C = connect(E_C, "Sleepy", "amelia");
   const aApr = queue(A.s, "approved"), bApr = queue(B.s, "approved"), cApr = queue(C.s, "approved");
-  const aAuth = queue(A.s, "adminAuthOk"), aRes = queue(A.s, "adminPriceResult");
+  const aAuth = queue(A.s, "adminAuthOk"), aRes = queue(A.s, "adminPriceResult"), aBg = queue(A.s, "adminBingoResult");
   const bBan = queue(B.s, "bannerUpdate"), cBan = queue(C.s, "bannerUpdate");
   const bLobby = queue(B.s, "bingoLobby"), cLobby = queue(C.s, "bingoLobby");
   const bCard = queue(B.s, "bingoCard"), cCard = queue(C.s, "bingoCard");
@@ -110,7 +110,7 @@ try {
 
   // ── bingo: not-enough-players round ──
   A.s.emit("adminBingoStart", { prize: 500 });
-  ok(/announced/.test((await aRes.next(8000, "bingo ack")).message), "bingo announced");
+  ok(/announced/.test((await aBg.next(8000, "bingo ack")).message), "bingo announced");
   await bLobby.next(8000, "B lobby");
   B.s.emit("bingoJoin");
   await bCard.next(8000, "B card (solo)");
@@ -120,15 +120,31 @@ try {
   // ── bingo: full game ──
   await sleep(300); cOver.drain(); bOver.drain();   // solo-round broadcast went to everyone
   const bPre = await coinsOf(E_B), cPre = await coinsOf(E_C);
-  A.s.emit("adminBingoStart", { prize: 500 });
-  await aRes.next(8000, "bingo2 ack");
+  A.s.emit("adminBingoStart", { prize: 500, mode: "manual" });
+  const ack2 = await aBg.next(8000, "bingo2 ack");
+  ok(/YOU call/.test(ack2.message) && ack2.mode === "manual", "manual (host) mode announced");
   await bLobby.next(8000, "B lobby 2"); await cLobby.next(8000, "C lobby 2");
   B.s.emit("bingoJoin"); C.s.emit("bingoJoin");
   const bc = await bCard.next(8000, "B card"); await cCard.next(8000, "C card");
   ok(Array.isArray(bc.card) && bc.card.length === 5 && bc.card[2][2] === 0, "card is 5x5 with a free center");
   const colOk = bc.card.every((row) => row.every((n, c) => n === 0 || (n > c * 15 && n <= (c + 1) * 15)));
   ok(colOk, "columns use real bingo ranges (B1-15 … O61-75)");
-  await bStart.next(8000, "game started");
+  const st = await bStart.next(8000, "game started");
+  ok(st.mode === "manual", "players told the host is calling");
+
+  // no auto balls in manual mode
+  const bCallQ = queue(B.s, "bingoCall");
+  await sleep(600);   // > 4 fast-call intervals — nothing should arrive
+  ok(bCallQ.items.length === 0, "manual mode: no balls until the host deals");
+  A.s.emit("adminBingoCall");
+  ok((await bCallQ.next(8000, "hosted ball")).n >= 1, "host-dealt ball reaches players");
+  const callAck = await aBg.next(8000, "call ack"); aBg.drain();
+  ok(/Called [BINGO]-?\d*/.test(callAck.message) || /Called/.test(callAck.message), "host sees what was called");
+  // a few more hand-dealt balls, then flip to auto for the rest
+  for (let i = 0; i < 5; i++) { A.s.emit("adminBingoCall"); await sleep(60); }
+  aBg.drain();
+  A.s.emit("adminBingoMode", { mode: "auto" });
+  ok(/Auto-calling ON/.test((await aBg.next(8000, "mode ack")).message), "mid-game switch to auto works");
 
   // false claim straight away
   B.s.emit("bingoClaim");
