@@ -1886,7 +1886,7 @@
   </div>
 
   <!-- ── Bingo card panel ── -->
-  <div id="bingo-panel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7500;width:320px;max-height:92vh;overflow-y:auto;background:#1d1733;color:#f1eaff;border:1px solid #4a3d78;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:13px;">
+  <div id="bingo-panel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7500;width:380px;max-height:92vh;overflow-y:auto;background:#1d1733;color:#f1eaff;border:1px solid #4a3d78;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:13px;">
     <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #352a5c;">
       <span style="font-weight:700;">🎱 BINGO</span>
       <span id="bingo-prize-label" style="color:#ffd76a;font-size:12px;"></span>
@@ -6076,7 +6076,7 @@
         const b = document.createElement('button');
         const daubed = n === 0 || _bingoDaubs.has(n);
         b.textContent = n === 0 ? '★' : n;
-        b.style.cssText = 'padding:10px 0;border-radius:6px;font-size:15px;cursor:pointer;border:1px solid ' +
+        b.style.cssText = 'padding:14px 0;border-radius:8px;font-size:18px;cursor:pointer;border:1px solid ' +
           (daubed ? '#ffb400;background:#5a4300;color:#ffd76a;font-weight:700;' : '#4a3d78;background:#2b2250;color:#e8e2ff;');
         if (n !== 0 && !daubed) b.onclick = () => socket.emit('bingoDaub', { n });
         grid.appendChild(b);
