@@ -1846,6 +1846,18 @@
           </div>
         </div>
         <button id="wardrobe-apply" class="buy-btn" onclick="applyOutfit()">Apply</button>
+        <!-- ── Avatar makeover: hair colour + base character. First change is
+             free, then AVATAR_PRICE coins (labels display-only — the server
+             enforces the real price). The name never changes. -->
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid #ddd;">
+          <div class="wardrobe-title" style="font-size:13px;">💇 Avatar makeover</div>
+          <div class="wardrobe-sub" id="avatar-price-sub"></div>
+          <div class="wardrobe-label">Character</div>
+          <div id="wardrobe-char" class="wardrobe-grid"></div>
+          <div class="wardrobe-label">Hair colour</div>
+          <div id="wardrobe-hair" class="wardrobe-grid"></div>
+          <button id="avatar-apply" class="buy-btn" onclick="applyAvatar()">Apply</button>
+        </div>
       </div>
       <div id="shop-pager">
         <button class="shop-page-btn" id="shop-page-prev" onclick="shopPage(-1)">‹</button>
@@ -3460,6 +3472,7 @@
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
       _playerItems    = data.items || {};
+      _avatarChanges  = data.avatarChanges ?? 0;
       _renderItemBar();
 
       const overlay = document.getElementById('join-overlay');
@@ -3745,6 +3758,19 @@
       window._gameScene?._applyLocalOutfit();
     });
 
+    // Avatar makeover confirmed: adopt the new character/hair and rebuild
+    // our own palette-swapped sheets (coinUpdate arrives separately).
+    socket.on('avatarSuccess', ({ character, hairIdx, avatarChanges } = {}) => {
+      _playerChar = character || _playerChar;
+      _playerHairIdx = hairIdx ?? _playerHairIdx;
+      _avatarChanges = avatarChanges ?? _avatarChanges;
+      _wardrobeCharSel = _playerChar; _wardrobeHairSel = _playerHairIdx;
+      _refreshShopUI();
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = 'New look! 💇';
+      window._gameScene?._applyLocalOutfit();
+    });
+
     // Someone (possibly on another screen) changed outfit: rebuild their
     // palette-swapped sheets. Self is handled by outfitSuccess above.
     socket.on('playerOutfitUpdate', (data) => {
@@ -3960,6 +3986,8 @@
     function openShop() {
       _wardrobeShirtSel = _playerShirtIdx;   // wardrobe picks start at what you're wearing
       _wardrobePantsSel = _playerPantsIdx;
+      _wardrobeHairSel  = _playerHairIdx;
+      _wardrobeCharSel  = _playerChar || 'adam';
       _refreshShopUI();
       document.getElementById('shop-msg').textContent = '';
       document.getElementById('shop-modal').classList.add('open');
@@ -4156,7 +4184,10 @@
     // real price. Selection is pending until Apply; openShop() resets it to
     // what you're currently wearing.
     const WARDROBE_PRICE = 25;
+    const AVATAR_PRICE = 100;   // display label only — server enforces the real price
     let _wardrobeShirtSel = 0, _wardrobePantsSel = 0;
+    let _wardrobeHairSel = 0, _wardrobeCharSel = 'adam';
+    let _avatarChanges = 0;   // how many makeovers this account has done (first is free)
     function _renderWardrobe() {
       const mk = (boxId, selIdx, curIdx, onPick) => {
         const box = document.getElementById(boxId);
@@ -4177,6 +4208,39 @@
       const noop = _wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx;
       btn.classList.toggle('poor', noop || _playerCoins < WARDROBE_PRICE);
       btn.textContent = noop ? 'Pick new colours' : `Apply — ${WARDROBE_PRICE} coins`;
+
+      // ── Avatar makeover: character buttons + hair swatches ──
+      const charBox = document.getElementById('wardrobe-char');
+      charBox.textContent = '';
+      CHARACTERS.forEach((ch) => {
+        const b = document.createElement('button');
+        b.className = 'cloth-swatch';
+        b.style.cssText = 'width:auto;padding:2px 8px;font-size:11px;text-transform:capitalize;';
+        b.textContent = ch;
+        b.title = ch === _playerChar ? `${ch} (current)` : ch;
+        if (ch === _wardrobeCharSel) b.classList.add('sel');
+        b.onclick = () => { _wardrobeCharSel = ch; _renderWardrobe(); };
+        charBox.append(b);
+      });
+      const hairBox = document.getElementById('wardrobe-hair');
+      hairBox.textContent = '';
+      HAIR_COLORS.forEach((c, i) => {
+        const b = document.createElement('button');
+        b.className = 'cloth-swatch';
+        b.title = i === _playerHairIdx ? `${c.label} (current)` : c.label;
+        if (c.css) b.style.background = c.css; else b.classList.add('orig');
+        if (i === _wardrobeHairSel) b.classList.add('sel');
+        b.onclick = () => { _wardrobeHairSel = i; _renderWardrobe(); };
+        hairBox.append(b);
+      });
+      const free = _avatarChanges === 0;
+      document.getElementById('avatar-price-sub').textContent = free
+        ? 'New hair colour or a whole new character — your FIRST makeover is free! (after that: ' + AVATAR_PRICE + ' coins)'
+        : `New hair colour or a whole new character — ${AVATAR_PRICE} coins per makeover`;
+      const abtn  = document.getElementById('avatar-apply');
+      const anoop = _wardrobeCharSel === _playerChar && _wardrobeHairSel === _playerHairIdx;
+      abtn.classList.toggle('poor', anoop || (!free && _playerCoins < AVATAR_PRICE));
+      abtn.textContent = anoop ? 'Pick a new look' : (free ? 'Apply — FREE (first makeover)' : `Apply — ${AVATAR_PRICE} coins`);
       _redrawWardrobePreview();
     }
     // Live wardrobe preview: same recolor pipeline as the registration
@@ -4187,11 +4251,11 @@
       if (!cv) return;
       const ctx = cv.getContext('2d');
       ctx.clearRect(0, 0, cv.width, cv.height);
-      const img = _charImages[_playerChar];
+      const img = _charImages[_wardrobeCharSel];
       if (!img) return;
       ctx.imageSmoothingEnabled = false;
-      const zones = _charZoneColors[_playerChar];
-      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_wardrobeShirtSel && !_wardrobePantsSel;
+      const zones = _charZoneColors[_wardrobeCharSel];
+      const noSwap = !_wardrobeHairSel && !_playerSkinIdx && !_wardrobeShirtSel && !_wardrobePantsSel;
       if (noSwap || !zones) {
         ctx.drawImage(img, 288, 0, 16, 32, 0, 0, cv.width, cv.height);
         return;
@@ -4201,7 +4265,7 @@
       const tc = tmp.getContext('2d');
       tc.drawImage(img, 288, 0, 16, 32, 0, 0, 16, 32);
       const id = tc.getImageData(0, 0, 16, 32);
-      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16);
+      _applySwaps(id.data, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16);
       tc.putImageData(id, 0, 0);
       ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, cv.width, cv.height);
     }
@@ -4212,6 +4276,11 @@
       if (_wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx) return;
       socket.emit('changeOutfit', { shirtIdx: _wardrobeShirtSel, pantsIdx: _wardrobePantsSel });
     }
+    function applyAvatar() {
+      if (_wardrobeCharSel === _playerChar && _wardrobeHairSel === _playerHairIdx) return;
+      socket.emit('changeAvatar', { character: _wardrobeCharSel, hairIdx: _wardrobeHairSel });
+    }
+    window.applyAvatar = applyAvatar;
     // Items bar: rows are generated once from the USABLES catalog (ids must
     // match the server's USABLE_ITEMS); a row shows only while you own that
     // item, and the whole bar hides when you own nothing usable.
@@ -9218,9 +9287,38 @@
       _applyRemoteOutfit(id, data) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
+        // Avatar makeovers can change the base character too — adopt it so
+        // the rebuilt texture (and all future anim keys) use the new sprite.
+        if (data.character) entry.character = data.character;
         const shirt = data.shirtIdx ?? data.clothesIdx ?? 0;
         const pants = data.pantsIdx ?? data.clothesIdx ?? 0;
         entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants);
+        // Re-render the CURRENT pose immediately: a stationary/seated player
+        // sends no playerMoved packets, so without this their old character
+        // would stay on screen until they next move.
+        const sp = entry.sprite, rdir = entry.lastDir || 'down';
+        if (entry.seated) {
+          const dp = this._deskPoseAt(sp.x, sp.y);
+          if (dp) {
+            const dsk = `sit_${entry.texKey}_down`;
+            if (dp.pose === 'sit3' && this.anims.exists(dsk)) {
+              sp.setFlipX(dp.flip === true);
+              sp.play(dsk);
+            } else {
+              sp.setTexture(entry.texKey);
+              sp.setFlipX(false); sp.anims.stop();
+              sp.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']);
+            }
+          } else {
+            const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
+            if (this.anims.exists(sk)) { sp.setFlipX(rdir === 'left'); sp.play(sk); }
+            else { sp.setFlipX(false); sp.anims.stop(); sp.setFrame(DIR_START[rdir]); }
+          }
+        } else {
+          sp.setFlipX(false); sp.anims.stop();
+          sp.setTexture(entry.texKey);
+          sp.setFrame(DIR_START[rdir]);
+        }
       }
 
       // ── Huddles the walking coach: rendered like a remote player (same

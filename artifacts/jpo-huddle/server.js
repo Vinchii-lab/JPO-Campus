@@ -564,6 +564,14 @@ async function marketSnapshot(myEmail) {
 // label is display-only. Indexes are validated against CLOTH_MAX.
 const WARDROBE_PRICE = 25;
 
+// Avatar makeover (hair colour and/or base character). First change is FREE,
+// every one after costs AVATAR_PRICE. Tracked per-account in
+// jpo_players.avatar_changes; the server is authoritative, client labels are
+// display-only. Name is untouchable here — identity stays locked to the login.
+const AVATAR_PRICE = 100;
+const AVATAR_CHARS = ["adam", "alex", "amelia", "bob"];
+const HAIR_MAX = 8;   // MUST equal client HAIR_COLORS.length - 1
+
 // ── Usable (consumable) items ────────────────────────────────────────────────
 // Unlike SHOP cosmetics (permanent, worn), these are bought in packs of `uses`
 // and deplete when used. Ownership lives in jpo_players.items (jsonb: itemId →
@@ -1624,6 +1632,7 @@ function rowToPlayerState(row) {
     pet:       row.equipped_pet || "",
     petAcc:    row.equipped_pet_acc || "",
     items:     row.items || {},
+    avatarChanges: row.avatar_changes ?? 0,
     isAnnouncer: row.is_announcer,
     department:  row.department || "",
     // Lifetime per-game win counts (jsonb) + free-text hobby, both shown on
@@ -1812,6 +1821,7 @@ async function restorePlayer(socket, row) {
     pet:       state.pet || "",
     petAcc:    state.petAcc || "",
     items:     state.items || {},
+    avatarChanges: state.avatarChanges ?? 0,
     x:         state.x,
     y:         state.y,
     // Restored pose: the client re-enters the seated pose from these instead of
@@ -5535,6 +5545,72 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("changeOutfit failed:", err); }
   });
 
+  // ── Avatar makeover: hair colour and/or base character ───────────────────
+  // First change per account is FREE, then AVATAR_PRICE each. Same money
+  // rules as changeOutfit: atomic coins-guard SQL, blocked mid-match and
+  // during a round, shares the buy-spam throttle. The name never changes —
+  // only the look. Both hair + character in one purchase = one charge.
+  socket.on("changeAvatar", async (payload) => {
+    const { character, hairIdx } = payload || {};
+    const p = players[socket.id];
+    if (!p) return;
+    if (!AVATAR_CHARS.includes(character)) return;
+    if (!Number.isInteger(hairIdx) || hairIdx < 0 || hairIdx > HAIR_MAX) return;
+    if (!takeToken(buyBucket)) return;
+    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no makeovers until the round ends!"); return; }
+    if (character === p.character && hairIdx === p.hairIdx) {
+      socket.emit("shopError", "That's already your look!");
+      return;
+    }
+
+    // Session-only players (no email): memory-only change. NO free first
+    // change here — "first free" is a per-ACCOUNT perk, and a session-only
+    // identity can be recreated endlessly to farm it. They always pay.
+    if (!p.email) {
+      const cost = AVATAR_PRICE;
+      if ((p.coins || 0) < cost) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins -= cost;
+      p.character = character;
+      p.hairIdx = hairIdx;
+      p.avatarChanges = (p.avatarChanges ?? 0) + 1;
+      socket.emit("coinUpdate",    { coins: p.coins });
+      socket.emit("avatarSuccess", { character, hairIdx, avatarChanges: p.avatarChanges });
+      io.emit("playerOutfitUpdate", {
+        id: socket.id, character, hairIdx,
+        skinIdx: p.skinIdx, shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
+      });
+      console.log(`${p.name} changed avatar (session-only)`);
+      return;
+    }
+
+    try {
+      // One statement: free when avatar_changes = 0, otherwise charge —
+      // and the coins guard uses the SAME row state, so no TOCTOU window.
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins - (CASE WHEN avatar_changes = 0 THEN 0 ELSE $2 END),
+                character = $3, hair_idx = $4,
+                avatar_changes = avatar_changes + 1, updated_at = now()
+          WHERE email = $1 AND coins >= (CASE WHEN avatar_changes = 0 THEN 0 ELSE $2 END)
+          RETURNING coins, character, hair_idx, avatar_changes`,
+        [p.email, AVATAR_PRICE, character, hairIdx],
+      );
+      if (rows.length === 0) { socket.emit("shopError", "Not enough coins!"); return; }
+      p.coins         = rows[0].coins;
+      p.character     = rows[0].character;
+      p.hairIdx       = rows[0].hair_idx;
+      p.avatarChanges = rows[0].avatar_changes;
+      socket.emit("coinUpdate",    { coins: p.coins });
+      socket.emit("avatarSuccess", { character: p.character, hairIdx: p.hairIdx, avatarChanges: p.avatarChanges });
+      io.emit("playerOutfitUpdate", {
+        id: socket.id, character: p.character, hairIdx: p.hairIdx,
+        skinIdx: p.skinIdx, shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
+      });
+      console.log(`${p.name} changed avatar (${p.character}, hair ${p.hairIdx}, change #${p.avatarChanges})`);
+    } catch (err) { console.error("changeAvatar failed:", err); }
+  });
+
   // ── Usable items: buy ────────────────────────────────────────────────
   // Adds a pack of `uses` to the player's item balance. Same money rules as
   // buyCosmetic: atomic coins-guard SQL for email-backed players, and NO
@@ -6074,6 +6150,7 @@ try {
 
 try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS dismissed boolean NOT NULL DEFAULT false`);
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS avatar_changes integer NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS wins jsonb NOT NULL DEFAULT '{}'::jsonb`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS hobby text NOT NULL DEFAULT ''`);
   // Pet accessories (July 2026): the worn accessory slot ('' = bare pet).

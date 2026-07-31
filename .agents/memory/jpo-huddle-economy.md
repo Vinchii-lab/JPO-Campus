@@ -28,3 +28,8 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - `uiSync` (client emits on approved) re-serves banner + bingo card; it is bucket-throttled. Bingo start is blocked while a lights-out round is running.
 - Test timers are env-tunable (BINGO_JOIN_MS/BINGO_CALL_MS); tests/economy/bingo.mjs spawns a THROWAWAY server on its own port with fast timers instead of hitting the dev server.
 - Banner is one in-memory {id,text}; dismissal is client-side localStorage by banner id, so a new post re-shows for everyone.
+
+## Avatar makeover (hair colour + base character)
+- First change per ACCOUNT free, then AVATAR_PRICE — priced in ONE guarded UPDATE using `CASE WHEN avatar_changes = 0` for both the debit and the coins guard (same row state = no TOCTOU).
+- Session-only (no-email) players ALWAYS pay: a memory-only "first free" perk can be farmed by recreating sessions.
+- Remote propagation gotcha: `playerMoved` only streams while moving — after changing another player's `entry.texKey`/`entry.character`, re-render their CURRENT pose immediately (seated/desk/idle branches), or a stationary player keeps the old sprite until they move.
