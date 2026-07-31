@@ -33,3 +33,7 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - First change per ACCOUNT free, then AVATAR_PRICE — priced in ONE guarded UPDATE using `CASE WHEN avatar_changes = 0` for both the debit and the coins guard (same row state = no TOCTOU).
 - Session-only (no-email) players ALWAYS pay: a memory-only "first free" perk can be farmed by recreating sessions.
 - Remote propagation gotcha: `playerMoved` only streams while moving — after changing another player's `entry.texKey`/`entry.character`, re-render their CURRENT pose immediately (seated/desk/idle branches), or a stationary player keeps the old sprite until they move.
+
+## Owner-key tier (OWNER_PASSWORD)
+- Second F8 password: `adminAuth` accepts ADMIN_PASSWORD (admins set) or OWNER_PASSWORD (admins + owners sets); `adminAuthOk` carries `{owner}` and the client shows owner-only tools from that flag. Coin adjust (`adminAdjustCoins`) is owner-gated and — per the owner's explicit request — deliberately NOT written to jpo_admin_log.
+- Coin edits must update BOTH the DB row and the in-memory player (memory wins on next save); never advise direct prod-DB coin edits.
