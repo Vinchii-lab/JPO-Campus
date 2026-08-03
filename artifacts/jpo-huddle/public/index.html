@@ -8754,7 +8754,18 @@
         // Prop cleanup hook for _phReset (which also runs on socket disconnect
         // — a server restart mid-round must not leave a ghost prop, a frozen
         // player, or a locked camera behind).
-        window._phKillProp = () => { if (this._phProp) { this._phProp.destroy(); this._phProp = null; } };
+        window._phKillProp = () => {
+          if (this._phProp) { this._phProp.destroy(); this._phProp = null; }
+          window._phSelfVis && window._phSelfVis(true);   // never leave the local avatar hidden
+        };
+        // Hider self-view: while disguised, the hider sees the PROP, not their
+        // avatar (tag/pet/cosmetic included) — same picture everyone else gets.
+        window._phSelfVis = (v) => {
+          this.player && this.player.setVisible(v);
+          this.localNameTag && this.localNameTag.setVisible(v);
+          this.localPet && this.localPet.setVisible && this.localPet.setVisible(v);
+          this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
+        };
         // phJoined: seeker teleports to the gathering base (server already
         // moved the authoritative position; body.reset keeps physics in sync).
         socket.on('phJoined', (d) => {
@@ -8785,7 +8796,7 @@
         socket.on('phHunt', (d) => {
           const ph = window._ph;
           ph.phase = 'hunting';
-          if (ph.role === 'hider') { ph.frozen = true; _phChip("🪑 Stay still — they're hunting!", d.endsAt); }
+          if (ph.role === 'hider') { ph.frozen = true; _phChip("🪑 Stay still — they're hunting!", d.endsAt); window._phSelfVis(false); }
           else if (ph.role === 'seeker') { ph.frozen = false; ph.zoomLock = true; this.cameras.main.setZoom(1); _phChip('🔎 Find the boss!', d.endsAt); }
           const t = PH_TEX[d.prop.disguise] || PH_TEX.cooler;
           if (this._phProp) this._phProp.destroy();
