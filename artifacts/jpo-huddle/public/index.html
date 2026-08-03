@@ -10162,6 +10162,20 @@
         // Prop Hunt hider self-view: while sneaking to a spot, the hider sees
         // THEMSELF as the chosen disguise (local only — nobody else can see
         // them at all). The furniture slides around; comedy is a feature.
+        // Ghost mode: the hider phases through walls/furniture while sneaking
+        // (owner request). Collision only re-engages on a walkable tile, so
+        // the phase flipping back can never seal you inside a wall.
+        if (player.body && player.body.checkCollision) {
+          const phGhost = window._ph.role === 'hider' && window._ph.phase === 'hiding';
+          const cc = player.body.checkCollision;
+          if (phGhost) cc.none = true;
+          else if (cc.none) {
+            const gc = Math.floor(player.x / 48), gr = Math.floor(player.y / 48);
+            const solid = [this.wallLayer, this.furnitureLayer, this.floorLayer]
+              .some(L => { const t = L && L.getTileAt(gc, gr); return t && t.collides; });
+            if (!solid) cc.none = false;
+          }
+        }
         // C toggles the shapeshift (same as the button) while sneaking.
         if (window._ph.role === 'hider' && window._ph.phase === 'hiding' &&
             Phaser.Input.Keyboard.JustDown(this.keyC) &&
@@ -10323,6 +10337,9 @@
           // and a live coffee boost (never the product); alive crew are
           // clamped to base speed — any boost timer resumes after the round.
           let spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
+          // Prop Hunt hider zooms at 2× while sneaking (MUST mirror the
+          // server's playerMove budget rule above).
+          if (window._ph.role === 'hider' && window._ph.phase === 'hiding') spd = Math.max(spd, SPEED * 2);
           if (_roundPhase === 'active' && _roundAlive) {
             spd = _roundRole === 'killer'
               ? SPEED * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)

@@ -4226,6 +4226,10 @@ io.on("connection", (socket) => {
           mult = round.killerIds.has(socket.id) ? Math.max(ROUND_KILLER_SPEED_MULT, mult) : 1;
         }
       }
+      // Prop Hunt: the hider sneaks at double speed during the hide phase
+      // (owner request — client mirrors this; the hider's position is never
+      // broadcast mid-round anyway, so nobody sees the zoom).
+      if (propHunt && propHunt.state === "hiding" && propHunt.hiderId === socket.id) mult = Math.max(mult, 2);
       const speed = MOVE_SPEED * mult;
       const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
