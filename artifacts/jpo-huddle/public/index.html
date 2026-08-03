@@ -908,6 +908,24 @@
     }
     #trade-incoming.open { display: flex; }
 
+    /* ── Lingering gift receipts ── stay until each ✕; restored on login */
+    #gift-notices {
+      position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+      z-index: 235; display: flex; flex-direction: column; gap: 8px;
+      align-items: center; pointer-events: none; max-width: 92vw;
+    }
+    .gift-notice {
+      pointer-events: auto; display: flex; align-items: center; gap: 12px;
+      background: rgba(30,30,48,0.96); border: 1px solid #f1c40f; border-radius: 10px;
+      padding: 9px 12px 9px 16px; font-family: monospace; font-size: 13px; color: #eee;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.5); max-width: 92vw; box-sizing: border-box;
+    }
+    .gift-notice-x {
+      background: none; border: none; color: #aaa; font-size: 14px;
+      cursor: pointer; padding: 2px 4px; line-height: 1; flex-shrink: 0;
+    }
+    .gift-notice-x:hover { color: #fff; }
+
     /* ── Player profile card ── (below the rps modals so an incoming challenge stays visible) */
     #profile-modal {
       position: fixed; inset: 0; z-index: 8400; display: none;
@@ -5950,8 +5968,35 @@
       closeGift();
     });
     socket.on('giftResult', ({ ok, message } = {}) => { _rpsToast(message || (ok ? 'Sent!' : 'Sending failed.')); });
-    socket.on('giftReceived', ({ fromName, amount } = {}) => {
-      _rpsToast(`💝 ${fromName} sent you ${(amount || 0).toLocaleString()} coins!`);
+    // ── Lingering gift receipts ── each stays until ITS ✕ is clicked. The
+    // server persists them per-email, so offline recipients see them at next
+    // login and a refresh doesn't clear them. id:null = session-only player
+    // (no email): the card is live-only and ✕ just removes it locally.
+    const _giftWrap = document.createElement('div');
+    _giftWrap.id = 'gift-notices';
+    document.body.appendChild(_giftWrap);
+    function _giftCard({ id, fromName, amount, ts } = {}) {
+      const card = document.createElement('div');
+      card.className = 'gift-notice';
+      let when = '';
+      if (ts) {
+        const d = new Date(ts);
+        if (!isNaN(d)) when = ` · ${d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+      }
+      const msg = document.createElement('span');
+      msg.textContent = `💝 ${fromName || 'Someone'} sent you ${(amount || 0).toLocaleString()} coins!${when}`;
+      const x = document.createElement('button');
+      x.className = 'gift-notice-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss');
+      x.addEventListener('click', () => {
+        if (Number.isInteger(id)) socket.emit('giftNoticeSeen', { id });
+        card.remove();
+      });
+      card.append(msg, x);
+      return card;
+    }
+    socket.on('giftReceived', (n = {}) => { _giftWrap.prepend(_giftCard(n)); });
+    socket.on('giftNotices', ({ notices } = {}) => {
+      _giftWrap.replaceChildren(...(notices || []).map(_giftCard));
     });
 
     function openTrade(targetId) {

@@ -460,6 +460,7 @@ function allPrices() { return { ...SHOP, ...PETS, ...PET_ACCESSORIES }; }
 // transfer itself reuses the rpsSettle atomic pattern so a partial move is
 // impossible.
 const GIFT_DAILY_CAP = 5000;
+const GIFT_NOTICE_MAX = 20;   // lingering gift receipts kept per recipient
 const giftLedger = new Map();   // senderKey (email or socket id) → { day, sent }
 function giftRoomToday(key) {
   const day = new Date().toISOString().slice(0, 10);
@@ -1872,6 +1873,18 @@ async function restorePlayer(socket, row) {
         socket.emit("coachStatus", { mission: missionClientView(row.mission, row.done, row.rerolled) });
       }
     }).catch((err) => console.error("coach status load failed:", err));
+  }
+
+  // Lingering gift receipts — includes gifts that arrived while offline.
+  // They stay on screen until the player hits ✕ on each one.
+  if (state.email) {
+    pool.query(
+      `SELECT id, from_name, amount, ts FROM jpo_gift_notices WHERE email = $1 ORDER BY id DESC`,
+      [state.email])
+      .then(({ rows }) => {
+        if (rows.length && players[socket.id] === state)
+          socket.emit("giftNotices", { notices: rows.map((r) => ({ id: r.id, fromName: r.from_name, amount: r.amount, ts: r.ts })) });
+      }).catch((err) => console.error("gift notices load failed:", err));
   }
 
   // Bid-store mail: deliver queued outcomes (won/refunded while offline) and
@@ -5112,6 +5125,16 @@ io.on("connection", (socket) => {
   // gains, which is always safe), blocked in an After Dark round. The move
   // itself reuses rpsSettle (receiver "wins" the amount from the sender), so
   // a partial transfer is impossible in every email/session combination.
+  // Recipient hit ✕ on a lingering gift receipt — delete THEIR row only.
+  socket.on("giftNoticeSeen", async (payload) => {
+    const id = payload?.id;
+    const p = players[socket.id];
+    if (!p?.email || !Number.isInteger(id)) return;
+    try {
+      await pool.query(`DELETE FROM jpo_gift_notices WHERE id = $1 AND email = $2`, [id, p.email]);
+    } catch (err) { console.error("gift notice dismiss failed:", err); }
+  });
+
   socket.on("sendCoins", async (payload) => {
     const { targetId, amount } = payload || {};
     const p = players[socket.id];
@@ -5146,7 +5169,26 @@ io.on("connection", (socket) => {
       socket.emit("coinUpdate", { coins: p.coins });
       io.to(targetId).emit("coinUpdate", { coins: target.coins });
       socket.emit("giftResult", { ok: true, message: `Sent ${moved.toLocaleString()} coins to ${target.name}! 💝` });
-      io.to(targetId).emit("giftReceived", { fromName: p.name, amount: moved });
+      // Lingering receipt: saved per-email so it survives refreshes/offline
+      // periods and stays on the recipient's screen until they hit ✕.
+      // Session-only players (no email) just get the live card.
+      if (target.email) {
+        try {
+          const { rows: gn } = await pool.query(
+            `INSERT INTO jpo_gift_notices (email, from_name, amount) VALUES ($1, $2, $3) RETURNING id, ts`,
+            [target.email, p.name, moved]);
+          pool.query(
+            `DELETE FROM jpo_gift_notices WHERE email = $1 AND id NOT IN
+               (SELECT id FROM jpo_gift_notices WHERE email = $1 ORDER BY id DESC LIMIT ${GIFT_NOTICE_MAX})`,
+            [target.email]).catch(() => {});
+          io.to(targetId).emit("giftReceived", { id: gn[0].id, fromName: p.name, amount: moved, ts: gn[0].ts });
+        } catch (err) {
+          console.error("gift notice save failed:", err);
+          io.to(targetId).emit("giftReceived", { id: null, fromName: p.name, amount: moved });
+        }
+      } else {
+        io.to(targetId).emit("giftReceived", { id: null, fromName: p.name, amount: moved });
+      }
       console.log(`GIFT: ${p.name} → ${target.name} (${moved} coins)`);
     } catch (err) { console.error("sendCoins failed:", err); fail("Sending failed — try again."); }
   });
@@ -6289,6 +6331,18 @@ try {
   )`);
 } catch (err) {
   console.error("schema nudge (admin log) failed:", err);
+}
+try {
+  // Lingering gift receipts — one row per undismissed "X sent you N coins".
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_gift_notices (
+    id serial PRIMARY KEY,
+    email text NOT NULL,
+    from_name text NOT NULL,
+    amount integer NOT NULL,
+    ts timestamptz NOT NULL DEFAULT now()
+  )`);
+} catch (err) {
+  console.error("schema nudge (gift notices) failed:", err);
 }
 try {
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_shop_prices (
