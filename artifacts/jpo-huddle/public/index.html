@@ -2099,6 +2099,8 @@
               <option value="plant">🪴 Potted plant</option>
               <option value="cabinet">🗄️ Bottle shelf</option>
               <option value="board">📌 Wall board</option>
+              <option value="tree">🌲 Pine tree</option>
+              <option value="couch">🛋️ Couch</option>
               <option value="cooler">🧊 Water cooler</option>
               <option value="punchbag">🥊 Punching bag</option>
               <option value="treadmill">🏃 Treadmill</option>
@@ -8390,10 +8392,17 @@
       // fake is pixel-identical to the real thing. grid = rows of frames,
       // top→bottom, anchored bottom-center.
       chair:    { tiles: { sheet: 'interiors_ss', grid: [[214]] } },          // GID 2231 — the office's everywhere-chair
-      computer: { tiles: { sheet: 'interiors_ss', grid: [[652]] } },          // GID 2669 — desk computer + keyboard
-      plant:    { tiles: { sheet: 'interiors_ss', grid: [[730], [746]] } },   // GIDs 2747/2763 — potted tree
+      computer: { tiles: { sheet: 'interiors_ss', grid: [[242], [258]] } },   // GIDs 2259/2275 — dark-screen PC on cream drawers (the real one)
+      plant:    { tiles: { sheet: 'interiors_ss', grid: [[714, 715], [730, 731], [746, 747]] } }, // GIDs 2731..2764 — FULL 2-wide potted tree
       cabinet:  { tiles: { sheet: 'interiors_ss', grid: [[1114], [1130]] } }, // GIDs 3131/3147 — bottle shelf
       board:    { tiles: { sheet: 'interiors_ss', grid: [[637, 638]] } },     // GIDs 2654/2655 — colorful wall board
+      tree:     { tiles: { sheet: 'ext_ss',       grid: [[4], [16]] } },      // GIDs 8165/8177 — outdoor pine (office edge, ×69)
+      couch:    { tiles: { sheet: 'interiors_ss', grid: [[818, 819], [834, 835]] } }, // GIDs 2835..2852 — orange couch
+    };
+    const PH_LABELS = {
+      chair: '🪑 Office chair', computer: '🖥️ Computer', plant: '🪴 Potted plant',
+      cabinet: '🗄️ Bottle shelf', board: '📌 Wall board', tree: '🌲 Pine tree', couch: '🛋️ Couch',
+      cooler: '🧊 Water cooler', punchbag: '🥊 Punching bag', treadmill: '🏃 Treadmill',
     };
     let _phChipTimer = null;
     function _phChip(label, endsAt) {
@@ -8419,14 +8428,30 @@
     // "me vs the furniture" while picking a spot.
     function _phMorphBtn(show) {
       let el = document.getElementById('ph-morph');
+      let sel = document.getElementById('ph-swap');
       if (!el) {
         el = document.createElement('button'); el.id = 'ph-morph'; el.className = 'o-btn';
         el.style.cssText = 'position:fixed;top:130px;right:14px;z-index:250;display:none;background:rgba(20,16,40,.92);color:#ffd76a;border:1px solid #c9a227;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;';
         el.onclick = () => { window._ph.morph = !window._ph.morph; _phMorphBtn(true); };
         document.body.appendChild(el);
+        // Mid-hide disguise switcher: changed your mind about being a chair?
+        // Server keeps the authoritative pick (the prop everyone hunts).
+        sel = document.createElement('select'); sel.id = 'ph-swap';
+        sel.style.cssText = 'position:fixed;top:172px;right:14px;z-index:250;display:none;background:rgba(20,16,40,.92);color:#ffd76a;border:1px solid #c9a227;border-radius:8px;padding:7px 10px;font-size:13px;cursor:pointer;';
+        for (const [v, label] of Object.entries(PH_LABELS)) {
+          const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o);
+        }
+        sel.onchange = () => {
+          socket.emit('phSetDisguise', { disguise: sel.value });
+          window._ph.disguise = sel.value;
+          if (window._phKillPreview) window._phKillPreview();   // rebuilt next frame in the new shape
+        };
+        document.body.appendChild(sel);
       }
-      el.textContent = window._ph.morph ? '👤 Back to me' : '🪄 Shapeshift!';
+      el.textContent = window._ph.morph ? '👤 Back to me (C)' : '🪄 Shapeshift! (C)';
       el.style.display = show ? '' : 'none';
+      sel.style.display = show ? '' : 'none';
+      if (show && window._ph.disguise) sel.value = window._ph.disguise;
     }
     function _phReset() {
       window._ph = { role: null, phase: null, frozen: false, zoomLock: false, hiderId: null, morph: false };
@@ -8799,8 +8824,10 @@
           this.player && this.player.setVisible(v);
           this.localNameTag && this.localNameTag.setVisible(v);
           this.localPet && this.localPet.setVisible && this.localPet.setVisible(v);
+          if (this.localPet && this.localPet._acc) this.localPet._acc.setVisible(v);   // pet's bow/hat rides separately
           this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
         };
+        window._phKillPreview = () => { if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; } };
         // phJoined: seeker teleports to the gathering base (server already
         // moved the authoritative position; body.reset keeps physics in sync).
         socket.on('phJoined', (d) => {
@@ -9203,6 +9230,8 @@
           right: Phaser.Input.Keyboard.KeyCodes.D,
         });
         this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.keyF = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);   // Prop Hunt: F = Find
+        this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);   // Prop Hunt: C = shapeshift toggle
         this.input.keyboard.addCapture([
           Phaser.Input.Keyboard.KeyCodes.UP,   Phaser.Input.Keyboard.KeyCodes.DOWN,
           Phaser.Input.Keyboard.KeyCodes.LEFT,  Phaser.Input.Keyboard.KeyCodes.RIGHT,
@@ -10133,6 +10162,12 @@
         // Prop Hunt hider self-view: while sneaking to a spot, the hider sees
         // THEMSELF as the chosen disguise (local only — nobody else can see
         // them at all). The furniture slides around; comedy is a feature.
+        // C toggles the shapeshift (same as the button) while sneaking.
+        if (window._ph.role === 'hider' && window._ph.phase === 'hiding' &&
+            Phaser.Input.Keyboard.JustDown(this.keyC) &&
+            !_chatOpen && !_dmOpen && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
+          window._ph.morph = !window._ph.morph; _phMorphBtn(true);
+        }
         if (window._ph.role === 'hider' && window._ph.phase === 'hiding' && window._ph.morph) {
           if (!this._phPreview) {
             this._phPreview = this._phMakeProp(player.x, player.y, window._ph.disguise);
@@ -10162,10 +10197,13 @@
         else if (interact?.type === 'coach') this.eHint.setText('[ E ] Talk to Huddles').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
-        else if (interact?.type === 'phGuess') this.eHint.setText('[ E ] Check this…').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'phGuess') this.eHint.setText('[ F ] Find the boss?').setVisible(true).setPosition(player.x, player.y-58);
         else                                 this.eHint.setVisible(false);
         this._updateTouchActionBtn(interact);
 
+        // F is the advertised "Find" key (owner request — E stays for sit/read/
+        // objects); touch users still go through the action button below.
+        if (interact?.type === 'phGuess' && Phaser.Input.Keyboard.JustDown(this.keyF)) socket.emit('phGuess');
         const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
         touchAction.queued = false;
         if (doAction) {

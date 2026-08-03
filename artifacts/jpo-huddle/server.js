@@ -3703,6 +3703,14 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("playerMoved", { id: socket.id, ...p });
   });
 
+  // Hider changes their mind mid-hide (the prop everyone hunts is whatever
+  // this holds when the hide timer fires). Locked once the hunt starts.
+  socket.on("phSetDisguise", (payload) => {
+    if (!propHunt || propHunt.state !== "hiding" || socket.id !== propHunt.hiderId) return;
+    const d = payload && payload.disguise;
+    if (typeof d === "string" && PH_DISGUISES.has(d)) propHunt.disguise = d;
+  });
+
   socket.on("phGuess", () => {
     if (!propHunt || propHunt.state !== "hunting") return;
     if (!propHunt.seekers.has(socket.id)) return;
