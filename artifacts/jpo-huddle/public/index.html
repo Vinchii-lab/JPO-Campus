@@ -908,6 +908,14 @@
     }
     #trade-incoming.open { display: flex; }
 
+    /* ── 1.5× earnings chip ── shared coffee/pizza buff countdown, under the coin HUD */
+    #earn-chip {
+      display: none; position: fixed; top: 52px; right: 14px; z-index: 250;
+      background: rgba(30,30,48,0.92); border: 1px solid #f1c40f; border-radius: 8px;
+      padding: 5px 10px; font-family: monospace; font-size: 12px; color: #ffd75e;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+    }
+
     /* ── Lingering gift receipts ── stay until each ✕; restored on login */
     #gift-notices {
       position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
@@ -5995,6 +6003,30 @@
       return card;
     }
     socket.on('giftReceived', (n = {}) => { _giftWrap.prepend(_giftCard(n)); });
+
+    // ── 1.5× earnings chip ── shared coffee/pizza buff. The server persists
+    // the expiry, so a refresh re-sends earnBoost and the countdown resumes.
+    const _earnChip = document.createElement('div');
+    _earnChip.id = 'earn-chip';
+    document.body.appendChild(_earnChip);
+    let _earnUntil = 0, _earnTimer = null;
+    function _earnRender() {
+      const left = _earnUntil - Date.now();
+      if (left <= 0) {
+        _earnChip.style.display = 'none';
+        clearInterval(_earnTimer); _earnTimer = null;
+        return;
+      }
+      const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+      _earnChip.textContent = `🍕 1.5× coins · ${m}:${String(s).padStart(2, '0')}`;
+      _earnChip.style.display = 'block';
+    }
+    socket.on('earnBoost', ({ until } = {}) => {
+      if (!Number.isFinite(until)) return;
+      _earnUntil = Math.max(_earnUntil, until);
+      if (!_earnTimer) _earnTimer = setInterval(_earnRender, 1000);
+      _earnRender();
+    });
     socket.on('giftNotices', ({ notices } = {}) => {
       _giftWrap.replaceChildren(...(notices || []).map(_giftCard));
     });

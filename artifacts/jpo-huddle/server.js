@@ -622,6 +622,12 @@ const COFFEE_MS       = 45_000;  // boost duration — MUST match client (client
 const PIZZA_MS        = 90_000;  // pizza-party boost duration (same mult as coffee — the move budget only knows one multiplier)
 const BOOST_GRACE_MS  = 2_500;   // extra server-side slack past expiry so latency can't reject a legit last step
 const GROUP_RADIUS    = 420;     // "everyone nearby" radius for group consumables, scaled px (~9 tiles)
+// Shared-treat EARNINGS buff (coffee_round / pizza_party only — solo coffee is
+// speed-only so nobody can farm their own coin rate). Applies to the coin tick
+// and only activates when the treat reached someone besides the buyer.
+const EARN_MULT      = 1.5;
+const EARN_COFFEE_MS = 10 * 60_000;  // coffee round → 10 min of 1.5× earnings
+const EARN_PIZZA_MS  = 20 * 60_000;  // pizza party → 20 min of 1.5× earnings
 
 // ── Interactive office objects ────────────────────────────────────────────
 // Fixed stations on the map you can use with E. Coords are scaled world px
@@ -1660,6 +1666,8 @@ function rowToPlayerState(row) {
     petAcc:    row.equipped_pet_acc || "",
     items:     row.items || {},
     avatarChanges: row.avatar_changes ?? 0,
+    // Shared-treat earnings buff survives refreshes/restarts (epoch ms, 0 = none).
+    earnUntil:   row.earn_until ? new Date(row.earn_until).getTime() : 0,
     isAnnouncer: row.is_announcer,
     department:  row.department || "",
     // Lifetime per-game win counts (jsonb) + free-text hobby, both shown on
@@ -1864,6 +1872,10 @@ async function restorePlayer(socket, row) {
   // covering the game-boots-after-this-emit ordering) + today's mission for
   // the HUD chip, so a refresh never loses the mission display.
   socket.emit("npcState", npcSnapshot());
+  // Restore a still-running shared-treat earnings buff (paid minutes survive
+  // refreshes and server restarts).
+  if ((state.earnUntil || 0) > Date.now())
+    socket.emit("earnBoost", { until: state.earnUntil, mult: EARN_MULT });
   if (state.email) {
     coachRow(state.email).then((row) => {
       if (players[socket.id] !== state) return;   // already reconnected as a new socket
@@ -2838,7 +2850,14 @@ setInterval(async () => {
   const ltTickStart = Date.now();
   for (const id in players) {
     const p = players[id];
-    const rate = COIN_TICK_BASE + (isAtWorkSeat(p) ? WORK_BONUS : 0);
+    // Base rate × the shared-treat buff. Fractional halves (e.g. 3 × 1.5 =
+    // 4.5) accumulate in p.earnFrac so nothing is lost to rounding: a boosted
+    // desk-sitter gets 4,5,4,5,... coins on alternating minutes.
+    const base = COIN_TICK_BASE + (isAtWorkSeat(p) ? WORK_BONUS : 0);
+    const exact = (p.earnUntil || 0) > ltTickStart ? base * EARN_MULT : base;
+    p.earnFrac = (p.earnFrac || 0) + exact;
+    const rate = Math.floor(p.earnFrac);
+    p.earnFrac -= rate;
     if (p.email) {
       try {
         const { rows } = await pool.query(
@@ -5887,6 +5906,25 @@ io.on("connection", (socket) => {
         q.boostUntil = Math.max(q.boostUntil || 0, now + dur);
         io.emit("coffeeBoost", { id: rid, durationMs: dur, mult: COFFEE_MULT, emoji });
       }
+      // Earnings buff: only when the treat actually reached someone besides
+      // the buyer — a solo "round" in an empty corner stays speed-only, so
+      // there is no way to buy your own coin multiplier. earnUntil only
+      // EXTENDS (max) and is persisted so a refresh/restart can't eat a paid
+      // 10–20 minute buff.
+      if (ids.some((rid) => rid !== socket.id)) {
+        const edur = item === "pizza_party" ? EARN_PIZZA_MS : EARN_COFFEE_MS;
+        for (const rid of ids) {
+          const q = players[rid];
+          if (!q) continue;
+          q.earnUntil = Math.max(q.earnUntil || 0, now + edur);
+          io.to(rid).emit("earnBoost", { until: q.earnUntil, mult: EARN_MULT });
+          if (q.email)
+            pool.query(
+              `UPDATE jpo_players SET earn_until = to_timestamp($2 / 1000.0), updated_at = now()
+                WHERE email = $1 AND (earn_until IS NULL OR earn_until < to_timestamp($2 / 1000.0))`,
+              [q.email, q.earnUntil]).catch((err) => console.error("earn boost save failed:", err));
+        }
+      }
       if (item === "pizza_party")
         io.emit("groupEffect", { effect: "pizza", x: p.x ?? 0, y: p.y ?? 0 });
       console.log(`${p.name} used ${item} — boosted ${ids.length} player(s) for ${dur / 1000}s`);
@@ -6343,6 +6381,13 @@ try {
   )`);
 } catch (err) {
   console.error("schema nudge (gift notices) failed:", err);
+}
+try {
+  // Shared-treat earnings buff expiry — persisted so refreshes/restarts
+  // can't eat a paid 10–20 minute buff.
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS earn_until timestamptz`);
+} catch (err) {
+  console.error("schema nudge (earn_until) failed:", err);
 }
 try {
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_shop_prices (
