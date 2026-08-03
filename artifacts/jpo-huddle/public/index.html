@@ -8392,10 +8392,10 @@
       // fake is pixel-identical to the real thing. grid = rows of frames,
       // top→bottom, anchored bottom-center.
       chair:    { tiles: { sheet: 'interiors_ss', grid: [[214]] } },          // GID 2231 — the office's everywhere-chair
-      computer: { tiles: { sheet: 'interiors_ss', grid: [[242], [258]] } },   // GIDs 2259/2275 — dark-screen PC on cream drawers (the real one)
+      computer: { tiles: { sheet: 'interiors_ss', grid: [[242, 243], [258, 259], [274, 275]] } }, // GIDs 2259/2260 + 2275/2276 + 2291/2292 — full PC desk unit (2w×3t on the map)
       plant:    { tiles: { sheet: 'interiors_ss', grid: [[714, 715], [730, 731], [746, 747]] } }, // GIDs 2731..2764 — FULL 2-wide potted tree
-      cabinet:  { tiles: { sheet: 'interiors_ss', grid: [[1114], [1130]] } }, // GIDs 3131/3147 — bottle shelf
-      board:    { tiles: { sheet: 'interiors_ss', grid: [[637, 638]] } },     // GIDs 2654/2655 — colorful wall board
+      cabinet:  { tiles: { sheet: 'interiors_ss', grid: [[1098, 1099], [1114, 1115], [1130, 1131]] } }, // GIDs 3115/3116 + 3131/3132 + 3147/3148 — full bottle shelf (2w×3t)
+      board:    { tiles: { sheet: 'interiors_ss', grid: [[621, 622], [637, 638]] } },  // GIDs 2638/2639 + 2654/2655 — the board is TWO rows tall on the map
       tree:     { tiles: { sheet: 'ext_ss',       grid: [[4], [16]] } },      // GIDs 8165/8177 — outdoor pine (office edge, ×69)
       couch:    { tiles: { sheet: 'interiors_ss', grid: [[818, 819], [834, 835]] } }, // GIDs 2835..2852 — orange couch
     };
