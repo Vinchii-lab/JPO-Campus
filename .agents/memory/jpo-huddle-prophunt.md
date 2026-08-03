@@ -18,4 +18,6 @@ Other durable bits:
 - Client cleanup: socket `disconnect` handler must call the round's reset (`window._phReset`) or a server restart leaves players frozen/zoom-locked with a ghost prop.
 - Reused `_roundGhostVis(id, visible)` (After Dark ghost helper) for vanish/unvanish.
 - Confirmed prop textures: `water_cooler_obj` (image, ox .5), `punch_bag_idle` f0 (art in LEFT 16px → ox .25), `anim_treadmill` f0. `fridge_ss`/`vending_ss` do NOT exist.
+- Map-furniture disguises: draw the map's own tileset frames (`interiors_ss`, frame = GID − 2017, scale 3) as a bottom-anchored container → pixel-identical to real furniture. Picked from Furniture-layer GID counts: chair 2231 (×471), computer 2669, plant 2747/2763, bottle shelf 3131/3147, board 2654/2655.
+- Hider self-view: local-only — hide own avatar/tag/pet/cosmetic and follow with a preview prop during the hide phase (walking furniture); zero secrecy impact since others never receive the position anyway.
 - Test seeding: hand-picked x/y often lands on unpainted tiles and playerMove gets silently void-rejected — seed at (1,1) and let void-rescue respawn at GRASS_SPAWN, read real coords from the `approved` payload. Server sends first names in round payloads.

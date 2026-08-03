@@ -2094,6 +2094,11 @@
           <p style="font-size:12px;color:#888;margin:0 0 10px">Stand where everyone should gather (that's YOUR current spot), pick a disguise, then start. Joiners teleport to your spot and freeze while you hide; when the timer ends they hunt you at normal zoom. First one to press E on the right object wins.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <select id="op-ph-disguise" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+              <option value="chair" selected>🪑 Office chair</option>
+              <option value="computer">🖥️ Computer</option>
+              <option value="plant">🪴 Potted plant</option>
+              <option value="cabinet">🗄️ Bottle shelf</option>
+              <option value="board">📌 Wall board</option>
               <option value="cooler">🧊 Water cooler</option>
               <option value="punchbag">🥊 Punching bag</option>
               <option value="treadmill">🏃 Treadmill</option>
@@ -8380,6 +8385,15 @@
       cooler:    { key: 'water_cooler_obj', frame: null, ox: 0.5  },
       punchbag:  { key: 'punch_bag_idle',   frame: 0,    ox: 0.25 },
       treadmill: { key: 'anim_treadmill',   frame: 0,    ox: 0.5  },
+      // Map-furniture disguises: drawn from the SAME tileset frames the map
+      // itself uses (interiors firstgid 2017 → frame = GID - 2017), so the
+      // fake is pixel-identical to the real thing. grid = rows of frames,
+      // top→bottom, anchored bottom-center.
+      chair:    { tiles: { sheet: 'interiors_ss', grid: [[214]] } },          // GID 2231 — the office's everywhere-chair
+      computer: { tiles: { sheet: 'interiors_ss', grid: [[652]] } },          // GID 2669 — desk computer + keyboard
+      plant:    { tiles: { sheet: 'interiors_ss', grid: [[730], [746]] } },   // GIDs 2747/2763 — potted tree
+      cabinet:  { tiles: { sheet: 'interiors_ss', grid: [[1114], [1130]] } }, // GIDs 3131/3147 — bottle shelf
+      board:    { tiles: { sheet: 'interiors_ss', grid: [[637, 638]] } },     // GIDs 2654/2655 — colorful wall board
     };
     let _phChipTimer = null;
     function _phChip(label, endsAt) {
@@ -8431,10 +8445,14 @@
     socket.on('phResult', (d) => {
       const el = document.getElementById('op-ph-msg');
       if (el) { el.textContent = (d && d.message) || ''; el.style.color = d && d.ok ? '#7fdc7f' : '#ff9c9c'; }
+      // Round accepted → remember the chosen disguise so the scene can dress
+      // the hider in it immediately (walking-furniture preview, local only).
+      if (d && d.ok && window._ph.wantDisguise) window._ph.disguise = window._ph.wantDisguise;
     });
     window.phStartClick = function () {
+      window._ph.wantDisguise = document.getElementById('op-ph-disguise').value;
       socket.emit('phStart', {
-        disguise: document.getElementById('op-ph-disguise').value,
+        disguise: window._ph.wantDisguise,
         hideSecs: Number(document.getElementById('op-ph-hide').value),
         huntSecs: Number(document.getElementById('op-ph-hunt').value),
       });
@@ -8756,6 +8774,7 @@
         // player, or a locked camera behind).
         window._phKillProp = () => {
           if (this._phProp) { this._phProp.destroy(); this._phProp = null; }
+          if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; }
           window._phSelfVis && window._phSelfVis(true);   // never leave the local avatar hidden
         };
         // Hider self-view: while disguised, the hider sees the PROP, not their
@@ -8798,12 +8817,8 @@
           ph.phase = 'hunting';
           if (ph.role === 'hider') { ph.frozen = true; _phChip("🪑 Stay still — they're hunting!", d.endsAt); window._phSelfVis(false); }
           else if (ph.role === 'seeker') { ph.frozen = false; ph.zoomLock = true; this.cameras.main.setZoom(1); _phChip('🔎 Find the boss!', d.endsAt); }
-          const t = PH_TEX[d.prop.disguise] || PH_TEX.cooler;
           if (this._phProp) this._phProp.destroy();
-          this._phProp = (t.frame === null
-            ? this.add.image(d.prop.x, d.prop.y, t.key)
-            : this.add.sprite(d.prop.x, d.prop.y, t.key, t.frame));
-          this._phProp.setOrigin(t.ox, 1).setScale(3);
+          this._phProp = this._phMakeProp(d.prop.x, d.prop.y, d.prop.disguise);
         });
         socket.on('phEnd', (d) => {
           if (this._phProp) { this._phProp.destroy(); this._phProp = null; }
@@ -9710,6 +9725,23 @@
         if (who) this._groupBurst('confetti', who.x, who.y);
       }
 
+      // Build a Prop Hunt disguise object anchored bottom-center at (x,y).
+      // Single-texture disguises are one sprite; map-furniture disguises are a
+      // container of the map's own 16px tileset frames (scale 3, like tiles).
+      _phMakeProp(x, y, disguise) {
+        const t = PH_TEX[disguise] || PH_TEX.cooler;
+        if (t.tiles) {
+          const g = t.tiles.grid, cols = g[0].length, rows = g.length, S = 3;
+          const c = this.add.container(x, y);
+          for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+            c.add(this.add.image((k - (cols - 1) / 2) * 16 * S, (r - rows) * 16 * S + 8 * S, t.tiles.sheet, g[r][k]).setScale(S));
+          }
+          return c;
+        }
+        const s = (t.frame === null ? this.add.image(x, y, t.key) : this.add.sprite(x, y, t.key, t.frame));
+        return s.setOrigin(t.ox, 1).setScale(3);
+      }
+
       _makeNameTag(x, y, name) {
         return this.add.text(x, y-40, name, {
           fontSize:'14px', fontFamily:'monospace', color:'#fff',
@@ -10082,6 +10114,20 @@
         this._setObjHighlight(objNear && objNear.id);
 
         // Prop Hunt: the suspicious furniture is E-checkable for seekers.
+        // Prop Hunt hider self-view: while sneaking to a spot, the hider sees
+        // THEMSELF as the chosen disguise (local only — nobody else can see
+        // them at all). The furniture slides around; comedy is a feature.
+        if (window._ph.role === 'hider' && window._ph.phase === 'hiding') {
+          if (!this._phPreview) {
+            this._phPreview = this._phMakeProp(player.x, player.y, window._ph.disguise);
+            window._phSelfVis && window._phSelfVis(false);
+          }
+          this._phPreview.setPosition(player.x, player.y);
+          if (this._phPreview.setDepth) this._phPreview.setDepth(player.depth || 0);
+        } else if (this._phPreview) {
+          this._phPreview.destroy(); this._phPreview = null;
+        }
+
         if (!interact && !this.sitting && this._phProp && window._ph.role === 'seeker' && window._ph.phase === 'hunting') {
           const gdx = player.x - this._phProp.x, gdy = player.y - this._phProp.y;
           if (gdx * gdx + gdy * gdy < 120 * 120) interact = { type: 'phGuess' };

@@ -2992,7 +2992,7 @@ function inTheDark(id) {
 // courtesy; the real secrecy is this suppression.)
 // In-memory only: a server restart cancels the round harmlessly.
 // Disguise ids must have a matching client texture in PH_TEX (index.html).
-const PH_DISGUISES = new Set(["cooler", "punchbag", "treadmill"]);
+const PH_DISGUISES = new Set(["cooler", "punchbag", "treadmill", "chair", "computer", "plant", "cabinet", "board"]);
 const PH_GUESS_RANGE_PX = 120;   // ~2.5 tiles — must walk right up to the prop
 let propHunt = null;
 // { state:'hiding'|'hunting', hiderId, hiderName, disguise,
