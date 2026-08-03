@@ -1865,7 +1865,18 @@ async function restorePlayer(socket, row) {
     dir:       state.dir,
     anim:      state.anim === "sit" ? "sit" : "idle",
   });
-  socket.emit("currentPlayers", players);
+  socket.emit("currentPlayers", phMaskedPlayers(socket.id));
+  // Prop Hunt for late joiners: vanish the hider's (masked) entry, share the
+  // prop if the hunt is on, and re-offer the invite so a refreshed seeker
+  // (new socket id — the old seeker spot is gone) can jump back in.
+  if (propHunt && propHunt.hiderId !== socket.id) {
+    socket.emit("phVanish", { id: propHunt.hiderId });
+    socket.emit("phInvite", { hiderName: propHunt.hiderName, hideEndsAt: propHunt.hideEndsAt, hiderId: propHunt.hiderId });
+    if (propHunt.state === "hunting") {
+      const hp = players[propHunt.hiderId];
+      if (hp) socket.emit("phHunt", { prop: { x: Math.round(hp.x), y: Math.round(hp.y), disguise: propHunt.disguise }, endsAt: propHunt.endsAt });
+    }
+  }
   socket.emit("announcerStatus", { canPost: state.isAnnouncer });
   socket.emit("announcements", await fetchAnnouncements());
   // Huddles: current NPC snapshot (the scene also pulls via npcSync at create,
@@ -2967,6 +2978,76 @@ function inTheDark(id) {
   return !!m && m.alive;
 }
 
+// ── Prop Hunt (Hide & Seek) ─────────────────────────────────────────────
+// The boss (any F8 admin) starts a round from wherever they're STANDING —
+// that spot becomes the seekers' gathering base. Joiners are teleported
+// there and frozen while the hider walks off and settles into a furniture
+// disguise. When the hide timer ends, everyone is shown one extra piece of
+// furniture (the prop) at the hider's final spot; seekers hunt at locked
+// default zoom and press E on the suspicious object to win.
+// ANTI-CHEAT: from phStart until phEnd the hider's playerMoved broadcasts
+// are suppressed and their sprite is vanished on every client — the only
+// position the server ever shares is the prop's frozen coordinates, so a
+// modified client has nothing extra to reveal. (Zoom lock is client-side
+// courtesy; the real secrecy is this suppression.)
+// In-memory only: a server restart cancels the round harmlessly.
+// Disguise ids must have a matching client texture in PH_TEX (index.html).
+const PH_DISGUISES = new Set(["cooler", "punchbag", "treadmill"]);
+const PH_GUESS_RANGE_PX = 120;   // ~2.5 tiles — must walk right up to the prop
+let propHunt = null;
+// { state:'hiding'|'hunting', hiderId, hiderName, disguise,
+//   gatherX, gatherY, seekers:Set<socketId>, hideEndsAt, endsAt,
+//   huntMs, hideTimer, huntTimer }
+
+function phFrozen(id) {
+  if (!propHunt) return false;
+  if (propHunt.state === "hiding")  return propHunt.seekers.has(id); // seekers wait at base
+  if (propHunt.state === "hunting") return propHunt.hiderId === id;  // furniture doesn't walk
+  return false;
+}
+
+function phBeginHunt() {
+  if (!propHunt || propHunt.state !== "hiding") return;
+  const hp = players[propHunt.hiderId];
+  if (!hp) { phFinish(false, null, "hider left"); return; }
+  if (propHunt.seekers.size === 0) { phFinish(false, null, "nobody joined"); return; }
+  propHunt.state = "hunting";
+  propHunt.endsAt = Date.now() + propHunt.huntMs;
+  propHunt.huntTimer = setTimeout(() => phFinish(false, null, "time"), propHunt.huntMs);
+  io.emit("phHunt", {
+    prop: { x: Math.round(hp.x), y: Math.round(hp.y), disguise: propHunt.disguise },
+    endsAt: propHunt.endsAt,
+  });
+}
+
+// Snapshot guard: any full-players emit during a round must mask the hider's
+// live coordinates (the sprite gets vanished client-side, but a modified
+// client keeps the payload). The mask is the PUBLIC gathering spot — zero
+// information. The hider themself gets the real map.
+function phMaskedPlayers(forId) {
+  if (!propHunt || forId === propHunt.hiderId) return players;
+  const hp = players[propHunt.hiderId];
+  if (!hp) return players;
+  return { ...players, [propHunt.hiderId]: { ...hp, x: propHunt.gatherX, y: propHunt.gatherY, anim: "idle" } };
+}
+
+function phFinish(found, winnerName, reason) {
+  if (!propHunt) return;
+  clearTimeout(propHunt.hideTimer);
+  clearTimeout(propHunt.huntTimer);
+  const hid = propHunt.hiderId;
+  const hp  = players[hid];
+  io.emit("phEnd", {
+    found: !!found,
+    winnerName: winnerName || null,
+    hiderName: propHunt.hiderName,
+    reason: reason || (found ? "found" : "time"),
+    // Un-vanish payload: where the hider stands right now (null if they left).
+    hider: hp ? { id: hid, x: Math.round(hp.x), y: Math.round(hp.y), dir: hp.dir, anim: hp.anim } : null,
+  });
+  propHunt = null;
+}
+
 // Roster sent to EVERY participant (ids/names/alive are not secret — clients
 // need it for the kill affordance, 💀 flashes, and spectator rendering).
 // Grace-window ghosts (members marked `gone`) stay listed on purpose: their
@@ -3578,6 +3659,67 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Prop Hunt: start / join / guess / cancel ─────────────────────────
+  socket.on("phStart", (payload) => {
+    if (!admins.has(socket.id)) return;
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(roundBucket)) return;
+    if (propHunt) { socket.emit("phResult", { ok: false, message: "A Hide & Seek round is already running." }); return; }
+    if (round)    { socket.emit("phResult", { ok: false, message: "Office After Dark is running — wait for it to finish." }); return; }
+    const disguise = String(payload?.disguise || "");
+    if (!PH_DISGUISES.has(disguise)) { socket.emit("phResult", { ok: false, message: "Pick a disguise first." }); return; }
+    const hideSecs = Math.min(300,  Math.max(5,  Math.round(Number(payload?.hideSecs)) || 60));
+    const huntSecs = Math.min(1800, Math.max(30, Math.round(Number(payload?.huntSecs)) || 300));
+    propHunt = {
+      state: "hiding", hiderId: socket.id, hiderName: p.name, disguise,
+      gatherX: Math.round(p.x), gatherY: Math.round(p.y),
+      seekers: new Set(), hideEndsAt: Date.now() + hideSecs * 1000, endsAt: 0,
+      huntMs: huntSecs * 1000, huntTimer: null,
+      hideTimer: setTimeout(phBeginHunt, hideSecs * 1000),
+    };
+    // Vanish BEFORE the invite so no client ever renders the hider mid-round.
+    socket.broadcast.emit("phVanish", { id: socket.id });
+    io.emit("phInvite", { hiderName: p.name, hideEndsAt: propHunt.hideEndsAt, hiderId: socket.id });
+    socket.emit("phResult", { ok: true, message: `Hide & Seek is on — go hide! ${hideSecs}s until the hunt.` });
+    logAdmin(socket, "Hide & Seek started", `${p.name} is hiding (${hideSecs}s hide, ${huntSecs}s hunt)`);
+  });
+
+  socket.on("phJoin", () => {
+    // Joinable during the hunt too — that's how a refreshed seeker (new
+    // socket id) gets back into the round, and latecomers get to play.
+    if (!propHunt) return;
+    const p = players[socket.id];
+    if (!p || socket.id === propHunt.hiderId || propHunt.seekers.has(socket.id)) return;
+    if (!takeToken(roundBucket)) return;
+    propHunt.seekers.add(socket.id);
+    // Teleport to the gathering base with a little scatter so joiners don't
+    // stack into one pixel. Server position moves too, so the post-round
+    // speed check baselines from the base, not the old desk.
+    p.x = propHunt.gatherX + Math.round(Math.random() * 120 - 60);
+    p.y = propHunt.gatherY + Math.round(Math.random() * 120 - 60);
+    p.anim = "idle";
+    socket.emit("phJoined", { x: p.x, y: p.y, hideEndsAt: propHunt.hideEndsAt, phase: propHunt.state, endsAt: propHunt.endsAt });
+    socket.broadcast.emit("playerMoved", { id: socket.id, ...p });
+  });
+
+  socket.on("phGuess", () => {
+    if (!propHunt || propHunt.state !== "hunting") return;
+    if (!propHunt.seekers.has(socket.id)) return;
+    if (!takeToken(interactBucket)) return;
+    const p = players[socket.id], hp = players[propHunt.hiderId];
+    if (!p || !hp) return;
+    const dx = p.x - hp.x, dy = p.y - hp.y;
+    if (dx * dx + dy * dy > PH_GUESS_RANGE_PX * PH_GUESS_RANGE_PX) return;
+    logAdmin(socket, "Hide & Seek won", `${p.name} found ${propHunt.hiderName}`);
+    phFinish(true, p.name);
+  });
+
+  socket.on("phCancel", () => {
+    if (!admins.has(socket.id) || !propHunt) return;
+    phFinish(false, null, "cancelled");
+  });
+
   // ── Admin: live shop price control ───────────────────────────────────
   // Persists to jpo_shop_prices, updates the in-memory catalog (every buy
   // handler reads it), and broadcasts the new label to every open client.
@@ -3658,6 +3800,7 @@ io.on("connection", (socket) => {
     if (!admins.has(socket.id)) return;
     if (bingo) { socket.emit("adminBingoResult", { ok: false, message: "A bingo game is already running." }); return; }
     if (round) { socket.emit("adminBingoResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
+    if (propHunt) { socket.emit("adminBingoResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
     const prize = Math.round(Number(payload?.prize));
     if (!Number.isSafeInteger(prize) || prize < BINGO_PRIZE_MIN || prize > BINGO_PRIZE_MAX) {
       socket.emit("adminBingoResult", { ok: false, message: `Prize must be ${BINGO_PRIZE_MIN}–${BINGO_PRIZE_MAX.toLocaleString()} coins.` });
@@ -3854,7 +3997,7 @@ io.on("connection", (socket) => {
           hairIdx: state.hairIdx, skinIdx: state.skinIdx, shirtIdx: state.shirtIdx, pantsIdx: state.pantsIdx,
           coins: state.coins, cosmetics: state.cosmetics, equipped: state.equipped, pet: state.pet, petAcc: state.petAcc, items: state.items,
         });
-        io.to(targetId).emit("currentPlayers", players);
+        io.to(targetId).emit("currentPlayers", phMaskedPlayers(targetId));
         io.to(targetId).emit("announcerStatus", { canPost: false });
         io.to(targetId).emit("announcements", await fetchAnnouncements());
         for (const pid in players) {
@@ -4020,6 +4163,11 @@ io.on("connection", (socket) => {
     const now = Date.now();
     if (now - lastMoveAt < MOVE_MIN_INTERVAL_MS) { if (LT_METRICS) ltState.mvThr++; return; }
 
+    // Prop Hunt freeze: seekers hold at the gathering base while the boss
+    // hides; the hider is furniture (immobile) once the hunt begins. Dropped
+    // server-side so a modified client can't wander early.
+    if (phFrozen(socket.id)) return;
+
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
     const x = Number(data.x), y = Number(data.y);
@@ -4082,6 +4230,10 @@ io.on("connection", (socket) => {
     wasSitting = sitting;
     lastMoveAt = now;
     if (LT_METRICS) ltState.mvOk++;
+    // Prop Hunt secrecy: the hider's live position is never broadcast while a
+    // round runs — the server tracks it (me.x/me.y above), everyone else only
+    // ever learns the prop's frozen spot from phHunt.
+    if (propHunt && propHunt.hiderId === socket.id) return;
     socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
   });
 
@@ -5834,6 +5986,12 @@ io.on("connection", (socket) => {
       socket.emit("itemError", { message: "🌙 Too dark to brew — no boosts until the lights come back on!" });
       return;
     }
+    // Prop Hunt: the hider can't use items — confetti/fireworks/group treats
+    // broadcast their exact x/y office-wide, which would out the hiding spot.
+    if (propHunt && propHunt.hiderId === socket.id) {
+      socket.emit("itemError", { message: "🙈 Not while you're hiding — furniture doesn't party!" });
+      return;
+    }
     if (item === "cigarette") {
       if (p.smokeUntil && now < p.smokeUntil) {
         socket.emit("itemError", { message: "You're already smoking!" });
@@ -5945,6 +6103,12 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(interactBucket)) return;   // silently drop spam
+    // Prop Hunt: object effects (brew steam, cooler chatter) render at the
+    // object next to the hider — a position tell. Furniture doesn't snack.
+    if (propHunt && propHunt.hiderId === socket.id) {
+      socket.emit("interactError", { message: "🙈 Not while you're hiding!" });
+      return;
+    }
     // hasOwn (not a bare lookup) so "__proto__"/"constructor" can't match.
     if (typeof object !== "string" || !Object.hasOwn(OBJECTS, object)) return;
     const obj = OBJECTS[object];
@@ -6087,6 +6251,7 @@ io.on("connection", (socket) => {
     if (!p) return;
     if (!takeToken(roundBucket)) return;   // silently drop spam
     if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (propHunt) { socket.emit("roundError", { message: "Hide & Seek is running — wait for it to finish!" }); return; }
     if (round) {
       socket.emit("roundError", {
         message: round.state === "joining" ? "A round is already gathering — join that one!" : "A round is already in progress.",
@@ -6190,6 +6355,15 @@ io.on("connection", (socket) => {
     // grace timer below expires (which then applies the leave rules) or a
     // resume rebinds it (restorePlayer). Everyone else leaves immediately.
     if (!roundDeferLeave(socket.id)) roundHandleLeave(socket.id);
+    // Prop Hunt: the hider leaving ends the round (nothing left to find);
+    // seekers just drop out, and an empty hunt ends early.
+    if (propHunt) {
+      if (propHunt.hiderId === socket.id) phFinish(false, null, "hider left");
+      else {
+        propHunt.seekers.delete(socket.id);
+        if (propHunt.state === "hunting" && propHunt.seekers.size === 0) phFinish(false, null, "seekers left");
+      }
+    }
     if (pending[socket.id]) {
       console.log(`Pending disconnected: ${pending[socket.id].name}`);
       delete pending[socket.id];
