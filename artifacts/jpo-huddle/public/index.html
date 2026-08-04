@@ -8512,8 +8512,9 @@
       if (!el) {
         el = document.createElement('button');
         el.id = 'buddy-chip';
-        // Top-left, to the RIGHT of the chat-log button (which owns 14,14).
-        el.style.cssText = 'position:fixed;top:14px;left:64px;z-index:250;display:none;align-items:center;gap:6px;background:rgba(0,0,0,.72);color:#fff;border:1px solid #6c63ff;border-radius:8px;padding:7px 12px;font-family:monospace;font-size:13px;cursor:pointer;';
+        // Top-left row is taken: chatlog(14) / logout(64) / help(114) all own
+        // 42px slots at z-300 — the chip sits AFTER them, at left:164.
+        el.style.cssText = 'position:fixed;top:14px;left:164px;z-index:250;display:none;align-items:center;gap:6px;height:42px;background:rgba(0,0,0,.72);color:#fff;border:1px solid #6c63ff;border-radius:10px;padding:0 12px;font-family:monospace;font-size:13px;cursor:pointer;';
         el.onclick = _buddyOpenPanel;
         document.body.appendChild(el);
       }
