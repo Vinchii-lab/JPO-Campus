@@ -21,3 +21,5 @@ Other durable bits:
 - Map-furniture disguises: draw the map's own tileset frames (`interiors_ss`, frame = GID − 2017, scale 3) as a bottom-anchored container → pixel-identical to real furniture. Picked from Furniture-layer GID counts: chair 2231 (×471), computer 2669, plant 2747/2763, bottle shelf 3131/3147, board 2654/2655.
 - Hider self-view: local-only — hide own avatar/tag/pet/cosmetic and follow with a preview prop during the hide phase (walking furniture); zero secrecy impact since others never receive the position anyway.
 - Test seeding: hand-picked x/y often lands on unpainted tiles and playerMove gets silently void-rejected — seed at (1,1) and let void-rescue respawn at GRASS_SPAWN, read real coords from the `approved` payload. Server sends first names in round payloads.
+
+- Teleporting the local player (join/gather/round teleports) MUST force-stand first: the seated client state zeroes velocity every frame ("can't move" bug) and a later E-stand snaps back to the pre-sit tile across the map. Use the `_phUnseat`-style cleanup (mirror E-stand teardown, skip `_preSitPos` restore) before any `body.reset` teleport.

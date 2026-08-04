@@ -9025,10 +9025,31 @@
           this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
         };
         window._phKillPreview = () => { if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; } };
+        // Force-stand for teleports: a player who joins the hunt from a chair
+        // must NOT stay in the seated state — sitting zeroes velocity every
+        // frame ("can't move after the countdown") and the normal E-stand
+        // would snap them back to the chair they left across the map. Mirrors
+        // the E-stand cleanup but skips the _preSitPos restore (the teleport
+        // supplies the new position).
+        window._phUnseat = () => {
+          if (!this.sitting) return;
+          this.sitting = false;
+          this._deskPose = null;
+          _setWorkChip(false);
+          this._clearOccluders(this._seatOccluders);
+          this._seatOccluders = [];
+          this._preSitPos = null;
+          if (this.player) {
+            this.player.setTexture(this.playerTexKey);
+            this.player.setFlipX(false);
+            if (this.player.body) this.player.body.enable = true;
+          }
+        };
         // phJoined: seeker teleports to the gathering base (server already
         // moved the authoritative position; body.reset keeps physics in sync).
         socket.on('phJoined', (d) => {
           const ph = window._ph;
+          window._phUnseat();
           ph.role = 'seeker';
           ph.phase = d.phase || 'hiding';
           if (ph.phase === 'hunting') {
