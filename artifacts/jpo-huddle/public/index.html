@@ -3636,7 +3636,10 @@
       _dailyToastTimer = setTimeout(() => t.classList.remove('open'), 5000);
     });
 
-    socket.on('coinUpdate', ({ coins }) => {
+    socket.on('coinUpdate', ({ coins, buddyBoost }) => {
+      // Only the minute tick carries buddyBoost (true/false); purchases and
+      // other coin events leave it undefined — don't flicker the chip then.
+      if (buddyBoost !== undefined && window._buddy) { window._buddy.boost = !!buddyBoost; _buddyChipRender(); }
       _playerCoins = coins;
       document.getElementById('coin-count').textContent = coins;
       document.getElementById('shop-coin-display').textContent = coins;
@@ -8498,6 +8501,141 @@
       sel.style.display = show ? '' : 'none';
       if (show && window._ph.disguise) sel.value = window._ph.disguise;
     }
+
+    // ── HQ-Buddy (secret weekly buddy) ───────────────────────────────────────
+    // Everything here is PRIVATE: the server only ever tells the pair about
+    // each other, and no element leaks the pairing to anyone else's screen.
+    window._buddy = null;     // { buddyName, isNpc, myAnswers, buddyAnswered, quizScore, mult, boost, ... }
+    let _buddyQs = null;      // this week's 3 questions [{a,b}] (server-drawn)
+    function _buddyChipRender() {
+      let el = document.getElementById('buddy-chip');
+      if (!el) {
+        el = document.createElement('button');
+        el.id = 'buddy-chip';
+        // Top-left, to the RIGHT of the chat-log button (which owns 14,14).
+        el.style.cssText = 'position:fixed;top:14px;left:64px;z-index:250;display:none;align-items:center;gap:6px;background:rgba(0,0,0,.72);color:#fff;border:1px solid #6c63ff;border-radius:8px;padding:7px 12px;font-family:monospace;font-size:13px;cursor:pointer;';
+        el.onclick = _buddyOpenPanel;
+        document.body.appendChild(el);
+      }
+      const b = window._buddy;
+      if (!b) { el.style.display = 'none'; return; }
+      el.textContent = '🤝 ' + b.buddyName + (b.boost ? ' · ×' + b.mult + ' 🔥' : '');
+      el.style.background = b.boost ? 'rgba(20,60,30,.85)' : 'rgba(0,0,0,.72)';
+      el.style.display = '';
+    }
+    function _buddyPanelEl() {
+      let m = document.getElementById('buddy-modal');
+      if (m) return m;
+      m = document.createElement('div');
+      m.id = 'buddy-modal';
+      m.style.cssText = 'position:fixed;inset:0;z-index:8000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);';
+      m.innerHTML = '<div id="buddy-card" style="background:#1e1e30;border:1px solid #3a3a5e;border-radius:14px;width:400px;max-width:calc(100vw - 32px);max-height:85vh;overflow-y:auto;font-family:monospace;color:#eee;padding:24px 26px;">' +
+        '<h3 style="font-size:17px;margin-bottom:4px;">🤝 Your HQ-Buddy this week</h3>' +
+        '<div id="buddy-body" style="font-size:13px;line-height:1.55;"></div>' +
+        '<div id="buddy-msg" style="font-size:12px;color:#ffd76a;min-height:16px;margin-top:10px;"></div>' +
+        '<button id="buddy-close" style="width:100%;margin-top:14px;padding:9px;background:#2a2a44;border:none;border-radius:8px;color:#ccc;font-family:monospace;font-size:13px;cursor:pointer;">Close</button></div>';
+      m.querySelector('#buddy-close').onclick = () => { m.style.display = 'none'; };
+      m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; });
+      document.body.appendChild(m);
+      return m;
+    }
+    function _buddyQuizRows(mode) {
+      // mode 'answer': "which do YOU prefer?" — mode 'guess': "what did THEY pick?"
+      return _buddyQs.map((q, i) =>
+        '<div style="margin:10px 0;">' +
+          '<div style="color:#aaa;margin-bottom:4px;">' + (i + 1) + '. ' + q.a + ' or ' + q.b + '?</div>' +
+          '<button class="buddy-opt" data-q="' + i + '" data-v="0" style="padding:7px 12px;margin-right:6px;border:1px solid #444;border-radius:7px;background:#22223a;color:#eee;font-family:monospace;cursor:pointer;">' + q.a + '</button>' +
+          '<button class="buddy-opt" data-q="' + i + '" data-v="1" style="padding:7px 12px;border:1px solid #444;border-radius:7px;background:#22223a;color:#eee;font-family:monospace;cursor:pointer;">' + q.b + '</button>' +
+        '</div>').join('') +
+        '<button id="buddy-submit" style="width:100%;margin-top:8px;padding:9px;background:#6c63ff;border:none;border-radius:8px;color:#fff;font-family:monospace;font-size:13px;cursor:pointer;" disabled>' +
+        (mode === 'answer' ? 'Lock in my answers' : 'Lock in my guesses') + '</button>';
+    }
+    function _buddyWireQuiz(body, mode) {
+      const picks = [null, null, null];
+      body.querySelectorAll('.buddy-opt').forEach((btn) => {
+        btn.onclick = () => {
+          const q = +btn.dataset.q;
+          picks[q] = +btn.dataset.v;
+          body.querySelectorAll('.buddy-opt[data-q="' + q + '"]').forEach((o) => { o.style.background = '#22223a'; o.style.borderColor = '#444'; });
+          btn.style.background = '#6c63ff'; btn.style.borderColor = '#6c63ff';
+          body.querySelector('#buddy-submit').disabled = picks.some((v) => v === null);
+        };
+      });
+      body.querySelector('#buddy-submit').onclick = () => {
+        if (picks.some((v) => v === null)) return;
+        socket.emit(mode === 'answer' ? 'buddyQuizAnswer' : 'buddyQuizGuess',
+          mode === 'answer' ? { answers: picks } : { guesses: picks });
+      };
+    }
+    // Buddy names come from player-set nicknames — escape before ANY
+    // innerHTML interpolation (a hostile nickname must not run script here).
+    function _buddyEsc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function _buddyRenderPanel() {
+      const b = window._buddy;
+      const m = _buddyPanelEl();
+      const body = m.querySelector('#buddy-body');
+      if (!b) { body.innerHTML = 'No buddy this week.'; return; }
+      const bn = _buddyEsc(b.buddyName);
+      let html = '<div style="font-size:15px;color:#ffd76a;margin:6px 0 10px;">' + (b.isNpc ? '🌱 Huddles (the coach!)' : '⭐ ' + bn) + '</div>' +
+        '<div style="color:#aaa;">Shh — only the two of you know. New buddy every Monday!</div>' +
+        '<ul style="margin:10px 0 4px 18px;color:#ccc;">' +
+        '<li>Hang out near ' + (b.isNpc ? 'Huddles' : bn) + ' → <b style="color:#4ade80;">×' + b.mult + ' coins</b> (up to 2h/day)</li>' +
+        (b.isNpc ? '' : '<li>Finish a game together → <b style="color:#4ade80;">+' + (b.gameBonus || 50) + ' coins each</b> (5×/day)</li>' +
+        '<li>“Get to know you” quiz → <b style="color:#4ade80;">+' + (b.quizPay || 100) + '/correct guess</b></li>') +
+        '</ul><hr style="border:none;border-top:1px solid #2a2a40;margin:12px 0;">';
+      if (b.isNpc) {
+        html += '<div style="color:#aaa;">Odd one out this week — Huddles has your back. Walk with the coach to earn the bonus, and you\'ll get a coworker buddy next shuffle!</div>';
+        body.innerHTML = html; return;
+      }
+      if (b.quizScore !== null && b.quizScore !== undefined) {
+        html += '<div>✅ Quiz done — you knew ' + bn + ' <b>' + b.quizScore + '/3</b>!</div>';
+        body.innerHTML = html; return;
+      }
+      if (!_buddyQs) { html += '<div style="color:#888;">Loading quiz…</div>'; body.innerHTML = html; socket.emit('buddyQuizOpen'); return; }
+      if (!b.myAnswers) {
+        html += '<div style="color:#ffd76a;margin-bottom:2px;">Round 1 — your own picks:</div>' + _buddyQuizRows('answer');
+        body.innerHTML = html; _buddyWireQuiz(body, 'answer'); return;
+      }
+      if (!b.buddyAnswered) {
+        html += '<div style="color:#888;">You answered! Waiting for ' + bn + ' to answer their questions — then you can guess theirs (stand together to play).</div>';
+        body.innerHTML = html; return;
+      }
+      html += '<div style="color:#ffd76a;margin-bottom:2px;">Round 2 — what did ' + bn + ' pick? (stand near them!)</div>' + _buddyQuizRows('guess');
+      body.innerHTML = html; _buddyWireQuiz(body, 'guess');
+    }
+    function _buddyOpenPanel() {
+      const m = _buddyPanelEl();
+      m.style.display = 'flex';
+      _buddyRenderPanel();
+    }
+    socket.on('buddyInfo', (info) => {
+      const boost = window._buddy?.boost || false;
+      window._buddy = { ...info, boost };
+      _buddyChipRender();
+      const m = document.getElementById('buddy-modal');
+      if (m && m.style.display === 'flex') _buddyRenderPanel();
+    });
+    socket.on('buddyQuiz', ({ questions }) => {
+      _buddyQs = questions;
+      const m = document.getElementById('buddy-modal');
+      if (m && m.style.display === 'flex') _buddyRenderPanel();
+    });
+    socket.on('buddyQuizMsg', ({ message }) => {
+      const m = _buddyPanelEl();
+      m.querySelector('#buddy-msg').textContent = message || '';
+    });
+    socket.on('buddyQuizResult', ({ score, pay }) => {
+      if (window._buddy) window._buddy.quizScore = score;
+      const m = _buddyPanelEl();
+      m.querySelector('#buddy-msg').textContent = '';
+      if (m.style.display === 'flex') _buddyRenderPanel();
+      _rpsToast('🤝 You knew your buddy ' + score + '/3' + (pay ? ' — +' + pay + ' coins!' : '!'));
+    });
+    socket.on('buddyBonus', ({ amount }) => {
+      _rpsToast('🤝 Buddy bonus! +' + amount + ' coins for playing together');
+    });
     function _phReset() {
       window._ph = { role: null, phase: null, frozen: false, zoomLock: false, hiderId: null, morph: false };
       _phMorphBtn(false);

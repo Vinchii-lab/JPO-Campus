@@ -475,6 +475,174 @@ function giftRecord(key, amount) {
   else e.sent += amount;
 }
 
+// ── HQ-Buddy (August 2026) ───────────────────────────────────────────────────
+// Secret weekly pairings: every email-backed player gets ONE buddy per week
+// (Monday-keyed). Only the pair ever learns who's who — no broadcast carries
+// buddy info. Perks: 1.25× coin ticks while standing near your buddy (daily
+// minute cap), a bonus when the pair finishes a duel together (daily cap),
+// and a one-shot "get to know you" quiz that pays per correct guess.
+// Pairing is lazy: the first player of the week gets Huddles (the NPC) as a
+// placeholder buddy; the next unpaired player upgrades that placeholder into
+// a real pair. Odd player out simply keeps Huddles for the week.
+const BUDDY_NPC             = "__huddles__";
+const BUDDY_EARN_MULT       = 1.25;
+const BUDDY_BUFF_DAILY_MIN  = 120;   // boosted minutes per player per UTC day
+const BUDDY_GAME_BONUS      = 50;    // coins EACH when the pair finishes a duel
+const BUDDY_GAME_DAILY_CAP  = 5;     // duel bonuses per pair per UTC day
+const BUDDY_QUIZ_PAY        = 100;   // coins per correct guess (3 questions)
+function buddyWeek(now = new Date()) {
+  // The week id is its Monday's UTC date — rotation happens at Monday 00:00 UTC.
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+// Daily caps live in jpo_buddy_caps (day,key → n) so a server restart can't
+// hand out fresh allowances (same lesson as the chore-reset task). The
+// INSERT..ON CONFLICT..WHERE n < cap is a single atomic consume: rowCount 0
+// means the cap is spent (or a concurrent consume beat us) — never double-pays.
+async function buddyCapConsume(key, cap) {
+  const day = new Date().toISOString().slice(0, 10);
+  const { rowCount } = await pool.query(
+    `INSERT INTO jpo_buddy_caps (day, key, n) VALUES ($1, $2, 1)
+     ON CONFLICT (day, key) DO UPDATE SET n = jpo_buddy_caps.n + 1
+     WHERE jpo_buddy_caps.n < $3`,
+    [day, key, cap]);
+  return rowCount === 1;
+}
+// (socketIdByEmail lives with the chore helpers below — shared here.)
+// Get-or-create this week's pairing for an email. Concurrency-safe via the
+// (week,email) primary key: a raced upgrade rolls back and retries as a
+// placeholder insert (ON CONFLICT DO NOTHING makes even that race harmless).
+async function ensureBuddy(email) {
+  const week = buddyWeek();
+  const { rows } = await pool.query(`SELECT * FROM jpo_buddies WHERE week=$1 AND email=$2`, [week, email]);
+  if (rows[0]) return rows[0];
+  // Prefer not repeating last week's buddy when there's a choice.
+  const prev = await pool.query(
+    `SELECT buddy_email FROM jpo_buddies WHERE email=$1 AND week<>$2 ORDER BY week DESC LIMIT 1`, [email, week]);
+  const avoid = prev.rows[0]?.buddy_email || "";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Claim a Huddles-placeholder atomically: the subselect takes a row lock
+    // (SKIP LOCKED — two simultaneous logins can never grab the same
+    // placeholder), and the UPDATE re-checks buddy_email so a claim that
+    // committed between plan and lock can't be stolen.
+    const claim = await client.query(
+      `UPDATE jpo_buddies SET buddy_email=$2
+        WHERE week=$1 AND buddy_email=$3 AND email = (
+          SELECT email FROM jpo_buddies
+           WHERE week=$1 AND buddy_email=$3 AND email<>$2
+           ORDER BY (email = $4) ASC, email LIMIT 1
+           FOR UPDATE SKIP LOCKED)
+        RETURNING email`,
+      [week, email, BUDDY_NPC, avoid]);
+    if (claim.rows[0]) {
+      const other = claim.rows[0].email;
+      await client.query(
+        `INSERT INTO jpo_buddies (week, email, buddy_email) VALUES ($1,$2,$3)`, [week, email, other]);
+      await client.query("COMMIT");
+      // The placeholder player just got a real buddy — refresh them live.
+      const sid = socketIdByEmail(other);
+      if (sid) { players[sid].buddyEmail = email; sendBuddyInfo(sid).catch(() => {}); }
+      return { week, email, buddy_email: other };
+    }
+    // No claimable placeholder — become one.
+    await client.query(
+      `INSERT INTO jpo_buddies (week, email, buddy_email) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+      [week, email, BUDDY_NPC]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+  const { rows: r2 } = await pool.query(`SELECT * FROM jpo_buddies WHERE week=$1 AND email=$2`, [week, email]);
+  return r2[0] || null;
+}
+async function buddyDisplayName(email) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(NULLIF(nickname,''), NULLIF(first_name,''), name) AS display FROM jpo_players WHERE email=$1`, [email]);
+  return rows[0]?.display || "your buddy";
+}
+// Private snapshot for ONE player — never broadcast.
+async function sendBuddyInfo(socketId) {
+  const p = players[socketId];
+  if (!p || !p.email) return;
+  try {
+    const row = await ensureBuddy(p.email);
+    if (!row) return;
+    p.buddyEmail = row.buddy_email;   // cached for the coin tick
+    const isNpc = row.buddy_email === BUDDY_NPC;
+    let buddyAnswered = false;
+    if (!isNpc) {
+      const { rows } = await pool.query(
+        `SELECT (quiz_answers IS NOT NULL) AS a FROM jpo_buddies WHERE week=$1 AND email=$2`, [row.week, row.buddy_email]);
+      buddyAnswered = !!rows[0]?.a;
+    }
+    io.to(socketId).emit("buddyInfo", {
+      week: row.week,
+      buddyName: isNpc ? "Huddles" : await buddyDisplayName(row.buddy_email),
+      isNpc,
+      myAnswers: row.quiz_answers || null,
+      buddyAnswered,
+      quizScore: row.quiz_score,          // null until guessed
+      mult: BUDDY_EARN_MULT,
+      quizPay: BUDDY_QUIZ_PAY,
+      gameBonus: BUDDY_GAME_BONUS,
+    });
+  } catch (e) {
+    console.error("buddy info failed:", e);
+  }
+}
+// Coin-tick helper: is this player currently standing near their buddy?
+// (NPC buddy counts — hang out with Huddles.) Pure position check; the daily
+// minute cap is consumed separately (DB) by the tick.
+function buddyNearPos(p) {
+  if (!p.email || !p.buddyEmail) return false;
+  let bx, by;
+  if (p.buddyEmail === BUDDY_NPC) { bx = NPC.x; by = NPC.y; }
+  else {
+    const sid = socketIdByEmail(p.buddyEmail);
+    if (!sid) return false;
+    bx = players[sid].x; by = players[sid].y;
+  }
+  const dx = p.x - bx, dy = p.y - by;
+  return dx * dx + dy * dy <= GROUP_RADIUS * GROUP_RADIUS;
+}
+// Duel-finish hook: if the two participants are this week's pair, pay both a
+// small bonus (capped per pair per day). Fire-and-forget from finishMatch.
+async function buddyGameBonus(idA, idB) {
+  const a = players[idA], b = players[idB];
+  if (!a?.email || !b?.email) return;
+  if (a.buddyEmail !== b.email || b.buddyEmail !== a.email) return;
+  const pairKey = "game|" + [a.email, b.email].sort().join("|");
+  if (!(await buddyCapConsume(pairKey, BUDDY_GAME_DAILY_CAP))) return;
+  for (const p of [a, b]) {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players SET coins = coins + $2 WHERE email = $1 RETURNING coins`, [p.email, BUDDY_GAME_BONUS]);
+      if (rows[0]) p.coins = rows[0].coins;
+    } catch (e) { console.error("buddy game bonus failed:", e); continue; }
+    const sid = socketIdByEmail(p.email);
+    if (sid) {
+      io.to(sid).emit("coinUpdate", { coins: p.coins });
+      io.to(sid).emit("buddyBonus", { amount: BUDDY_GAME_BONUS });
+    }
+  }
+}
+// Deterministic 3 questions per pair per week, drawn from IB_PROMPTS.
+function buddyQuizQs(week, e1, e2) {
+  const seed = crypto.createHash("sha1").update(`${week}|${[e1, e2].sort().join("|")}`).digest();
+  const picks = [];
+  for (let i = 0; picks.length < 3 && i < seed.length; i++) {
+    const idx = seed[i] % IB_PROMPTS.length;
+    if (!picks.includes(idx)) picks.push(idx);
+  }
+  return picks;
+}
+
 // ── Pet trades (July 2026) ───────────────────────────────────────────────────
 // Direct offers only (no open marketplace): "my cat + 2000 coins for your
 // dragon". Both sides must be email-backed (a trade must persist), the
@@ -1931,6 +2099,9 @@ async function restorePlayer(socket, row) {
   // Office chores: remaining cooldown per chore, so the client's "available
   // again" sparkle is right from the first frame (not just after a chore).
   socket.emit("choreState", { chores: choreStateFor(state.email || socket.id) });
+  // HQ-Buddy: pair (or restore) this week's secret buddy and tell ONLY this
+  // socket. Fire-and-forget — a pairing hiccup must never block login.
+  if (state.email) sendBuddyInfo(socket.id).catch((err) => console.error("buddy pairing failed:", err));
   // Restore a still-running shared-treat earnings buff (paid minutes survive
   // refreshes and server restarts).
   if ((state.earnUntil || 0) > Date.now())
@@ -2429,6 +2600,7 @@ async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false
     // A draw still counts as "played together" for pair history + missions
     // (the connection happened; only forfeits are excluded).
     coachDuelPlayed(cId, tId).catch((err) => console.error("coach duel hook failed:", err));
+    buddyGameBonus(cId, tId).catch((err) => console.error("buddy game bonus failed:", err));
     done();
     return;
   }
@@ -2458,7 +2630,10 @@ async function finishMatch(m, { draw = false, winnerId, loserId, forfeit = false
   recordWin(winnerId, m.game).catch((err) => console.error("recordWin failed:", err));
   // Pair history + play missions — NOT on forfeits (dodging a loss by leaving
   // or timing out is no connection; see task rules). Win, lose or draw count.
-  if (!forfeit) coachDuelPlayed(winnerId, loserId).catch((err) => console.error("coach duel hook failed:", err));
+  if (!forfeit) {
+    coachDuelPlayed(winnerId, loserId).catch((err) => console.error("coach duel hook failed:", err));
+    buddyGameBonus(winnerId, loserId).catch((err) => console.error("buddy game bonus failed:", err));
+  }
   console.log(`${GAME_NAMES[m.game] || m.game}: ${wp?.name || "?"} beat ${lp?.name || "?"}${transferred ? ` for ${transferred} coins` : ""}${forfeit ? " (forfeit)" : ""}`);
   done();
 }
@@ -2913,7 +3088,12 @@ setInterval(async () => {
     // 4.5) accumulate in p.earnFrac so nothing is lost to rounding: a boosted
     // desk-sitter gets 4,5,4,5,... coins on alternating minutes.
     const base = COIN_TICK_BASE + (isAtWorkSeat(p) ? WORK_BONUS : 0);
-    const exact = (p.earnUntil || 0) > ltTickStart ? base * EARN_MULT : base;
+    // Buddy proximity buff multiplies WITH the shared-treat buff (both are
+    // deliberately social; the daily minute cap bounds the stack).
+    const buddyNear = buddyNearPos(p) &&
+      await buddyCapConsume("buff|" + p.email, BUDDY_BUFF_DAILY_MIN).catch((e) => { console.error("buddy cap failed:", e); return false; });
+    const mult = ((p.earnUntil || 0) > ltTickStart ? EARN_MULT : 1) * (buddyNear ? BUDDY_EARN_MULT : 1);
+    const exact = base * mult;
     p.earnFrac = (p.earnFrac || 0) + exact;
     const rate = Math.floor(p.earnFrac);
     p.earnFrac -= rate;
@@ -2934,7 +3114,7 @@ setInterval(async () => {
     } else {
       p.coins = (p.coins || 0) + rate;
     }
-    io.to(id).emit("coinUpdate", { coins: p.coins });
+    io.to(id).emit("coinUpdate", { coins: p.coins, buddyBoost: buddyNear });
   }
   ltState.coinTickMs = Date.now() - ltTickStart;
 }, 60_000);
@@ -3749,6 +3929,77 @@ io.on("connection", (socket) => {
     p.anim = "idle";
     socket.emit("phJoined", { x: p.x, y: p.y, hideEndsAt: propHunt.hideEndsAt, phase: propHunt.state, endsAt: propHunt.endsAt });
     socket.broadcast.emit("playerMoved", { id: socket.id, ...p });
+  });
+
+  // ── HQ-Buddy quiz ─────────────────────────────────────────────────────────
+  // All three handlers are hider-of-truth on the server: questions are drawn
+  // deterministically per pair per week, answers/score live in jpo_buddies,
+  // and payouts go through the same atomic UPDATE pattern as everything else.
+  socket.on("buddyQuizOpen", async () => {
+    const p = players[socket.id];
+    if (!p?.email || !p.buddyEmail || p.buddyEmail === BUDDY_NPC) return;
+    try {
+      const week = buddyWeek();
+      const qs = buddyQuizQs(week, p.email, p.buddyEmail).map((i) => IB_PROMPTS[i]);
+      socket.emit("buddyQuiz", { questions: qs });
+    } catch (e) { console.error("buddy quiz open failed:", e); }
+  });
+  socket.on("buddyQuizAnswer", async ({ answers } = {}) => {
+    const p = players[socket.id];
+    if (!p?.email || !p.buddyEmail || p.buddyEmail === BUDDY_NPC) return;
+    if (!Array.isArray(answers) || answers.length !== 3 || answers.some((v) => v !== 0 && v !== 1)) return;
+    try {
+      const week = buddyWeek();
+      // Answers lock on first save — the quiz is a one-shot per week.
+      const upd = await pool.query(
+        `UPDATE jpo_buddies SET quiz_answers=$3 WHERE week=$1 AND email=$2 AND quiz_answers IS NULL`,
+        [week, p.email, JSON.stringify(answers)]);
+      if (!upd.rowCount) { socket.emit("buddyQuizMsg", { message: "You already answered this week." }); return; }
+      socket.emit("buddyQuizMsg", { message: "Answers saved! Now guess your buddy's picks.", answered: true });
+      // Unlock the buddy's waiting guess screen live.
+      const sid = socketIdByEmail(p.buddyEmail);
+      if (sid) sendBuddyInfo(sid).catch(() => {});
+      sendBuddyInfo(socket.id).catch(() => {});
+    } catch (e) { console.error("buddy quiz answer failed:", e); }
+  });
+  socket.on("buddyQuizGuess", async ({ guesses } = {}) => {
+    const p = players[socket.id];
+    if (!p?.email || !p.buddyEmail || p.buddyEmail === BUDDY_NPC) return;
+    if (!Array.isArray(guesses) || guesses.length !== 3 || guesses.some((v) => v !== 0 && v !== 1)) return;
+    // The "meet" part is real: guessing requires your buddy online and nearby.
+    const sid = socketIdByEmail(p.buddyEmail);
+    const b = sid ? players[sid] : null;
+    if (!b) { socket.emit("buddyQuizMsg", { message: "Your buddy needs to be in the office to play this round." }); return; }
+    const dx = p.x - b.x, dy = p.y - b.y;
+    if (dx * dx + dy * dy > GROUP_RADIUS * GROUP_RADIUS) {
+      socket.emit("buddyQuizMsg", { message: "Get closer to your buddy first — this is a together thing!" });
+      return;
+    }
+    try {
+      const week = buddyWeek();
+      const { rows } = await pool.query(
+        `SELECT quiz_answers, quiz_score FROM jpo_buddies WHERE week=$1 AND email=$2`, [week, p.email]);
+      if (!rows[0] || rows[0].quiz_score !== null) { socket.emit("buddyQuizMsg", { message: "You already guessed this week." }); return; }
+      const { rows: brows } = await pool.query(
+        `SELECT quiz_answers FROM jpo_buddies WHERE week=$1 AND email=$2`, [week, p.buddyEmail]);
+      const theirAnswers = brows[0]?.quiz_answers;
+      if (!theirAnswers) { socket.emit("buddyQuizMsg", { message: "Your buddy hasn't answered their questions yet." }); return; }
+      // Score lock inside the UPDATE guard — a double-submit race pays once.
+      const score = guesses.reduce((n, g, i) => n + (g === theirAnswers[i] ? 1 : 0), 0);
+      const lock = await pool.query(
+        `UPDATE jpo_buddies SET quiz_score=$3 WHERE week=$1 AND email=$2 AND quiz_score IS NULL`,
+        [week, p.email, score]);
+      if (!lock.rowCount) return;
+      const pay = score * BUDDY_QUIZ_PAY;
+      if (pay > 0) {
+        const { rows: crows } = await pool.query(
+          `UPDATE jpo_players SET coins = coins + $2 WHERE email = $1 RETURNING coins`, [p.email, pay]);
+        if (crows[0]) p.coins = crows[0].coins;
+        socket.emit("coinUpdate", { coins: p.coins });
+      }
+      socket.emit("buddyQuizResult", { score, pay, theirAnswers });
+      sendBuddyInfo(socket.id).catch(() => {});
+    } catch (e) { console.error("buddy quiz guess failed:", e); }
   });
 
   // Hider changes their mind mid-hide (the prop everyone hunts is whatever
@@ -6602,6 +6853,22 @@ function _playerList() {
 // never migrated by drizzle push) self-healing on the first boot after a
 // publish — same policy as the column nudges below.
 try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_buddy_caps (
+    day text NOT NULL,
+    key text NOT NULL,
+    n int NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, key)
+  )`);
+  // Yesterday's cap rows are dead weight — sweep on boot.
+  await pool.query(`DELETE FROM jpo_buddy_caps WHERE day < to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_buddies (
+    week text NOT NULL,
+    email text NOT NULL,
+    buddy_email text NOT NULL,
+    quiz_answers jsonb,
+    quiz_score int,
+    PRIMARY KEY (week, email)
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_coach (
     email text PRIMARY KEY,
     intake jsonb,
