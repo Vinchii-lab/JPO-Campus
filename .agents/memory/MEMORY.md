@@ -12,4 +12,5 @@
 - [JPO Huddle NPC & AI coach](jpo-huddle-npc-coach.md) — NPCs live OUTSIDE players (own npc* events); socket-triggered AI needs pre-gate read + daily spend cap + atomic claim; form events use a talk-session stamp, not distance.
 - [JPO Huddle economy features](jpo-huddle-economy.md) — gifting/trades/price overrides: block mid-match, settle in one guarded SQL transaction, client price labels display-only.
 - [JPO Huddle Prop Hunt / hidden-player rounds](jpo-huddle-prophunt.md) — client-side sprite hiding is NOT secrecy: mask every snapshot, suppress broadcasts, block position-leaking items; mutual exclusion with other rounds.
+- [JPO Huddle map furniture ID](jpo-huddle-map-furniture.md) — confirm a GID by cropping the tileset tile with magick before anchoring a station; known plant/sofa/whiteboard/kettlebell GIDs.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.

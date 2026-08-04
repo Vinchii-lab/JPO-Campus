@@ -2392,6 +2392,28 @@
         hl:{ x:98*48, y:94*48, w:7*48, h:2*48 } },   // prep/bakery tables, middle (c98-104, r94-95)
       { id:'bakery_line3',    x:5232, y:4536, r:210, label:'Buy fresh bakes', touch:'Bakery',
         hl:{ x:105*48, y:94*48, w:9*48, h:2*48 } },  // prep/bakery tables + register, east (c105-113, r94-95)
+      // ── Office chores (server CHORES/CHORE_STATIONS): small repeatable jobs
+      // for coins. `chore` names the shared cooldown group — stations sharing
+      // it share one per-person timer, and it keys the ✨ "available again"
+      // marker. Coords MUST match OBJECTS in server.js. These stay LAST in the
+      // list so every existing station keeps winning its own overlap zone
+      // (the E-scan is first-match).
+      { id:'chore_plants1',  x:9312, y:2640, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:193*48, y:53*48, w:2*48, h:2*48 } },  // potted palm, Game Room (c193-194, r53-54)
+      { id:'chore_plants2',  x:9984, y:3264, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:207*48, y:66*48, w:2*48, h:2*48 } },  // potted palm, east hallway (c207-208, r66-67)
+      { id:'chore_plants3',  x:4992, y:5760, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:103*48, y:118*48, w:2*48, h:2*48 } }, // potted palm, basement office (c103-104, r118-119)
+      { id:'chore_couch',    x:1728, y:4608, r:200, label:'Fluff the lounge cushions', touch:'Tidy', chore:'couch',
+        hl:{ x:33*48, y:94*48, w:6*48, h:2*48 } },   // lounge sofa row (c33-38, r94-95)
+      { id:'chore_weights',  x:9960, y:1104, r:170, label:'Re-rack the gym weights', touch:'Rack', chore:'weights',
+        hl:{ x:206*48, y:21*48, w:3*48, h:4*48 } },  // kettlebell racks, Gym (c206-208, r21-24)
+      { id:'chore_board',    x:2064, y:4128, r:150, label:'Wipe the whiteboard', touch:'Wipe', chore:'board',
+        hl:{ x:42*48, y:84*48, w:2*48, h:2*48 } },   // whiteboard + stool (c42-43, r84-85)
+      { id:'chore_meeting1', x:4632, y:5376, r:200, label:'Tidy the meeting room', touch:'Tidy', chore:'meeting',
+        hl:{ x:95*48, y:108*48, w:3*48, h:4*48 } },  // conference table, basement meeting room (c95-97, r108-111)
+      { id:'chore_meeting2', x:7632, y:3600, r:180, label:'Tidy the meeting room', touch:'Tidy', chore:'meeting',
+        hl:{ x:158*48, y:72*48, w:2*48, h:3*48 } },  // conference table, east meeting room (c158-159, r72-74)
     ];
     // Cafeteria tables (gid 2183 = table top-left marker) each get their own food
     // spot — entries are appended at create() from the loaded map so a Tiled
@@ -3990,9 +4012,32 @@
     // Group consumable visuals (confetti / fireworks / pizza burst) — pure
     // flavor at the thrower's world position, visible to everyone (like smoke).
     socket.on('groupEffect', (payload) => {
-      const { effect, x, y } = payload || {};
+      const { effect, x, y, emoji } = payload || {};
       if (typeof x !== 'number' || typeof y !== 'number') return;
-      window._gameScene?._groupBurst(effect, x, y);
+      window._gameScene?._groupBurst(effect, x, y, emoji);
+    });
+
+    // ── Office chores ─────────────────────────────────────────────────
+    // Per-chore cooldown state: choreId → ts when it's available again.
+    // Seeded by the server's choreState on office entry; choreDone updates
+    // the one we just did. Drives the ✨ marker over each chore station.
+    window._choreReadyAt = {};
+    socket.on('choreState', (payload) => {
+      const { chores } = payload || {};
+      const now = Date.now();
+      window._choreReadyAt = {};
+      for (const [c, ms] of Object.entries(chores || {})) {
+        if (typeof ms === 'number' && ms >= 0) window._choreReadyAt[c] = now + ms;
+      }
+    });
+    socket.on('choreDone', (payload) => {
+      const { chore, pay, line, emoji, nextInMs } = payload || {};
+      if (typeof chore === 'string' && typeof nextInMs === 'number') {
+        window._choreReadyAt[chore] = Date.now() + nextInMs;
+      }
+      const ic = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '🧹';
+      const txt = (typeof line === 'string' ? line.slice(0, 120) : 'Chore done!');
+      _rpsToast(`${ic} ${txt} +${Number(pay) || 0} coins`);
     });
 
     // ── Interactive office objects: feedback ──────────────────────────
@@ -4016,11 +4061,11 @@
     socket.on('objectEffect', (payload) => {
       const { id, kind, emoji } = payload || {};
       const scene = window._gameScene;
-      const EFFECT_EMOJI = { water: '🥤', snack: '🍪' };   // default bubble per effect kind
+      const EFFECT_EMOJI = { water: '🥤', snack: '🍪', chore: '🧹' };   // default bubble per effect kind
       if (!scene || !Object.hasOwn(EFFECT_EMOJI, kind)) return;
-      // 'snack' carries the specific snack emoji from the server's rotation;
+      // 'snack'/'chore' carry the specific emoji from the server;
       // sanity-cap the length and fall back to the default on anything odd.
-      const bubble = (kind === 'snack' && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8)
+      const bubble = ((kind === 'snack' || kind === 'chore') && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8)
         ? emoji : EFFECT_EMOJI[kind];
       if (id === socket.id) {
         if (scene.player) scene._showEmoteBubble(scene.player, bubble, true);
@@ -8788,6 +8833,19 @@
           this._objHl[o.id] = rect;
         }
 
+        // Office chore stations: a gently bobbing ✨ over each station while
+        // its chore is available for the local player (window._choreReadyAt,
+        // fed by choreState/choreDone). Visibility is refreshed on a ~1s
+        // throttle in update().
+        this._choreMarks = {};
+        for (const o of OFFICE_OBJECTS) {
+          if (!o.chore) continue;
+          const m = this.add.text(o.hl.x + o.hl.w / 2, o.hl.y - 4, '✨', { fontSize: '16px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(450).setVisible(false).setAlpha(0.95);
+          this.tweens.add({ targets: m, y: m.y - 8, duration: 750, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+          this._choreMarks[o.id] = m;
+        }
+
 
         this.otherPlayers    = {};
         this.player          = null;
@@ -9891,14 +9949,19 @@
       // position. Confetti pops outward and falls; fireworks launch up and
       // explode high; pizza is a gentle float-up. Purely cosmetic — the
       // server's groupEffect event carries only {effect, x, y}.
-      _groupBurst(effect, x, y) {
+      _groupBurst(effect, x, y, emoji) {
         const CFG = {
           confetti:  { emojis: ['🎉', '🎊', '✨'],       count: 14, up: 90,  spread: 90,  dur: 1600, size: 16 },
           fireworks: { emojis: ['🎆', '✨', '💥', '🌟'], count: 22, up: 220, spread: 130, dur: 2600, size: 18 },
           pizza:     { emojis: ['🍕', '🍕', '✨'],       count: 10, up: 70,  spread: 70,  dur: 1800, size: 16 },
+          // Chore bursts ride the server-sent chore emoji plus sparkles.
+          chore:     { emojis: ['✨', '✨', '🪙'],       count: 9,  up: 60,  spread: 60,  dur: 1400, size: 15 },
         };
         const cfg = CFG[effect];
         if (!cfg) return;
+        if (effect === 'chore' && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) {
+          cfg.emojis = [emoji, '✨', '🪙'];
+        }
         for (let i = 0; i < cfg.count; i++) {
           const em = cfg.emojis[Phaser.Math.Between(0, cfg.emojis.length - 1)];
           const p = this.add.text(
@@ -10040,6 +10103,17 @@
         // Office After Dark darkness overlay follows the player every frame
         // (transform-only; no-op unless a round is active for us).
         window._roundFrame?.(this);
+        // Chore "available again" sparkles — cheap, so a 1s throttle is plenty.
+        if (!this._choreMarkAt || time - this._choreMarkAt > 1000) {
+          this._choreMarkAt = time;
+          const ra = window._choreReadyAt || {};
+          const nowTs = Date.now();
+          for (const o of OFFICE_OBJECTS) {
+            if (!o.chore) continue;
+            const m = this._choreMarks && this._choreMarks[o.id];
+            if (m) m.setVisible((ra[o.chore] || 0) <= nowTs);
+          }
+        }
         // Void containment snap-back: never let anyone stand in the unpainted
         // nothing outside the drawn map (the velocity clamp below is the
         // steering half; this catches teleports/separation pushes).

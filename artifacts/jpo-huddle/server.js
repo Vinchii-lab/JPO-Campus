@@ -689,7 +689,52 @@ const OBJECTS = {
   bakery_line2:    { x: 4848, y: 4536, r: 170 }, // prep/bakery tables, middle (c98-104, r94-95)
   bakery_line3:    { x: 5232, y: 4536, r: 210 }, // prep/bakery tables + register, east (c105-113, r94-95)
   // cafeteria_food<N> spots are appended after the map loads (see FOOD_TABLES).
+  // ── Office chore stations (August 2026 — see CHORES below) ─────────────
+  // Small repeatable jobs on real map furniture. Several stations can share
+  // ONE chore (same per-person cooldown — more stations are walk-distance
+  // convenience, never a faster payout), mirroring the coffee-machine rule.
+  chore_plants1:  { x: 9312, y: 2640, r: 150 }, // potted palm, Game Room (c193-194, r53-54)
+  chore_plants2:  { x: 9984, y: 3264, r: 150 }, // potted palm, east hallway (c207-208, r66-67)
+  chore_plants3:  { x: 4992, y: 5760, r: 150 }, // potted palm, basement office (c103-104, r118-119)
+  chore_couch:    { x: 1728, y: 4608, r: 200 }, // lounge sofa row (c33-38, r94-95)
+  chore_weights:  { x: 9960, y: 1104, r: 170 }, // kettlebell racks, Gym (c206-208, r21-24)
+  chore_board:    { x: 2064, y: 4128, r: 150 }, // whiteboard + stool (c42-43, r84-85)
+  chore_meeting1: { x: 4632, y: 5376, r: 200 }, // conference table, basement meeting room (c95-97, r108-111)
+  chore_meeting2: { x: 7632, y: 3600, r: 180 }, // conference table, east meeting room (c158-159, r72-74)
 };
+
+// ── Office chores ────────────────────────────────────────────────────────
+// Repeatable small jobs anyone can do for coins — an ACTIVE earning floor for
+// new/broke players on top of the passive tick (COIN_TICK_BASE = 2/min =
+// 120/hr). Doing every chore each hour adds at most 82/hr, so it's a floor
+// for the poor, never a farm for the rich. Cooldowns are per player per
+// CHORE (stations sharing a chore share its cooldown), in-memory like the
+// coffee cooldown — a restart forgives them, which is fine at this stakes
+// level. Station ids MUST exist in OBJECTS above and in the client's
+// OFFICE_OBJECTS (the usual lockstep).
+const CHORES = {
+  plants:  { pay: 15, cooldownMs: 60 * 60_000, emoji: "🪴", line: "You water the office plants. They perk up gratefully." },
+  couch:   { pay: 12, cooldownMs: 60 * 60_000, emoji: "🛋️", line: "You fluff the lounge cushions back into shape." },
+  weights: { pay: 20, cooldownMs: 60 * 60_000, emoji: "🏋️", line: "You re-rack the stray kettlebells. The gym approves." },
+  board:   { pay: 10, cooldownMs: 60 * 60_000, emoji: "🧽", line: "You wipe last sprint's scribbles off the whiteboard." },
+  meeting: { pay: 25, cooldownMs: 60 * 60_000, emoji: "🧹", line: "You tidy the meeting room: chairs in, table cleared." },
+};
+// Station object id → chore id (many-to-one, like FOOD_STATIONS).
+const CHORE_STATIONS = {
+  chore_plants1: "plants", chore_plants2: "plants", chore_plants3: "plants",
+  chore_couch: "couch", chore_weights: "weights", chore_board: "board",
+  chore_meeting1: "meeting", chore_meeting2: "meeting",
+};
+// `${email|socketId}|${choreId}` → ts when that chore unlocks again.
+const choreReadyAt = new Map();
+// Remaining ms per chore for one player — sent on office entry so the client
+// can show the "available again" sparkle without guessing.
+function choreStateFor(key) {
+  const now = Date.now();
+  const out = {};
+  for (const c of Object.keys(CHORES)) out[c] = Math.max(0, (choreReadyAt.get(key + "|" + c) || 0) - now);
+  return out;
+}
 // Free coffee is on a LONG per-person refill so the 10-coin shop coffee
 // (instant, usable anywhere, stockpilable) stays worth buying.
 const COFFEE_MACHINE_COOLDOWN_MS = 10 * 60_000;
@@ -1883,6 +1928,9 @@ async function restorePlayer(socket, row) {
   // covering the game-boots-after-this-emit ordering) + today's mission for
   // the HUD chip, so a refresh never loses the mission display.
   socket.emit("npcState", npcSnapshot());
+  // Office chores: remaining cooldown per chore, so the client's "available
+  // again" sparkle is right from the first frame (not just after a chore).
+  socket.emit("choreState", { chores: choreStateFor(state.email || socket.id) });
   // Restore a still-running shared-treat earnings buff (paid minutes survive
   // refreshes and server restarts).
   if ((state.earnUntil || 0) > Date.now())
@@ -6214,6 +6262,72 @@ io.on("connection", (socket) => {
       socket.emit("fridgeSnack", { line: s.line, icon });
       io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
       coachCoffeeMoment(socket.id);
+
+    } else if (Object.hasOwn(CHORE_STATIONS, object)) {
+      // Office chores: small repeatable payouts with a per-person, per-CHORE
+      // cooldown (stations sharing a chore share it). Everything server-side:
+      // proximity was checked above, the cooldown lives here, and the coins
+      // move via the same atomic relative UPDATE as the daily bonus.
+      const choreId = CHORE_STATIONS[object];
+      const chore = CHORES[choreId];
+      const key = (p.email || socket.id) + "|" + choreId;
+      const readyAt = choreReadyAt.get(key) || 0;
+      if (now < readyAt) {
+        const mins = Math.ceil((readyAt - now) / 60_000);
+        socket.emit("interactError", { message: `${chore.emoji} Already done — this chore resets in about ${mins} min.` });
+        return;
+      }
+      pruneCooldowns(choreReadyAt, now);
+      // Claim the cooldown BEFORE the async payout so a rapid double-press
+      // can't double-pay; it is ROLLED BACK (deleted) if the DB credit fails,
+      // so a failed payout never eats an hour — the player just retries.
+      choreReadyAt.set(key, now + chore.cooldownMs);
+      const announceChore = () => {
+        socket.emit("choreDone", { chore: choreId, object, pay: chore.pay, line: chore.line, emoji: chore.emoji, nextInMs: chore.cooldownMs });
+        // Everyone nearby sees the worker's bubble + a burst at the station —
+        // but with the same After Dark isolation as gymFx/emotes: a lit
+        // outsider's chore is a position-anchored signal that must not reach
+        // alive participants in the dark.
+        const bubble = { id: socket.id, kind: "chore", emoji: chore.emoji };
+        const burst = { effect: "chore", x: obj.x, y: obj.y - 24, emoji: chore.emoji };
+        if (round && round.state === "active" && !inTheDark(socket.id)) {
+          for (const pid of Object.keys(players)) if (!inTheDark(pid)) {
+            io.to(pid).emit("objectEffect", bubble);
+            io.to(pid).emit("groupEffect", burst);
+          }
+        } else {
+          io.emit("objectEffect", bubble);
+          io.emit("groupEffect", burst);
+        }
+        console.log(`${p.name} did chore '${choreId}' at ${object} (+${chore.pay} coins)`);
+      };
+      if (p.email) {
+        pool
+          .query(`UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`, [p.email, chore.pay])
+          .then(({ rows }) => {
+            if (!rows[0]) throw new Error("no player row");
+            // Only adopt the returned balance if this socket is still the live
+            // session (a fast refresh swaps players[socket.id] out under us) —
+            // the DB credit itself already landed either way.
+            if (players[socket.id] === p) {
+              p.coins = rows[0].coins;
+              socket.emit("coinUpdate", { coins: p.coins });
+            }
+            announceChore();
+          })
+          .catch((err) => {
+            console.error("chore payout failed:", err);
+            // Undo the claim (only if it's still OUR claim) so the chore stays
+            // retryable — no success events were sent.
+            if (choreReadyAt.get(key) === now + chore.cooldownMs) choreReadyAt.delete(key);
+            socket.emit("interactError", { message: "Hmm, that didn't count — try again in a moment." });
+          });
+      } else {
+        // Session-only players earn in-memory, same policy as the coin tick.
+        p.coins = (p.coins || 0) + chore.pay;
+        socket.emit("coinUpdate", { coins: p.coins });
+        announceChore();
+      }
 
     } else if (object === "arcade" || object.startsWith("pool_table") || object === "pingpong_table") {
       // Two-player game stations: the arcade opens the full game picker; the
