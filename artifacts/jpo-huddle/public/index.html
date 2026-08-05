@@ -1956,7 +1956,7 @@
         <button id="bingo-host-switch" type="button" style="width:100%;margin-top:6px;padding:6px 0;border-radius:8px;border:1px solid #4a3d78;background:#2b2250;color:#bba9ff;font-size:12px;cursor:pointer;">Switch to auto</button>
       </div>
       <div style="margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
-        <div style="font-size:11px;font-weight:700;color:#bba9ff;margin-bottom:6px;">How to win — complete any ONE line:</div>
+        <div id="bingo-howto-title" style="font-size:11px;font-weight:700;color:#bba9ff;margin-bottom:6px;">How to win — complete any ONE line:</div>
         <div id="bingo-howto" style="display:flex;gap:10px;justify-content:center;align-items:center;"></div>
       </div>
       <div id="bingo-called-list" style="margin-top:8px;font-size:11px;color:#8f83b8;word-break:break-word;line-height:1.5;"></div>
@@ -6411,6 +6411,10 @@
     function _bingoRenderHowto() {
       const wrap = _bgEl('bingo-howto');
       wrap.replaceChildren();
+      const title = _bgEl('bingo-howto-title');
+      if (title) title.textContent = _bingoRule === 'blackout'
+        ? 'How to win — fill your WHOLE card (blackout):'
+        : 'How to win — complete any ONE line:';
       const patterns = _bingoRule === 'blackout'
         ? [{ label: 'BLACKOUT — fill it ALL', hit: () => true }]
         : [
