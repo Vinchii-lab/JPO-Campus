@@ -4612,6 +4612,20 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Pet trick button — relay so everyone sees the trick (lively pets) ──
+  // Client-side flavor animation; the server just validates + throttles and
+  // fans out. Shares the After Dark isolation rule with emotes: a hidden
+  // round participant's pet trick must not fire at their concealed position.
+  socket.on("petTrick", () => {
+    if (!players[socket.id]) return;
+    if (!takeToken(emoteBucket)) return;             // same throttle pool as emotes
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("petTrick", { id: socket.id });
+    } else {
+      io.emit("petTrick", { id: socket.id });
+    }
+  });
+
   // ── Private whispers (DMs) — delivered ONLY to the target, echoed to sender ──
   // The client resolves the display name to a specific socket id via its online
   // roster (autocomplete), so name collisions are settled in the UI; the server
