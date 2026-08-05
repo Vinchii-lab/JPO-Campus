@@ -8797,6 +8797,12 @@
         this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 12, frameHeight: 8 });
         this.load.spritesheet('wear_scifihelmet',  '/assets/wear_scifihelmet.png',  { frameWidth: 13, frameHeight: 16 });
         this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
+        // A flaky connection can silently drop an asset download — Phaser has
+        // no retry, so a missing tileset renders whole furniture/wall layers
+        // blank while everything else looks normal. Track failures so create()
+        // can self-heal with one guarded reload.
+        this._loadErrors = [];
+        this.load.on('loaderror', (file) => this._loadErrors.push(file?.key || '?'));
 
         CHARACTERS.forEach(char => {
           this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
@@ -8819,6 +8825,26 @@
 
       create() {
         _phaserKbd = this.input.keyboard;
+
+        // Self-heal from dropped downloads: if any tileset texture (or the map
+        // itself) is missing, auto-reload ONCE; on a second failure show a
+        // clear message instead of a half-empty office.
+        const missingAssets = Object.values(TILESET_NAMES).filter((k) => !this.textures.exists(k));
+        if (!this.cache.tilemap.exists('map')) missingAssets.push('map');
+        if (missingAssets.length || this._loadErrors.length) {
+          console.warn('Asset load failure:', missingAssets, this._loadErrors);
+          if (!sessionStorage.getItem('jpoAssetRetry')) {
+            sessionStorage.setItem('jpoAssetRetry', '1');
+            document.body.insertAdjacentHTML('beforeend',
+              '<div style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:16px;">Slow connection — reloading the office\u2026</div>');
+            setTimeout(() => location.reload(), 1200);
+            return;
+          }
+          document.body.insertAdjacentHTML('beforeend',
+            '<div style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;align-items:center;justify-content:center;text-align:center;font-family:monospace;font-size:15px;padding:20px;">Some office graphics failed to download.<br>Please check your connection and refresh the page.</div>');
+          return;
+        }
+        sessionStorage.removeItem('jpoAssetRetry');
 
         const map      = this.make.tilemap({ key: 'map' });
         this._tileMap  = map;   // minimap reads layer data + dimensions from here
