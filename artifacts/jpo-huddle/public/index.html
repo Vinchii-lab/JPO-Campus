@@ -6313,6 +6313,12 @@
     }
     let _bingoLobbyTimer = null;
     const _bgEl = (id) => document.getElementById(id);
+    // A client that missed bingoOver (tab asleep / brief disconnect) still
+    // holds the OLD game's card. Any message carrying a NEWER gameId proves
+    // that game is dead — wipe the stale card before handling the new game.
+    function _bingoDropStale(gameId) {
+      if (gameId != null && _bingoGameId != null && gameId > _bingoGameId) _bingoHideAll();
+    }
     function ownerStartBingo() {
       const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
       socket.emit('adminBingoStart', {
@@ -6382,6 +6388,7 @@
       }
     }
     socket.on('bingoLobby', ({ gameId, prize, rule, msLeft } = {}) => {
+      _bingoDropStale(gameId);
       if (_bingoCard) return;   // already joined (resync)
       _bingoGameId = gameId ?? _bingoGameId;
       _bingoRule = rule || 'line';
@@ -6441,6 +6448,7 @@
     }
     _bingoRenderHowto();
     socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, msLeft } = {}) => {
+      _bingoDropStale(gameId);
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
       _bingoMode = mode || _bingoMode;
       _bingoRule = rule || _bingoRule;
@@ -6471,7 +6479,8 @@
       _bingoRenderGrid();
       _bingoHostRefresh();
     });
-    socket.on('bingoStart', ({ playerCount, mode, rule } = {}) => {
+    socket.on('bingoStart', ({ gameId, playerCount, mode, rule } = {}) => {
+      _bingoDropStale(gameId);
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
@@ -6505,6 +6514,7 @@
     // Live "who's playing" list — shown in the lobby AND inside the card panel.
     socket.on('bingoNames', ({ gameId, names } = {}) => {
       if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      _bingoDropStale(gameId);
       const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
       const a = document.getElementById('bingo-lobby-players'); if (a) a.textContent = label;
       const b = document.getElementById('bingo-players');       if (b) b.textContent = label;
