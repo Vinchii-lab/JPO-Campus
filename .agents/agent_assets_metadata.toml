@@ -62,3 +62,17 @@ uri = "file://attached_assets/generated_images/wings_concept.png"
 type = "image"
 title = "Wings accessories — concept"
 description = "Angel & bat wings on the character's back, multiple angles"
+
+[[outputs]]
+id = "CgX9UOS87GnrPlHBKaQjR"
+uri = "file://attached_assets/generated_images/pets_existing_animated_concept.png"
+type = "image"
+title = "Your current pets — animated concept"
+description = "Duck, cat, dog, bunny, turtle & dragon with walk / idle / personality moves"
+
+[[outputs]]
+id = "QuTaq1E_1S9zAFOKA0vd7"
+uri = "file://attached_assets/generated_images/wings_more_designs_concept.png"
+type = "image"
+title = "6 wing designs — concept"
+description = "Fairy, butterfly, phoenix, crystal, steampunk & dragon wings"
