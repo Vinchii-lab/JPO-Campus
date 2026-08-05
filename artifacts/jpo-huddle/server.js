@@ -303,6 +303,14 @@ function bingoHasLine(card, daubs) {
   if ([0,1,2,3,4].every((i) => hit(i, 4 - i))) return "diagonal";
   return null;
 }
+// Blackout rule: EVERY number on the card must be daubed (free center is free).
+function bingoHasBlackout(card, daubs) {
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    const n = card[r][c];
+    if (n !== 0 && !daubs.has(n)) return null;
+  }
+  return "BLACKOUT";
+}
 function bingoStop() {
   if (!bingo) return;
   clearTimeout(bingo.joinTimer);
@@ -328,7 +336,7 @@ function bingoSetMode(mode) {
   bingo.mode = mode;
   clearInterval(bingo.callTimer);
   bingo.callTimer = (mode === "auto" && bingo.state === "active")
-    ? setInterval(bingoCallNext, BINGO_CALL_MS) : null;
+    ? setInterval(bingoCallNext, bingo.callMs || BINGO_CALL_MS) : null;
 }
 // Join window over → start calling (needs 2+ players for a real game).
 function bingoBegin() {
@@ -339,7 +347,7 @@ function bingoBegin() {
     return;
   }
   bingo.state = "active";
-  io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, names: [...bingo.players.values()].map((v) => v.name) });
+  io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, rule: bingo.rule, names: [...bingo.players.values()].map((v) => v.name) });
   console.log(`BINGO active: ${bingo.players.size} players (${bingo.mode} calling)`);
   bingoSetMode(bingo.mode);
 }
@@ -4093,12 +4101,12 @@ io.on("connection", (socket) => {
     const em = players[socket.id]?.email;
     if (bingo && em && bingo.players.has(em)) {
       const bp = bingo.players.get(em);
-      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode, msLeft: bingo.state === "joining" ? Math.max(0, bingo.joinDeadline - Date.now()) : 0 });
+      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode, rule: bingo.rule, msLeft: bingo.state === "joining" ? Math.max(0, bingo.joinDeadline - Date.now()) : 0 });
       if (admins.has(socket.id)) {
         socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, phase: bingo.state, message: bingo.state === "active" ? `Bingo is live (${bingo.mode} calling).` : "Bingo lobby is open — game starts soon." });
       }
     } else if (bingo && bingo.state === "joining") {
-      socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
+      socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, rule: bingo.rule, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     }
     // Refresh/reconnect keeps the "who's playing" list current for everyone.
     if (bingo) socket.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
@@ -4116,17 +4124,26 @@ io.on("connection", (socket) => {
       return;
     }
     const mode = payload?.mode === "manual" ? "manual" : "auto";
+    // Host-picked auto-call pace (seconds between balls) and win rule.
+    // Only clamp when the host actually picked a pace — otherwise keep the
+    // env-configurable default (tests run with a very fast BINGO_CALL_MS).
+    const pickedSecs = Math.round(Number(payload?.callSecs));
+    const callMs = Number.isFinite(pickedSecs) && pickedSecs > 0
+      ? Math.min(20, Math.max(2, pickedSecs)) * 1000
+      : BINGO_CALL_MS;
+    const rule = payload?.rule === "blackout" ? "blackout" : "line";
     const pool = Array.from({ length: 75 }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     bingo = {
       id: ++bingoGameSeq, state: "joining", mode, prize, players: new Map(), pool, called: [],
+      callMs, rule,
       joinDeadline: Date.now() + BINGO_JOIN_MS,
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,
     };
-    io.emit("bingoLobby", { gameId: bingo.id, prize, msLeft: BINGO_JOIN_MS });
-    socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : "auto-calling"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
-    logAdmin(socket, "Bingo started", `Prize ${prize.toLocaleString()} coins, ${mode === "auto" ? "auto-calling" : "manual calling"}`);
-    console.log(`ADMIN bingo start: prize ${prize}, ${mode}`);
+    io.emit("bingoLobby", { gameId: bingo.id, prize, rule, msLeft: BINGO_JOIN_MS });
+    socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : `auto-calling every ${callMs / 1000}s`}, ${rule === "blackout" ? "BLACKOUT — full card wins" : "any line wins"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join.` });
+    logAdmin(socket, "Bingo started", `Prize ${prize.toLocaleString()} coins, ${mode === "auto" ? `auto every ${callMs / 1000}s` : "manual calling"}, ${rule}`);
+    console.log(`ADMIN bingo start: prize ${prize}, ${mode}, ${rule}, ${callMs}ms`);
   });
   socket.on("adminBingoCancel", () => {
     if (!admins.has(socket.id) || !bingo) return;
@@ -4165,7 +4182,7 @@ io.on("connection", (socket) => {
     if (bingo.players.has(p.email)) return;
     const card = makeBingoCard();
     bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
-    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
+    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, rule: bingo.rule, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     io.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
     console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
   });
@@ -4190,8 +4207,11 @@ io.on("connection", (socket) => {
     if (!em || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
     if (!takeToken(interactBucket)) return;
     const bp = bingo.players.get(em);
-    const line = bingoHasLine(bp.card, bp.daubs);
-    if (!line) { socket.emit("bingoError", { message: "Not a bingo yet — keep daubing!" }); return; }
+    const line = bingo.rule === "blackout" ? bingoHasBlackout(bp.card, bp.daubs) : bingoHasLine(bp.card, bp.daubs);
+    if (!line) {
+      socket.emit("bingoError", { message: bingo.rule === "blackout" ? "Not a blackout yet — the WHOLE card must be filled!" : "Not a bingo yet — keep daubing!" });
+      return;
+    }
     // Winner! Freeze the game synchronously (no await before bingoStop) so a
     // racing second claim loses. Capture what we need, then pay, THEN announce
     // — the announcement must reflect what actually happened in the DB, and it

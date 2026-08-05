@@ -2042,13 +2042,26 @@
       </div>
       <div class="owner-section" data-otab="events">
         <h3>🎱 Office Bingo</h3>
-        <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, first valid line (row / column / diagonal) wins the prize — paid by the house, no entry fee. Needs at least 2 players. Pick how balls get called: automatic, or you deal them like a real host. You can switch anytime mid-game.</p>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">Starts an office-wide bingo: 60s to join, the prize is paid by the house — no entry fee. Needs at least 2 players. Pick the win rule (any line, or BLACKOUT: fill the whole card), how balls get called (auto at your chosen pace, or you deal them like a real host — switchable mid-game).</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input id="op-bingo-prize" type="number" min="100" max="100000" step="100" value="2000" placeholder="Prize (coins)"
                  style="width:120px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
           <select id="op-bingo-mode" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
-            <option value="auto">🤖 Auto-call (every 4s)</option>
+            <option value="auto">🤖 Auto-call</option>
             <option value="manual">🎤 I call the balls</option>
+          </select>
+          <select id="op-bingo-secs" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+            <option value="2">⏱️ every 2s (turbo)</option>
+            <option value="3">⏱️ every 3s</option>
+            <option value="4" selected>⏱️ every 4s</option>
+            <option value="6">⏱️ every 6s</option>
+            <option value="8">⏱️ every 8s</option>
+            <option value="10">⏱️ every 10s (chill)</option>
+            <option value="15">⏱️ every 15s</option>
+          </select>
+          <select id="op-bingo-rule" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+            <option value="line" selected>📏 Any line wins</option>
+            <option value="blackout">⬛ Blackout — fill the whole card</option>
           </select>
           <button class="o-btn o-btn-approve" onclick="ownerStartBingo()">Start Bingo</button>
           <button class="o-btn o-btn-reject" onclick="ownerBingoCancel()">Cancel game</button>
@@ -6283,7 +6296,7 @@
     // ── Office Bingo ────────────────────────────────────────────────────
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
-    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null;
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line';
     // Host controls live IN the bingo panel (not just F8) for authed admins.
     // An admin who didn't join still gets the panel with just the host row.
     function _bingoHostRefresh() {
@@ -6302,7 +6315,12 @@
     const _bgEl = (id) => document.getElementById(id);
     function ownerStartBingo() {
       const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
-      socket.emit('adminBingoStart', { prize, mode: _bgEl('op-bingo-mode').value });
+      socket.emit('adminBingoStart', {
+        prize,
+        mode: _bgEl('op-bingo-mode').value,
+        callSecs: Number(_bgEl('op-bingo-secs').value),
+        rule: _bgEl('op-bingo-rule').value,
+      });
     }
     window.ownerStartBingo = ownerStartBingo;
     let _bingoAdminMode = 'auto';
@@ -6363,14 +6381,16 @@
         grid.appendChild(b);
       }
     }
-    socket.on('bingoLobby', ({ gameId, prize, msLeft } = {}) => {
+    socket.on('bingoLobby', ({ gameId, prize, rule, msLeft } = {}) => {
       if (_bingoCard) return;   // already joined (resync)
       _bingoGameId = gameId ?? _bingoGameId;
+      _bingoRule = rule || 'line';
       _bgEl('bingo-lobby').style.display = 'block';
       let deadline = Date.now() + (msLeft ?? 60000);
+      const ruleTxt = _bingoRule === 'blackout' ? '⬛ BLACKOUT — fill the WHOLE card' : '📏 any line wins';
       const tick = () => {
         const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        _bgEl('bingo-lobby-info').textContent = `Prize: ${(prize ?? 0).toLocaleString()} coins • starts in ${s}s`;
+        _bgEl('bingo-lobby-info').textContent = `Prize: ${(prize ?? 0).toLocaleString()} coins • ${ruleTxt} • starts in ${s}s`;
         if (s <= 0) { clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null; _bgEl('bingo-lobby').style.display = 'none'; }
       };
       clearInterval(_bingoLobbyTimer);
@@ -6410,9 +6430,10 @@
         wrap.appendChild(box);
       }
     })();
-    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, msLeft } = {}) => {
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, msLeft } = {}) => {
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
       _bingoMode = mode || _bingoMode;
+      _bingoRule = rule || _bingoRule;
       _bingoGameId = gameId ?? _bingoGameId;
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
@@ -6421,7 +6442,7 @@
       const last = _bingoCalled[_bingoCalled.length - 1];
       _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
       if (state === 'active') {
-        _bgEl('bingo-call-sub').textContent = `call ${_bingoCalled.length}/75 — click your numbers!`;
+        _bgEl('bingo-call-sub').textContent = `call ${_bingoCalled.length}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`;
       } else {
         // Joined during the lobby: keep the countdown ticking on the card
         // itself (the lobby box is gone once you have a card).
@@ -6439,16 +6460,18 @@
       _bingoRenderGrid();
       _bingoHostRefresh();
     });
-    socket.on('bingoStart', ({ playerCount, mode } = {}) => {
+    socket.on('bingoStart', ({ playerCount, mode, rule } = {}) => {
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
+      _bingoRule = rule || _bingoRule;
       if (_bingoCard) {
         _bingoState = 'active';
-        _bgEl('bingo-call-sub').textContent = _bingoMode === 'manual'
+        const ruleTag = _bingoRule === 'blackout' ? ' BLACKOUT: fill the WHOLE card!' : '';
+        _bgEl('bingo-call-sub').textContent = (_bingoMode === 'manual'
           ? `${playerCount} playing — the host is calling the balls!`
-          : `${playerCount} playing — click your numbers as they're called!`;
-        _rpsToast('🎱 Bingo is ON — watch the calls!');
+          : `${playerCount} playing — click your numbers as they're called!`) + ruleTag;
+        _rpsToast(_bingoRule === 'blackout' ? '🎱 BLACKOUT Bingo is ON — fill the whole card!' : '🎱 Bingo is ON — watch the calls!');
       } else if (_adminAuthed) {
         // hosting without playing: open the panel with just the host controls
         _bgEl('bingo-call-sub').textContent = `${playerCount} playing — you're hosting!`;
@@ -6459,7 +6482,7 @@
       if (!_bingoCard) return;
       _bingoCalled.push(n);
       _bgEl('bingo-call').textContent = `${letter}-${n}`;
-      _bgEl('bingo-call-sub').textContent = `call ${count}/75 — click your numbers!`;
+      _bgEl('bingo-call-sub').textContent = `call ${count}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`;
       _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
     });
     socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
