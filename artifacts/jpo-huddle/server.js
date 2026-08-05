@@ -4110,6 +4110,11 @@ io.on("connection", (socket) => {
     }
     // Refresh/reconnect keeps the "who's playing" list current for everyone.
     if (bingo) socket.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
+    // No game running? Say so explicitly. A server restart mid-game (e.g. a
+    // Republish) means bingoOver was never sent — reconnecting clients would
+    // otherwise keep a dead card on screen forever. An empty bingoOver clears
+    // the UI without any banner/toast.
+    if (!bingo) socket.emit("bingoOver", {});
   });
 
   // ── Admin: Office Bingo ───────────────────────────────────────────────
