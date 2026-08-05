@@ -2987,7 +2987,7 @@
       // frame 1 = folded side profile). side is NEGATIVE: sideways the wings
       // trail the back, away from the face. A slow scaleX flap tween lives on
       // the image itself.
-      fairywings: { tex: 'wear_fairywings', dy: 4, side: -5, behind: true, showUp: true },
+      fairywings: { tex: 'wear_fairywings', dy: 0, side: -26, sideDy: -4, behind: true, showUp: true },
       shades: { tex: 'wear_shades', dy: 8,   side: 6 },
       cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
       chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
@@ -8815,7 +8815,7 @@
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
-        this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 24, frameHeight: 16 });
+        this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 32, frameHeight: 20 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
