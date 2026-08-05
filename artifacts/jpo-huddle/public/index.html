@@ -1933,6 +1933,7 @@
   <div id="bingo-lobby" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8300;background:#1d1733;color:#f1eaff;border:1px solid #ffb400;border-radius:14px;padding:14px 18px;box-shadow:0 8px 28px rgba(0,0,0,.5);text-align:center;">
     <div style="font-size:16px;font-weight:700;">🎱 OFFICE BINGO!</div>
     <div id="bingo-lobby-info" style="font-size:13px;margin:6px 0 10px;color:#cfc4f5;"></div>
+    <div id="bingo-lobby-players" style="font-size:11px;margin:0 0 10px;color:#8f83b8;max-width:320px;word-break:break-word;line-height:1.5;"></div>
     <button id="bingo-join-btn" class="rps-btn primary" type="button">Join — it's free!</button>
   </div>
 
@@ -1959,6 +1960,7 @@
         <div id="bingo-howto" style="display:flex;gap:10px;justify-content:center;align-items:center;"></div>
       </div>
       <div id="bingo-called-list" style="margin-top:8px;font-size:11px;color:#8f83b8;word-break:break-word;line-height:1.5;"></div>
+      <div id="bingo-players" style="margin-top:6px;font-size:11px;color:#cfc4f5;word-break:break-word;line-height:1.5;"></div>
     </div>
   </div>
 
@@ -6465,11 +6467,37 @@
     _bgEl('bingo-claim-btn').addEventListener('click', () => socket.emit('bingoClaim'));
     _bgEl('bingo-host-call').addEventListener('click', () => socket.emit('adminBingoCall'));
     _bgEl('bingo-host-switch').addEventListener('click', () => ownerBingoSwitch());
-    socket.on('bingoOver', ({ gameId, message } = {}) => {
+    // Live "who's playing" list — shown in the lobby AND inside the card panel.
+    socket.on('bingoNames', ({ gameId, names } = {}) => {
+      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
+      const a = document.getElementById('bingo-lobby-players'); if (a) a.textContent = label;
+      const b = document.getElementById('bingo-players');       if (b) b.textContent = label;
+    });
+    // Big office-wide winner banner — 30 seconds, everyone sees it.
+    let _bingoWinBannerTimer = null;
+    function _bingoWinBanner(text) {
+      let el = document.getElementById('bingo-win-banner');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'bingo-win-banner';
+        el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:8400;background:linear-gradient(135deg,#3a2a00,#5a4300);color:#ffd76a;border:2px solid #ffb400;border-radius:14px;padding:14px 26px;font-size:18px;font-weight:800;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.55);max-width:92vw;cursor:pointer;';
+        el.title = 'Click to dismiss';
+        el.onclick = () => { el.style.display = 'none'; };
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.display = 'block';
+      clearTimeout(_bingoWinBannerTimer);
+      _bingoWinBannerTimer = setTimeout(() => { el.style.display = 'none'; }, 30000);
+    }
+    socket.on('bingoOver', ({ gameId, message, winnerName, prize } = {}) => {
       // A late "game over" from an OLD game (e.g. a slow payout) must never
       // tear down the UI of a newer game we've since joined.
       if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
-      if (message) _rpsToast(`🎱 ${message}`);
+      if (winnerName) _bingoWinBanner(`🎉 BINGO! ${winnerName} wins ${(prize ?? 0).toLocaleString()} coins! 🎱`);
+      else if (message) _rpsToast(`🎱 ${message}`);
+      const lp = document.getElementById('bingo-lobby-players'); if (lp) lp.textContent = '';
+      const pp = document.getElementById('bingo-players');       if (pp) pp.textContent = '';
       _bingoHideAll();
       const host = document.getElementById('op-bingo-host');
       if (host) host.style.display = 'none';   // game over → hide the admin host controls

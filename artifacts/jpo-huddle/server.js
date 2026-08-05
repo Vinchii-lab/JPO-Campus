@@ -339,7 +339,7 @@ function bingoBegin() {
     return;
   }
   bingo.state = "active";
-  io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode });
+  io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, names: [...bingo.players.values()].map((v) => v.name) });
   console.log(`BINGO active: ${bingo.players.size} players (${bingo.mode} calling)`);
   bingoSetMode(bingo.mode);
 }
@@ -4100,6 +4100,8 @@ io.on("connection", (socket) => {
     } else if (bingo && bingo.state === "joining") {
       socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     }
+    // Refresh/reconnect keeps the "who's playing" list current for everyone.
+    if (bingo) socket.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
   });
 
   // ── Admin: Office Bingo ───────────────────────────────────────────────
@@ -4164,6 +4166,7 @@ io.on("connection", (socket) => {
     const card = makeBingoCard();
     bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
     socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
+    io.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
     console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
   });
 
