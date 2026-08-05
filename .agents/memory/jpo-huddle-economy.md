@@ -37,3 +37,7 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 ## Owner-key tier (OWNER_PASSWORD)
 - Second F8 password: `adminAuth` accepts ADMIN_PASSWORD (admins set) or OWNER_PASSWORD (admins + owners sets); `adminAuthOk` carries `{owner}` and the client shows owner-only tools from that flag. Coin adjust (`adminAdjustCoins`) is owner-gated and — per the owner's explicit request — deliberately NOT written to jpo_admin_log.
 - Coin edits must update BOTH the DB row and the in-memory player (memory wins on next save); never advise direct prod-DB coin edits.
+
+## Broadcast mini-game UI (bingo) — stale-state lessons
+- Clients that miss the game-over event (tab asleep / brief disconnect) keep the old game's card. Every game broadcast carries a monotonically increasing gameId; handlers wipe local state when a NEWER id arrives (`_bingoDropStale`) and reject OLDER ids.
+- Sticky DOM states (panel minimize) persist across games — always restore them when a new game shows the panel, or players report "the game never showed."

@@ -6365,6 +6365,14 @@
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
       _bingoActive = false; _bingoPhase = null;
       document.getElementById('bingo-host-row').style.display = 'none';
+      _bingoUnminimize();
+    }
+    // A panel minimized (▸) in a PREVIOUS game keeps #bingo-body display:none
+    // forever — the next game "opens" as just a thin header bar players don't
+    // notice. Always restore the body whenever a game shows the panel.
+    function _bingoUnminimize() {
+      _bgEl('bingo-body').style.display = 'block';
+      _bgEl('bingo-min-btn').textContent = '▾';
     }
     function _bingoRenderGrid() {
       const grid = _bgEl('bingo-grid');
@@ -6458,6 +6466,7 @@
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bgEl('bingo-prize-label').textContent = `${(prize ?? 0).toLocaleString()} 🪙`;
       _bgEl('bingo-panel').style.display = 'block';
+      _bingoUnminimize();
       const last = _bingoCalled[_bingoCalled.length - 1];
       _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
       if (state === 'active') {
@@ -6481,6 +6490,7 @@
     });
     socket.on('bingoStart', ({ gameId, playerCount, mode, rule } = {}) => {
       _bingoDropStale(gameId);
+      _bingoGameId = gameId ?? _bingoGameId;
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
@@ -8839,10 +8849,14 @@
         // Self-heal from dropped downloads: if any tileset texture (or the map
         // itself) is missing, auto-reload ONCE; on a second failure show a
         // clear message instead of a half-empty office.
+        // Only the map + tileset textures are FATAL (the office can't render
+        // without them). Optional art (pets, wearables, anims) already has
+        // graceful fallbacks — a dropped download there must not block entry.
         const missingAssets = Object.values(TILESET_NAMES).filter((k) => !this.textures.exists(k));
         if (!this.cache.tilemap.exists('map')) missingAssets.push('map');
-        if (missingAssets.length || this._loadErrors.length) {
-          console.warn('Asset load failure:', missingAssets, this._loadErrors);
+        if (this._loadErrors.length) console.warn('Non-fatal asset load errors:', this._loadErrors);
+        if (missingAssets.length) {
+          console.warn('FATAL asset load failure:', missingAssets);
           if (!sessionStorage.getItem('jpoAssetRetry')) {
             sessionStorage.setItem('jpoAssetRetry', '1');
             document.body.insertAdjacentHTML('beforeend',
@@ -8850,8 +8864,11 @@
             setTimeout(() => location.reload(), 1200);
             return;
           }
+          // Terminal overlay — clear the guard so the player's next attempt
+          // (button or manual refresh) gets a fresh auto-retry.
+          sessionStorage.removeItem('jpoAssetRetry');
           document.body.insertAdjacentHTML('beforeend',
-            '<div style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;align-items:center;justify-content:center;text-align:center;font-family:monospace;font-size:15px;padding:20px;">Some office graphics failed to download.<br>Please check your connection and refresh the page.</div>');
+            '<div id="jpo-asset-fail" style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;font-family:monospace;font-size:15px;padding:20px;">Some office graphics failed to download.<br>Check your connection, then try again.<button onclick="location.reload()" style="padding:10px 22px;font-size:15px;font-family:monospace;background:#7c5cff;color:#fff;border:none;border-radius:8px;cursor:pointer;">↻ Try again</button></div>');
           return;
         }
         sessionStorage.removeItem('jpoAssetRetry');
