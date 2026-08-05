@@ -26,3 +26,5 @@ Wings render BEHIND the wearer via EQUAL depth + `children.moveBelow(img, sprite
 
 ## Lively pets pilot (Aug 2026)
 Procedural pet animation (walk waddle+trot bounce, idle breathing, random idle tricks) lives in `_stepPet`, gated by `PET_LIVELY` species set — mirroring a species = add to the set (+ a `_petTrick` case). Tricks must `return` when `!petObj.visible`: a sparkle burst at a round-hidden player's pet leaks their location. `_trickBusy` parks the procedural writes while a trick tween owns angle/y.
+
+Fairywings final empirical fit (screenshot-swept): `dy 16, side -18, sideDy 14` — side wing must TUCK INTO the body silhouette (side ≈ -18) or it reads as floating/detached; big negative side values look broken. Side frame art shrunk to 13x14 (in 32x20 frame) so lowering it doesn't poke below the feet. AI wing art needs a noise pass: dark speckles + green chroma fringe must be scrubbed (fuzz/channel-fx) or they read as "black spots" on grey floors.
