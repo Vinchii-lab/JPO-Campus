@@ -245,3 +245,8 @@ The nix chromium binary is 114.0.5735.90 — drive it with puppeteer-core@20.7.2
 doesn't error; it just TIMES OUT on page.goto, which looks like an app bug.
 When a previously-green browser test suddenly times out on goto after a /tmp
 rebuild, suspect the pin before debugging the app.
+
+## /tmp test deps are fragile
+- `npm install <pkg> --no-save` in /tmp PRUNES the other throwaway deps (installing socket.io-client deleted puppeteer-core). Reinstall pinned `puppeteer-core@21` (matches nix chromium 114) if launches fail/hang after any /tmp npm churn.
+- Back-to-back headless logins with the SAME seeded email trip the server's one-live-session-per-email drop (socket shows connected:false) — use a fresh email per run or wait out the grace period.
+- Puppeteer `page.keyboard.press` sometimes never reaches Phaser Key objects headless even when arrows work; dispatch an in-page `new KeyboardEvent('keydown', {keyCode…})` on `window` instead to test key-bound features.
