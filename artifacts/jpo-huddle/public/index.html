@@ -3097,7 +3097,7 @@
     // (see _stepPet/_petTrick). Everything is derived client-side from the
     // pet object each frame, zero network traffic, so mirroring a species
     // later is just adding it to this set (+ a trick case if it gets one).
-    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog']);
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle']);
     // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
@@ -6986,7 +6986,12 @@
       if (e.sprite) e.sprite.setVisible(visible);
       if (e.nameTag) e.nameTag.setVisible(visible);
       if (e.cosmetic) e.cosmetic.setVisible(visible);
-      if (e.pet) e.pet.setVisible(visible);
+      if (e.pet) {
+        e.pet.setVisible(visible);
+        // Hiding mid-trick: purge in-flight particles (🔥/💦/✨) too, or they
+        // finish playing at the hidden player's spot and leak the location.
+        if (!visible && sc._killPetFx) sc._killPetFx(e.pet);
+      }
       if (e.chatBubble && e.chatBubble.setVisible) e.chatBubble.setVisible(visible);
       if (e.occluders) for (const o of e.occluders) { if (o && o.setVisible) o.setVisible(visible); }
     }
@@ -9154,6 +9159,7 @@
           this.player && this.player.setVisible(v);
           this.localNameTag && this.localNameTag.setVisible(v);
           this.localPet && this.localPet.setVisible && this.localPet.setVisible(v);
+          if (this.localPet && !v) this._killPetFx(this.localPet);   // no trick particles at a disguised hider's spot
           if (this.localPet && this.localPet._acc) this.localPet._acc.setVisible(v);   // pet's bow/hat rides separately
           this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
         };
@@ -9964,8 +9970,30 @@
       _destroyPet(petObj) {
         if (!petObj) return;
         this.tweens.killTweensOf(petObj);           // trick tweens die with the pet
+        this._killPetFx(petObj);                    // in-flight trick particles too
         if (petObj._acc) petObj._acc.destroy();
         petObj.destroy();
+      }
+
+      // Destroy any live trick particles (🔥/💦/✨…) a pet has in flight.
+      // killTweensOf does NOT run onComplete (Phaser kills tweens outright),
+      // so particles must be torn down explicitly — otherwise they'd linger
+      // at the old spot after a pet switch, or leak a round-hidden player's
+      // location if the owner vanishes mid-trick.
+      _killPetFx(petObj) {
+        if (!petObj || !petObj._fx) return;
+        for (const o of petObj._fx) { if (o && o.active !== false) { this.tweens.killTweensOf(o); o.destroy(); } }
+        petObj._fx = null;
+      }
+
+      // Register a self-destroying trick particle: tracked on the pet so a
+      // mid-trick destroy/hide can purge it, unregistered when it finishes.
+      _trackPetFx(petObj, obj) {
+        (petObj._fx = petObj._fx || []).push(obj);
+        return () => {
+          obj.destroy();
+          if (petObj._fx) { const i = petObj._fx.indexOf(obj); if (i >= 0) petObj._fx.splice(i, 1); }
+        };
       }
 
       // ── Lively pets pilot (Aug 2026) ──────────────────────────────────
@@ -9989,7 +10017,7 @@
               .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
             this.tweens.add({
               targets: s, alpha: { from: 0.95, to: 0 }, y: s.y - 26 - Math.random() * 14,
-              delay: i * 110, duration: 850, ease: 'Sine.easeOut', onComplete: () => s.destroy(),
+              delay: i * 110, duration: 850, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s),
             });
           }
           return;
@@ -10003,6 +10031,98 @@
             onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
           });
           this.tweens.add({ targets: petObj, y: petObj.y - 8, duration: 150, yoyo: true, ease: 'Sine.easeOut' });
+          return;
+        }
+        if (sp === 'pet_bunny') {
+          // Binky! Two quick hops then one BIG spring with squash & stretch.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { y: y0 - 10, duration: 130, yoyo: true, ease: 'Sine.easeOut' },
+              { y: y0 - 10, duration: 130, yoyo: true, ease: 'Sine.easeOut' },
+              { scaleY: bs * 0.8, scaleX: bs * 1.12, duration: 90 },          // crouch
+              { y: y0 - 26, scaleY: bs * 1.15, scaleX: bs * 0.92, duration: 200, ease: 'Sine.easeOut' },
+              { y: y0, scaleY: bs, scaleX: bs, duration: 190, ease: 'Bounce.easeOut' },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj._trickBusy = false; },
+          });
+          return;
+        }
+        if (sp === 'pet_dragon') {
+          // Fire breath: rear back, then a stream of 🔥 puffs shoots forward
+          // (toward current facing). Every puff self-destroys (_brewFx pattern).
+          petObj._trickBusy = true;
+          const fwd = (petObj.flipX ? -1 : 1);
+          this.tweens.add({
+            targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          for (let i = 0; i < 6; i++) {
+            const f = this.add.text(
+              petObj.x + fwd * (14 + Math.random() * 6), petObj.y - 6 + (Math.random() * 8 - 4),
+              Math.random() < 0.8 ? '🔥' : '💨', { fontSize: '11px', resolution: 2 })
+              .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3);
+            this.tweens.add({
+              targets: f, alpha: { from: 0.95, to: 0 },
+              x: f.x + fwd * (16 + Math.random() * 14), y: f.y - 4 - Math.random() * 8,
+              scale: { from: 0.7, to: 1.25 },
+              delay: 180 + i * 90, duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f),
+            });
+          }
+          return;
+        }
+        if (sp === 'pet_cat') {
+          // Big lazy stretch (long and low), then a little tail-flick shake.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { scaleX: bs * 1.25, scaleY: bs * 0.82, duration: 420, ease: 'Sine.easeInOut', yoyo: true, hold: 260 },
+              { angle: { from: -6, to: 6 }, duration: 110, yoyo: true, repeat: 2 },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          return;
+        }
+        if (sp === 'pet_duck') {
+          // Flap-flap: fast wing-beat wobble + two stubby hops and a 💦 shake.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          this.tweens.add({
+            targets: petObj, angle: { from: -12, to: 12 }, duration: 70, yoyo: true, repeat: 7,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { y: y0 - 7, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+              { y: y0 - 7, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+            ],
+            onComplete: () => { petObj.y = y0; petObj.setScale(bs); },
+          });
+          const d = this.add.text(petObj.x, petObj.y - 14, '💦', { fontSize: '10px', resolution: 2 })
+            .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+          this.tweens.add({
+            targets: d, alpha: { from: 0.9, to: 0 }, y: d.y - 12,
+            delay: 150, duration: 500, onComplete: this._trackPetFx(petObj, d),
+          });
+          return;
+        }
+        if (sp === 'pet_turtle') {
+          // Shell tuck: shrink down into the shell, pause... pop back out.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 200, ease: 'Sine.easeIn', hold: 900 },
+              { scaleX: bs, scaleY: bs, duration: 260, ease: 'Back.easeOut' },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+          });
         }
       }
 
