@@ -6385,6 +6385,7 @@
       if (_bingoCard) return;   // already joined (resync)
       _bingoGameId = gameId ?? _bingoGameId;
       _bingoRule = rule || 'line';
+      _bingoRenderHowto();
       _bgEl('bingo-lobby').style.display = 'block';
       let deadline = Date.now() + (msLeft ?? 60000);
       const ruleTxt = _bingoRule === 'blackout' ? '⬛ BLACKOUT — fill the WHOLE card' : '📏 any line wins';
@@ -6405,14 +6406,18 @@
         el.addEventListener(ev, (e) => e.stopPropagation());
       }
     }
-    // "How to win" mini-diagrams: any row, any column, or a diagonal.
-    (() => {
+    // "How to win" mini-diagrams — rule-aware: line games show row/column/
+    // diagonal; blackout shows one fully-filled card.
+    function _bingoRenderHowto() {
       const wrap = _bgEl('bingo-howto');
-      const patterns = [
-        { label: 'row',      hit: (r, c) => r === 2 },
-        { label: 'column',   hit: (r, c) => c === 2 },
-        { label: 'diagonal', hit: (r, c) => r === c },
-      ];
+      wrap.replaceChildren();
+      const patterns = _bingoRule === 'blackout'
+        ? [{ label: 'BLACKOUT — fill it ALL', hit: () => true }]
+        : [
+            { label: 'row',      hit: (r, c) => r === 2 },
+            { label: 'column',   hit: (r, c) => c === 2 },
+            { label: 'diagonal', hit: (r, c) => r === c },
+          ];
       for (const p of patterns) {
         const box = document.createElement('div');
         box.style.cssText = 'text-align:center;';
@@ -6429,11 +6434,13 @@
         box.appendChild(g); box.appendChild(l);
         wrap.appendChild(box);
       }
-    })();
+    }
+    _bingoRenderHowto();
     socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, msLeft } = {}) => {
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
       _bingoMode = mode || _bingoMode;
       _bingoRule = rule || _bingoRule;
+      _bingoRenderHowto();
       _bingoGameId = gameId ?? _bingoGameId;
       _bgEl('bingo-lobby').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
@@ -6465,6 +6472,7 @@
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
       _bingoRule = rule || _bingoRule;
+      _bingoRenderHowto();
       if (_bingoCard) {
         _bingoState = 'active';
         const ruleTag = _bingoRule === 'blackout' ? ' BLACKOUT: fill the WHOLE card!' : '';
