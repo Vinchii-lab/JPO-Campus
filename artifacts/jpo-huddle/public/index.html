@@ -2960,6 +2960,7 @@
       { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 6500, desc: 'full visor, straight from 3024' },
       { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 7000, desc: 'real gold, around your neck' },
       { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 8000, desc: 'jeweled gold, on your head' },
+      { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 15000, desc: 'shimmering wings on your back' },
     ];
     const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
 
@@ -2980,6 +2981,13 @@
       // without an in-game screenshot. Textures are 2-frame sheets (frame 0 =
       // front, frame 1 = side profile facing right); optional sideDy overrides
       // dy for the side frame.
+      // fairywings: worn on the BACK — drawn BEHIND the body (behind: true →
+      // _makeCosmetic slots it just under the wearer in the display list) and
+      // visible in every facing incl. 'up' (showUp; frame 0 = spread pair,
+      // frame 1 = folded side profile). side is NEGATIVE: sideways the wings
+      // trail the back, away from the face. A slow scaleX flap tween lives on
+      // the image itself.
+      fairywings: { tex: 'wear_fairywings', dy: 4, side: -5, behind: true, showUp: true },
       shades: { tex: 'wear_shades', dy: 8,   side: 6 },
       cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
       chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
@@ -3046,6 +3054,7 @@
       { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
       { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
       { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
+      { id: 'pet_unicorn',         species: 'Unicorn',     emoji: '🦄', name: 'Unicorn',        cost: 55000, desc: 'sparkles when you least expect it' },
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
     // Species base id for any pet id: 'pet_dragon_crimson' → 'pet_dragon'.
@@ -3081,7 +3090,14 @@
       pet_bunny:  { dx: 3,  dy: -36 },
       pet_turtle: { dx: 11, dy: -22 },
       pet_dragon: { dx: 6,  dy: -30 },
+      pet_unicorn:{ dx: 8,  dy: -34 },
     };
+    // Lively pets pilot (Aug 2026): species with procedural animation — a
+    // walk waddle/trot bounce, idle breathing, and a random idle "trick"
+    // (see _stepPet/_petTrick). Everything is derived client-side from the
+    // pet object each frame, zero network traffic, so mirroring a species
+    // later is just adding it to this set (+ a trick case if it gets one).
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog']);
     // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
@@ -8799,6 +8815,7 @@
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 24, frameHeight: 16 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
@@ -9830,8 +9847,16 @@
       // set = sprite wearable (follow the body), null = emoji (float at y-68,
       // raise the chat bubble).
       _placeWearable(img, def, x, y, dir) {
-        if (dir === 'up') { img.setVisible(false); return; }   // back view — gear hidden
+        // Back view: face gear hides, but back-worn gear (wings) shows fully.
+        if (dir === 'up' && !def.showUp) { img.setVisible(false); return; }
         img.setVisible(true);
+        // Behind-wearables flip sides with the camera: facing up you SEE the
+        // wearer's back, so the wings draw ON TOP of the body; every other
+        // facing they tuck behind it. (_under = wearer sprite, set at make.)
+        if (def.behind && img._under && img._under.active) {
+          if (dir === 'up') this.children.moveAbove(img, img._under);
+          else this.children.moveBelow(img, img._under);
+        }
         const sideways = dir === 'left' || dir === 'right';
         img.setFrame(sideways ? 1 : 0);                        // frame 1 = side profile
         img.setFlipX(dir === 'left');
@@ -9840,10 +9865,22 @@
         img.setPosition(x + dx, y + dy);
       }
 
-      _makeCosmetic(equipped, x, y, dir) {
+      // `under` = the wearer's sprite; needed only by behind:true wearables
+      // (wings): the image takes the wearer's depth and is slotted just BELOW
+      // them in the display list (equal depth renders in list order), so it
+      // sits behind the body but above the floor. Behind-wearables also get a
+      // perpetual slow scaleX flap tween (killed with the image on destroy).
+      _makeCosmetic(equipped, x, y, dir, under) {
         const wd = WEARABLE_DEFS[equipped];
         if (wd) {
           const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(3).setDepth(10);
+          if (wd.behind && under) {
+            img._under = under;
+            img.setDepth(under.depth);
+            this.children.moveBelow(img, under);
+            this.tweens.add({ targets: img, scaleX: { from: 3, to: 2.3 },
+              duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          }
           this._placeWearable(img, wd, x, y, dir || 'down');
           return { obj: img, def: wd };
         }
@@ -9856,19 +9893,19 @@
       }
 
       _setLocalCosmetic(equipped) {
-        if (this.localCosmetic) { this.localCosmetic.destroy(); this.localCosmetic = null; }
+        if (this.localCosmetic) { this.tweens.killTweensOf(this.localCosmetic); this.localCosmetic.destroy(); this.localCosmetic = null; }
         this.localCosmeticDef = null;
         if (!this.player) return;
-        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir);
+        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir, this.player);
         if (made) { this.localCosmetic = made.obj; this.localCosmeticDef = made.def; }
       }
 
       _updatePlayerCosmetics(id, cosmetics, equipped) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
-        if (entry.cosmetic) { entry.cosmetic.destroy(); entry.cosmetic = null; }
+        if (entry.cosmetic) { this.tweens.killTweensOf(entry.cosmetic); entry.cosmetic.destroy(); entry.cosmetic = null; }
         entry.cosmeticDef = null;
-        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir);
+        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
         if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
       }
 
@@ -9896,6 +9933,11 @@
         // per species + per-accessory nudge; _placePetAcc owns its position
         // (called here and every _stepPet frame, so it rides through walks,
         // the seated ring, and teleport snaps). Torn down via _destroyPet.
+        // Lively pilot bookkeeping: _stepPet's waddle/breathing/tricks need
+        // the pet id, the fitted base scale, and the lively flag.
+        obj._petId = pet;
+        obj._baseScale = Math.abs(obj.scaleX) || 1;
+        obj._lively = PET_LIVELY.has(petSpeciesId(pet));
         const accEmoji = PET_ACC_EMOJI[acc];
         if (accEmoji) {
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
@@ -9921,8 +9963,47 @@
       // A pet and its accessory overlay live and die together.
       _destroyPet(petObj) {
         if (!petObj) return;
+        this.tweens.killTweensOf(petObj);           // trick tweens die with the pet
         if (petObj._acc) petObj._acc.destroy();
         petObj.destroy();
+      }
+
+      // ── Lively pets pilot (Aug 2026) ──────────────────────────────────
+      // Random idle "personality" moment for a lively pet. Only fires while
+      // idle (see _stepPet); _trickBusy parks the procedural waddle/breathing
+      // so the tween owns angle/scale/y until it finishes.
+      _petTrick(petObj) {
+        // Round-hidden owners (_roundGhostVis hides the pet too): a sparkle
+        // burst at an invisible pet's spot would leak a hidden player's
+        // location — no tricks while concealed.
+        if (!petObj.visible) return;
+        const sp = petSpeciesId(petObj._petId || '');
+        if (sp === 'pet_unicorn') {
+          // Sparkle burst: a handful of stars pop out and float away.
+          // Client-only flavor; every piece self-destroys (same pattern as
+          // _brewFx) so repeated bursts never leak display objects.
+          for (let i = 0; i < 5; i++) {
+            const s = this.add.text(
+              petObj.x + (Math.random() * 36 - 18), petObj.y - 8 - Math.random() * 18,
+              Math.random() < 0.5 ? '✨' : '⭐', { fontSize: '12px', resolution: 2 })
+              .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+            this.tweens.add({
+              targets: s, alpha: { from: 0.95, to: 0 }, y: s.y - 26 - Math.random() * 14,
+              delay: i * 110, duration: 850, ease: 'Sine.easeOut', onComplete: () => s.destroy(),
+            });
+          }
+          return;
+        }
+        if (sp === 'pet_dog') {
+          // Tail-wag wiggle + a happy little hop.
+          petObj._trickBusy = true;
+          this.tweens.add({
+            targets: petObj, angle: { from: -10, to: 10 }, duration: 90,
+            yoyo: true, repeat: 5,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          this.tweens.add({ targets: petObj, y: petObj.y - 8, duration: 150, yoyo: true, ease: 'Sine.easeOut' });
+        }
       }
 
       // Follow-at-distance: the pet stands still until its owner is more than
@@ -9940,6 +10021,28 @@
         let dist = Math.hypot(dx, dy) || 1;
         if (dist > 300) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
+        // Lively pets pilot: procedural walk waddle / idle breathing / random
+        // idle tricks for PET_LIVELY species. Runs before the follow step so
+        // "walking" is judged on the raw owner distance. Tricks own
+        // angle/scale/y while _trickBusy (tween in flight).
+        if (petObj._lively && !petObj._trickBusy) {
+          petObj._animT = (petObj._animT || 0) + delta;
+          const bs = petObj._baseScale || 1, walking = dist > gap + 1;
+          if (walking) {
+            petObj.angle = Math.sin(petObj._animT * 0.02) * 6;                       // waddle
+            petObj.setScale(bs, bs * (1 + 0.05 * Math.sin(petObj._animT * 0.028)));  // trot bounce
+            petObj._trickAt = 0;                  // re-roll the trick timer on next stop
+          } else {
+            petObj.angle *= 0.85;                                                    // settle upright
+            petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
+            const now = performance.now();
+            if (!petObj._trickAt) petObj._trickAt = now + 6000 + Math.random() * 10000;
+            else if (now >= petObj._trickAt) {
+              petObj._trickAt = now + 9000 + Math.random() * 14000;
+              this._petTrick(petObj);
+            }
+          }
+        }
         if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
@@ -10265,7 +10368,7 @@
         const e = this.otherPlayers[id];
         if (!e) return;
         e.sprite.destroy(); e.nameTag.destroy();
-        if (e.cosmetic)   e.cosmetic.destroy();
+        if (e.cosmetic)   { this.tweens.killTweensOf(e.cosmetic); e.cosmetic.destroy(); }   // flap tween dies with the wings
         if (e.pet)        this._destroyPet(e.pet);
         if (e.chatBubble) e.chatBubble.destroy();
         this._clearOccluders(e.occluders);
@@ -10336,7 +10439,7 @@
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
-        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir);
+        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir, sprite);
         const cosmetic = made ? made.obj : null;
         const cosmeticDef = made ? made.def : null;
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc);

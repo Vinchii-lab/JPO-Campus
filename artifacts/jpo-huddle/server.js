@@ -389,6 +389,7 @@ const SHOP = {
   scifihelmet:  6500,
   chain:        7000,
   crown:        8000,
+  fairywings:  15000,
 };
 
 // ── Pets catalog ─────────────────────────────────────────────────────────────
@@ -420,6 +421,7 @@ const PETS = {
   pet_dragon:           30000,
   pet_dragon_crimson:   38000,
   pet_dragon_obsidian:  45000,
+  pet_unicorn:          55000,
 };
 
 // ── Pet accessories catalog ──────────────────────────────────────────────────
