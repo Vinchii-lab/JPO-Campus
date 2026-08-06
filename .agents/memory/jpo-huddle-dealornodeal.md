@@ -15,3 +15,10 @@ description: Owner-hosted game show — state machine gotchas, majority + payout
 - Env-fast testing: `DEAL_JOIN_MS/DEAL_VOTE_MS/DEAL_OFFER_MS/DEAL_REVEAL_MS`; run an isolated `PORT=20999 node server.js` instance so tests don't broadcast lobbies to real coworkers on dev.
 - Second approved test account now exists: `pilotdrg2@justpressone.com` (same password as pilotdrg; hash copied in dev DB). Logging one email in twice kicks the older socket — never reuse an email across test sockets.
 - Browser login in headless tests: set input values via `page.evaluate` (page.type left the field unread → "A valid email is required").
+
+## Format v2 (real-show cadence)
+- Office picks a sealed TEAM case first (`pickcase` state; `dealVoteCase` allowed in pickcase; team case rejected in normal voting).
+- Cases open in blocks 5-4-3-2-1 (`DEAL_BLOCKS` env override for tests, e.g. `DEAL_BLOCKS=15`); after each block a `banker` break (DEAL_BANKER_MS, auto-skips) — offers are ONLY legal in `banker` state now, not `voting`.
+- Banker offer is a TOTAL pot split evenly among entrants (per = floor(total/n), min 1) — same rule as the finale, which now reveals the TEAM case.
+- Owner has in-panel Banker controls (`deal-host-row`, gated on `window._ownerAuthed`) + `ownerDealSkip`.
+- Vote timer is owner-tunable per game via `ownerDealStart {voteSec}` (clamped 5–60s).

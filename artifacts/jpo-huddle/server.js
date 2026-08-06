@@ -368,7 +368,8 @@ const DEAL_OFFER_MS  = Number(process.env.DEAL_OFFER_MS)  || 25_000;
 const DEAL_REVEAL_MS = Number(process.env.DEAL_REVEAL_MS) || 4_000;
 const DEAL_BANKER_MS = Number(process.env.DEAL_BANKER_MS) || 45_000;  // owner gets this long to make an offer before the show rolls on
 // Classic show cadence: open 5 cases, offer break, 4, break, 3, 2, 1, 1, ...
-const DEAL_BLOCKS = [5, 4, 3, 2, 1];
+// (env override like DEAL_BLOCKS=15 exists purely for fast tests)
+const DEAL_BLOCKS = (process.env.DEAL_BLOCKS || "5,4,3,2,1").split(",").map(Number);
 const DEAL_JACKPOT_MIN = 500, DEAL_JACKPOT_MAX = 50_000;
 // 16 case values as fractions of the jackpot — a classic junk-to-jackpot ladder.
 const DEAL_FRACS = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.06,
@@ -389,6 +390,7 @@ function dealSnap() {
     opened: deal.cases.map((c) => (c.opened ? c.v : null)),
     names: [...deal.players.values()].map((v) => v.name),
     offer: deal.state === "offer" ? deal.offer : null,
+    teamCase: deal.teamCase,
     toOpen: deal.blockLeft, blockSize: deal.blockSize,
     msLeft: deal.state === "joining"
       ? Math.max(0, deal.joinDeadline - Date.now())
@@ -403,16 +405,43 @@ function dealBegin() {
     return;
   }
   console.log(`DEAL active: ${deal.players.size} players, jackpot ${deal.jackpot}`);
-  dealVotePhase();
+  dealPickPhase();
+}
+// Opening act: the office picks the TEAM's briefcase. It stays sealed on the
+// board; ride all the way and whatever is inside gets split between everyone.
+function dealPickPhase() {
+  if (!deal) return;
+  deal.state = "pickcase";
+  deal.votes = new Map();
+  deal.phaseDeadline = Date.now() + deal.voteMs;
+  clearTimeout(deal.phaseTimer);
+  deal.phaseTimer = setTimeout(dealResolvePick, deal.voteMs);
+  io.emit("dealPhase", dealSnap());
+}
+function dealResolvePick() {
+  if (!deal || deal.state !== "pickcase") return;
+  const tally = new Map();
+  for (const i of deal.votes.values()) tally.set(i, (tally.get(i) || 0) + 1);
+  let best = [], bestN = 0;
+  for (const [i, n] of tally) {
+    if (n > bestN) { best = [i]; bestN = n; }
+    else if (n === bestN) best.push(i);
+  }
+  if (best.length === 0) best = deal.cases.map((_, i) => i);
+  deal.teamCase = best[Math.floor(Math.random() * best.length)];
+  io.emit("dealTeamCase", { gameId: deal.id, i: deal.teamCase, votes: bestN });
+  console.log(`DEAL team case picked: ${deal.teamCase + 1}`);
+  clearTimeout(deal.phaseTimer);
+  deal.phaseTimer = setTimeout(dealVotePhase, 2500);
 }
 function dealVotePhase() {
   if (!deal) return;
   // New block? Load the next chunk of the 5-4-3-2-1 cadence.
   if (deal.blockLeft <= 0) {
     deal.blockSize = DEAL_BLOCKS[Math.min(deal.blockIdx, DEAL_BLOCKS.length - 1)];
-    // never plan to open more cases than would leave 1 on the board
-    const unopened = deal.cases.filter((c) => !c.opened).length;
-    deal.blockSize = Math.min(deal.blockSize, Math.max(1, unopened - 1));
+    // only the non-team cases are openable; the team case stays sealed
+    const openable = deal.cases.filter((c, i) => !c.opened && i !== deal.teamCase).length;
+    deal.blockSize = Math.min(deal.blockSize, Math.max(1, openable));
     deal.blockLeft = deal.blockSize;
     deal.blockIdx++;
   }
@@ -449,29 +478,29 @@ function dealResolveVote() {
     if (n > bestN) { best = [i]; bestN = n; }
     else if (n === bestN) best.push(i);
   }
-  if (best.length === 0) best = deal.cases.map((c, i) => (c.opened ? -1 : i)).filter((i) => i >= 0);
+  if (best.length === 0) best = deal.cases.map((c, i) => (c.opened || i === deal.teamCase ? -1 : i)).filter((i) => i >= 0);
   const pick = best[Math.floor(Math.random() * best.length)];
   const c = deal.cases[pick];
-  if (!c || c.opened) { dealVotePhase(); return; }   // paranoia — revote
+  if (!c || c.opened || pick === deal.teamCase) { dealVotePhase(); return; }   // paranoia — revote
   c.opened = true;
   // Reveal window is NOT interruptible — no Banker offers until the next
   // voting round starts (and never once the final case is being paid out).
   deal.state = "revealing";
-  const left = deal.cases.filter((x) => !x.opened);
-  io.emit("dealOpen", { gameId: deal.id, i: pick, v: c.v, votes: bestN, casesLeft: left.length });
-  console.log(`DEAL open case ${pick + 1}: ${c.v} (${left.length} left)`);
-  if (left.length === 1) {
-    // Finale: the last case standing is what the office rode for — split it.
-    const gameId = deal.id, v = left[0].v, entrants = [...deal.players.keys()];
+  const openable = deal.cases.filter((x, i) => !x.opened && i !== deal.teamCase).length;
+  io.emit("dealOpen", { gameId: deal.id, i: pick, v: c.v, votes: bestN, casesLeft: openable + 1 });
+  console.log(`DEAL open case ${pick + 1}: ${c.v} (${openable} openable left)`);
+  if (openable === 0) {
+    // Finale: only the TEAM's sealed case is left — crack it open and split it.
+    const gameId = deal.id, teamIdx = deal.teamCase, v = deal.cases[teamIdx].v;
+    const entrants = [...deal.players.keys()];
     const per = Math.max(1, Math.floor(v / entrants.length));
     const names = [...deal.players.values()].map((p) => p.name);
-    const lastIdx = deal.cases.indexOf(left[0]);
     clearTimeout(deal.phaseTimer);
     deal.phaseTimer = setTimeout(() => {
       dealStop();
       dealPayAll(gameId, entrants, per,
-        { gameId, mode: "final", i: lastIdx, v, per, names,
-          message: `💼 FINAL CASE: ${v.toLocaleString()} coins inside — split ${entrants.length} ways, ${per.toLocaleString()} each!` });
+        { gameId, mode: "final", i: teamIdx, v, per, names,
+          message: `💼 THE TEAM'S CASE: ${v.toLocaleString()} coins inside — split ${entrants.length} ways, ${per.toLocaleString()} each!` });
     }, DEAL_REVEAL_MS);
     return;
   }
@@ -486,12 +515,14 @@ function dealResolveOffer() {
   const yes = votes.filter(Boolean).length, no = votes.length - yes;
   // A DEAL needs a true majority of ALL entrants — abstaining is a quiet NO.
   if (yes > deal.players.size / 2) {
-    const gameId = deal.id, per = deal.offer, entrants = [...deal.players.keys()];
+    // The offer is ONE pot, split evenly — same rule as the cases themselves.
+    const gameId = deal.id, total = deal.offer, entrants = [...deal.players.keys()];
+    const per = Math.max(1, Math.floor(total / entrants.length));
     const names = [...deal.players.values()].map((p) => p.name);
     dealStop();
     dealPayAll(gameId, entrants, per,
-      { gameId, mode: "deal", per, yes, no, names,
-        message: `🤝 DEAL! The office takes the Banker's ${per.toLocaleString()} coins each (${yes}–${no}).` });
+      { gameId, mode: "deal", total, per, yes, no, names,
+        message: `🤝 DEAL! The office takes the Banker's ${total.toLocaleString()} coins — split ${entrants.length} ways, ${per.toLocaleString()} each (${yes}–${no}).` });
   } else {
     io.emit("dealNoDeal", { gameId: deal.id, yes, no });
     console.log(`DEAL offer refused ${yes}-${no}`);
@@ -4490,7 +4521,7 @@ io.on("connection", (socket) => {
     for (let i = values.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [values[i], values[j]] = [values[j], values[i]]; }
     deal = {
       id: ++dealGameSeq, state: "joining", jackpot, round: 0, voteMs: voteSec * 1000,
-      blockIdx: 0, blockLeft: 0, blockSize: 0,
+      blockIdx: 0, blockLeft: 0, blockSize: 0, teamCase: null,
       cases: values.map((v) => ({ v, opened: false })),
       players: new Map(), votes: new Map(), dealVotes: new Map(), offer: 0,
       joinDeadline: Date.now() + DEAL_JOIN_MS,
@@ -4511,7 +4542,7 @@ io.on("connection", (socket) => {
     }
     const amount = Math.round(Number(payload?.amount));
     if (!Number.isSafeInteger(amount) || amount < 1 || amount > DEAL_JACKPOT_MAX) {
-      socket.emit("ownerDealResult", { ok: false, message: `Offer must be 1–${DEAL_JACKPOT_MAX.toLocaleString()} coins (per player).` });
+      socket.emit("ownerDealResult", { ok: false, message: `Offer must be 1–${DEAL_JACKPOT_MAX.toLocaleString()} coins (total pot — they split it).` });
       return;
     }
     clearTimeout(deal.phaseTimer);
@@ -4521,8 +4552,8 @@ io.on("connection", (socket) => {
     deal.phaseDeadline = Date.now() + DEAL_OFFER_MS;
     deal.phaseTimer = setTimeout(dealResolveOffer, DEAL_OFFER_MS);
     io.emit("dealPhase", dealSnap());
-    socket.emit("ownerDealResult", { ok: true, active: true, message: `Offer on the table: ${amount.toLocaleString()} coins each. The office is voting…` });
-    logAdmin(socket, "Banker offer", `${amount.toLocaleString()} coins per player`);
+    socket.emit("ownerDealResult", { ok: true, active: true, message: `Offer on the table: ${amount.toLocaleString()} coins total (≈${Math.floor(amount / Math.max(1, deal.players.size)).toLocaleString()} each). The office is voting…` });
+    logAdmin(socket, "Banker offer", `${amount.toLocaleString()} coins total pot`);
     console.log(`OWNER deal offer: ${amount}/player`);
   });
   // "No offer this round" — the show rolls straight into the next block.
@@ -4558,10 +4589,12 @@ io.on("connection", (socket) => {
   socket.on("dealVoteCase", (payload) => {
     const p = players[socket.id];
     const em = p?.email;
-    if (!em || !deal || deal.state !== "voting" || !deal.players.has(em)) return;
+    if (!em || !deal || !deal.players.has(em)) return;
+    if (deal.state !== "voting" && deal.state !== "pickcase") return;
     if (!takeToken(interactBucket)) return;
     const i = Math.round(Number(payload?.i));
     if (!Number.isInteger(i) || i < 0 || i >= deal.cases.length || deal.cases[i].opened) return;
+    if (deal.state === "voting" && i === deal.teamCase) return;   // the team's case stays sealed
     if (deal.votes.get(em) === i) return;   // unchanged — no broadcast fuel for spammers
     deal.votes.set(em, i);
     // Live tallies keep the argument loud — counts only, never who voted what.

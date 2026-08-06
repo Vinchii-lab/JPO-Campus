@@ -6893,7 +6893,7 @@
     // ── Deal or No Deal (The Vince Show) ───────────────────────────────
     // Server owns cases/values/votes/payouts; this is the studio audience UI.
     // Only the OWNER can host (server enforces; the F8 section is owner-gated).
-    let _dealGameId = null, _dealState = null, _dealLadder = [], _dealOpened = [], _dealIn = false, _dealMyVote = null, _dealActive = false;
+    let _dealGameId = null, _dealState = null, _dealLadder = [], _dealOpened = [], _dealIn = false, _dealMyVote = null, _dealActive = false, _dealTeamCase = null;
     let _dealLobbyTimer = null, _dealPhaseTimer = null;
     const _dlEl = (id) => document.getElementById(id);
     window._dealUiOpen = () =>
@@ -6919,7 +6919,7 @@
       clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
       clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
       _dealGameId = null; _dealState = null; _dealLadder = []; _dealOpened = [];
-      _dealIn = false; _dealMyVote = null; _dealActive = false;
+      _dealIn = false; _dealMyVote = null; _dealActive = false; _dealTeamCase = null;
       _dlEl('deal-body').style.display = 'block';
       _dlEl('deal-min-btn').textContent = '▾';
     }
@@ -6934,13 +6934,17 @@
         if (openedV != null) {
           b.textContent = openedV.toLocaleString();
           b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:11px;border:1px solid #2a3555;background:#0e1322;color:#5d6a8f;text-decoration:line-through;';
+        } else if (i === _dealTeamCase) {
+          // The team's sealed briefcase — it rides to the end.
+          b.textContent = `📌 OURS`;
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:12px;font-weight:900;border:2px solid #ffd76a;background:linear-gradient(135deg,#4a3800,#6b5200);color:#ffd76a;box-shadow:0 0 12px rgba(255,215,106,.35);';
         } else {
           const n = counts ? counts[i] : 0;
           const mine = _dealMyVote === i;
           b.textContent = `💼${i + 1}` + (n ? ` ·${n}` : '');
           b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid ' +
             (mine ? '#ffd76a;background:#4a3800;color:#ffd76a;' : '#d4af37;background:#243154;color:#eaf0ff;');
-          if (_dealIn && _dealState === 'voting') {
+          if (_dealIn && (_dealState === 'voting' || _dealState === 'pickcase')) {
             const idx = i;
             b.onclick = () => { _dealMyVote = idx; socket.emit('dealVoteCase', { i: idx }); _dealRenderGrid(counts); };
           }
@@ -6982,6 +6986,7 @@
       _dealState = snap.state;
       _dealLadder = snap.ladder || _dealLadder;
       _dealOpened = snap.opened || _dealOpened;
+      if (snap.teamCase != null) _dealTeamCase = snap.teamCase;
       _dealActive = true;
       _dlEl('deal-lobby').style.display = 'none';
       clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
@@ -6991,12 +6996,17 @@
       const offerRow = _dlEl('deal-offer-row');
       if (snap.state === 'offer') {
         offerRow.style.display = 'block';
-        _dlEl('deal-offer-text').textContent = `☎️ The Banker offers ${(snap.offer ?? 0).toLocaleString()} coins EACH`;
+        const nPlayers = Math.max(1, (snap.names || []).length);
+        const each = Math.floor((snap.offer ?? 0) / nPlayers);
+        _dlEl('deal-offer-text').textContent = `☎️ The Banker offers ${(snap.offer ?? 0).toLocaleString()} coins — split ${nPlayers} ways ≈ ${each.toLocaleString()} each`;
         _dlEl('deal-offer-tally').textContent = '';
         _dealCountdown(snap.msLeft, (s) => `DEAL or NO DEAL? Majority decides — ${s}s`);
       } else {
         offerRow.style.display = 'none';
-        if (snap.state === 'voting') {
+        if (snap.state === 'pickcase') {
+          _dealMyVote = null;
+          _dealCountdown(snap.msLeft, (s) => `📌 First things first: vote for the TEAM's briefcase — ${s}s`);
+        } else if (snap.state === 'voting') {
           _dealMyVote = null;
           const nth = (snap.blockSize || 0) - (snap.toOpen || 0) + 1;
           const blockTxt = snap.blockSize > 1 ? ` (case ${nth} of ${snap.blockSize} this round)` : '';
@@ -7061,6 +7071,14 @@
       const st = _dlEl('deal-status');
       if (st.textContent.includes('vote') || st.textContent.includes('voting')) { /* countdown keeps ticking */ }
       _dlEl('deal-players').textContent = `🗳️ ${voters}/${of} votes in`;
+    });
+    socket.on('dealTeamCase', ({ gameId, i } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dealTeamCase = i;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dlEl('deal-status').textContent = `📌 Case ${i + 1} is the TEAM's! It stays sealed — now open the rest…`;
+      _dealRenderGrid(null);
+      _rpsToast(`📌 The office chose case ${i + 1} as the team's briefcase!`);
     });
     socket.on('dealOpen', ({ gameId, i, v, casesLeft } = {}) => {
       if (gameId !== _dealGameId) return;
