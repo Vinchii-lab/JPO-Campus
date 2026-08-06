@@ -2951,6 +2951,7 @@
     let _playerCoins    = 0;
     let _ownedItems     = [];
     let _equippedCosmetic = '';   // which owned cosmetic is worn ('' = none); server-authoritative
+    let _equippedWings    = '';   // wings are their OWN slot — worn alongside a wearable
 
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the
@@ -3669,6 +3670,7 @@
       _playerCoins    = data.coins;
       _ownedItems     = data.cosmetics || [];
       _equippedCosmetic = data.equipped || '';
+      _equippedWings  = data.wings || '';
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
       _playerItems    = data.items || {};
@@ -3936,21 +3938,25 @@
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('shopSuccess', ({ item, equipped }) => {
+    socket.on('shopSuccess', ({ item, equipped, wings }) => {
       if (!_ownedItems.includes(item)) _ownedItems.push(item);
       _equippedCosmetic = equipped ?? item;   // buying auto-equips
+      if (wings !== undefined) _equippedWings = wings || '';
       _refreshShopUI();
       const meta = COSMETICS.find(c => c.id === item);
       document.getElementById('shop-msg').style.color = '#27ae60';
       document.getElementById('shop-msg').textContent = `${meta ? meta.name : item} equipped!`;
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+      window._gameScene?._setLocalWings(_equippedWings);
     });
 
     // Free wear/take-off confirmation (no purchase involved).
-    socket.on('equipUpdate', ({ equipped }) => {
+    socket.on('equipUpdate', ({ equipped, wings }) => {
       _equippedCosmetic = equipped || '';
+      _equippedWings = wings || '';
       _refreshShopUI();
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+      window._gameScene?._setLocalWings(_equippedWings);
     });
 
     // Wardrobe purchase confirmed: the server already took the coins
@@ -3990,8 +3996,8 @@
       document.getElementById('shop-msg').textContent = msg;
     });
 
-    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped }) => {
-      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped);
+    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped, wings }) => {
+      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped, wings);
     });
 
     // ── Pets ──────────────────────────────────────────────────────────
@@ -4227,7 +4233,7 @@
       document.querySelector('canvas')?.focus();
     }
     function buyItem(item) { socket.emit('buyCosmetic', { item }); }
-    function equipItem(item) { socket.emit('equipCosmetic', { item }); }   // '' = take off
+    function equipItem(item, slot) { socket.emit('equipCosmetic', { item, slot }); }   // '' = take off (slot says which)
     function buyUsable(item) { socket.emit('buyUsable', { item }); }
     function buyPet(item) { socket.emit('buyPet', { item }); }
     function equipPet(item) { socket.emit('equipPet', { item }); }         // '' = send it home
@@ -4346,9 +4352,9 @@
               if (_playerCoins < c.cost) btn.classList.add('poor');
               btn.onclick = () => buyItem(c.id);
             }
-          } else if (_equippedCosmetic === c.id) {
+          } else if ((c.wings ? _equippedWings : _equippedCosmetic) === c.id) {
             btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
-            btn.onclick = () => equipItem('');       // take it off
+            btn.onclick = () => equipItem('', c.wings ? 'wings' : 'wear');   // take it off
           } else {
             btn.textContent = 'Wear'; btn.classList.add('wear');
             btn.onclick = () => equipItem(c.id);     // switch, free
@@ -7054,6 +7060,7 @@
       if (e.sprite) e.sprite.setVisible(visible);
       if (e.nameTag) e.nameTag.setVisible(visible);
       if (e.cosmetic) e.cosmetic.setVisible(visible);
+      if (e.wings) e.wings.setVisible(visible);
       if (e.pet) {
         e.pet.setVisible(visible);
         // Hiding mid-trick: purge in-flight particles (🔥/💦/✨) too, or they
@@ -9261,12 +9268,14 @@
         // Hider self-view: while disguised, the hider sees the PROP, not their
         // avatar (tag/pet/cosmetic included) — same picture everyone else gets.
         window._phSelfVis = (v) => {
+          window._phSelfHiddenNow = !v;   // remembered so cosmetic re-creates can re-assert it
           this.player && this.player.setVisible(v);
           this.localNameTag && this.localNameTag.setVisible(v);
           this.localPet && this.localPet.setVisible && this.localPet.setVisible(v);
           if (this.localPet && !v) this._killPetFx(this.localPet);   // no trick particles at a disguised hider's spot
           if (this.localPet && this.localPet._acc) this.localPet._acc.setVisible(v);   // pet's bow/hat rides separately
           this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
+          this.localWings && this.localWings.setVisible && this.localWings.setVisible(v);
         };
         window._phKillPreview = () => { if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; } };
         // Force-stand for teleports: a player who joins the hunt from a chair
@@ -9407,6 +9416,7 @@
             if (entry.cosmeticDef) this._placeWearable(entry.cosmetic, entry.cosmeticDef, data.x, data.y, rdir);
             else entry.cosmetic.setPosition(data.x, data.y-68);
           }
+          if (entry.wings && entry.wingsDef) this._placeWearable(entry.wings, entry.wingsDef, data.x, data.y, rdir);
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
           const vb = window._voiceBadges && window._voiceBadges[data.id];
           if (vb) vb.txt.setPosition(data.x, data.y-56);
@@ -9714,6 +9724,7 @@
 
         this.cameras.main.startFollow(this.player);
         this._setLocalCosmetic(_equippedCosmetic);   // restore the worn cosmetic on (re)join
+        this._setLocalWings(_equippedWings);         // wings slot rides alongside
         this._setLocalPet(_equippedPet);             // restore the active pet on (re)join
 
         if (this._pendingPlayers) {
@@ -10021,15 +10032,37 @@
         if (!this.player) return;
         const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir, this.player);
         if (made) { this.localCosmetic = made.obj; this.localCosmeticDef = made.def; }
+        // Hidden hider (prop hunt / after-dark): a freshly made sprite starts
+        // visible — re-hide it or the disguise sprouts a visible cosmetic.
+        if (window._phSelfHiddenNow && this.localCosmetic && this.localCosmetic.setVisible) this.localCosmetic.setVisible(false);
       }
 
-      _updatePlayerCosmetics(id, cosmetics, equipped) {
+      // Wings slot: a second, independent cosmetic object (same maker) so
+      // wings and a wearable render together on one body.
+      _setLocalWings(wings) {
+        if (this.localWings) { this.tweens.killTweensOf(this.localWings); this.localWings.destroy(); this.localWings = null; }
+        this.localWingsDef = null;
+        if (!this.player) return;
+        const made = this._makeCosmetic(wings, this.player.x, this.player.y, this.lastDir, this.player);
+        if (made) { this.localWings = made.obj; this.localWingsDef = made.def; }
+        if (window._phSelfHiddenNow && this.localWings && this.localWings.setVisible) this.localWings.setVisible(false);
+      }
+
+      _updatePlayerCosmetics(id, cosmetics, equipped, wings) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
         if (entry.cosmetic) { this.tweens.killTweensOf(entry.cosmetic); entry.cosmetic.destroy(); entry.cosmetic = null; }
         entry.cosmeticDef = null;
         const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
         if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
+        if (entry.wings) { this.tweens.killTweensOf(entry.wings); entry.wings.destroy(); entry.wings = null; }
+        entry.wingsDef = null;
+        const madeW = this._makeCosmetic(wings || '', entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
+        if (madeW) { entry.wings = madeW.obj; entry.wingsDef = madeW.def; }
+        // Freshly made sprites start visible — a hidden round ghost or prop
+        // hunt hider must stay hidden through a cosmetic change.
+        if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
+        if (window._ph && window._ph.hiderId === id && window._roundGhostVis) window._roundGhostVis(id, false);   // prop-hunt hider stays vanished
       }
 
       // ── Pets ──────────────────────────────────────────────────────────
@@ -10671,6 +10704,7 @@
         if (!e) return;
         e.sprite.destroy(); e.nameTag.destroy();
         if (e.cosmetic)   { this.tweens.killTweensOf(e.cosmetic); e.cosmetic.destroy(); }   // flap tween dies with the wings
+        if (e.wings)      { this.tweens.killTweensOf(e.wings); e.wings.destroy(); }
         if (e.pet)        this._destroyPet(e.pet);
         if (e.chatBubble) e.chatBubble.destroy();
         this._clearOccluders(e.occluders);
@@ -10744,9 +10778,12 @@
         const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir, sprite);
         const cosmetic = made ? made.obj : null;
         const cosmeticDef = made ? made.def : null;
+        const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite);
+        const wings = madeW ? madeW.obj : null;
+        const wingsDef = madeW ? madeW.def : null;
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.
@@ -10811,6 +10848,7 @@
           if (this.localCosmeticDef) this._placeWearable(this.localCosmetic, this.localCosmeticDef, player.x, player.y, this.lastDir);
           else this.localCosmetic.setPosition(player.x, player.y-68);
         }
+        if (this.localWings && this.localWingsDef) this._placeWearable(this.localWings, this.localWingsDef, player.x, player.y, this.lastDir);
         // Sprite wearables sit ON the body, so they don't raise the bubble —
         // only a floating emoji cosmetic does.
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
