@@ -10066,9 +10066,9 @@
           // Fire breath: rear back, then a stream of 🔥 puffs shoots forward
           // (toward current facing). Every puff self-destroys (_brewFx pattern).
           petObj._trickBusy = true;
-          // Art faces LEFT unflipped, so the mouth is on the -x side; flipX
-          // mirrors it to +x. Puffs spawn at head height (mouth), not mid-body.
-          const fwd = (petObj.flipX ? 1 : -1);
+          // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
+          // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
+          const fwd = (petObj.flipX ? -1 : 1);
           this.tweens.add({
             targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
             onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
@@ -10182,11 +10182,14 @@
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
           petObj.x += mx;
           petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;
-          // Sprite pets are drawn facing RIGHT; flip toward the walk
-          // direction (idle keeps the last facing). Tiny drifts don't flip.
-          // Pet art is drawn facing LEFT (all species) — flip when moving RIGHT
-          // so the head leads. (Was inverted: pets walked backwards.)
-          if (petObj.setFlipX && Math.abs(mx) > 0.3) petObj.setFlipX(mx > 0);
+          // Flip toward the walk direction so the head leads (idle keeps the
+          // last facing; tiny drifts don't flip). NOTE: most pet art faces
+          // RIGHT unflipped — only the bunnies face LEFT (verified against
+          // the PNGs), so bunnies use the inverted flip.
+          if (petObj.setFlipX && Math.abs(mx) > 0.3) {
+            const facesLeft = (petObj._petId || petObj.texture?.key || '').startsWith('pet_bunny');
+            petObj.setFlipX(facesLeft ? mx > 0 : mx < 0);
+          }
         }
         this._placePetAcc(petObj);   // accessory rides along every frame
       }

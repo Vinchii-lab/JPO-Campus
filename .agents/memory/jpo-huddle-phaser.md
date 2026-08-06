@@ -116,5 +116,5 @@ was spent sealing intentional doorways on the wrong wall (row 82) while the
 real gap was 15 rows south.
 
 ## Pet sprite orientation (Aug 2026)
-- ALL pet PNGs in `public/assets/pets/` are drawn facing **LEFT** (unlike player/wearable art, which faces right). Correct walk-facing is `setFlipX(mx > 0)`; direction-dependent trick FX (dragon fire) use `fwd = flipX ? 1 : -1`. Assuming right-facing art made pets moonwalk and the dragon "fart fire".
+- Pet PNGs in `public/assets/pets/` are NOT uniformly oriented: **only the bunnies face LEFT; every other species (cat, dog, dragon, duck, turtle, unicorn) faces RIGHT**. NEVER assume from one sprite — verify by viewing every PNG (a montage/append of all files) before touching flip logic. Walk-facing: `setFlipX(facesLeft ? mx>0 : mx<0)` with facesLeft = petId starts with `pet_bunny`; dragon fire uses `fwd = flipX ? -1 : 1` (right-facing art, mouth on +x). Two wrong all-face-one-way assumptions in a row caused moonwalking pets and "fart fire" twice.
 - Bunny pet PNGs shipped with heavy interior semi-transparency (~500 px, alpha 10–245) that read as a ghost pet — harden with an alpha threshold (>=100 → 255 else 0) rather than trusting source art.
