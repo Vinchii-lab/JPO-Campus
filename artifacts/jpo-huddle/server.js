@@ -391,15 +391,15 @@ const SHOP = {
   camera:       4000,
   chain:        6000,
   guitar:       7500,
-  fairywings:  15000,
-  // Wings collection (Aug 2026) — same back-worn sprite pipeline as
-  // fairywings. phoenixwings is RARE: gift-only, price 0 (see RARE_COSMETICS).
-  beewings:     6000,
-  batwings:     9000,
-  butterflywings: 12000,
+  // Wings: 8k–30k ladder, cheapest first (fairy tops the list).
+  // phoenixwings is RARE: gift-only, price 0 (see RARE_COSMETICS).
+  fairywings:   8000,
+  beewings:    10000,
+  batwings:    12000,
+  butterflywings: 14000,
   angelwings:  18000,
   devilwings:  18000,
-  jetpackwings: 22000,
+  jetpackwings: 24000,
   goldenwings: 30000,
   phoenixwings: 0,
 };
