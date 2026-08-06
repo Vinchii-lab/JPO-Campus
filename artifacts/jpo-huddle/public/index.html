@@ -2005,15 +2005,15 @@
   </div>
 
   <!-- ── Deal or No Deal show panel ── -->
-  <div id="deal-panel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7500;width:400px;max-height:92vh;overflow-y:auto;background:#161d2e;color:#eaf0ff;border:1px solid #3a4a78;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:13px;">
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #2a3555;">
-      <span style="font-weight:700;">💼 DEAL OR NO DEAL</span>
-      <span id="deal-jackpot-label" style="color:#ffd76a;font-size:12px;"></span>
+  <div id="deal-panel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7500;width:480px;max-width:95vw;max-height:92vh;overflow-y:auto;background:linear-gradient(160deg,#141b30 0%,#1a2342 55%,#141b30 100%);color:#eaf0ff;border:1px solid rgba(212,175,55,.55);border-radius:18px;box-shadow:0 14px 48px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);font-size:14px;backdrop-filter:blur(6px);">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(212,175,55,.3);background:rgba(0,0,0,.18);border-radius:18px 18px 0 0;">
+      <span style="font-weight:800;font-size:16px;letter-spacing:.5px;">💼 DEAL <span style="color:#ffd76a;">OR</span> NO DEAL</span>
+      <span id="deal-jackpot-label" style="color:#ffd76a;font-size:12px;font-weight:700;"></span>
       <span style="flex:1"></span>
-      <button id="deal-min-btn" style="background:none;border:none;color:#a9bcff;cursor:pointer;font-size:14px;">▾</button>
+      <button id="deal-min-btn" style="background:rgba(255,255,255,.08);border:none;color:#a9bcff;cursor:pointer;font-size:15px;border-radius:8px;padding:2px 10px;">▾</button>
     </div>
-    <div id="deal-body" style="padding:10px;">
-      <div id="deal-status" style="text-align:center;font-size:13px;font-weight:700;color:#ffd76a;min-height:20px;margin-bottom:8px;">waiting for the show to start…</div>
+    <div id="deal-body" style="padding:14px;">
+      <div id="deal-status" style="text-align:center;font-size:15px;font-weight:800;color:#ffd76a;min-height:22px;margin-bottom:10px;text-shadow:0 1px 8px rgba(255,215,106,.25);">waiting for the show to start…</div>
       <div id="deal-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
       <div id="deal-offer-row" style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#241a06;border:1px solid #d4af37;text-align:center;">
         <div id="deal-offer-text" style="font-size:15px;font-weight:800;color:#ffd76a;margin-bottom:8px;"></div>
@@ -2029,9 +2029,11 @@
           <input id="deal-host-amount" type="number" min="1" max="50000" step="50" placeholder="Coins per player"
                  style="flex:1;min-width:0;padding:12px 10px;border:1px solid #3a4a78;border-radius:8px;background:#0e1322;color:#eaf0ff;font-size:15px;font-weight:700;" />
           <button id="deal-host-offer-btn" type="button"
-                  style="flex:1.3;padding:12px 8px;border:none;border-radius:8px;background:linear-gradient(135deg,#d4af37,#b8860b);color:#1a1400;font-size:15px;font-weight:800;cursor:pointer;">☎️ MAKE OFFER</button>
+                  style="flex:1.3;padding:14px 8px;border:none;border-radius:10px;background:linear-gradient(135deg,#ffd76a,#b8860b);color:#1a1400;font-size:16px;font-weight:900;cursor:pointer;box-shadow:0 3px 14px rgba(212,175,55,.35);">☎️ MAKE OFFER</button>
+          <button id="deal-host-skip-btn" type="button"
+                  style="padding:14px 12px;border:1px solid #3a4a78;border-radius:10px;background:#0e1322;color:#a9bcff;font-size:13px;font-weight:700;cursor:pointer;">Skip ➡️</button>
         </div>
-        <div id="deal-host-msg" style="font-size:11px;color:#8fa0c8;margin-top:6px;min-height:14px;">Offers only land while the office is voting on a case.</div>
+        <div id="deal-host-msg" style="font-size:11px;color:#8fa0c8;margin-top:6px;min-height:14px;">The phone rings between rounds — that's your window to make an offer (or skip).</div>
       </div>
       <div style="margin-top:10px;padding-top:8px;border-top:1px solid #2a3555;">
         <div style="font-size:11px;font-weight:700;color:#a9bcff;margin-bottom:6px;">💰 Still on the board:</div>
@@ -2151,10 +2153,14 @@
       </div>
       <div class="owner-section" data-otab="events" id="op-owner-deal" style="display:none;">
         <h3>💼 Deal or No Deal <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
-        <p style="font-size:12px;color:#888;margin:0 0 10px">The Vince Show: 16 briefcases, one holds the jackpot. The office votes which case opens next (20s a round); YOU are the Banker — drop a per-player offer whenever you like and they vote DEAL or NO DEAL (majority rules). Ride to the last case and its value splits between everyone. House pays, free to join, 60s lobby, needs 2+ players.</p>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">The Vince Show, real-show rules: 16 briefcases, one holds the jackpot. The office votes cases open in rounds of 5 → 4 → 3 → 2 → 1. After every round the Banker's phone rings — that's YOU: make a per-player offer (from the gold controls inside the game panel) or skip. They vote DEAL or NO DEAL (majority of all players). Ride to the last case and its value splits between everyone. House pays, free to join, 60s lobby, needs 2+ players.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input id="op-deal-jackpot" type="number" min="500" max="50000" step="500" value="5000" placeholder="Jackpot (coins)"
                  style="width:130px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#666;">vote timer
+            <input id="op-deal-votesec" type="number" min="5" max="60" step="5" value="20"
+                   style="width:64px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" /> s
+          </label>
           <button class="o-btn o-btn-approve" onclick="ownerDealStart()">🎬 Start the show</button>
           <button class="o-btn o-btn-reject" onclick="ownerDealCancel()">Cancel show</button>
         </div>
@@ -6893,7 +6899,7 @@
     window._dealUiOpen = () =>
       _dlEl('deal-lobby').style.display !== 'none' ||
       _dlEl('deal-panel').style.display !== 'none';
-    window.ownerDealStart  = () => socket.emit('ownerDealStart', { jackpot: Math.round(Number(_dlEl('op-deal-jackpot').value)) });
+    window.ownerDealStart  = () => socket.emit('ownerDealStart', { jackpot: Math.round(Number(_dlEl('op-deal-jackpot').value)), voteSec: Math.round(Number(_dlEl('op-deal-votesec').value)) });
     window.ownerDealOffer  = () => socket.emit('ownerDealOffer', { amount: Math.round(Number(_dlEl('op-deal-offer').value)) });
     window.ownerDealCancel = () => socket.emit('ownerDealCancel');
     socket.on('ownerDealResult', ({ ok, active, message } = {}) => {
@@ -6992,20 +6998,33 @@
         offerRow.style.display = 'none';
         if (snap.state === 'voting') {
           _dealMyVote = null;
-          _dealCountdown(snap.msLeft, (s) => _dealIn ? `Round ${snap.round}: vote which case opens — ${s}s` : `Round ${snap.round}: the office is voting — ${s}s`);
+          const nth = (snap.blockSize || 0) - (snap.toOpen || 0) + 1;
+          const blockTxt = snap.blockSize > 1 ? ` (case ${nth} of ${snap.blockSize} this round)` : '';
+          _dealCountdown(snap.msLeft, (s) => `Vote which case opens${blockTxt} — ${s}s`);
+        } else if (snap.state === 'banker') {
+          _dealCountdown(snap.msLeft, (s) => window._ownerAuthed
+            ? `☎️ YOUR phone is ringing, Banker — make an offer or skip! ${s}s`
+            : `☎️ Round over… the Banker is thinking — ${s}s`);
+        } else if (snap.state === 'joining') {
+          _dealCountdown(snap.msLeft, (s) => `🎟️ You're in! The show starts in ${s}s…`);
         } else {
           _dlEl('deal-status').textContent = `you're in! the show starts soon…`;
         }
       }
       _dealRenderGrid(null);
       _dealRenderLadder();
-      // The Banker's desk lives right in the panel — owner eyes only.
+      // The Banker's desk lives right in the panel — owner eyes only, and the
+      // phone only works during the offer break.
       const host = _dlEl('deal-host-row');
       host.style.display = window._ownerAuthed ? 'block' : 'none';
-      const btn = _dlEl('deal-host-offer-btn');
-      btn.disabled = snap.state !== 'voting';
-      btn.style.opacity = snap.state === 'voting' ? '1' : '.45';
+      const isBreak = snap.state === 'banker';
+      for (const bid of ['deal-host-offer-btn', 'deal-host-skip-btn']) {
+        const b = _dlEl(bid);
+        b.disabled = !isBreak;
+        b.style.opacity = isBreak ? '1' : '.45';
+      }
     }
+    _dlEl('deal-host-skip-btn').addEventListener('click', () => socket.emit('ownerDealSkip'));
     _dlEl('deal-host-offer-btn').addEventListener('click', () => {
       const amt = Math.round(Number(_dlEl('deal-host-amount').value));
       if (!amt || amt < 1) { _dlEl('deal-host-msg').textContent = 'Type an amount first, Banker.'; return; }
@@ -7058,10 +7077,11 @@
       if (gameId !== _dealGameId) return;
       _dlEl('deal-offer-tally').textContent = `🤝 DEAL ${yes} — ${no} NO DEAL (${of} players)`;
     });
-    socket.on('dealNoDeal', ({ gameId, yes, no } = {}) => {
+    socket.on('dealNoDeal', ({ gameId, yes, no, skipped } = {}) => {
       if (gameId !== _dealGameId) return;
       _dlEl('deal-offer-row').style.display = 'none';
-      _rpsToast(`🙅 NO DEAL! (${yes}–${no}) The Banker hangs up… the cases keep opening!`);
+      _rpsToast(skipped ? `☎️ No offer this round — the cases keep opening!`
+                        : `🙅 NO DEAL! (${yes}–${no}) The Banker hangs up… the cases keep opening!`);
     });
     socket.on('dealNames', ({ gameId, names } = {}) => {
       if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;

@@ -366,6 +366,9 @@ const DEAL_JOIN_MS   = Number(process.env.DEAL_JOIN_MS)   || 60_000;
 const DEAL_VOTE_MS   = Number(process.env.DEAL_VOTE_MS)   || 20_000;
 const DEAL_OFFER_MS  = Number(process.env.DEAL_OFFER_MS)  || 25_000;
 const DEAL_REVEAL_MS = Number(process.env.DEAL_REVEAL_MS) || 4_000;
+const DEAL_BANKER_MS = Number(process.env.DEAL_BANKER_MS) || 45_000;  // owner gets this long to make an offer before the show rolls on
+// Classic show cadence: open 5 cases, offer break, 4, break, 3, 2, 1, 1, ...
+const DEAL_BLOCKS = [5, 4, 3, 2, 1];
 const DEAL_JACKPOT_MIN = 500, DEAL_JACKPOT_MAX = 50_000;
 // 16 case values as fractions of the jackpot — a classic junk-to-jackpot ladder.
 const DEAL_FRACS = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.06,
@@ -386,6 +389,7 @@ function dealSnap() {
     opened: deal.cases.map((c) => (c.opened ? c.v : null)),
     names: [...deal.players.values()].map((v) => v.name),
     offer: deal.state === "offer" ? deal.offer : null,
+    toOpen: deal.blockLeft, blockSize: deal.blockSize,
     msLeft: deal.state === "joining"
       ? Math.max(0, deal.joinDeadline - Date.now())
       : Math.max(0, (deal.phaseDeadline || 0) - Date.now()),
@@ -403,12 +407,36 @@ function dealBegin() {
 }
 function dealVotePhase() {
   if (!deal) return;
+  // New block? Load the next chunk of the 5-4-3-2-1 cadence.
+  if (deal.blockLeft <= 0) {
+    deal.blockSize = DEAL_BLOCKS[Math.min(deal.blockIdx, DEAL_BLOCKS.length - 1)];
+    // never plan to open more cases than would leave 1 on the board
+    const unopened = deal.cases.filter((c) => !c.opened).length;
+    deal.blockSize = Math.min(deal.blockSize, Math.max(1, unopened - 1));
+    deal.blockLeft = deal.blockSize;
+    deal.blockIdx++;
+  }
   deal.state = "voting";
   deal.round++;
   deal.votes = new Map();
-  deal.phaseDeadline = Date.now() + DEAL_VOTE_MS;
+  deal.phaseDeadline = Date.now() + deal.voteMs;
   clearTimeout(deal.phaseTimer);
-  deal.phaseTimer = setTimeout(dealResolveVote, DEAL_VOTE_MS);
+  deal.phaseTimer = setTimeout(dealResolveVote, deal.voteMs);
+  io.emit("dealPhase", dealSnap());
+}
+// Offer break between blocks: the floor goes quiet and the Banker's phone
+// rings. The owner has DEAL_BANKER_MS to put an offer up (or skip); if they
+// wander off, the show rolls on by itself.
+function dealBankerPhase() {
+  if (!deal) return;
+  deal.state = "banker";
+  deal.phaseDeadline = Date.now() + DEAL_BANKER_MS;
+  clearTimeout(deal.phaseTimer);
+  deal.phaseTimer = setTimeout(() => {
+    if (!deal || deal.state !== "banker") return;
+    io.emit("dealNoDeal", { gameId: deal.id, yes: 0, no: 0, skipped: true });
+    dealVotePhase();
+  }, DEAL_BANKER_MS);
   io.emit("dealPhase", dealSnap());
 }
 function dealResolveVote() {
@@ -447,8 +475,10 @@ function dealResolveVote() {
     }, DEAL_REVEAL_MS);
     return;
   }
+  deal.blockLeft--;
   clearTimeout(deal.phaseTimer);
-  deal.phaseTimer = setTimeout(dealVotePhase, DEAL_REVEAL_MS);
+  // Block finished → Banker break. Otherwise keep opening this block's cases.
+  deal.phaseTimer = setTimeout(deal.blockLeft <= 0 ? dealBankerPhase : dealVotePhase, DEAL_REVEAL_MS);
 }
 function dealResolveOffer() {
   if (!deal || deal.state !== "offer") return;
@@ -4452,10 +4482,15 @@ io.on("connection", (socket) => {
       socket.emit("ownerDealResult", { ok: false, message: `Jackpot must be ${DEAL_JACKPOT_MIN}–${DEAL_JACKPOT_MAX.toLocaleString()} coins.` });
       return;
     }
+    // Owner-tunable vote timer (F8 setting), clamped to something sane.
+    let voteSec = Math.round(Number(payload?.voteSec));
+    if (!Number.isFinite(voteSec)) voteSec = DEAL_VOTE_MS / 1000;
+    voteSec = Math.min(60, Math.max(5, voteSec));
     const values = DEAL_FRACS.map((f) => Math.max(1, Math.round(jackpot * f)));
     for (let i = values.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [values[i], values[j]] = [values[j], values[i]]; }
     deal = {
-      id: ++dealGameSeq, state: "joining", jackpot, round: 0,
+      id: ++dealGameSeq, state: "joining", jackpot, round: 0, voteMs: voteSec * 1000,
+      blockIdx: 0, blockLeft: 0, blockSize: 0,
       cases: values.map((v) => ({ v, opened: false })),
       players: new Map(), votes: new Map(), dealVotes: new Map(), offer: 0,
       joinDeadline: Date.now() + DEAL_JOIN_MS,
@@ -4466,11 +4501,12 @@ io.on("connection", (socket) => {
     logAdmin(socket, "Deal or No Deal started", `Jackpot ${jackpot.toLocaleString()} coins`);
     console.log(`OWNER deal start: jackpot ${jackpot}`);
   });
-  // The Banker speaks. Freezes case-voting and puts the offer to an office vote.
+  // The Banker speaks — only during the offer break between rounds, like the
+  // real show. Puts the offer to an office DEAL / NO DEAL vote.
   socket.on("ownerDealOffer", (payload) => {
     if (!owners.has(socket.id)) return;
-    if (!deal || deal.state !== "voting") {
-      socket.emit("ownerDealResult", { ok: false, message: deal ? "Wait for the current vote to settle first." : "No show running." });
+    if (!deal || deal.state !== "banker") {
+      socket.emit("ownerDealResult", { ok: false, message: deal ? "The phone only rings between rounds — wait for the Banker break." : "No show running." });
       return;
     }
     const amount = Math.round(Number(payload?.amount));
@@ -4488,6 +4524,16 @@ io.on("connection", (socket) => {
     socket.emit("ownerDealResult", { ok: true, active: true, message: `Offer on the table: ${amount.toLocaleString()} coins each. The office is voting…` });
     logAdmin(socket, "Banker offer", `${amount.toLocaleString()} coins per player`);
     console.log(`OWNER deal offer: ${amount}/player`);
+  });
+  // "No offer this round" — the show rolls straight into the next block.
+  socket.on("ownerDealSkip", () => {
+    if (!owners.has(socket.id)) return;
+    if (!deal || deal.state !== "banker") return;
+    clearTimeout(deal.phaseTimer);
+    io.emit("dealNoDeal", { gameId: deal.id, yes: 0, no: 0, skipped: true });
+    socket.emit("ownerDealResult", { ok: true, active: true, message: "No offer — next round!" });
+    console.log("OWNER deal skip offer");
+    dealVotePhase();
   });
   socket.on("ownerDealCancel", () => {
     if (!owners.has(socket.id) || !deal) return;
