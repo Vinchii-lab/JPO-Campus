@@ -8817,12 +8817,17 @@
         // Texture key = the pet id; _makePet falls back to the emoji if a
         // texture is missing, so a failed load never breaks joining.
         for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
-        // Animated pet frames pilot (Aug 2026): per-frame PNGs (64x64,
-        // bottom-aligned, drawn facing RIGHT) swapped via setTexture in
-        // _stepPet/_petTrick. Purple dragon only until Vince approves the
-        // style; other species/variants keep their single static PNG.
-        for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'fire'])
-          this.load.image(`petanim_dragon_${f}`, `/assets/pets/anim/dragon_${f}.png`);
+        // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
+        // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
+        // static bunny art) swapped via setTexture in _stepPet/_petTrick.
+        // File stem = pet id minus 'pet_' (dragon, dragon_obsidian, …).
+        // A missing/failed frame just means that pet stays static — _makePet
+        // only attaches an anim set when all 5 textures actually loaded.
+        for (const p of PETS) {
+          const stem = p.id.replace(/^pet_/, '');
+          for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+            this.load.image(`petanim_${stem}_${f}`, `/assets/pets/anim/${stem}_${f}.png`);
+        }
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
@@ -9962,14 +9967,16 @@
         obj._petId = pet;
         obj._baseScale = Math.abs(obj.scaleX) || 1;
         obj._lively = PET_LIVELY.has(petSpeciesId(pet));
-        // Animated-frames pilot: only the base purple dragon has a frame set
-        // (walk cycle + sit + fire). All frames are 64x64 bottom-aligned, so
-        // one setScale fits them all; setTexture never changes the scale.
-        if (pet === 'pet_dragon' && obj.setTexture &&
-            ['walk1', 'walk2', 'walk3', 'sit', 'fire'].every(f => this.textures.exists(`petanim_dragon_${f}`))) {
+        // Animated frames: attach a frame set when every frame texture for
+        // this exact pet id loaded (walk cycle + sit + action). All frames
+        // are 64x64 bottom-aligned, so one setScale fits them all;
+        // setTexture never changes the scale.
+        const stem = pet.replace(/^pet_/, '');
+        if (obj.setTexture &&
+            ['walk1', 'walk2', 'walk3', 'sit', 'action'].every(f => this.textures.exists(`petanim_${stem}_${f}`))) {
           obj._animSet = {
-            walk: ['petanim_dragon_walk1', 'petanim_dragon_walk2', 'petanim_dragon_walk3', 'petanim_dragon_walk2'],
-            sit: 'petanim_dragon_sit', fire: 'petanim_dragon_fire', idle: 'petanim_dragon_walk2',
+            walk: [`petanim_${stem}_walk1`, `petanim_${stem}_walk2`, `petanim_${stem}_walk3`, `petanim_${stem}_walk2`],
+            sit: `petanim_${stem}_sit`, action: `petanim_${stem}_action`, idle: `petanim_${stem}_walk2`,
           };
           obj.setTexture(obj._animSet.idle);
           obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
@@ -10037,6 +10044,10 @@
         // location — no tricks while concealed.
         if (!petObj.visible) return;
         const sp = petSpeciesId(petObj._petId || '');
+        // Animated frames: swap to the action pose for the trick's duration.
+        // No explicit restore needed — once the trick's tween clears
+        // _trickBusy, the next _stepPet frame reasserts walk/idle/sit.
+        if (petObj._animSet) petObj.setTexture(petObj._animSet.action);
         if (sp === 'pet_unicorn') {
           // Sparkle burst: a handful of stars pop out and float away.
           // Client-only flavor; every piece self-destroys (same pattern as
@@ -10088,15 +10099,9 @@
           // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
           // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
           const fwd = (petObj.flipX ? -1 : 1);
-          // Animated-frames pilot: show the mouth-open fire frame for the
-          // duration of the breath, restore the neutral frame after.
-          if (petObj._animSet) petObj.setTexture(petObj._animSet.fire);
           this.tweens.add({
             targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
-            onComplete: () => {
-              petObj.angle = 0; petObj._trickBusy = false;
-              if (petObj._animSet && petObj.active !== false) petObj.setTexture(petObj._animSet.idle);
-            },
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
           });
           for (let i = 0; i < 6; i++) {
             const f = this.add.text(
@@ -10222,7 +10227,9 @@
           // RIGHT unflipped — only the bunnies face LEFT (verified against
           // the PNGs), so bunnies use the inverted flip.
           if (petObj.setFlipX && Math.abs(mx) > 0.3) {
-            const facesLeft = (petObj._petId || petObj.texture?.key || '').startsWith('pet_bunny');
+            // All ANIMATED frame art faces RIGHT (bunnies included); only the
+            // old STATIC bunny PNGs face left.
+            const facesLeft = !petObj._animSet && (petObj._petId || petObj.texture?.key || '').startsWith('pet_bunny');
             petObj.setFlipX(facesLeft ? mx > 0 : mx < 0);
           }
         }
