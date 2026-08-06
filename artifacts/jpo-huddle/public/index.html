@@ -3032,11 +3032,11 @@
       // too (the emoji path below is now only a fallback for unknown ids).
       sunglasses:   { tex: 'wear_sunglasses',   dy: 8,   side: 6 },
       crown:        { tex: 'wear_crown',        dy: -24, side: 3, sideDy: -20 },
-      headphones:   { tex: 'wear_headphones',   dy: -9,  side: 0, sideDy: -7 },
+      headphones:   { tex: 'wear_headphones',   dy: -6,  side: 0, sideDy: -6 },   // band over hair, cups ear-to-ear
       beret:        { tex: 'wear_beret',        dy: -20, side: 3, sideDy: -17 },
       chefhat:      { tex: 'wear_chefhat',      dy: -25, side: 3, sideDy: -21 },
       camera:       { tex: 'wear_camera',       dy: 24,  side: 4 },
-      gamerheadset: { tex: 'wear_gamerheadset', dy: -1,  side: 0 },
+      gamerheadset: { tex: 'wear_gamerheadset', dy: -6,  side: 0 },
       book:         { tex: 'wear_book',         dy: 26,  side: 6, sideDy: 30 },
       guitar:       { tex: 'wear_guitar',       dy: 22,  side: 2 },
       // July 2026: six wearables adapted from the MV_Accessories pack
@@ -3045,7 +3045,7 @@
       beanie:       { tex: 'wear_beanie',       dy: -22, side: 3, sideDy: -18 },
       flatcap:      { tex: 'wear_flatcap',      dy: -21, side: 3, sideDy: -17 },
       rangerhat:    { tex: 'wear_rangerhat',    dy: -22, side: 3, sideDy: -18 },
-      catears:      { tex: 'wear_catears',      dy: -4,  side: 0 },
+      catears:      { tex: 'wear_catears',      dy: -9,  side: 0 },
       scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
     };
 
@@ -8937,18 +8937,18 @@
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_crown',        '/assets/wear_crown.png',        { frameWidth: 10, frameHeight: 6 });
-        this.load.spritesheet('wear_headphones',   '/assets/wear_headphones.png',   { frameWidth: 12, frameHeight: 7 });
+        this.load.spritesheet('wear_headphones',   '/assets/wear_headphones.png',   { frameWidth: 14, frameHeight: 8 });
         this.load.spritesheet('wear_beret',        '/assets/wear_beret.png',        { frameWidth: 10, frameHeight: 5 });
         this.load.spritesheet('wear_chefhat',      '/assets/wear_chefhat.png',      { frameWidth: 10, frameHeight: 8 });
         this.load.spritesheet('wear_camera',       '/assets/wear_camera.png',       { frameWidth: 8,  frameHeight: 6 });
-        this.load.spritesheet('wear_gamerheadset', '/assets/wear_gamerheadset.png', { frameWidth: 12, frameHeight: 8 });
+        this.load.spritesheet('wear_gamerheadset', '/assets/wear_gamerheadset.png', { frameWidth: 14, frameHeight: 8 });
         this.load.spritesheet('wear_book',         '/assets/wear_book.png',         { frameWidth: 9,  frameHeight: 4 });
         this.load.spritesheet('wear_guitar',       '/assets/wear_guitar.png',       { frameWidth: 10, frameHeight: 8 });
         this.load.spritesheet('wear_spectacles',   '/assets/wear_spectacles.png',   { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_beanie',       '/assets/wear_beanie.png',       { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_flatcap',      '/assets/wear_flatcap.png',      { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_rangerhat',    '/assets/wear_rangerhat.png',    { frameWidth: 12, frameHeight: 6 });
-        this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 12, frameHeight: 8 });
+        this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 14, frameHeight: 9 });
         this.load.spritesheet('wear_scifihelmet',  '/assets/wear_scifihelmet.png',  { frameWidth: 12, frameHeight: 12 });
         this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
         // A flaky connection can silently drop an asset download — Phaser has
