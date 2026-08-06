@@ -3046,7 +3046,7 @@
       flatcap:      { tex: 'wear_flatcap',      dy: -21, side: 3, sideDy: -17 },
       rangerhat:    { tex: 'wear_rangerhat',    dy: -22, side: 3, sideDy: -18 },
       catears:      { tex: 'wear_catears',      dy: -4,  side: 0 },
-      scifihelmet:  { tex: 'wear_scifihelmet',  dy: -7,  side: 2, sideDy: -7 },
+      scifihelmet:  { tex: 'wear_scifihelmet',  dy: -14,  side: 2, sideDy: -14, scale: 2 },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -10007,12 +10007,13 @@
       _makeCosmetic(equipped, x, y, dir, under) {
         const wd = WEARABLE_DEFS[equipped];
         if (wd) {
-          const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(3).setDepth(10);
+          const sc = wd.scale || 3;                 // per-item fit (default 3)
+          const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(sc).setDepth(10);
           if (wd.behind && under) {
             img._under = under;
             img.setDepth(under.depth);
             this.children.moveBelow(img, under);
-            this.tweens.add({ targets: img, scaleX: { from: 3, to: 2.3 },
+            this.tweens.add({ targets: img, scaleX: { from: sc, to: sc * 0.77 },
               duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
           }
           this._placeWearable(img, wd, x, y, dir || 'down');
