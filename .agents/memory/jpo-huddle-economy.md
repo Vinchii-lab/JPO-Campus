@@ -47,3 +47,5 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - Grants: `ownerGrantPet {email, pet}` gated on `owners.has(socket.id)` (OWNER_PASSWORD tier via adminAuth; plain ADMIN_PASSWORD gets owner=false and must stay blocked — Vince explicitly keeps coin/rare tools off the admin tier). Email-based like adminAdjustCoins so offline grants work; online recipients get petSuccess + rareGiftToast + playerPetUpdate.
 - **Why:** boss wants rares as social currency — visible, unbuyable, personally gifted.
 - Login success socket event for headless tests is `approved` (not loginSuccess); login inputs are `login-email`/`login-password` + `tryLogin()`.
+
+**Zero-price rares & falsy checks:** rare gift-only items (unicorn/phoenix pets, phoenix wings) sit in the PETS/SHOP catalogs at price 0. Any catalog-membership validation MUST use `Object.hasOwn(catalog, id)` — a truthiness check like `!PETS[item]` silently rejects rares (broke the Bring button in prod, Aug 2026). Purchase paths keep the falsy check on purpose (0 = not buyable); trade paths block rares via RARE_IDS explicitly.

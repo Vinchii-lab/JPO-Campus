@@ -5634,7 +5634,7 @@ io.on("connection", (socket) => {
     const item = typeof raw === "string" ? raw : null;
     const p = players[socket.id];
     if (!p || item === null) return;
-    if (item !== "" && !PETS[item]) return;          // unknown pet id
+    if (item !== "" && !Object.hasOwn(PETS, item)) return;   // unknown pet id (hasOwn: rare pets are price 0 but still equipable by owners)
     if (!takeToken(buyBucket)) return;               // shares the shop's spam throttle
     if ((p.pet || "") === item) return;              // no-op
 
