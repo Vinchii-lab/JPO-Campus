@@ -2023,6 +2023,16 @@
         </div>
         <div id="deal-offer-tally" style="font-size:11px;color:#c3d0f0;margin-top:6px;"></div>
       </div>
+      <div id="deal-host-row" style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#101726;border:1px dashed #d4af37;">
+        <div style="font-size:11px;font-weight:700;color:#ffd76a;margin-bottom:6px;">☎️ BANKER CONTROLS (only you see this)</div>
+        <div style="display:flex;gap:8px;">
+          <input id="deal-host-amount" type="number" min="1" max="50000" step="50" placeholder="Coins per player"
+                 style="flex:1;min-width:0;padding:12px 10px;border:1px solid #3a4a78;border-radius:8px;background:#0e1322;color:#eaf0ff;font-size:15px;font-weight:700;" />
+          <button id="deal-host-offer-btn" type="button"
+                  style="flex:1.3;padding:12px 8px;border:none;border-radius:8px;background:linear-gradient(135deg,#d4af37,#b8860b);color:#1a1400;font-size:15px;font-weight:800;cursor:pointer;">☎️ MAKE OFFER</button>
+        </div>
+        <div id="deal-host-msg" style="font-size:11px;color:#8fa0c8;margin-top:6px;min-height:14px;">Offers only land while the office is voting on a case.</div>
+      </div>
       <div style="margin-top:10px;padding-top:8px;border-top:1px solid #2a3555;">
         <div style="font-size:11px;font-weight:700;color:#a9bcff;margin-bottom:6px;">💰 Still on the board:</div>
         <div id="deal-ladder" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;"></div>
@@ -6989,7 +6999,22 @@
       }
       _dealRenderGrid(null);
       _dealRenderLadder();
+      // The Banker's desk lives right in the panel — owner eyes only.
+      const host = _dlEl('deal-host-row');
+      host.style.display = window._ownerAuthed ? 'block' : 'none';
+      const btn = _dlEl('deal-host-offer-btn');
+      btn.disabled = snap.state !== 'voting';
+      btn.style.opacity = snap.state === 'voting' ? '1' : '.45';
     }
+    _dlEl('deal-host-offer-btn').addEventListener('click', () => {
+      const amt = Math.round(Number(_dlEl('deal-host-amount').value));
+      if (!amt || amt < 1) { _dlEl('deal-host-msg').textContent = 'Type an amount first, Banker.'; return; }
+      socket.emit('ownerDealOffer', { amount: amt });
+    });
+    socket.on('ownerDealResult', ({ ok, message } = {}) => {
+      const m = _dlEl('deal-host-msg');
+      if (m && window._ownerAuthed) { m.style.color = ok ? '#7ddf8a' : '#ff8f8f'; m.textContent = message || ''; }
+    });
     socket.on('dealLobby', ({ gameId, jackpot, msLeft } = {}) => {
       _dealDropStale(gameId);
       if (_dealIn) return;   // already joined (resync path uses dealYouIn)
