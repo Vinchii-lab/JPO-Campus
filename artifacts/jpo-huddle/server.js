@@ -354,6 +354,148 @@ function bingoBegin() {
   bingoSetMode(bingo.mode);
 }
 
+// ── Deal or No Deal (OWNER-hosted show, ephemeral) ──────────────────────────
+// The Vince Show: the OWNER (not plain admins) opens the board, the office
+// votes which briefcase opens next, and the owner drops live Banker offers.
+// DEAL (majority) → every joined player gets the offer amount. Riding it to
+// the final case splits that case's value between everyone. House pays; free
+// to join. Players keyed by EMAIL like bingo so a refresh keeps their seat.
+let deal = null;   // { id, state:'joining'|'voting'|'offer', jackpot, cases:[{v,opened}], players:Map(email->{name}), votes:Map, dealVotes:Map, round, offer, joinDeadline, phaseDeadline, joinTimer, phaseTimer }
+let dealGameSeq = 0;
+const DEAL_JOIN_MS   = Number(process.env.DEAL_JOIN_MS)   || 60_000;
+const DEAL_VOTE_MS   = Number(process.env.DEAL_VOTE_MS)   || 20_000;
+const DEAL_OFFER_MS  = Number(process.env.DEAL_OFFER_MS)  || 25_000;
+const DEAL_REVEAL_MS = Number(process.env.DEAL_REVEAL_MS) || 4_000;
+const DEAL_JACKPOT_MIN = 500, DEAL_JACKPOT_MAX = 50_000;
+// 16 case values as fractions of the jackpot — a classic junk-to-jackpot ladder.
+const DEAL_FRACS = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.06,
+                    0.09, 0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1];
+function dealStop() {
+  if (!deal) return;
+  clearTimeout(deal.joinTimer);
+  clearTimeout(deal.phaseTimer);
+  deal = null;
+}
+// Public snapshot — safe for every client (values of OPENED cases only; the
+// closed cases' contents never leave the server until they're opened).
+function dealSnap() {
+  if (!deal) return null;
+  return {
+    gameId: deal.id, state: deal.state, jackpot: deal.jackpot, round: deal.round,
+    ladder: deal.cases.map((c) => c.v).sort((a, b) => a - b),
+    opened: deal.cases.map((c) => (c.opened ? c.v : null)),
+    names: [...deal.players.values()].map((v) => v.name),
+    offer: deal.state === "offer" ? deal.offer : null,
+    msLeft: deal.state === "joining"
+      ? Math.max(0, deal.joinDeadline - Date.now())
+      : Math.max(0, (deal.phaseDeadline || 0) - Date.now()),
+  };
+}
+function dealBegin() {
+  if (!deal || deal.state !== "joining") return;
+  if (deal.players.size < 2) {
+    io.emit("dealOver", { gameId: deal.id, message: "Deal or No Deal cancelled — not enough players joined." });
+    dealStop();
+    return;
+  }
+  console.log(`DEAL active: ${deal.players.size} players, jackpot ${deal.jackpot}`);
+  dealVotePhase();
+}
+function dealVotePhase() {
+  if (!deal) return;
+  deal.state = "voting";
+  deal.round++;
+  deal.votes = new Map();
+  deal.phaseDeadline = Date.now() + DEAL_VOTE_MS;
+  clearTimeout(deal.phaseTimer);
+  deal.phaseTimer = setTimeout(dealResolveVote, DEAL_VOTE_MS);
+  io.emit("dealPhase", dealSnap());
+}
+function dealResolveVote() {
+  if (!deal || deal.state !== "voting") return;
+  // Most-voted unopened case; no votes at all → random (the show must go on).
+  const tally = new Map();
+  for (const i of deal.votes.values()) tally.set(i, (tally.get(i) || 0) + 1);
+  let best = [], bestN = 0;
+  for (const [i, n] of tally) {
+    if (n > bestN) { best = [i]; bestN = n; }
+    else if (n === bestN) best.push(i);
+  }
+  if (best.length === 0) best = deal.cases.map((c, i) => (c.opened ? -1 : i)).filter((i) => i >= 0);
+  const pick = best[Math.floor(Math.random() * best.length)];
+  const c = deal.cases[pick];
+  if (!c || c.opened) { dealVotePhase(); return; }   // paranoia — revote
+  c.opened = true;
+  // Reveal window is NOT interruptible — no Banker offers until the next
+  // voting round starts (and never once the final case is being paid out).
+  deal.state = "revealing";
+  const left = deal.cases.filter((x) => !x.opened);
+  io.emit("dealOpen", { gameId: deal.id, i: pick, v: c.v, votes: bestN, casesLeft: left.length });
+  console.log(`DEAL open case ${pick + 1}: ${c.v} (${left.length} left)`);
+  if (left.length === 1) {
+    // Finale: the last case standing is what the office rode for — split it.
+    const gameId = deal.id, v = left[0].v, entrants = [...deal.players.keys()];
+    const per = Math.max(1, Math.floor(v / entrants.length));
+    const names = [...deal.players.values()].map((p) => p.name);
+    const lastIdx = deal.cases.indexOf(left[0]);
+    clearTimeout(deal.phaseTimer);
+    deal.phaseTimer = setTimeout(() => {
+      dealStop();
+      dealPayAll(gameId, entrants, per,
+        { gameId, mode: "final", i: lastIdx, v, per, names,
+          message: `💼 FINAL CASE: ${v.toLocaleString()} coins inside — split ${entrants.length} ways, ${per.toLocaleString()} each!` });
+    }, DEAL_REVEAL_MS);
+    return;
+  }
+  clearTimeout(deal.phaseTimer);
+  deal.phaseTimer = setTimeout(dealVotePhase, DEAL_REVEAL_MS);
+}
+function dealResolveOffer() {
+  if (!deal || deal.state !== "offer") return;
+  const votes = [...deal.dealVotes.values()];
+  const yes = votes.filter(Boolean).length, no = votes.length - yes;
+  // A DEAL needs a true majority of ALL entrants — abstaining is a quiet NO.
+  if (yes > deal.players.size / 2) {
+    const gameId = deal.id, per = deal.offer, entrants = [...deal.players.keys()];
+    const names = [...deal.players.values()].map((p) => p.name);
+    dealStop();
+    dealPayAll(gameId, entrants, per,
+      { gameId, mode: "deal", per, yes, no, names,
+        message: `🤝 DEAL! The office takes the Banker's ${per.toLocaleString()} coins each (${yes}–${no}).` });
+  } else {
+    io.emit("dealNoDeal", { gameId: deal.id, yes, no });
+    console.log(`DEAL offer refused ${yes}-${no}`);
+    clearTimeout(deal.phaseTimer);
+    deal.phaseTimer = setTimeout(dealVotePhase, 2000);
+  }
+}
+// Pay every entrant `per` coins (house money), then announce. Awarded by
+// EMAIL like the bingo prize, so a mid-payout refresh can't dodge or double.
+// ONE attempt per player on purpose: `coins = coins + N` is not idempotent,
+// and a retry after an ambiguous connection error could pay someone twice.
+// A failed payout is loudly flagged for a manual award instead.
+async function dealPayAll(gameId, emails, per, overMsg) {
+  let paid = 0;
+  const failed = [];
+  for (const em of emails) {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`,
+        [em, per]);
+      if (rows.length) {
+        paid++;
+        for (const [sid, lp] of Object.entries(players)) {
+          if (lp.email === em) { lp.coins = rows[0].coins; io.to(sid).emit("coinUpdate", { coins: rows[0].coins }); }
+        }
+      } else failed.push(em);
+    } catch (err) { failed.push(em); console.error(`deal payout failed for ${em}:`, err); }
+  }
+  for (const em of failed) console.error(`DEAL PAYOUT FAILED for ${em} (+${per}) — award manually`);
+  io.emit("dealOver", paid === emails.length ? overMsg
+    : { ...overMsg, message: overMsg.message + ` (⚠️ ${emails.length - paid} payout(s) failed — the owner should award those manually.)` });
+  console.log(`DEAL over: ${per} coins × ${paid}/${emails.length} players`);
+}
+
 // email → { oldId, name, x, y, dir, timer }. A gracefully-disconnected player is
 // parked here for GRACE_MS so a quick refresh / network blip resumes the SAME
 // session without the avatar vanishing for everyone else. The frozen sprite (still
@@ -3938,6 +4080,7 @@ io.on("connection", (socket) => {
     if (!takeToken(roundBucket)) return;
     if (propHunt) { socket.emit("phResult", { ok: false, message: "A Hide & Seek round is already running." }); return; }
     if (round)    { socket.emit("phResult", { ok: false, message: "Office After Dark is running — wait for it to finish." }); return; }
+    if (deal)     { socket.emit("phResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
     const disguise = String(payload?.disguise || "");
     if (!PH_DISGUISES.has(disguise)) { socket.emit("phResult", { ok: false, message: "Pick a disguise first." }); return; }
     const hideSecs = Math.min(300,  Math.max(5,  Math.round(Number(payload?.hideSecs)) || 60));
@@ -4153,6 +4296,16 @@ io.on("connection", (socket) => {
     // otherwise keep a dead card on screen forever. An empty bingoOver clears
     // the UI without any banner/toast.
     if (!bingo) socket.emit("bingoOver", {});
+    // Deal or No Deal resync — same idea: rebuild or clear the show UI.
+    if (deal) {
+      const snap = dealSnap();
+      if (em && deal.players.has(em)) socket.emit("dealYouIn", snap);
+      else if (deal.state === "joining") socket.emit("dealLobby", { gameId: deal.id, jackpot: deal.jackpot, msLeft: snap.msLeft });
+      socket.emit("dealNames", { gameId: deal.id, names: snap.names });
+      if (owners.has(socket.id)) socket.emit("ownerDealResult", { ok: true, active: true, message: deal.state === "joining" ? "Show lobby is open." : "The show is live — you're the Banker." });
+    } else {
+      socket.emit("dealOver", {});
+    }
   });
 
   // ── Admin: Office Bingo ───────────────────────────────────────────────
@@ -4161,6 +4314,7 @@ io.on("connection", (socket) => {
     if (bingo) { socket.emit("adminBingoResult", { ok: false, message: "A bingo game is already running." }); return; }
     if (round) { socket.emit("adminBingoResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("adminBingoResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
+    if (deal) { socket.emit("adminBingoResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
     const prize = Math.round(Number(payload?.prize));
     if (!Number.isSafeInteger(prize) || prize < BINGO_PRIZE_MIN || prize > BINGO_PRIZE_MAX) {
       socket.emit("adminBingoResult", { ok: false, message: `Prize must be ${BINGO_PRIZE_MIN}–${BINGO_PRIZE_MAX.toLocaleString()} coins.` });
@@ -4284,6 +4438,100 @@ io.on("connection", (socket) => {
       io.emit("bingoOver", { gameId, winnerName: null, message: `${winnerName} hit a valid bingo, but the prize payout failed — an admin needs to award the ${prize.toLocaleString()} coins manually.` });
       console.error(`BINGO PAYOUT FAILED for ${em} (+${prize}) — award manually`);
     }
+  });
+
+  // ── Deal or No Deal (owner-hosted) ────────────────────────────────────
+  socket.on("ownerDealStart", (payload) => {
+    if (!owners.has(socket.id)) return;   // OWNER key only — plain admins can't host
+    if (deal)     { socket.emit("ownerDealResult", { ok: false, message: "A show is already running." }); return; }
+    if (bingo)    { socket.emit("ownerDealResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
+    if (round)    { socket.emit("ownerDealResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
+    if (propHunt) { socket.emit("ownerDealResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
+    const jackpot = Math.round(Number(payload?.jackpot));
+    if (!Number.isSafeInteger(jackpot) || jackpot < DEAL_JACKPOT_MIN || jackpot > DEAL_JACKPOT_MAX) {
+      socket.emit("ownerDealResult", { ok: false, message: `Jackpot must be ${DEAL_JACKPOT_MIN}–${DEAL_JACKPOT_MAX.toLocaleString()} coins.` });
+      return;
+    }
+    const values = DEAL_FRACS.map((f) => Math.max(1, Math.round(jackpot * f)));
+    for (let i = values.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [values[i], values[j]] = [values[j], values[i]]; }
+    deal = {
+      id: ++dealGameSeq, state: "joining", jackpot, round: 0,
+      cases: values.map((v) => ({ v, opened: false })),
+      players: new Map(), votes: new Map(), dealVotes: new Map(), offer: 0,
+      joinDeadline: Date.now() + DEAL_JOIN_MS,
+      joinTimer: setTimeout(dealBegin, DEAL_JOIN_MS), phaseTimer: null, phaseDeadline: 0,
+    };
+    io.emit("dealLobby", { gameId: deal.id, jackpot, msLeft: DEAL_JOIN_MS });
+    socket.emit("ownerDealResult", { ok: true, active: true, message: `Show announced! Top case holds ${jackpot.toLocaleString()} coins — ${DEAL_JOIN_MS / 1000}s to join. You're the Banker: drop offers whenever you smell fear.` });
+    logAdmin(socket, "Deal or No Deal started", `Jackpot ${jackpot.toLocaleString()} coins`);
+    console.log(`OWNER deal start: jackpot ${jackpot}`);
+  });
+  // The Banker speaks. Freezes case-voting and puts the offer to an office vote.
+  socket.on("ownerDealOffer", (payload) => {
+    if (!owners.has(socket.id)) return;
+    if (!deal || deal.state !== "voting") {
+      socket.emit("ownerDealResult", { ok: false, message: deal ? "Wait for the current vote to settle first." : "No show running." });
+      return;
+    }
+    const amount = Math.round(Number(payload?.amount));
+    if (!Number.isSafeInteger(amount) || amount < 1 || amount > DEAL_JACKPOT_MAX) {
+      socket.emit("ownerDealResult", { ok: false, message: `Offer must be 1–${DEAL_JACKPOT_MAX.toLocaleString()} coins (per player).` });
+      return;
+    }
+    clearTimeout(deal.phaseTimer);
+    deal.state = "offer";
+    deal.offer = amount;
+    deal.dealVotes = new Map();
+    deal.phaseDeadline = Date.now() + DEAL_OFFER_MS;
+    deal.phaseTimer = setTimeout(dealResolveOffer, DEAL_OFFER_MS);
+    io.emit("dealPhase", dealSnap());
+    socket.emit("ownerDealResult", { ok: true, active: true, message: `Offer on the table: ${amount.toLocaleString()} coins each. The office is voting…` });
+    logAdmin(socket, "Banker offer", `${amount.toLocaleString()} coins per player`);
+    console.log(`OWNER deal offer: ${amount}/player`);
+  });
+  socket.on("ownerDealCancel", () => {
+    if (!owners.has(socket.id) || !deal) return;
+    const gameId = deal.id;
+    dealStop();
+    io.emit("dealOver", { gameId, message: "The Banker walked off the set — show cancelled, nobody gets paid. 📺" });
+    logAdmin(socket, "Deal or No Deal cancelled", "");
+    socket.emit("ownerDealResult", { ok: true, message: "Show cancelled." });
+    console.log("OWNER deal cancelled");
+  });
+  socket.on("dealJoin", () => {
+    const p = players[socket.id];
+    if (!p?.email || !deal || deal.state !== "joining") return;
+    if (!takeToken(interactBucket)) return;
+    if (deal.players.has(p.email)) return;
+    deal.players.set(p.email, { name: p.name });
+    socket.emit("dealYouIn", dealSnap());
+    io.emit("dealNames", { gameId: deal.id, names: [...deal.players.values()].map((v) => v.name) });
+    console.log(`DEAL join: ${p.name} (${deal.players.size} in)`);
+  });
+  // One vote per player per round (revotable until the timer): which case opens.
+  socket.on("dealVoteCase", (payload) => {
+    const p = players[socket.id];
+    const em = p?.email;
+    if (!em || !deal || deal.state !== "voting" || !deal.players.has(em)) return;
+    if (!takeToken(interactBucket)) return;
+    const i = Math.round(Number(payload?.i));
+    if (!Number.isInteger(i) || i < 0 || i >= deal.cases.length || deal.cases[i].opened) return;
+    if (deal.votes.get(em) === i) return;   // unchanged — no broadcast fuel for spammers
+    deal.votes.set(em, i);
+    // Live tallies keep the argument loud — counts only, never who voted what.
+    const counts = deal.cases.map((c, idx) => (c.opened ? 0 : [...deal.votes.values()].filter((v) => v === idx).length));
+    io.emit("dealTally", { gameId: deal.id, counts, voters: deal.votes.size, of: deal.players.size });
+  });
+  socket.on("dealVoteDeal", (payload) => {
+    const p = players[socket.id];
+    const em = p?.email;
+    if (!em || !deal || deal.state !== "offer" || !deal.players.has(em)) return;
+    if (!takeToken(interactBucket)) return;
+    const yes = !!payload?.yes;
+    if (deal.dealVotes.get(em) === yes) return;   // unchanged — drop silently
+    deal.dealVotes.set(em, yes);
+    const votes = [...deal.dealVotes.values()];
+    io.emit("dealDealTally", { gameId: deal.id, yes: votes.filter(Boolean).length, no: votes.filter((v) => !v).length, of: deal.players.size });
   });
 
   // Pull-based refresh: the open admin panel re-requests both lists every few
@@ -6815,6 +7063,7 @@ io.on("connection", (socket) => {
     if (!takeToken(roundBucket)) return;   // silently drop spam
     if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (propHunt) { socket.emit("roundError", { message: "Hide & Seek is running — wait for it to finish!" }); return; }
+    if (deal)     { socket.emit("roundError", { message: "Deal or No Deal is running — wait for the show to end!" }); return; }
     if (round) {
       socket.emit("roundError", {
         message: round.state === "joining" ? "A round is already gathering — join that one!" : "A round is already in progress.",

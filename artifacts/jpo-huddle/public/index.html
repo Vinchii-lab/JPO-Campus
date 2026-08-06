@@ -1996,6 +1996,41 @@
     </div>
   </div>
 
+  <!-- ── Deal or No Deal join card ── -->
+  <div id="deal-lobby" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8300;background:#161d2e;color:#eaf0ff;border:1px solid #d4af37;border-radius:14px;padding:14px 18px;box-shadow:0 8px 28px rgba(0,0,0,.5);text-align:center;">
+    <div style="font-size:16px;font-weight:700;">💼 DEAL OR NO DEAL!</div>
+    <div id="deal-lobby-info" style="font-size:13px;margin:6px 0 10px;color:#c3d0f0;"></div>
+    <div id="deal-lobby-players" style="font-size:11px;margin:0 0 10px;color:#7f8db0;max-width:320px;word-break:break-word;line-height:1.5;"></div>
+    <button id="deal-join-btn" class="rps-btn primary" type="button">Join the show — it's free!</button>
+  </div>
+
+  <!-- ── Deal or No Deal show panel ── -->
+  <div id="deal-panel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7500;width:400px;max-height:92vh;overflow-y:auto;background:#161d2e;color:#eaf0ff;border:1px solid #3a4a78;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.5);font-size:13px;">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #2a3555;">
+      <span style="font-weight:700;">💼 DEAL OR NO DEAL</span>
+      <span id="deal-jackpot-label" style="color:#ffd76a;font-size:12px;"></span>
+      <span style="flex:1"></span>
+      <button id="deal-min-btn" style="background:none;border:none;color:#a9bcff;cursor:pointer;font-size:14px;">▾</button>
+    </div>
+    <div id="deal-body" style="padding:10px;">
+      <div id="deal-status" style="text-align:center;font-size:13px;font-weight:700;color:#ffd76a;min-height:20px;margin-bottom:8px;">waiting for the show to start…</div>
+      <div id="deal-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
+      <div id="deal-offer-row" style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#241a06;border:1px solid #d4af37;text-align:center;">
+        <div id="deal-offer-text" style="font-size:15px;font-weight:800;color:#ffd76a;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="deal-yes-btn" class="rps-btn primary" type="button" style="flex:1;">🤝 DEAL</button>
+          <button id="deal-no-btn" class="rps-btn" type="button" style="flex:1;">🙅 NO DEAL</button>
+        </div>
+        <div id="deal-offer-tally" style="font-size:11px;color:#c3d0f0;margin-top:6px;"></div>
+      </div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #2a3555;">
+        <div style="font-size:11px;font-weight:700;color:#a9bcff;margin-bottom:6px;">💰 Still on the board:</div>
+        <div id="deal-ladder" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;"></div>
+      </div>
+      <div id="deal-players" style="margin-top:8px;font-size:11px;color:#c3d0f0;word-break:break-word;line-height:1.5;"></div>
+    </div>
+  </div>
+
   <!-- ── Owner password modal ── -->
   <div id="owner-pwd-modal">
     <div id="owner-pwd-card">
@@ -2103,6 +2138,22 @@
           <button class="o-btn" id="op-bingo-switch" onclick="ownerBingoSwitch()">Switch to auto</button>
         </div>
         <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
+      <div class="owner-section" data-otab="events" id="op-owner-deal" style="display:none;">
+        <h3>💼 Deal or No Deal <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">The Vince Show: 16 briefcases, one holds the jackpot. The office votes which case opens next (20s a round); YOU are the Banker — drop a per-player offer whenever you like and they vote DEAL or NO DEAL (majority rules). Ride to the last case and its value splits between everyone. House pays, free to join, 60s lobby, needs 2+ players.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="op-deal-jackpot" type="number" min="500" max="50000" step="500" value="5000" placeholder="Jackpot (coins)"
+                 style="width:130px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-approve" onclick="ownerDealStart()">🎬 Start the show</button>
+          <button class="o-btn o-btn-reject" onclick="ownerDealCancel()">Cancel show</button>
+        </div>
+        <div id="op-deal-host" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <input id="op-deal-offer" type="number" min="1" max="50000" step="50" placeholder="Offer per player"
+                 style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-approve" style="font-size:15px;padding:10px 16px;" onclick="ownerDealOffer()">☎️ Banker's offer</button>
+        </div>
+        <div id="op-deal-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
       <div class="owner-section" data-otab="log">
         <h3>🕒 Admin Activity Log</h3>
@@ -6823,6 +6874,211 @@
       _bgEl('bingo-min-btn').textContent = hidden ? '▾' : '▸';
     });
 
+    // ── Deal or No Deal (The Vince Show) ───────────────────────────────
+    // Server owns cases/values/votes/payouts; this is the studio audience UI.
+    // Only the OWNER can host (server enforces; the F8 section is owner-gated).
+    let _dealGameId = null, _dealState = null, _dealLadder = [], _dealOpened = [], _dealIn = false, _dealMyVote = null, _dealActive = false;
+    let _dealLobbyTimer = null, _dealPhaseTimer = null;
+    const _dlEl = (id) => document.getElementById(id);
+    window._dealUiOpen = () =>
+      _dlEl('deal-lobby').style.display !== 'none' ||
+      _dlEl('deal-panel').style.display !== 'none';
+    window.ownerDealStart  = () => socket.emit('ownerDealStart', { jackpot: Math.round(Number(_dlEl('op-deal-jackpot').value)) });
+    window.ownerDealOffer  = () => socket.emit('ownerDealOffer', { amount: Math.round(Number(_dlEl('op-deal-offer').value)) });
+    window.ownerDealCancel = () => socket.emit('ownerDealCancel');
+    socket.on('ownerDealResult', ({ ok, active, message } = {}) => {
+      const msg = _dlEl('op-deal-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (message && !ok) _rpsToast(`💼 ${message}`);
+      _dealActive = !!active;
+      _dlEl('op-deal-host').style.display = active ? 'flex' : 'none';
+    });
+    function _dealDropStale(gameId) {
+      if (gameId != null && _dealGameId != null && gameId > _dealGameId) _dealHideAll();
+    }
+    function _dealHideAll() {
+      _dlEl('deal-lobby').style.display = 'none';
+      _dlEl('deal-panel').style.display = 'none';
+      clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dealGameId = null; _dealState = null; _dealLadder = []; _dealOpened = [];
+      _dealIn = false; _dealMyVote = null; _dealActive = false;
+      _dlEl('deal-body').style.display = 'block';
+      _dlEl('deal-min-btn').textContent = '▾';
+    }
+    // The board: 16 briefcases. Closed = clickable during voting (if joined);
+    // opened = dimmed with its value showing. Vote counts ride on the cases.
+    function _dealRenderGrid(counts) {
+      const grid = _dlEl('deal-grid');
+      grid.replaceChildren();
+      for (let i = 0; i < _dealOpened.length; i++) {
+        const openedV = _dealOpened[i];
+        const b = document.createElement('button');
+        if (openedV != null) {
+          b.textContent = openedV.toLocaleString();
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:11px;border:1px solid #2a3555;background:#0e1322;color:#5d6a8f;text-decoration:line-through;';
+        } else {
+          const n = counts ? counts[i] : 0;
+          const mine = _dealMyVote === i;
+          b.textContent = `💼${i + 1}` + (n ? ` ·${n}` : '');
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid ' +
+            (mine ? '#ffd76a;background:#4a3800;color:#ffd76a;' : '#d4af37;background:#243154;color:#eaf0ff;');
+          if (_dealIn && _dealState === 'voting') {
+            const idx = i;
+            b.onclick = () => { _dealMyVote = idx; socket.emit('dealVoteCase', { i: idx }); _dealRenderGrid(counts); };
+          }
+        }
+        grid.appendChild(b);
+      }
+    }
+    function _dealRenderLadder() {
+      const lad = _dlEl('deal-ladder');
+      lad.replaceChildren();
+      const gone = _dealOpened.filter((v) => v != null);
+      const usedIdx = new Set();
+      for (const v of _dealLadder) {
+        const d = document.createElement('div');
+        // strike each opened VALUE once (values can repeat only if jackpot tiny)
+        const gi = gone.findIndex((g, k) => g === v && !usedIdx.has(k));
+        const isGone = gi >= 0; if (isGone) usedIdx.add(gi);
+        d.textContent = v.toLocaleString();
+        d.style.cssText = 'text-align:center;padding:3px 0;border-radius:5px;font-size:11px;' +
+          (isGone ? 'background:#0e1322;color:#4d5878;text-decoration:line-through;' : 'background:#243154;color:#ffd76a;font-weight:700;');
+        lad.appendChild(d);
+      }
+    }
+    function _dealCountdown(msLeft, label) {
+      clearInterval(_dealPhaseTimer);
+      const deadline = Date.now() + (msLeft ?? 0);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _dlEl('deal-status').textContent = label(s);
+        if (s <= 0) { clearInterval(_dealPhaseTimer); _dealPhaseTimer = null; }
+      };
+      _dealPhaseTimer = setInterval(tick, 500); tick();
+    }
+    // Rebuild the whole panel from a server snapshot (join, phase change, resync).
+    function _dealApplySnap(snap) {
+      if (!snap) return;
+      _dealDropStale(snap.gameId);
+      _dealGameId = snap.gameId ?? _dealGameId;
+      _dealState = snap.state;
+      _dealLadder = snap.ladder || _dealLadder;
+      _dealOpened = snap.opened || _dealOpened;
+      _dealActive = true;
+      _dlEl('deal-lobby').style.display = 'none';
+      clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
+      _dlEl('deal-jackpot-label').textContent = `top case: ${(snap.jackpot ?? 0).toLocaleString()} 🪙`;
+      _dlEl('deal-panel').style.display = 'block';
+      _dlEl('deal-body').style.display = 'block';
+      const offerRow = _dlEl('deal-offer-row');
+      if (snap.state === 'offer') {
+        offerRow.style.display = 'block';
+        _dlEl('deal-offer-text').textContent = `☎️ The Banker offers ${(snap.offer ?? 0).toLocaleString()} coins EACH`;
+        _dlEl('deal-offer-tally').textContent = '';
+        _dealCountdown(snap.msLeft, (s) => `DEAL or NO DEAL? Majority decides — ${s}s`);
+      } else {
+        offerRow.style.display = 'none';
+        if (snap.state === 'voting') {
+          _dealMyVote = null;
+          _dealCountdown(snap.msLeft, (s) => _dealIn ? `Round ${snap.round}: vote which case opens — ${s}s` : `Round ${snap.round}: the office is voting — ${s}s`);
+        } else {
+          _dlEl('deal-status').textContent = `you're in! the show starts soon…`;
+        }
+      }
+      _dealRenderGrid(null);
+      _dealRenderLadder();
+    }
+    socket.on('dealLobby', ({ gameId, jackpot, msLeft } = {}) => {
+      _dealDropStale(gameId);
+      if (_dealIn) return;   // already joined (resync path uses dealYouIn)
+      _dealGameId = gameId ?? _dealGameId;
+      _dlEl('deal-lobby').style.display = 'block';
+      const deadline = Date.now() + (msLeft ?? 60000);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _dlEl('deal-lobby-info').textContent = `16 briefcases — one holds ${(jackpot ?? 0).toLocaleString()} coins. Vote the cases open, split the winnings! Starts in ${s}s`;
+        if (s <= 0) { clearInterval(_dealLobbyTimer); _dealLobbyTimer = null; _dlEl('deal-lobby').style.display = 'none'; }
+      };
+      clearInterval(_dealLobbyTimer);
+      _dealLobbyTimer = setInterval(tick, 500); tick();
+    });
+    _dlEl('deal-join-btn').addEventListener('click', () => socket.emit('dealJoin'));
+    socket.on('dealYouIn', (snap) => { _dealIn = true; _dealApplySnap(snap); });
+    socket.on('dealPhase', (snap) => {
+      // Spectators without a seat don't get the board — but the hosting owner does.
+      if (!_dealIn && !window._ownerAuthed) return;
+      _dealApplySnap(snap);
+    });
+    socket.on('dealTally', ({ gameId, counts, voters, of } = {}) => {
+      if (gameId !== _dealGameId || _dealState !== 'voting') return;
+      _dealRenderGrid(counts);
+      const st = _dlEl('deal-status');
+      if (st.textContent.includes('vote') || st.textContent.includes('voting')) { /* countdown keeps ticking */ }
+      _dlEl('deal-players').textContent = `🗳️ ${voters}/${of} votes in`;
+    });
+    socket.on('dealOpen', ({ gameId, i, v, casesLeft } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dealOpened[i] = v;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dlEl('deal-status').textContent = `💥 Case ${i + 1} had ${v.toLocaleString()} coins! ${casesLeft} case${casesLeft === 1 ? '' : 's'} left…`;
+      _dealRenderGrid(null);
+      _dealRenderLadder();
+      _rpsToast(`💼 Case ${i + 1}: ${v.toLocaleString()} coins — off the board!`);
+    });
+    _dlEl('deal-yes-btn').addEventListener('click', () => socket.emit('dealVoteDeal', { yes: true }));
+    _dlEl('deal-no-btn').addEventListener('click', () => socket.emit('dealVoteDeal', { yes: false }));
+    socket.on('dealDealTally', ({ gameId, yes, no, of } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dlEl('deal-offer-tally').textContent = `🤝 DEAL ${yes} — ${no} NO DEAL (${of} players)`;
+    });
+    socket.on('dealNoDeal', ({ gameId, yes, no } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dlEl('deal-offer-row').style.display = 'none';
+      _rpsToast(`🙅 NO DEAL! (${yes}–${no}) The Banker hangs up… the cases keep opening!`);
+    });
+    socket.on('dealNames', ({ gameId, names } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;
+      _dealDropStale(gameId);
+      const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
+      const a = _dlEl('deal-lobby-players'); if (a) a.textContent = label;
+      const b = _dlEl('deal-players');       if (b) b.textContent = label;
+    });
+    let _dealBannerTimer = null;
+    function _dealBanner(text) {
+      let el = document.getElementById('deal-win-banner');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'deal-win-banner';
+        el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:8400;background:linear-gradient(135deg,#1a2440,#243154);color:#ffd76a;border:2px solid #d4af37;border-radius:14px;padding:14px 26px;font-size:18px;font-weight:800;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.55);max-width:92vw;cursor:pointer;';
+        el.title = 'Click to dismiss';
+        el.onclick = () => { el.style.display = 'none'; };
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.display = 'block';
+      clearTimeout(_dealBannerTimer);
+      _dealBannerTimer = setTimeout(() => { el.style.display = 'none'; }, 30000);
+    }
+    socket.on('dealOver', ({ gameId, message, mode, per } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;
+      if (mode) _dealBanner(message);
+      else if (message) _rpsToast(`💼 ${message}`);
+      _dealHideAll();
+      const host = document.getElementById('op-deal-host');
+      if (host) host.style.display = 'none';
+    });
+    for (const id of ['deal-panel', 'deal-lobby']) {
+      const el = _dlEl(id);
+      for (const ev of ['pointerdown', 'pointerup', 'click']) el.addEventListener(ev, (e) => e.stopPropagation());
+    }
+    _dlEl('deal-min-btn').addEventListener('click', () => {
+      const body = _dlEl('deal-body');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? 'block' : 'none';
+      _dlEl('deal-min-btn').textContent = hidden ? '▾' : '▸';
+    });
+
     function _mkLine(txt, css) {
       const d = document.createElement('div');
       d.style.cssText = css || 'font-size:12px;opacity:.75;margin:8px 2px 2px;';
@@ -8524,6 +8780,8 @@
       // Owner key (OWNER_PASSWORD) unlocks the owner-only tools too.
       document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
+      document.getElementById('op-owner-deal').style.display = (d && d.owner) ? '' : 'none';
+      window._ownerAuthed = !!(d && d.owner);
       // Silent path = automatic re-auth after a reconnect (pwd modal not open):
       // refresh the flags but do NOT pop the owner panel open mid-game.
       const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
@@ -9887,6 +10145,7 @@
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
               && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
               && !window._bingoUiOpen?.()
+              && !window._dealUiOpen?.()
               && !document.getElementById('shop-modal').classList.contains('open')) {
             window._openProfile(socket.id);
           }
@@ -10955,6 +11214,7 @@
           if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
               && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
               && !window._bingoUiOpen?.()
+              && !window._dealUiOpen?.()
               && !document.getElementById('shop-modal').classList.contains('open')) {
             const ev = pointer && pointer.event;
             window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
