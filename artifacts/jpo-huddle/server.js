@@ -390,6 +390,16 @@ const SHOP = {
   chain:        7000,
   crown:        8000,
   fairywings:  15000,
+  // Wings collection (Aug 2026) — same back-worn sprite pipeline as
+  // fairywings. phoenixwings is RARE: gift-only, price 0 (see RARE_COSMETICS).
+  beewings:     6000,
+  batwings:     9000,
+  butterflywings: 12000,
+  angelwings:  18000,
+  devilwings:  18000,
+  jetpackwings: 22000,
+  goldenwings: 30000,
+  phoenixwings: 0,
 };
 
 // ── Pets catalog ─────────────────────────────────────────────────────────────
@@ -430,6 +440,10 @@ const PETS = {
 // OWNER_PASSWORD tier, same gate as coin adjustments; plain admins can't).
 // Price 0 in PETS keeps equip/trade/anchor pipelines working untouched.
 const RARE_PETS = new Set(["pet_unicorn", "pet_phoenix"]);
+// Rare wearables work the same way (gift-only via the F8 owner panel).
+const RARE_COSMETICS = new Set(["phoenixwings"]);
+// Union used by every "rares never change hands / have no price" guard.
+const RARE_IDS = new Set([...RARE_PETS, ...RARE_COSMETICS]);
 
 // ── Pet accessories catalog ──────────────────────────────────────────────────
 // Cosmetic add-ons drawn ON the active pet (one slot). Ownership shares the
@@ -4056,7 +4070,7 @@ io.on("connection", (socket) => {
     if (!cat) { socket.emit("adminPriceResult", { ok: false, message: "Unknown item." }); return; }
     // Rare pets have no price by design — an override could resurrect a
     // buyable price label (buyPet still blocks, but the shop would lie).
-    if (RARE_PETS.has(item)) { socket.emit("adminPriceResult", { ok: false, message: "Rare pets are gift-only — no price to set." }); return; }
+    if (RARE_IDS.has(item)) { socket.emit("adminPriceResult", { ok: false, message: "Rare items are gift-only — no price to set." }); return; }
     const p = Math.round(Number(price));
     if (!Number.isInteger(p) || p < PRICE_MIN || p > PRICE_MAX) {
       socket.emit("adminPriceResult", { ok: false, message: `Price must be ${PRICE_MIN}–${PRICE_MAX.toLocaleString()} coins.` });
@@ -4302,18 +4316,20 @@ io.on("connection", (socket) => {
     if (!owners.has(socket.id)) return;
     const em = String(payload?.email || "").trim().toLowerCase().slice(0, 80);
     const pet = String(payload?.pet || "");
-    if (!em || !RARE_PETS.has(pet)) {
-      socket.emit("ownerGrantResult", { ok: false, message: "Pick a rare pet and enter an email." });
+    if (!em || !RARE_IDS.has(pet)) {
+      socket.emit("ownerGrantResult", { ok: false, message: "Pick a rare item and enter an email." });
       return;
     }
+    // Pets auto-equip into equipped_pet; rare wearables into equipped_cosmetic.
+    const isPet = RARE_PETS.has(pet);
     try {
       const { rows } = await pool.query(
         `UPDATE jpo_players
             SET cosmetics = array_append(cosmetics, $2),
-                equipped_pet = $2,
+                ${isPet ? "equipped_pet" : "equipped_cosmetic"} = $2,
                 updated_at = now()
           WHERE email = $1 AND NOT ($2 = ANY(cosmetics))
-          RETURNING name, cosmetics, equipped_pet`,
+          RETURNING name, cosmetics, equipped_pet, equipped_cosmetic`,
         [em, pet],
       );
       if (!rows[0]) {
@@ -4325,14 +4341,21 @@ io.on("connection", (socket) => {
       for (const [sid, lp] of Object.entries(players)) {
         if (lp.email === em) {
           lp.cosmetics = rows[0].cosmetics || [];
-          lp.pet = rows[0].equipped_pet || "";
-          io.to(sid).emit("petSuccess", { item: pet, pet: lp.pet, petAcc: lp.petAcc || "" });
+          if (isPet) {
+            lp.pet = rows[0].equipped_pet || "";
+            io.to(sid).emit("petSuccess", { item: pet, pet: lp.pet, petAcc: lp.petAcc || "" });
+            io.emit("playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "" });
+          } else {
+            lp.equipped = rows[0].equipped_cosmetic || "";
+            io.to(sid).emit("shopSuccess", { item: pet, equipped: lp.equipped });
+            io.emit("playerCosmeticUpdate", { id: sid, cosmetics: lp.cosmetics, equipped: lp.equipped });
+          }
           io.to(sid).emit("rareGiftToast", { pet });
-          io.emit("playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "" });
         }
       }
-      console.log(`Owner gifted rare pet ${pet} to ${em}`);
-      socket.emit("ownerGrantResult", { ok: true, message: `Done! ${rows[0].name} now owns the ${pet === "pet_unicorn" ? "Unicorn 🦄" : "Phoenix 🐦‍🔥"}.` });
+      const label = { pet_unicorn: "Unicorn 🦄", pet_phoenix: "Phoenix 🐦‍🔥", phoenixwings: "Phoenix Wings 🔥" }[pet] || pet;
+      console.log(`Owner gifted rare ${pet} to ${em}`);
+      socket.emit("ownerGrantResult", { ok: true, message: `Done! ${rows[0].name} now owns the ${label}.` });
     } catch (err) {
       console.error("ownerGrantPet failed:", err);
       socket.emit("ownerGrantResult", { ok: false, message: "Something went wrong — try again." });
@@ -5388,7 +5411,10 @@ io.on("connection", (socket) => {
   socket.on("buyCosmetic", async (payload) => {
     const { item } = payload || {};
     const p = players[socket.id], cost = SHOP[item];
-    if (!p || !cost) return;
+    if (!p) return;
+    // Rare wearables are shop-visible bait, never purchasable — gift-only.
+    if (RARE_COSMETICS.has(item)) { socket.emit("shopError", "This one can't be bought — only the boss can gift it. 🎁"); return; }
+    if (!cost) return;
     if (!takeToken(buyBucket)) return;   // throttle rapid buy attempts
     // No spending while in an RPS challenge/match: this is what keeps the
     // accept-time wager check exact all the way to settlement (the coin tick
@@ -5496,7 +5522,7 @@ io.on("connection", (socket) => {
     const item = typeof raw === "string" ? raw : null;
     const p = players[socket.id];
     if (!p || item === null) return;
-    if (item !== "" && !SHOP[item]) return;          // unknown cosmetic id
+    if (item !== "" && !Object.hasOwn(SHOP, item)) return;   // unknown cosmetic id (hasOwn: rare items are price 0 but still equipable by owners)
     if (!takeToken(buyBucket)) return;               // shares the shop's spam throttle
     if (p.equipped === item) return;                 // no-op
 
@@ -5973,7 +5999,7 @@ io.on("connection", (socket) => {
     const cat = catalogOf(item);
     if (!cat) { storeFail("That item can't be listed."); return; }
     // Gift-only rares never change hands between players.
-    if (RARE_PETS.has(item)) { storeFail("Rare pets can't be listed — they're personal gifts from the boss."); return; }
+    if (RARE_IDS.has(item)) { storeFail("Rare items can't be listed — they're personal gifts from the boss."); return; }
     if (!(p.cosmetics || []).includes(item)) { storeFail("You don't own that."); return; }
     const min = storeInt(minBid);
     if (!Number.isFinite(min) || min < STORE_BID_MIN || min > STORE_BID_MAX) {
@@ -7076,7 +7102,7 @@ try {
   // override rows (e.g. the old 55,000 unicorn) so panel/catalog stay honest.
   // Runs at boot so it also heals prod on the next publish (prod DB is
   // never edited by hand).
-  await pool.query(`DELETE FROM jpo_shop_prices WHERE item_id = ANY($1)`, [[...RARE_PETS]]);
+  await pool.query(`DELETE FROM jpo_shop_prices WHERE item_id = ANY($1)`, [[...RARE_IDS]]);
   const { rows } = await pool.query(`SELECT item_id, price FROM jpo_shop_prices`);
   for (const r of rows) {
     const cat = catalogOf(r.item_id);

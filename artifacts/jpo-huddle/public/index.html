@@ -1852,6 +1852,7 @@
            Wardrobe. One tab shows at a time; long tabs paginate (SHOP_PAGE_SIZE). -->
       <div id="shop-tabs">
         <button class="shop-tab sel" id="shop-tab-btn-wear"     onclick="shopTab('wear')">🕶️ Wearables</button>
+        <button class="shop-tab"     id="shop-tab-btn-wings"    onclick="shopTab('wings')">🪽 Wings</button>
         <button class="shop-tab"     id="shop-tab-btn-items"    onclick="shopTab('items')">🎒 Items</button>
         <button class="shop-tab"     id="shop-tab-btn-pets"     onclick="shopTab('pets')">🐾 Pets</button>
         <button class="shop-tab"     id="shop-tab-btn-wardrobe" onclick="shopTab('wardrobe')">👕 Wardrobe</button>
@@ -1860,6 +1861,7 @@
       </div>
       <!-- Cosmetic rows are generated from the COSMETICS catalog. -->
       <div id="shop-cosmetics"></div>
+      <div id="shop-wings" style="display:none"></div>
       <!-- Usable-item rows are generated from the USABLES catalog. -->
       <div id="shop-usables" style="display:none"></div>
       <!-- Pet rows are generated from the PETS catalog. -->
@@ -2113,6 +2115,7 @@
             <select id="op-rare-pet" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
               <option value="pet_unicorn">🦄 Unicorn</option>
               <option value="pet_phoenix">🐦‍🔥 Phoenix</option>
+              <option value="phoenixwings">🔥 Phoenix Wings</option>
             </select>
             <button class="o-btn o-btn-approve" onclick="ownerGrantRarePet()">Gift</button>
           </div>
@@ -2974,7 +2977,16 @@
       { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 6500, desc: 'full visor, straight from 3024' },
       { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 7000, desc: 'real gold, around your neck' },
       { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 8000, desc: 'jeweled gold, on your head' },
-      { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 15000, desc: 'shimmering wings on your back' },
+      { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 15000, wings: true, desc: 'shimmering wings on your back' },
+      // Wings collection (Aug 2026) — all share the fairywings render pipeline.
+      { id: 'beewings',     emoji: '🐝', name: 'Bee Wings',      cost: 6000,  wings: true, desc: 'tiny buzzy wings, extra fast flap' },
+      { id: 'batwings',     emoji: '🦇', name: 'Bat Wings',      cost: 9000,  wings: true, desc: 'leathery and a little spooky' },
+      { id: 'butterflywings', emoji: '🦋', name: 'Butterfly Wings', cost: 12000, wings: true, desc: 'monarch colors on your back' },
+      { id: 'angelwings',   emoji: '😇', name: 'Angel Wings',    cost: 18000, wings: true, desc: 'soft white feathers, pick a side' },
+      { id: 'devilwings',   emoji: '😈', name: 'Devil Wings',    cost: 18000, wings: true, desc: 'ragged crimson, pick the other side' },
+      { id: 'jetpackwings', emoji: '🤖', name: 'Jetpack Wings',  cost: 22000, wings: true, desc: 'thrusters with a tiny blue flame' },
+      { id: 'goldenwings',  emoji: '✨', name: 'Golden Wings',   cost: 30000, wings: true, desc: 'gilded feathers that catch the light' },
+      { id: 'phoenixwings', emoji: '🔥', name: 'Phoenix Wings',  cost: 0, wings: true, rare: true, desc: 'blazing feathers for the boss\'s chosen' },
     ];
     const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
 
@@ -3002,6 +3014,16 @@
       // trail the back, away from the face. A slow scaleX flap tween lives on
       // the image itself.
       fairywings: { tex: 'wear_fairywings', dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      // Wings collection: same geometry as fairywings (all sheets are drawn
+      // to the identical 32x20 two-frame layout).
+      beewings:       { tex: 'wear_beewings',       dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      batwings:       { tex: 'wear_batwings',       dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      butterflywings: { tex: 'wear_butterflywings', dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      angelwings:     { tex: 'wear_angelwings',     dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      devilwings:     { tex: 'wear_devilwings',     dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      jetpackwings:   { tex: 'wear_jetpackwings',   dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      goldenwings:    { tex: 'wear_goldenwings',    dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      phoenixwings:   { tex: 'wear_phoenixwings',   dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
       shades: { tex: 'wear_shades', dy: 8,   side: 6 },
       cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
       chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
@@ -4271,14 +4293,16 @@
     // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
     function _refreshShopUI() {
       document.getElementById('shop-coin-display').textContent = _playerCoins;
-      for (const t of ['wear', 'items', 'pets', 'wardrobe', 'market'])
+      for (const t of ['wear', 'wings', 'items', 'pets', 'wardrobe', 'market'])
         document.getElementById('shop-tab-btn-' + t).classList.toggle('sel', _shopTab === t);
       const cosBox  = document.getElementById('shop-cosmetics');
+      const wingBox = document.getElementById('shop-wings');
       const useBox  = document.getElementById('shop-usables');
       const petsBox = document.getElementById('shop-pets');
       const wardBox = document.getElementById('shop-wardrobe');
       const mktBox  = document.getElementById('shop-market');
       cosBox.style.display  = _shopTab === 'wear'     ? '' : 'none';
+      wingBox.style.display = _shopTab === 'wings'    ? '' : 'none';
       useBox.style.display  = _shopTab === 'items'    ? '' : 'none';
       petsBox.style.display = _shopTab === 'pets'     ? '' : 'none';
       wardBox.style.display = _shopTab === 'wardrobe' ? '' : 'none';
@@ -4287,7 +4311,10 @@
 
       // Page window for the active (paged) tab; clamp so a shrinking catalog
       // or stale page index can never show an empty page.
-      const catalog = _shopTab === 'wear' ? COSMETICS : _shopTab === 'items' ? USABLES : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES) : null;
+      const catalog = _shopTab === 'wear' ? COSMETICS.filter(c => !c.wings)
+                    : _shopTab === 'wings' ? COSMETICS.filter(c => c.wings)
+                    : _shopTab === 'items' ? USABLES
+                    : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES) : null;
       let pages = 1;
       if (catalog) {
         pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
@@ -4302,15 +4329,23 @@
       }
       const slice = catalog ? catalog.slice(_shopPage * SHOP_PAGE_SIZE, (_shopPage + 1) * SHOP_PAGE_SIZE) : [];
 
-      if (_shopTab === 'wear') {
-        cosBox.textContent = '';
+      if (_shopTab === 'wear' || _shopTab === 'wings') {
+        const box = _shopTab === 'wings' ? wingBox : cosBox;
+        box.textContent = '';
         for (const c of slice) {
           const btn = document.createElement('button');
           btn.className = 'buy-btn';
           if (!_ownedItems.includes(c.id)) {
-            btn.textContent = 'Buy';
-            if (_playerCoins < c.cost) btn.classList.add('poor');
-            btn.onclick = () => buyItem(c.id);
+            if (c.rare) {
+              // Gift-only: tease instead of buy (server blocks buyCosmetic too).
+              btn.textContent = '🎁 Gift only';
+              btn.classList.add('poor');
+              btn.onclick = () => showToast('🎁 Rare item — the boss decides who gets one.');
+            } else {
+              btn.textContent = 'Buy';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyItem(c.id);
+            }
           } else if (_equippedCosmetic === c.id) {
             btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
             btn.onclick = () => equipItem('');       // take it off
@@ -4318,7 +4353,7 @@
             btn.textContent = 'Wear'; btn.classList.add('wear');
             btn.onclick = () => equipItem(c.id);     // switch, free
           }
-          cosBox.append(_shopRow(c, btn));
+          box.append(_shopRow(c, btn));
         }
       } else if (_shopTab === 'items') {
         useBox.textContent = '';
@@ -8279,9 +8314,12 @@
     });
     // Recipient-side fanfare when the boss gifts you a rare pet.
     socket.on('rareGiftToast', (d) => {
-      showToast(d.pet === 'pet_phoenix'
-        ? '🐦‍🔥 The boss gifted you a PHOENIX! It\'s at your feet right now.'
-        : '🦄 The boss gifted you a UNICORN! It\'s at your feet right now.');
+      const msgs = {
+        pet_phoenix: '🐦‍🔥 The boss gifted you a PHOENIX! It\'s at your feet right now.',
+        pet_unicorn: '🦄 The boss gifted you a UNICORN! It\'s at your feet right now.',
+        phoenixwings: '🔥 The boss gifted you PHOENIX WINGS! They\'re on your back right now.',
+      };
+      showToast(msgs[d.pet] || '🎁 The boss gifted you something RARE!');
     });
     socket.on('adminCoinResult', (d) => {
       const m = document.getElementById('op-coin-msg');
@@ -8534,7 +8572,7 @@
       const tbody = document.getElementById('op-price-tbody');
       if (!tbody) return;
       if (tbody.contains(document.activeElement)) return;   // don't wipe an edit in progress
-      const rows = [...COSMETICS.map(c => ({ ...c, kind: 'Wearable' })),
+      const rows = [...COSMETICS.filter(c => !c.rare).map(c => ({ ...c, kind: 'Wearable' })),
                     // Rare pets have no price — keep them out of the admin
                     // price panel entirely (server rejects overrides anyway).
                     ...PETS.filter(c => !c.rare).map(c => ({ ...c, kind: 'Pet' })),
@@ -8886,6 +8924,8 @@
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 32, frameHeight: 20 });
+        for (const w of ['beewings', 'batwings', 'butterflywings', 'angelwings', 'devilwings', 'jetpackwings', 'goldenwings', 'phoenixwings'])
+          this.load.spritesheet('wear_' + w, `/assets/wear_${w}.png`, { frameWidth: 32, frameHeight: 20 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
