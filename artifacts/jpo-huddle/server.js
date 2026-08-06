@@ -371,24 +371,26 @@ const GRACE_MS = 10_000;
 // hanging out, crown is a long-term goal); server is authoritative — client
 // drift only mislabels the shop row.
 const SHOP = {
+  // Aug 2026 shop cleanup: tiered pricing by category (hats / eyewear /
+  // audio / accessories). Keep in lockstep with client COSMETICS labels.
+  beanie:       4000,
+  flatcap:      4500,
+  beret:        5000,
+  cap:          5500,
+  chefhat:      6000,
+  rangerhat:    6500,
+  scifihelmet: 10000,
+  crown:       12000,
+  spectacles:   2500,
   sunglasses:   3000,
-  book:         3200,
-  spectacles:   3400,
-  headphones:   3600,
-  beret:        3800,
-  chefhat:      4000,
-  beanie:       4200,
-  camera:       4400,
-  flatcap:      4600,
-  gamerheadset: 4800,
-  rangerhat:    5000,
-  guitar:       5250,
-  shades:       5500,
-  catears:      5750,
-  cap:          6000,
-  scifihelmet:  6500,
-  chain:        7000,
-  crown:        8000,
+  shades:       3500,
+  headphones:   4500,
+  gamerheadset: 5500,
+  catears:      6500,
+  book:         3000,
+  camera:       4000,
+  chain:        6000,
+  guitar:       7500,
   fairywings:  15000,
   // Wings collection (Aug 2026) — same back-worn sprite pipeline as
   // fairywings. phoenixwings is RARE: gift-only, price 0 (see RARE_COSMETICS).

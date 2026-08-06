@@ -2960,24 +2960,28 @@
     // wearable has a WEARABLE_DEFS entry, so the floating-emoji render path
     // below is a dormant fallback for unknown/legacy ids.
     const COSMETICS = [
-      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 3000, desc: 'gold aviators, on your face' },
-      { id: 'book',         emoji: '📖', name: 'Book',          cost: 3200, desc: 'read while you walk' },
-      { id: 'spectacles',   emoji: '👓', name: 'Round Specs',   cost: 3400, desc: 'scholarly round frames, clear lenses' },
-      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 3600, desc: 'worn over your ears' },
-      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 3800, desc: 'ooh là là, on your head' },
-      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 4000, desc: 'the toque sits tall' },
-      { id: 'beanie',       emoji: '🧶', name: 'Knit Beanie',   cost: 4200, desc: 'cozy knit, worn low' },
-      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 4400, desc: 'strapped around your neck' },
-      { id: 'flatcap',      emoji: '🍀', name: 'Newsboy Cap',   cost: 4600, desc: 'vintage tweed with a lucky sprig' },
-      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 4800, desc: 'mic on, worn for real' },
-      { id: 'rangerhat',    emoji: '🤠', name: 'Ranger Hat',    cost: 5000, desc: 'wide brim, ready for adventure' },
-      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 5250, desc: 'slung across your body' },
-      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 5500, desc: 'real shades, worn ON your face' },
-      { id: 'catears',      emoji: '😺', name: 'Cat-Ear Headset', cost: 5750, desc: 'golden ears, matching cups' },
-      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 6000, desc: 'pixel cap, worn on your head' },
-      { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 6500, desc: 'full visor, straight from 3024' },
-      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 7000, desc: 'real gold, around your neck' },
-      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 8000, desc: 'jeweled gold, on your head' },
+      // Aug 2026 shop cleanup: grouped by category (cat drives the section
+      // headers in the Wearables tab) with tiered prices, cheapest first in
+      // each group. Costs are display-only — the server SHOP map is
+      // authoritative and must stay in lockstep.
+      { id: 'beanie',       emoji: '🧶', name: 'Knit Beanie',   cost: 4000, cat: '🎩 Hats', desc: 'cozy knit with a pompom' },
+      { id: 'flatcap',      emoji: '🍀', name: 'Newsboy Cap',   cost: 4500, cat: '🎩 Hats', desc: 'vintage tweed with a lucky sprig' },
+      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 5000, cat: '🎩 Hats', desc: 'ooh là là, worn with a slouch' },
+      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 5500, cat: '🎩 Hats', desc: 'red with a white front panel' },
+      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 6000, cat: '🎩 Hats', desc: 'the toque sits tall' },
+      { id: 'rangerhat',    emoji: '🤠', name: 'Ranger Hat',    cost: 6500, cat: '🎩 Hats', desc: 'wide brim, ready for adventure' },
+      { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 10000, cat: '🎩 Hats', desc: 'full-face visor, straight from 3024' },
+      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 12000, cat: '🎩 Hats', desc: 'polished gold, three jewels' },
+      { id: 'spectacles',   emoji: '👓', name: 'Round Specs',   cost: 2500, cat: '🕶️ Eyewear', desc: 'scholarly round frames' },
+      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 3000, cat: '🕶️ Eyewear', desc: 'gold aviators, on your face' },
+      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 3500, cat: '🕶️ Eyewear', desc: 'one cool black visor bar' },
+      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 4500, cat: '🎧 Audio', desc: 'crimson cups, ear to ear' },
+      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 5500, cat: '🎧 Audio', desc: 'LED cups, mic on' },
+      { id: 'catears',      emoji: '😺', name: 'Cat-Ear Headset', cost: 6500, cat: '🎧 Audio', desc: 'golden ears, matching cups' },
+      { id: 'book',         emoji: '📖', name: 'Book',          cost: 3000, cat: '💎 Extras', desc: 'read while you walk' },
+      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 4000, cat: '💎 Extras', desc: 'strapped around your neck' },
+      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 6000, cat: '💎 Extras', desc: 'bright gold V with a medallion' },
+      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 7500, cat: '💎 Extras', desc: 'sunburst, slung across your body' },
       { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 15000, wings: true, desc: 'shimmering wings on your back' },
       // Wings collection (Aug 2026) — all share the fairywings render pipeline.
       { id: 'beewings',     emoji: '🐝', name: 'Bee Wings',      cost: 6000,  wings: true, desc: 'tiny buzzy wings, extra fast flap' },
@@ -4338,7 +4342,15 @@
       if (_shopTab === 'wear' || _shopTab === 'wings') {
         const box = _shopTab === 'wings' ? wingBox : cosBox;
         box.textContent = '';
+        let lastCat = null;   // category headers (Hats / Eyewear / ...), one per run on this page
         for (const c of slice) {
+          if (c.cat && c.cat !== lastCat) {
+            lastCat = c.cat;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = c.cat;
+            box.append(h);
+          }
           const btn = document.createElement('button');
           btn.className = 'buy-btn';
           if (!_ownedItems.includes(c.id)) {
