@@ -76,3 +76,10 @@ uri = "file://attached_assets/generated_images/wings_more_designs_concept.png"
 type = "image"
 title = "6 wing designs — concept"
 description = "Fairy, butterfly, phoenix, crystal, steampunk & dragon wings"
+
+[[outputs]]
+id = "Wb2EmNS_OmoJLhLHeLvKF"
+uri = "file://attached_assets/dragon_anim_preview.png"
+type = "image"
+title = "Baby Dragon — animated frames preview"
+description = "Walk 1-2-3, sit, and fire-breathing frames in the new style"
