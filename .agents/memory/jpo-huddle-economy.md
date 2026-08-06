@@ -41,3 +41,9 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 ## Broadcast mini-game UI (bingo) — stale-state lessons
 - Clients that miss the game-over event (tab asleep / brief disconnect) keep the old game's card. Every game broadcast carries a monotonically increasing gameId; handlers wipe local state when a NEWER id arrives (`_bingoDropStale`) and reject OLDER ids.
 - Sticky DOM states (panel minimize) persist across games — always restore them when a new game shows the panel, or players report "the game never showed."
+
+## Rare gift-only pets (Aug 2026)
+- Unicorn + Phoenix: in both PETS catalogs with price 0 + client `rare:true`; server `RARE_PETS` set hard-blocks buyPet BEFORE the `!cost` check (0 is falsy — order matters). Shop shows them ("✨ RARE · not for sale", 🎁 Gift only tease button) so people pester the boss.
+- Grants: `ownerGrantPet {email, pet}` gated on `owners.has(socket.id)` (OWNER_PASSWORD tier via adminAuth; plain ADMIN_PASSWORD gets owner=false and must stay blocked — Vince explicitly keeps coin/rare tools off the admin tier). Email-based like adminAdjustCoins so offline grants work; online recipients get petSuccess + rareGiftToast + playerPetUpdate.
+- **Why:** boss wants rares as social currency — visible, unbuyable, personally gifted.
+- Login success socket event for headless tests is `approved` (not loginSuccess); login inputs are `login-email`/`login-password` + `tryLogin()`.

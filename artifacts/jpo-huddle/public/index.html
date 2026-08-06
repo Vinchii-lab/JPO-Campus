@@ -2104,6 +2104,20 @@
           </div>
           <div id="op-coin-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
         </div>
+        <div id="op-owner-rare" style="display:none;margin-top:22px;border-top:1px solid #2a2a40;padding-top:16px;">
+          <h3>🎁 Gift a Rare Pet <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
+          <p style="font-size:12px;color:#888;margin:0 0 10px">The Unicorn and Phoenix can't be bought — this is the ONLY way anyone gets one. Works even if they're offline; if they're online it appears at their feet instantly.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input id="op-rare-email" type="email" placeholder="person@company.com" maxlength="80"
+                   style="flex:1;min-width:180px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+            <select id="op-rare-pet" style="padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+              <option value="pet_unicorn">🦄 Unicorn</option>
+              <option value="pet_phoenix">🐦‍🔥 Phoenix</option>
+            </select>
+            <button class="o-btn o-btn-approve" onclick="ownerGrantRarePet()">Gift</button>
+          </div>
+          <div id="op-rare-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+        </div>
         <div style="margin-top:22px;border-top:1px solid #2a2a40;padding-top:16px;">
           <h3>🙈 Hide &amp; Seek (Prop Hunt)</h3>
           <p style="font-size:12px;color:#888;margin:0 0 10px">Stand where everyone should gather (that's YOUR current spot), pick a disguise, then start. Joiners teleport to your spot and freeze while you hide; when the timer ends they hunt you at normal zoom. First one to press E on the right object wins.</p>
@@ -3054,7 +3068,11 @@
       { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
       { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
       { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
-      { id: 'pet_unicorn',         species: 'Unicorn',     emoji: '🦄', name: 'Unicorn',        cost: 55000, desc: 'sparkles when you least expect it' },
+      // Rare tier: shop-visible so everyone can drool, but NOT buyable at any
+      // price — the only way in is a personal gift from the boss. (cost 0 is
+      // display-only anyway; the server hard-blocks buyPet on rare ids.)
+      { id: 'pet_unicorn',         species: 'Rare — gift only', emoji: '🦄', name: 'Unicorn',   cost: 0, rare: true, desc: 'sparkles when you least expect it' },
+      { id: 'pet_phoenix',         species: 'Rare — gift only', emoji: '🐦‍🔥', name: 'Phoenix', cost: 0, rare: true, desc: 'reborn from the Monday ashes' },
     ];
     const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
     // Species base id for any pet id: 'pet_dragon_crimson' → 'pet_dragon'.
@@ -3091,13 +3109,14 @@
       pet_turtle: { dx: 11, dy: -22 },
       pet_dragon: { dx: 6,  dy: -30 },
       pet_unicorn:{ dx: 8,  dy: -34 },
+      pet_phoenix:{ dx: 7,  dy: -32 },
     };
     // Lively pets pilot (Aug 2026): species with procedural animation — a
     // walk waddle/trot bounce, idle breathing, and a random idle "trick"
     // (see _stepPet/_petTrick). Everything is derived client-side from the
     // pet object each frame, zero network traffic, so mirroring a species
     // later is just adding it to this set (+ a trick case if it gets one).
-    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle']);
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix']);
     // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
@@ -3657,14 +3676,18 @@
     // office entry of the calendar day; the matching coinUpdate arrives
     // separately, this is just the celebratory toast.
     let _dailyToastTimer = null;
+    // Generic top-center toast (reuses the daily-bonus element/styling).
+    function showToast(msg, ms = 5000) {
+      const t = document.getElementById('daily-toast');
+      t.textContent = msg;
+      t.classList.add('open');
+      clearTimeout(_dailyToastTimer);
+      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), ms);
+    }
     socket.on('dailyBonus', (data) => {
       const amount = (data || {}).amount || 0;
       if (!amount) return;
-      const t = document.getElementById('daily-toast');
-      t.textContent = `🎁 Daily login bonus! +${amount} coins`;
-      t.classList.add('open');
-      clearTimeout(_dailyToastTimer);
-      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), 5000);
+      showToast(`🎁 Daily login bonus! +${amount} coins`);
     });
 
     socket.on('coinUpdate', ({ coins, buddyBoost }) => {
@@ -4235,7 +4258,9 @@
         nm.append(pk);
       }
       const ct = document.createElement('div');
-      ct.className = 'shop-item-cost'; ct.textContent = `${c.cost} coins — ${c.desc}`;
+      ct.className = 'shop-item-cost';
+      // Rare pets: no price tag — make it clear coins can't touch this.
+      ct.textContent = c.rare ? `✨ RARE · not for sale — ${c.desc}` : `${c.cost} coins — ${c.desc}`;
       info.append(nm, ct);
       row.append(icon, info, btn);
       return row;
@@ -4348,9 +4373,17 @@
               btn.onclick = () => equipPetAcc(c.id);    // swap, free
             }
           } else if (!_ownedItems.includes(c.id)) {
-            btn.textContent = 'Adopt';
-            if (_playerCoins < c.cost) btn.classList.add('poor');
-            btn.onclick = () => buyPet(c.id);
+            if (c.rare) {
+              // Gift-only: the button teases instead of buying (server
+              // hard-blocks buyPet on rare ids regardless).
+              btn.textContent = '🎁 Gift only';
+              btn.classList.add('poor');
+              btn.onclick = () => showToast('Only the boss can gift this one. Better start sucking up! 😏');
+            } else {
+              btn.textContent = 'Adopt';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyPet(c.id);
+            }
           } else if (_equippedPet === c.id) {
             btn.textContent = 'With you ✓'; btn.classList.add('wearing');
             btn.onclick = () => equipPet('');       // send it home
@@ -8232,6 +8265,24 @@
       const delta = Number(document.getElementById('op-coin-amount').value);
       socket.emit('adminAdjustCoins', { email, delta });
     };
+    // Rare pet gifting (owner key only — same tier as coin adjustments).
+    window.ownerGrantRarePet = function () {
+      const email = document.getElementById('op-rare-email').value.trim();
+      const pet = document.getElementById('op-rare-pet').value;
+      socket.emit('ownerGrantPet', { email, pet });
+    };
+    socket.on('ownerGrantResult', (d) => {
+      const el = document.getElementById('op-rare-msg');
+      el.textContent = d.message;
+      el.style.color = d.ok ? '#2e9e5b' : '#d33';
+      if (d.ok) document.getElementById('op-rare-email').value = '';
+    });
+    // Recipient-side fanfare when the boss gifts you a rare pet.
+    socket.on('rareGiftToast', (d) => {
+      showToast(d.pet === 'pet_phoenix'
+        ? '🐦‍🔥 The boss gifted you a PHOENIX! It\'s at your feet right now.'
+        : '🦄 The boss gifted you a UNICORN! It\'s at your feet right now.');
+    });
     socket.on('adminCoinResult', (d) => {
       const m = document.getElementById('op-coin-msg');
       if (!m || !d) return;
@@ -8258,6 +8309,7 @@
     socket.on('adminAuthOk', (d) => {
       // Owner key (OWNER_PASSWORD) unlocks the owner-only tools too.
       document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
+      document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
       // Silent path = automatic re-auth after a reconnect (pwd modal not open):
       // refresh the flags but do NOT pop the owner panel open mid-game.
       const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
@@ -10167,6 +10219,33 @@
             ],
             onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
           });
+        }
+        if (sp === 'pet_phoenix') {
+          // Blaze-up: wings flare (action frame), a puff of embers rises off
+          // the plumage and fades. Same self-destroying particle pattern as
+          // the dragon (_trackPetFx) so hides/destroys can purge mid-trick.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { scaleX: bs * 1.15, scaleY: bs * 1.15, duration: 180, ease: 'Sine.easeOut', hold: 700 },
+              { scaleX: bs, scaleY: bs, duration: 220, ease: 'Sine.easeIn' },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+          });
+          for (let i = 0; i < 7; i++) {
+            const f = this.add.text(
+              petObj.x + (Math.random() * 24 - 12), petObj.y - 6 - Math.random() * 14,
+              Math.random() < 0.6 ? '🔥' : '✨', { fontSize: '10px', resolution: 2 })
+              .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3);
+            this.tweens.add({
+              targets: f, alpha: { from: 0.9, to: 0 },
+              y: f.y - 18 - Math.random() * 12, x: f.x + (Math.random() * 10 - 5),
+              scale: { from: 0.7, to: 1.2 },
+              delay: 120 + i * 90, duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f),
+            });
+          }
         }
       }
 
