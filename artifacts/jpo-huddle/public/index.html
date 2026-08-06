@@ -4378,7 +4378,7 @@
               // hard-blocks buyPet on rare ids regardless).
               btn.textContent = '🎁 Gift only';
               btn.classList.add('poor');
-              btn.onclick = () => showToast('Only the boss can gift this one. Better start sucking up! 😏');
+              btn.onclick = () => showToast('🎁 Rare pet — the boss decides who gets one.');
             } else {
               btn.textContent = 'Adopt';
               if (_playerCoins < c.cost) btn.classList.add('poor');
@@ -8535,7 +8535,9 @@
       if (!tbody) return;
       if (tbody.contains(document.activeElement)) return;   // don't wipe an edit in progress
       const rows = [...COSMETICS.map(c => ({ ...c, kind: 'Wearable' })),
-                    ...PETS.map(c => ({ ...c, kind: 'Pet' })),
+                    // Rare pets have no price — keep them out of the admin
+                    // price panel entirely (server rejects overrides anyway).
+                    ...PETS.filter(c => !c.rare).map(c => ({ ...c, kind: 'Pet' })),
                     ...PET_ACCESSORIES.map(c => ({ ...c, kind: 'Pet acc.' }))];
       tbody.innerHTML = rows.map(c => `
         <tr>
