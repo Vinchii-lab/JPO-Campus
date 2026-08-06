@@ -8817,6 +8817,12 @@
         // Texture key = the pet id; _makePet falls back to the emoji if a
         // texture is missing, so a failed load never breaks joining.
         for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
+        // Animated pet frames pilot (Aug 2026): per-frame PNGs (64x64,
+        // bottom-aligned, drawn facing RIGHT) swapped via setTexture in
+        // _stepPet/_petTrick. Purple dragon only until Vince approves the
+        // style; other species/variants keep their single static PNG.
+        for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'fire'])
+          this.load.image(`petanim_dragon_${f}`, `/assets/pets/anim/dragon_${f}.png`);
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
@@ -9956,6 +9962,19 @@
         obj._petId = pet;
         obj._baseScale = Math.abs(obj.scaleX) || 1;
         obj._lively = PET_LIVELY.has(petSpeciesId(pet));
+        // Animated-frames pilot: only the base purple dragon has a frame set
+        // (walk cycle + sit + fire). All frames are 64x64 bottom-aligned, so
+        // one setScale fits them all; setTexture never changes the scale.
+        if (pet === 'pet_dragon' && obj.setTexture &&
+            ['walk1', 'walk2', 'walk3', 'sit', 'fire'].every(f => this.textures.exists(`petanim_dragon_${f}`))) {
+          obj._animSet = {
+            walk: ['petanim_dragon_walk1', 'petanim_dragon_walk2', 'petanim_dragon_walk3', 'petanim_dragon_walk2'],
+            sit: 'petanim_dragon_sit', fire: 'petanim_dragon_fire', idle: 'petanim_dragon_walk2',
+          };
+          obj.setTexture(obj._animSet.idle);
+          obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
+          obj.setScale(obj._baseScale);
+        }
         const accEmoji = PET_ACC_EMOJI[acc];
         if (accEmoji) {
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
@@ -10069,9 +10088,15 @@
           // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
           // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
           const fwd = (petObj.flipX ? -1 : 1);
+          // Animated-frames pilot: show the mouth-open fire frame for the
+          // duration of the breath, restore the neutral frame after.
+          if (petObj._animSet) petObj.setTexture(petObj._animSet.fire);
           this.tweens.add({
             targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
-            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+            onComplete: () => {
+              petObj.angle = 0; petObj._trickBusy = false;
+              if (petObj._animSet && petObj.active !== false) petObj.setTexture(petObj._animSet.idle);
+            },
           });
           for (let i = 0; i < 6; i++) {
             const f = this.add.text(
@@ -10166,9 +10191,19 @@
             petObj.angle = Math.sin(petObj._animT * 0.02) * 6;                       // waddle
             petObj.setScale(bs, bs * (1 + 0.05 * Math.sin(petObj._animT * 0.028)));  // trot bounce
             petObj._trickAt = 0;                  // re-roll the trick timer on next stop
+            // Animated-frames pilot: step the walk cycle (~140ms per frame).
+            if (petObj._animSet) {
+              const fr = petObj._animSet.walk[Math.floor(petObj._animT / 140) % petObj._animSet.walk.length];
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+            }
           } else {
             petObj.angle *= 0.85;                                                    // settle upright
             petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
+            if (petObj._animSet) {
+              // Sit frame when the owner is seated, neutral frame otherwise.
+              const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+            }
             const now = performance.now();
             if (!petObj._trickAt) petObj._trickAt = now + 6000 + Math.random() * 10000;
             else if (now >= petObj._trickAt) {
