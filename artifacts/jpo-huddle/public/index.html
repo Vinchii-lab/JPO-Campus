@@ -201,11 +201,39 @@
     }
     #chat-bar.open { display: flex; }
     #chat-input {
-      width: 360px; background: transparent; border: none;
+      width: 520px; background: transparent; border: none;
       border-bottom: 1px solid rgba(255,255,255,0.25);
       color: #fff; font-size: 15px; font-family: monospace; outline: none; padding: 2px 0;
     }
     #chat-input::placeholder { color: rgba(255,255,255,0.35); }
+    /* Pending pasted/dropped image preview inside the chat bar */
+    #chat-img-preview { display: none; align-items: center; gap: 6px; }
+    #chat-img-preview.on { display: flex; }
+    #chat-img-preview img {
+      max-height: 44px; max-width: 80px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.3); display: block;
+    }
+    #chat-img-x {
+      background: none; border: none; color: rgba(255,255,255,0.6);
+      font-size: 14px; cursor: pointer; padding: 0 2px;
+    }
+    #chat-img-x:hover { color: #fff; }
+    /* Images inside the chat log */
+    .cl-msg img.cl-img {
+      display: block; max-width: 100%; max-height: 140px; border-radius: 8px;
+      margin-top: 4px; cursor: zoom-in; border: 1px solid rgba(255,255,255,0.15);
+    }
+    /* Full-size image lightbox */
+    #img-lightbox {
+      position: fixed; inset: 0; z-index: 400; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.85); cursor: zoom-out;
+    }
+    #img-lightbox.open { display: flex; }
+    #img-lightbox img {
+      max-width: 92vw; max-height: 92vh; border-radius: 10px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+    }
     #chat-hint {
       position: fixed; bottom: 10px; right: 14px; z-index: 99;
       font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.85); pointer-events: none;
@@ -1544,7 +1572,8 @@
   <!-- ── Chat bar ── -->
   <div id="chat-bar">
     <span style="color:#888;font-size:14px">💬</span>
-    <input id="chat-input" type="text" placeholder="Say something… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
+    <div id="chat-img-preview"><img alt="pasted image" /><button id="chat-img-x" type="button" aria-label="Remove image">✕</button></div>
+    <input id="chat-input" type="text" placeholder="Say something… (paste or drop a picture · Enter to send)" maxlength="200" autocomplete="off" />
     <button id="chat-send" class="chat-touch-btn" type="button" aria-label="Send">➤</button>
     <button id="chat-close" class="chat-touch-btn" type="button" aria-label="Close">✕</button>
   </div>
@@ -1577,6 +1606,7 @@
     <div id="chatlog-empty">Nothing yet — messages people send while you're here will show up.</div>
     <div id="chatlog-scroll"></div>
   </div>
+  <div id="img-lightbox"><img alt="chat image" /></div>
 
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
@@ -4612,13 +4642,98 @@
       _chatOpen = false;
       document.body.classList.remove('chatting');
       chatBar.classList.remove('open');
+      _setPendingImg(null);   // Esc / close always discards a staged picture
       document.querySelector('canvas')?.focus();
     }
     function sendChat() {
       const msg = chatInput.value.trim();
       if (msg) socket.emit('chatMessage', { message: msg });
+      if (_pendingChatImg) socket.emit('chatImage', { img: _pendingChatImg });
       closeChat();
     }
+
+    // ── Chat images: paste (Ctrl+V) or drag-and-drop, like Teams ──────
+    // Pictures are ephemeral exactly like text chat: broadcast once, kept
+    // only in each player's session log, gone on a server restart.
+    const CHAT_IMG_LIMIT = 2 * 1024 * 1024;   // 2 MB — matches the server cap
+    let _pendingChatImg = null;               // data URL staged in the preview chip
+    const _imgPreview   = document.getElementById('chat-img-preview');
+    const _imgPreviewEl = _imgPreview.querySelector('img');
+
+    function _setPendingImg(dataUrl) {
+      _pendingChatImg = dataUrl;
+      _imgPreviewEl.src = dataUrl || '';
+      _imgPreview.classList.toggle('on', !!dataUrl);
+    }
+    document.getElementById('chat-img-x').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); _setPendingImg(null); chatInput.focus();
+    });
+
+    // Auto-shrink: big photos are resized (max edge 1280) and re-encoded as
+    // JPEG with descending quality until they fit under the cap — nobody
+    // ever sees a "file too big" error. Small PNG/JPEG/WebP pass through
+    // untouched (keeps screenshots crisp and PNG transparency intact).
+    function _shrinkChatImage(file) {
+      return new Promise((resolve, reject) => {
+        const ok = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+        if (ok && file.size <= CHAT_IMG_LIMIT) {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error('read failed'));
+          r.readAsDataURL(file);
+          return;
+        }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const MAX_EDGE = 1280;
+          const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+          const cv = document.createElement('canvas');
+          cv.width  = Math.max(1, Math.round(img.width  * scale));
+          cv.height = Math.max(1, Math.round(img.height * scale));
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          for (const q of [0.85, 0.7, 0.55, 0.4, 0.25]) {
+            const out = cv.toDataURL('image/jpeg', q);
+            // base64 chars ≈ bytes × 4/3 — compare in data-URL space
+            if (out.length <= CHAT_IMG_LIMIT * 1.37) { resolve(out); return; }
+          }
+          reject(new Error('too big'));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+        img.src = url;
+      });
+    }
+
+    function _stageChatImage(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      _shrinkChatImage(file)
+        .then((dataUrl) => { if (!_chatOpen) openChat(); _setPendingImg(dataUrl); })
+        .catch(() => showToast("😵 Couldn't read that picture — try a PNG or JPEG."));
+    }
+
+    // Paste anywhere while playing (chat opens itself if needed) — but never
+    // steal a paste aimed at another input (DM box, shop, admin fields).
+    document.addEventListener('paste', (e) => {
+      if (!document.body.classList.contains('playing')) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ae !== chatInput) return;
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      if (!item) return;
+      e.preventDefault();
+      _stageChatImage(item.getAsFile());
+    });
+
+    // Drag-and-drop a picture anywhere onto the office.
+    window.addEventListener('dragover', (e) => { e.preventDefault(); });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!document.body.classList.contains('playing')) return;
+      const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+      if (f) _stageChatImage(f);
+    });
+
+    socket.on('chatImgError', (m) => showToast('🐢 ' + m));
 
     document.addEventListener('keydown', e => {
       if ((e.key === 't' || e.key === 'T') && !_chatOpen && !_dmOpen && !_rpsUiOpen
@@ -5102,6 +5217,47 @@
       if (typeof p.message !== 'string' || !p.message) return;
       _chatLogAdd('chat', p.name || '?', p.message, { me: p.id === socket.id });
     });
+
+    // Chat images land in the log as clickable thumbnails. Pictures are far
+    // heavier than text, so beyond the shared 200-entry cap only the newest
+    // CHATLOG_IMG_MAX image entries keep their pixels — older ones collapse
+    // to a "📷 (photo expired)" stub so scrollback stays light.
+    const CHATLOG_IMG_MAX = 30;
+    socket.on('chatImage', (payload) => {
+      const p = payload || {};
+      if (typeof p.img !== 'string' || !p.img.startsWith('data:image/')) return;
+      const div = document.createElement('div');
+      div.className = 'cl-msg' + (p.id === socket.id ? ' me' : '');
+      const t = document.createElement('span');
+      t.className = 'cl-time'; t.textContent = _clTime();
+      div.appendChild(t);
+      const n = document.createElement('span');
+      n.className = 'cl-name'; n.textContent = `${p.name || '?'}: `;
+      div.appendChild(n);
+      const im = document.createElement('img');
+      im.className = 'cl-img'; im.src = p.img; im.alt = 'shared image';
+      im.addEventListener('pointerdown', (e) => { e.preventDefault(); _openLightbox(p.img); });
+      div.appendChild(im);
+      const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
+      clEmpty.style.display = 'none';
+      clScroll.appendChild(div);
+      while (clScroll.children.length > CHATLOG_MAX) clScroll.removeChild(clScroll.firstChild);
+      const imgs = clScroll.querySelectorAll('img.cl-img');
+      for (let i = 0; i < imgs.length - CHATLOG_IMG_MAX; i++) {
+        const stub = document.createTextNode('📷 (photo expired)');
+        imgs[i].replaceWith(stub);
+      }
+      if (!_logOpen) { _logUnread++; _clBadgeRender(); }
+      else if (nearBottom) clScroll.scrollTop = clScroll.scrollHeight;
+    });
+
+    // Full-size lightbox: click a thumbnail to zoom, click anywhere to close.
+    const _lightbox = document.getElementById('img-lightbox');
+    function _openLightbox(src) {
+      _lightbox.querySelector('img').src = src;
+      _lightbox.classList.add('open');
+    }
+    _lightbox.addEventListener('pointerdown', (e) => { e.preventDefault(); _lightbox.classList.remove('open'); });
 
     // pointerdown + preventDefault (not click) keeps focus on the game canvas.
     clBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleChatLog(); });
@@ -9473,6 +9629,24 @@
             if (entry) {
               if (entry.chatBubble) entry.chatBubble.destroy();
               entry.chatBubble = this._showChatBubble(entry.sprite, message, false);
+            }
+          }
+        });
+
+        // Chat images: the picture itself renders in the chat log — the
+        // in-world bubble just flags that a photo was shared. Hidden players
+        // (Prop Hunt hider, round-hidden ghosts) get no bubble at all — even a
+        // stale sprite position shouldn't sprout a marker while they're unseen.
+        socket.on('chatImage', ({ id }) => {
+          if (window._roundIsHidden && window._roundIsHidden(id)) return;
+          if (window._ph && window._ph.hiderId === id && id !== socket.id) return;
+          if (id === socket.id) {
+            this._showChatBubble(this.player, '📷 shared a photo', true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showChatBubble(entry.sprite, '📷 shared a photo', false);
             }
           }
         });

@@ -37,7 +37,9 @@ pool.on("error", (err) => console.error("Postgres pool error:", err));
 
 const app        = express();
 const httpServer = createServer(app);
-const io         = new Server(httpServer);
+// maxHttpBufferSize: chat images arrive as base64 data URLs — a 2 MB image is
+// ~2.73 MB of base64, so allow 3.5 MB per socket.io packet (default is 1 MB).
+const io         = new Server(httpServer, { maxHttpBufferSize: 3_500_000 });
 
 app.use((req, res, next) => {
   if (req.path === '/' || req.path.endsWith('.html')) {
@@ -3605,6 +3607,7 @@ io.on("connection", (socket) => {
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).
   const chatBucket  = makeBucket(5, 700);   // ~1.4 msgs/s sustained, burst of 5
+  const chatImgBucket = makeBucket(2, 6000); // chat images are heavy — ~1 per 6s sustained, burst of 2
   const buyBucket   = makeBucket(3, 500);   // guards rapid buy-spam / double-clicks
   const postBucket  = makeBucket(3, 1000);  // guards announcement spam
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
@@ -4673,7 +4676,7 @@ io.on("connection", (socket) => {
     const { message } = payload || {};
     if (!players[socket.id]) return;
     if (!takeToken(chatBucket)) return;   // throttle chat spam (silently drop)
-    const text = (message || "").trim().slice(0, 120);
+    const text = (message || "").trim().slice(0, 200);
     if (!text) return;
     const msg = { id: socket.id, name: players[socket.id].name, message: text };
     // While Office After Dark is live, players in the dark hear ONLY each
@@ -4685,6 +4688,30 @@ io.on("connection", (socket) => {
     } else {
       io.emit("chatMessage", msg);
     }
+  });
+
+  // ── Chat images (pasted / dragged in, like Teams) ────────────────────
+  // Ephemeral like text chat: broadcast once, held only in each client's
+  // session log — a server restart wipes them, exactly like messages.
+  // The client shrinks big pictures before sending; the server just enforces
+  // the hard cap (2 MB image ≈ 2.73 MB base64) and the data-URL shape so a
+  // modified client can't relay arbitrary payloads to everyone.
+  const CHAT_IMG_MAX_B64 = 2_800_000;
+  const CHAT_IMG_RE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+  socket.on("chatImage", (payload) => {
+    const img = (payload || {}).img;
+    if (!players[socket.id]) return;
+    if (typeof img !== "string" || img.length > CHAT_IMG_MAX_B64 || !CHAT_IMG_RE.test(img)) return;
+    if (!takeToken(chatImgBucket)) { socket.emit("chatImgError", "Sending pictures a bit fast — give it a few seconds."); return; }
+    const msg = { id: socket.id, name: players[socket.id].name, img };
+    // Same Office After Dark routing as text chat: lit players can't leak
+    // to the people still in the dark.
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatImage", msg);
+    } else {
+      io.emit("chatImage", msg);
+    }
+    console.log(`${players[socket.id].name} shared a chat image (${Math.round(img.length / 1024)} KB b64)`);
   });
 
   // ── Emotes (ephemeral reaction bubbles, relayed to everyone) ─────────
