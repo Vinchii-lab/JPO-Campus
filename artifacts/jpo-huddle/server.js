@@ -32,8 +32,23 @@ const { Pool } = pg;
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL must be set. Provision a database (see the database skill).");
 }
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 8_000,   // fail fast during network blips instead of hanging
+  keepAlive: true,                  // ride out idle-connection resets at peak hours
+});
 pool.on("error", (err) => console.error("Postgres pool error:", err));
+
+// SAFETY NET — one un-caught DB timeout must NEVER take the whole office down.
+// On 2026-08-07 a peak-hour connection-timeout storm surfaced one unhandled
+// promise rejection and Node killed the process, dropping ~85 players at once.
+// Log loudly and keep serving; the periodic ticks re-heal any missed write.
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION (server kept alive):", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION (server kept alive):", err);
+});
 
 const app        = express();
 const httpServer = createServer(app);
