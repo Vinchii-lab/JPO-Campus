@@ -523,6 +523,37 @@
     }
     .coach-btn.secondary { background: #21402c; color: #a7e8bb; }
     .coach-btn:disabled { opacity: .45; cursor: default; }
+    /* Ms. Poli (HR) — same layout as the coach panel, warm library palette */
+    #hr-panel {
+      position: fixed; inset: 0; z-index: 10000; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55); padding: 20px;
+    }
+    #hr-panel.open { display: flex; }
+    #hr-card {
+      background: #231a14; border: 1px solid #5e452f; border-radius: 14px;
+      width: 460px; max-width: 100%; max-height: calc(100vh - 60px); overflow-y: auto;
+      font-family: monospace; color: #f5eee7; box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+    #hr-card-header {
+      display: flex; align-items: center; gap: 10px; padding: 16px 20px;
+      border-bottom: 1px solid #40301f; position: sticky; top: 0; background: #231a14; z-index: 1;
+    }
+    #hr-card-header h2 { font-size: 16px; flex: 1; margin: 0; color: #f0c987; }
+    #hr-close { background: none; border: none; color: #8a755d; font-size: 20px; cursor: pointer; line-height: 1; padding: 0 2px; }
+    #hr-close:hover { color: #f5eee7; }
+    #hr-body { padding: 16px 20px 20px; font-size: 13px; line-height: 1.55; }
+    .hr-say { background: #31261b; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+    .hr-opt {
+      display: block; width: 100%; text-align: left; margin: 6px 0; padding: 10px 12px;
+      background: #40301f; color: #f5eee7; border: 1px solid #5e452f; border-radius: 8px;
+      font-family: monospace; font-size: 13px; cursor: pointer;
+    }
+    .hr-opt:hover { background: #52402a; }
+    .hr-opt:disabled { opacity: .45; cursor: default; }
+    .hr-shelf { background: #1c150e; border: 1px solid #40301f; border-radius: 8px; padding: 10px 12px; margin-top: 10px; max-height: 260px; overflow-y: auto; font-size: 12px; }
+    .hr-shelf h4 { color: #f0c987; margin: 10px 0 4px; font-size: 12px; }
+    .hr-shelf p, .hr-shelf li { color: #d8c9b8; margin: 3px 0; }
     .coach-opt { display: block; margin: 6px 0; cursor: pointer; }
     .coach-opt input { margin-right: 8px; }
     .coach-depts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
@@ -2309,6 +2340,17 @@
     </div>
   </div>
 
+  <!-- ── Ms. Poli's library (press E next to the HR librarian) ── -->
+  <div id="hr-panel">
+    <div id="hr-card">
+      <div id="hr-card-header">
+        <h2>📚 Ms. Poli · HR Library</h2>
+        <button id="hr-close" onclick="closeHrPanel()">✕</button>
+      </div>
+      <div id="hr-body"></div>
+    </div>
+  </div>
+
   <div id="owner-hint">[F8] settings</div>
 
   <!-- ── First-timer tutorial: dimmed backdrop, a spotlight ring, and a caption
@@ -3967,6 +4009,69 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && _coachPanelOpen) { e.preventDefault(); closeCoachPanel(); }
     });
+
+    // ── Ms. Poli's HR library panel ─────────────────────────────────────
+    let _hrPanelOpen = false;
+    function closeHrPanel() {
+      _hrPanelOpen = false;
+      document.getElementById('hr-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    window.closeHrPanel = closeHrPanel;
+    document.getElementById('hr-panel').addEventListener('click', (e) => {
+      if (e.target.id === 'hr-panel') closeHrPanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _hrPanelOpen) { e.preventDefault(); closeHrPanel(); }
+    });
+    // Condensed Code of Discipline for the shelf — the real thing lives with
+    // HR; this is the study copy Ms. Poli quizzes from.
+    const COD_SHELF = `
+      <h4>⚖️ Due process (how discipline works)</h4>
+      <p>Simple offenses (verbal/written warning): your superior issues a Coaching Form and discusses improvement. They're disregarded after <b>6 months</b> — unless they reached suspension, then they stay in your 201 file.</p>
+      <p>Grave offenses: Incident Report → HR review → <b>Notice To Explain within 24h</b> of probable cause → you get <b>5 calendar days</b> to explain → investigation (you, your supervisor, dept manager, HR) → decision. Termination uses the Twin-Notice rule (NTE, then Notice of Dismissal).</p>
+      <p>Progressive steps: Verbal Reprimand → Written Warning → Suspension (5/10/15 days, max 30 — beyond 30 = with pay) → Dismissal. Two final written warnings in one category = next sanction level.</p>
+      <h4>🕐 Attendance</h4>
+      <p>Tardiness: 2× a week or 60 accumulated minutes/week. AWOL after 3 days of no notice. Critical Working Days: holidays, 1st Monday of Jan, every Monday, day after a holiday, payday — "missing" = unreachable 15+ min. Sick leave form within 2 days of returning; leave notice 2h before shift; med cert for 2+ days absent (telemedicine certs not accepted).</p>
+      <h4>💼 Professionalism & integrity</h4>
+      <p>No gifts/bribes from clients (dismissal). No sharing passwords, log-ins, or salary info. No logging in/out for someone else. Report record changes (civil status, address) within 30 days. Personal internet use over 30 min during work hours is an offense.</p>
+      <h4>🚫 Terminable offenses (straight to dismissal)</h4>
+      <p>Sexual harassment, fraud/theft, bribery, falsifying records, secret deals, competing with the company, leaking confidential info (including this COD outside JPO!), weapons on premises, drugs, two successive below-average appraisals.</p>
+      <p style="color:#8a755d">Full details: ask HR — Junell, Claire, or Klynn. 💛</p>`;
+    function openHrPanel(d) {
+      _hrPanelOpen = true;
+      document.getElementById('hr-panel').classList.add('open');
+      const body = document.getElementById('hr-body');
+      if (d.guest) {
+        body.innerHTML = '<div class="hr-say">Welcome to the library! 📚 I quiz registered teammates on our Code of Discipline — daily coins for those who know their stuff. Join with your email and come see me!</div>' +
+          '<button class="coach-btn" onclick="closeHrPanel()">Got it</button>';
+        return;
+      }
+      // Server-sent strings are escaped before touching innerHTML — the bank
+      // is static today, but this keeps the contract safe if it ever isn't.
+      const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const shelfBtn = '<button class="coach-btn secondary" style="margin-top:10px;" onclick="hrToggleShelf()">📖 Browse the Code of Discipline</button>' +
+        `<div class="hr-shelf" id="hr-shelf" style="display:none;">${COD_SHELF}</div>`;
+      if (d.solved) {
+        body.innerHTML = `<div class="hr-say">${d.justPaid
+            ? `🎉 Correct! <b>+${d.justPaid} coins.</b>${d.paid >= 50 ? ' First try — you know your COD!' : ' Research pays off!'}`
+            : `You already aced today's question${d.paid ? ` (+${d.paid} coins)` : ''}. Come back tomorrow for a new one!`}
+          ${d.ref ? `<br><br><span style="color:#8a755d">📌 See: ${esc(d.ref)}</span>` : ''}</div>` + shelfBtn;
+        return;
+      }
+      body.innerHTML =
+        `<div class="hr-say">${d.wrong ? '❌ Hmm, not quite — check the shelf, or go ask <b>Junell, Claire, or Klynn</b>. They love this stuff. 😄<br><br>' : ''}
+         📋 <b>Today's question:</b><br><br>${esc(d.q)}</div>` +
+        (d.opts || []).map((o, i) => `<button class="hr-opt" onclick="hrAnswer(${i})">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join('') +
+        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +50 coins · after research: +15 ${d.attempts ? `· attempts so far: ${d.attempts}` : ''}</div>` +
+        shelfBtn;
+    }
+    window.hrToggleShelf = function () {
+      const s = document.getElementById('hr-shelf');
+      if (s) s.style.display = s.style.display === 'none' ? 'block' : 'none';
+    };
+    window.hrAnswer = function (i) { socket.emit('hrAnswer', { choice: i }); };
+    socket.on('hrQuiz', (d) => openHrPanel(d || {}));
 
     function openCoachPanel(d) {
       _coachPanelOpen = true;
@@ -10071,6 +10176,9 @@
         // makes that ordering irrelevant.
         socket.emit('npcSync');
 
+        // Ms. Poli, the stationary HR librarian: one snapshot, no movement.
+        socket.on('hrNpcState', (d) => this._hrNpcSpawn(d));
+
         socket.on('chatMessage', ({id,message}) => {
           if (id === socket.id) {
             this._showChatBubble(this.player, message, true);
@@ -11174,6 +11282,21 @@
         this.npc = { sprite, tag, texKey, lastDir: dir };
       }
 
+      // Ms. Poli (HR): stationary — same texture pipeline, amber name tag.
+      _hrNpcSpawn(d) {
+        if (!d) return;
+        if (this.hrNpc) { this.hrNpc.sprite.destroy(); this.hrNpc.tag.destroy(); this.hrNpc = null; }
+        const texKey = this._buildPlayerTex(d.character || 'amelia', d.hairIdx || 0, d.skinIdx || 0, d.shirtIdx || 0, d.pantsIdx || 0);
+        const sprite = this.add.sprite(d.x, d.y, texKey);
+        sprite.setScale(3).setOrigin(0.5, 0.5);
+        sprite.anims.stop();
+        sprite.setFrame(DIR_START[d.dir] !== undefined ? DIR_START[d.dir] : DIR_START.down);
+        const tag = this._makeNameTag(d.x, d.y, '📚 ' + (d.name || 'Ms. Poli'));
+        tag.setColor('#fde68a');
+        tag.setBackgroundColor('#78350fd9');
+        this.hrNpc = { sprite, tag, texKey };
+      }
+
       // Confetti over whoever finished Huddles' mission (the server already
       // filtered recipients for After Dark light isolation).
       _missionCheer(d) {
@@ -11450,6 +11573,7 @@
         else if (interact?.type === 'board') { label = 'Read';  avail = true; }
         else if (interact?.type === 'sit')   { label = interact.bed ? 'Lie' : 'Sit'; avail = true; }
         else if (interact?.type === 'coach') { label = 'Talk';  avail = true; }
+        else if (interact?.type === 'hr')    { label = 'Talk';  avail = true; }
         else if (interact?.type === 'object'){ label = interact.obj.touch; avail = true; }
         if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
         if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
@@ -11581,6 +11705,11 @@
           const ndx = player.x - this.npc.sprite.x, ndy = player.y - this.npc.sprite.y;
           if (ndx * ndx + ndy * ndy < 150 * 150) interact = { type: 'coach' };
         }
+        // Ms. Poli the HR librarian: same E-talk zone as Huddles.
+        if (!interact && !this.sitting && this.hrNpc) {
+          const hdx = player.x - this.hrNpc.sprite.x, hdy = player.y - this.hrNpc.sprite.y;
+          if (hdx * hdx + hdy * hdy < 150 * 150) interact = { type: 'hr' };
+        }
         let objNear = null;
         if (!this.sitting && !interact) {
           for (const o of OFFICE_OBJECTS) {
@@ -11642,6 +11771,7 @@
         if (this.sitting)                    this.eHint.setVisible(false);
         else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'coach') this.eHint.setText('[ E ] Talk to Huddles').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'hr') this.eHint.setText('[ E ] Talk to Ms. Poli').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
         else if (interact?.type === 'phGuess') this.eHint.setText('[ F ] Find the boss?').setVisible(true).setPosition(player.x, player.y-58);
@@ -11685,6 +11815,8 @@
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
           } else if (interact?.type === 'coach') {
             socket.emit('coachInteract');
+          } else if (interact?.type === 'hr') {
+            socket.emit('hrInteract');
           } else if (interact?.type === 'phGuess') {
             socket.emit('phGuess');
           } else if (interact?.type === 'object') {

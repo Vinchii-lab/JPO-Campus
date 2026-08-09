@@ -745,6 +745,71 @@ async function _endSale(reason) {
   console.log(`Flash sale ended (${reason}).`);
 }
 
+// ── Ms. Poli, the HR librarian (Aug 2026) ────────────────────────────────────
+// A STATIONARY NPC by the lounge "library" corner. Press E → one Code of
+// Discipline question per person per UTC day (deterministic per email+day, so
+// posting "today's answer" in chat doesn't help much). First-try correct pays
+// full; getting it right after research still pays a little. Wrong answers
+// nudge people to read the shelf or literally ask HR (Junell/Claire/Klynn) —
+// that's the bonding part, straight from HR's own idea.
+// Same NPC rules as Huddles: lives OUTSIDE `players`, own hr* events.
+const HR_NPC = {
+  id: "npc:hr", name: "Ms. Poli · HR", character: "amelia",
+  hairIdx: 5, skinIdx: 2, shirtIdx: 3, pantsIdx: 1,
+  x: 1800, y: 4488, dir: "down", anim: "idle",   // lounge corner — confirmed open floor (tile 37,93)
+};
+const HR_TALK_RADIUS   = 200;      // same feel as Huddles
+const HR_SESSION_MS    = 120000;   // stamp window (same pattern as coachTalkAt)
+const HR_QUIZ_PAY_FIRST = 50;      // first attempt correct
+const HR_QUIZ_PAY_LATE  = 15;      // correct after one or more wrong tries
+const hrSessionOk = (p) => p?.hrTalkAt && Date.now() - p.hrTalkAt < HR_SESSION_MS;
+// Hand-authored from JPO's Code of Discipline (Ver. 2023-02) — answers cite
+// the section so people can verify on the shelf. `ans` = index into opts.
+const COD_QUIZ = [
+  { q: "Simple offenses (Verbal Reprimand / Written Warning) are disregarded after how long?", opts: ["3 months", "6 months", "1 year", "Never — they stay forever"], ans: 1, ref: "General Guidelines #3" },
+  { q: "If a simple offense ever reaches suspension, how long does it stay in your 201 file?", opts: ["6 months", "1 year", "Until the end of employment", "It gets erased after promotion"], ans: 2, ref: "General Guidelines #3" },
+  { q: "Who is part of a formal Investigation Committee?", opts: ["Only the HR Manager", "Co-employee(s), Dept Manager, Security Officer (if applicable), HR Manager", "The CEO and the client", "Your teammates only"], ans: 1, ref: "General Guidelines #2" },
+  { q: "A Notice To Explain (NTE) should be served within how long of discovering probable cause?", opts: ["24 hours", "48 hours", "5 days", "30 days"], ans: 0, ref: "Disciplinary Actions — Process #3" },
+  { q: "After receiving an NTE, how many calendar days do you have to explain your side?", opts: ["24 hours", "3 days", "5 days", "15 days"], ans: 2, ref: "Disciplinary Actions — Process #4" },
+  { q: "What is the FIRST step of the progressive discipline process?", opts: ["Written Warning", "Counseling / Verbal Reprimand", "Suspension", "NTE"], ans: 1, ref: "Disciplinary Actions — Definitions #1" },
+  { q: "Suspension beyond how many days is considered suspension WITH pay?", opts: ["10 days", "15 days", "30 days", "60 days"], ans: 2, ref: "Disciplinary Actions — Definitions #3" },
+  { q: "Suspensions can be given in which lengths?", opts: ["1, 2, 3 days", "5, 10, 15 days (max 30)", "Only 30 days", "7 or 14 days"], ans: 1, ref: "Disciplinary Actions — Definitions #3" },
+  { q: "What's the 1st-offense penalty for tardiness (without approval)?", opts: ["Verbal Reprimand", "Written Warning", "3 days suspension", "Dismissal"], ans: 1, ref: "I. Attendance #1" },
+  { q: "Tardiness counts as an infraction when you're late twice in a week OR accumulate how many minutes in a week?", opts: ["30 minutes", "45 minutes", "60 minutes", "90 minutes"], ans: 2, ref: "I. Attendance #1.1" },
+  { q: "You're considered AWOL if you fail to notify your superior for more than how many days?", opts: ["1 day", "2 days", "3 days", "5 days"], ans: 2, ref: "I. Attendance #2" },
+  { q: "On Critical Working Days, you're considered 'Missing' if unreachable for more than…", opts: ["15 minutes", "30 minutes", "1 hour", "2 hours"], ans: 0, ref: "I. Attendance — Note" },
+  { q: "Which of these is NOT a Critical Working Day?", opts: ["Every Monday", "Payday", "The day after a holiday", "Every Friday"], ans: 3, ref: "I. Attendance — Note" },
+  { q: "A Sick Leave application must be submitted to HRD within how long after returning to work?", opts: ["Same day", "2 days", "5 days", "1 week"], ans: 1, ref: "I. Attendance #3.1" },
+  { q: "A Leave Notification should be filed at least how long before your shift?", opts: ["30 minutes", "1 hour", "2 hours", "24 hours"], ans: 2, ref: "I. Attendance #3.2" },
+  { q: "Medical certificates from Telemedicine / online consultation are…", opts: ["Accepted with a receipt", "Accepted if signed", "Accepted on holidays only", "Not accepted"], ans: 3, ref: "I. Attendance — Note" },
+  { q: "Accepting gifts, tokens, or bribes from clients/customers leads to…", opts: ["A verbal warning", "Coaching", "Employee dismissal", "A fine"], ans: 2, ref: "Professionalism / VII. Terminable #4" },
+  { q: "Unexcused undertime becomes an infraction when it's more than… ", opts: ["15 minutes", "30 minutes", "1 hour", "2 hours"], ans: 2, ref: "I. Attendance #3.5" },
+  { q: "Changes to your records (civil status, residence, etc.) must be reported within…", opts: ["7 days", "14 days", "30 days", "90 days"], ans: 2, ref: "III. Office Protocol #7" },
+  { q: "1st offense for non-adherence to the dress code (onsite) is…", opts: ["Verbal Reprimand / Counseling", "Written Warning", "Suspension", "Dismissal"], ans: 0, ref: "III. Office Protocol #5" },
+  { q: "Browsing the internet for personal use during work hours becomes an offense past…", opts: ["10 minutes", "30 minutes", "1 hour", "Any amount"], ans: 1, ref: "V. Company Property #7" },
+  { q: "Sharing sensitive info like passwords, log-in accounts, or salary can lead to…", opts: ["Nothing if it's a friend", "Verbal warning only", "Suspension to dismissal depending on severity", "A written apology"], ans: 2, ref: "IV. Integrity #2" },
+  { q: "Two successive below-average performance appraisals with no improvement means…", opts: ["Coaching", "Final warning", "Demotion", "Dismissal"], ans: 3, ref: "VII. Terminable #1" },
+  { q: "A manager/supervisor who knows about a violation must report it within…", opts: ["24 hours", "48 hours", "5 days", "1 week"], ans: 1, ref: "Managers and Supervisors" },
+  { q: "If two final written warnings are issued within the same category…", opts: ["They cancel out", "The next level of sanction applies", "HR restarts the count", "Nothing happens"], ans: 1, ref: "Disciplinary Actions — Process #8" },
+  { q: "In the Twin-Notice rule, what is the second notice served for a justified termination?", opts: ["Notice To Explain", "Coaching Form", "Notice of Dismissal", "Incident Report"], ans: 2, ref: "Disciplinary Actions — Process #5" },
+];
+// Deterministic per email+day → a stable daily question per person.
+function hrQuestionIdx(email, day) {
+  let h = 0;
+  const s = `${day}|${email}`;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % COD_QUIZ.length;
+}
+function hrQuizView(row, extra = {}) {
+  const item = COD_QUIZ[row.qid] || COD_QUIZ[0];
+  return {
+    q: item.q, opts: item.opts, attempts: row.attempts, solved: row.solved,
+    ref: row.solved ? item.ref : undefined,   // the citation is the reward
+    paid: row.paid || 0,
+    ...extra,
+  };
+}
+
 // ── Coin gifting (July 2026) ─────────────────────────────────────────────────
 // Player→player coin sends. Per-sender daily cap keeps "send me coins"
 // pressure and funneling in check. The cap ledger is in-memory (resets on
@@ -2393,6 +2458,7 @@ async function restorePlayer(socket, row) {
   // covering the game-boots-after-this-emit ordering) + today's mission for
   // the HUD chip, so a refresh never loses the mission display.
   socket.emit("npcState", npcSnapshot());
+  socket.emit("hrNpcState", HR_NPC);   // Ms. Poli is stationary — one snapshot is enough
   // Office chores: remaining cooldown per chore, so the client's "available
   // again" sparkle is right from the first frame (not just after a chore).
   socket.emit("choreState", { chores: choreStateFor(state.email || socket.id) });
@@ -5262,7 +5328,90 @@ io.on("connection", (socket) => {
 
   // Scene-create pull for the NPC snapshot (the restorePlayer push can land
   // before the Phaser scene registers its listeners — pull covers that).
-  socket.on("npcSync", () => socket.emit("npcState", npcSnapshot()));
+  socket.on("npcSync", () => { socket.emit("npcState", npcSnapshot()); socket.emit("hrNpcState", HR_NPC); });
+
+  // ── Ms. Poli (HR): daily Code of Discipline quiz ──────────────────────
+  socket.on("hrInteract", async () => {
+    const p = players[socket.id];
+    if (!p || !takeToken(coachBucket)) return;
+    const dx = (p.x ?? 0) - HR_NPC.x, dy = (p.y ?? 0) - HR_NPC.y;
+    if (dx * dx + dy * dy > HR_TALK_RADIUS * HR_TALK_RADIUS) {
+      socket.emit("interactError", { message: "Walk over to Ms. Poli first!" });
+      return;
+    }
+    p.hrTalkAt = Date.now();   // proximity verified — answer window opens
+    if (!p.email) { socket.emit("hrQuiz", { guest: true }); return; }
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      const qid = hrQuestionIdx(p.email, day);
+      await pool.query(
+        `INSERT INTO jpo_cod_quiz (day, email, qid) VALUES ($1, $2, $3)
+         ON CONFLICT (day, email) DO NOTHING`, [day, p.email, qid]);
+      const { rows } = await pool.query(
+        `SELECT * FROM jpo_cod_quiz WHERE day=$1 AND email=$2`, [day, p.email]);
+      socket.emit("hrQuiz", hrQuizView(rows[0]));
+    } catch (err) {
+      console.error("hrInteract failed:", err);
+      socket.emit("interactError", { message: "Ms. Poli is filing paperwork — try again in a moment." });
+    }
+  });
+  socket.on("hrAnswer", async (payload) => {
+    const p = players[socket.id];
+    if (!p?.email || !takeToken(coachBucket)) return;
+    if (!hrSessionOk(p)) { socket.emit("interactError", { message: "Walk over to Ms. Poli first!" }); return; }
+    p.hrTalkAt = Date.now();
+    const choice = Math.round(Number(payload?.choice));
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM jpo_cod_quiz WHERE day=$1 AND email=$2`, [day, p.email]);
+      const row = rows[0];
+      if (!row) { socket.emit("interactError", { message: "Talk to Ms. Poli first!" }); return; }
+      if (row.solved) { socket.emit("hrQuiz", hrQuizView(row, { already: true })); return; }
+      const item = COD_QUIZ[row.qid];
+      if (!item || !Number.isInteger(choice) || choice < 0 || choice >= item.opts.length) return;
+      if (choice !== item.ans) {
+        const upd = await pool.query(
+          `UPDATE jpo_cod_quiz SET attempts = attempts + 1 WHERE day=$1 AND email=$2 AND solved=FALSE RETURNING *`,
+          [day, p.email]);
+        if (upd.rows[0]) socket.emit("hrQuiz", hrQuizView(upd.rows[0], { wrong: true }));
+        return;
+      }
+      // Correct: flip solved exactly once (guards restarts + double-clicks),
+      // pay based on whether this was the very first attempt. Claim + coin
+      // credit run in ONE transaction so a mid-flight failure can never leave
+      // a solved row without its coins (review catch).
+      const pay = row.attempts === 0 ? HR_QUIZ_PAY_FIRST : HR_QUIZ_PAY_LATE;
+      const client = await pool.connect();
+      let claimed = null, newCoins = null;
+      try {
+        await client.query("BEGIN");
+        const claim = await client.query(
+          `UPDATE jpo_cod_quiz SET solved=TRUE, paid=$3 WHERE day=$1 AND email=$2 AND solved=FALSE RETURNING *`,
+          [day, p.email, pay]);
+        claimed = claim.rows[0] || null;
+        if (claimed) {
+          const coin = await client.query(
+            `UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email=$1 RETURNING coins`,
+            [p.email, pay]);
+          newCoins = coin.rows[0]?.coins ?? null;
+        }
+        await client.query("COMMIT");
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      } finally {
+        client.release();
+      }
+      if (!claimed) { socket.emit("hrQuiz", hrQuizView(row, { already: true })); return; }
+      if (newCoins !== null) { p.coins = newCoins; socket.emit("coinUpdate", { coins: p.coins }); }
+      socket.emit("hrQuiz", hrQuizView(claimed, { justPaid: pay }));
+      console.log(`COD quiz: ${p.email} solved q${row.qid} (attempt ${row.attempts + 1}, +${pay})`);
+    } catch (err) {
+      console.error("hrAnswer failed:", err);
+      socket.emit("interactError", { message: "Ms. Poli lost her page — try again." });
+    }
+  });
 
   socket.on("coachInteract", async () => {
     const p = players[socket.id];
@@ -7613,6 +7762,17 @@ try {
       console.log(`price override: ${r.item_id} → ${r.price}`);
     }
   }
+  // HR daily COD quiz: one row per (day,email). `solved` flips exactly once
+  // (conditional UPDATE), so a restart or replayed answer can never double-pay.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_cod_quiz (
+    day text NOT NULL,
+    email text NOT NULL,
+    qid integer NOT NULL,
+    attempts integer NOT NULL DEFAULT 0,
+    solved boolean NOT NULL DEFAULT FALSE,
+    paid integer NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, email)
+  )`);
   // Flash sale survives restarts: single-row table, re-armed at boot if the
   // end time is still in the future (otherwise cleaned up).
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_flash_sale (
