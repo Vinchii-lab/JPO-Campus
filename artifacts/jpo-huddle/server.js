@@ -4736,6 +4736,31 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("adminLogGet failed:", err); }
   });
 
+  // Registered directory (F8 → Registered): every approved account, online or
+  // not, straight from the DB — plus a live "online" flag matched by email.
+  socket.on("adminRegisteredList", async () => {
+    if (!admins.has(socket.id)) return;
+    try {
+      const { rows } = await pool.query(
+        `SELECT email, name, nickname, first_name, last_name, department, coins, created_at, updated_at
+           FROM jpo_players
+          WHERE approved = TRUE AND COALESCE(dismissed, FALSE) = FALSE
+          ORDER BY LOWER(COALESCE(NULLIF(first_name,''), name))`);
+      const onlineEmails = new Set(
+        Object.values(players).map(p => (p.email || "").toLowerCase()).filter(Boolean));
+      socket.emit("registeredList", rows.map(r => ({
+        email:      r.email || "",
+        name:       r.nickname || r.first_name || r.name,
+        fullName:   [r.first_name, r.last_name].filter(Boolean).join(" ") || r.name,
+        department: r.department || "",
+        coins:      Number.isFinite(Number(r.coins)) ? Number(r.coins) : 0,
+        registeredAt: r.created_at,
+        lastActive:   r.updated_at || r.created_at,
+        online:     onlineEmails.has((r.email || "").toLowerCase()),
+      })));
+    } catch (err) { console.error("adminRegisteredList failed:", err); }
+  });
+
   socket.on("adminRefresh", () => {
     if (!admins.has(socket.id)) return;
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminRefresh failed:", err));

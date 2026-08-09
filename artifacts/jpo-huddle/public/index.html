@@ -2071,6 +2071,7 @@
       <div id="owner-tabs">
         <button class="o-tab active" data-otab-btn="reg" onclick="ownerTab('reg')">📝 Registration <span class="o-tab-badge" id="op-tab-pending" style="display:none;">0</span></button>
         <button class="o-tab" data-otab-btn="online" onclick="ownerTab('online')">🟢 Online Players</button>
+        <button class="o-tab" data-otab-btn="roster" onclick="ownerTab('roster')">👥 Registered</button>
         <button class="o-tab" data-otab-btn="prices" onclick="ownerTab('prices')">🏷️ In-game Prices</button>
         <button class="o-tab" data-otab-btn="ann" onclick="ownerTab('ann')">📢 Announcements</button>
         <button class="o-tab" data-otab-btn="events" onclick="ownerTab('events')">🎉 Events</button>
@@ -2088,10 +2089,24 @@
       </div>
       <div class="owner-section" data-otab="online">
         <h3>Online Players <span class="owner-badge green" id="op-player-count">0</span></h3>
+        <input id="op-online-search" type="search" placeholder="🔍 Search name, email or department…" oninput="renderOnlinePlayers()"
+               style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:7px 10px;border:1px solid #444;border-radius:6px;background:#1d1f27;color:#eee;font-size:13px;">
         <table class="owner-table">
           <thead><tr><th>Name</th><th>Dept</th><th>Coins</th><th>Items</th><th>Post</th><th></th></tr></thead>
           <tbody id="op-player-tbody">
             <tr><td class="owner-empty" colspan="6">No players online</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="owner-section" data-otab="roster">
+        <h3>Registered Players <span class="owner-badge" id="op-roster-count">0</span></h3>
+        <p style="font-size:12px;color:#888;margin:0 0 8px">Everyone who has an approved account — even people who aren't online right now.</p>
+        <input id="op-roster-search" type="search" placeholder="🔍 Search name, email or department…" oninput="renderRoster()"
+               style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:7px 10px;border:1px solid #444;border-radius:6px;background:#1d1f27;color:#eee;font-size:13px;">
+        <table class="owner-table">
+          <thead><tr><th>Name</th><th>Dept</th><th>Email</th><th>Coins</th><th>Last seen</th></tr></thead>
+          <tbody id="op-roster-tbody">
+            <tr><td class="owner-empty" colspan="5">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -8764,6 +8779,7 @@
         b.classList.toggle('active', b.dataset.otabBtn === tab);
       });
       if (tab === 'log') window.ownerLogGo(_ownerLogPage);
+      if (tab === 'roster') socket.emit('adminRegisteredList');   // fresh DB pull on every open
     };
     window.ownerLogGo = function (page) {
       _ownerLogPage = Math.max(1, page || 1);
@@ -9022,11 +9038,20 @@
         </tr>`).join('');
     });
 
+    let _onlineList = [];
     socket.on('playerList', (list) => {
+      _onlineList = list;
+      renderOnlinePlayers();
+    });
+    window.renderOnlinePlayers = function () {
+      const list = _onlineList;
       document.getElementById('op-player-count').textContent = list.length;
+      const q = (document.getElementById('op-online-search')?.value || '').trim().toLowerCase();
+      const shown = !q ? list : list.filter(p =>
+        [p.fullName, p.name, p.email, p.department].some(v => (v || '').toLowerCase().includes(q)));
       const tbody = document.getElementById('op-player-tbody');
-      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="6">No players online</td></tr>'; return; }
-      tbody.innerHTML = list.map(p => `
+      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="6">${q ? 'No one matches your search' : 'No players online'}</td></tr>`; return; }
+      tbody.innerHTML = shown.map(p => `
         <tr>
           <td><span class="online-dot"></span>${esc(p.fullName || p.name)}${p.fullName && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
           <td>${esc(p.department || '—')}</td>
@@ -9036,6 +9061,42 @@
           <td><button class="o-btn o-btn-reject" title="Reset player (lets them re-register)" onclick="ownerKick('${esc(p.id)}')">⟳</button></td>
         </tr>`).join('');
     });
+
+    // ── Registered directory (all approved accounts, online or not) ──
+    let _rosterList = [];
+    socket.on('registeredList', (list) => {
+      _rosterList = Array.isArray(list) ? list : [];
+      renderRoster();
+    });
+    function _lastSeenLabel(iso) {
+      if (!iso) return '—';
+      const ms = Date.now() - new Date(iso).getTime();
+      if (!isFinite(ms) || ms < 0) return '—';
+      const m = Math.floor(ms / 60000);
+      if (m < 2)        return 'just now';
+      if (m < 60)       return `${m}m ago`;
+      if (m < 48 * 60)  return `${Math.floor(m / 60)}h ago`;
+      const d = Math.floor(m / 1440);
+      if (d < 30)       return `${d}d ago`;
+      return new Date(iso).toLocaleDateString();
+    }
+    window.renderRoster = function () {
+      const list = _rosterList;
+      document.getElementById('op-roster-count').textContent = list.length;
+      const q = (document.getElementById('op-roster-search')?.value || '').trim().toLowerCase();
+      const shown = !q ? list : list.filter(p =>
+        [p.fullName, p.name, p.email, p.department].some(v => (v || '').toLowerCase().includes(q)));
+      const tbody = document.getElementById('op-roster-tbody');
+      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="5">${q ? 'No one matches your search' : 'No registered players yet'}</td></tr>`; return; }
+      tbody.innerHTML = shown.map(p => `
+        <tr${p.online ? '' : ' style="opacity:.7"'}>
+          <td>${p.online ? '<span class="online-dot"></span>' : ''}${esc(p.fullName || p.name)}${p.fullName && p.name && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
+          <td>${esc(p.department || '—')}</td>
+          <td style="font-size:11px;color:#888">${esc(p.email || '—')}</td>
+          <td>💰 ${Number(p.coins) || 0}</td>
+          <td style="font-size:11px;color:${p.online ? '#27ae60' : '#888'}">${p.online ? 'online now' : esc(_lastSeenLabel(p.lastActive))}</td>
+        </tr>`).join('');
+    };
 
     function ownerApprove(id) { socket.emit('approvePlayer', id); }
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
