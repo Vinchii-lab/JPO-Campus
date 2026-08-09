@@ -4063,7 +4063,7 @@
         `<div class="hr-say">${d.wrong ? '❌ Hmm, not quite — check the shelf, or go ask <b>Junell, Claire, or Klynn</b>. They love this stuff. 😄<br><br>' : ''}
          📋 <b>Today's question:</b><br><br>${esc(d.q)}</div>` +
         (d.opts || []).map((o, i) => `<button class="hr-opt" onclick="hrAnswer(${i})">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join('') +
-        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +50 coins · after research: +15 ${d.attempts ? `· attempts so far: ${d.attempts}` : ''}</div>` +
+        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +100 coins · after research: +50 ${d.attempts ? `· attempts so far: ${d.attempts}` : ''}</div>` +
         shelfBtn;
     }
     window.hrToggleShelf = function () {

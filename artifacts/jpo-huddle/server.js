@@ -760,8 +760,8 @@ const HR_NPC = {
 };
 const HR_TALK_RADIUS   = 200;      // same feel as Huddles
 const HR_SESSION_MS    = 120000;   // stamp window (same pattern as coachTalkAt)
-const HR_QUIZ_PAY_FIRST = 50;      // first attempt correct
-const HR_QUIZ_PAY_LATE  = 15;      // correct after one or more wrong tries
+const HR_QUIZ_PAY_FIRST = 100;     // first attempt correct
+const HR_QUIZ_PAY_LATE  = 50;      // correct after one or more wrong tries
 const hrSessionOk = (p) => p?.hrTalkAt && Date.now() - p.hrTalkAt < HR_SESSION_MS;
 // Hand-authored from JPO's Code of Discipline (Ver. 2023-02) — answers cite
 // the section so people can verify on the shelf. `ans` = index into opts.
