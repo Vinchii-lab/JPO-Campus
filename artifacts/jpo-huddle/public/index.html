@@ -9060,7 +9060,7 @@
           <td><button class="o-btn ${p.isAnnouncer ? 'o-btn-approve' : 'o-btn-reject'}" ${p.email ? '' : 'disabled'} title="${p.isAnnouncer ? 'Can post announcements — click to revoke' : 'Allow this person to post announcements'}" onclick="ownerToggleAnnouncer('${esc(p.id)}', ${p.isAnnouncer ? 'false' : 'true'})">📢</button></td>
           <td><button class="o-btn o-btn-reject" title="Reset player (lets them re-register)" onclick="ownerKick('${esc(p.id)}')">⟳</button></td>
         </tr>`).join('');
-    });
+    };
 
     // ── Registered directory (all approved accounts, online or not) ──
     let _rosterList = [];
