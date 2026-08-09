@@ -9353,7 +9353,7 @@
       m.id = 'buddy-modal';
       m.style.cssText = 'position:fixed;inset:0;z-index:8000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);';
       m.innerHTML = '<div id="buddy-card" style="background:#1e1e30;border:1px solid #3a3a5e;border-radius:14px;width:400px;max-width:calc(100vw - 32px);max-height:85vh;overflow-y:auto;font-family:monospace;color:#eee;padding:24px 26px;">' +
-        '<h3 style="font-size:17px;margin-bottom:4px;">🤝 Your HQ-Buddy this week</h3>' +
+        '<h3 style="font-size:17px;margin-bottom:4px;">🤝 Your HQ-Buddy today</h3>' +
         '<div id="buddy-body" style="font-size:13px;line-height:1.55;"></div>' +
         '<div id="buddy-msg" style="font-size:12px;color:#ffd76a;min-height:16px;margin-top:10px;"></div>' +
         '<button id="buddy-close" style="width:100%;margin-top:14px;padding:9px;background:#2a2a44;border:none;border-radius:8px;color:#ccc;font-family:monospace;font-size:13px;cursor:pointer;">Close</button></div>';
@@ -9399,17 +9399,17 @@
       const b = window._buddy;
       const m = _buddyPanelEl();
       const body = m.querySelector('#buddy-body');
-      if (!b) { body.innerHTML = 'No buddy this week.'; return; }
+      if (!b) { body.innerHTML = 'No buddy today.'; return; }
       const bn = _buddyEsc(b.buddyName);
       let html = '<div style="font-size:15px;color:#ffd76a;margin:6px 0 10px;">' + (b.isNpc ? '🌱 Huddles (the coach!)' : '⭐ ' + bn) + '</div>' +
-        '<div style="color:#aaa;">Shh — only the two of you know. New buddy every Monday!</div>' +
+        '<div style="color:#aaa;">Shh — only the two of you know. New buddy every day!</div>' +
         '<ul style="margin:10px 0 4px 18px;color:#ccc;">' +
         '<li>Hang out near ' + (b.isNpc ? 'Huddles' : bn) + ' → <b style="color:#4ade80;">×' + b.mult + ' coins</b> (up to 2h/day)</li>' +
         (b.isNpc ? '' : '<li>Finish a game together → <b style="color:#4ade80;">+' + (b.gameBonus || 50) + ' coins each</b> (5×/day)</li>' +
         '<li>“Get to know you” quiz → <b style="color:#4ade80;">+' + (b.quizPay || 100) + '/correct guess</b></li>') +
         '</ul><hr style="border:none;border-top:1px solid #2a2a40;margin:12px 0;">';
       if (b.isNpc) {
-        html += '<div style="color:#aaa;">Odd one out this week — Huddles has your back. Walk with the coach to earn the bonus, and you\'ll get a coworker buddy next shuffle!</div>';
+        html += '<div style="color:#aaa;">Odd one out today — Huddles has your back. Walk with the coach to earn the bonus, and you\'ll get a coworker buddy tomorrow!</div>';
         body.innerHTML = html; return;
       }
       if (b.quizScore !== null && b.quizScore !== undefined) {

@@ -768,14 +768,18 @@ function giftRecord(key, amount) {
 }
 
 // ── HQ-Buddy (August 2026) ───────────────────────────────────────────────────
-// Secret weekly pairings: every email-backed player gets ONE buddy per week
-// (Monday-keyed). Only the pair ever learns who's who — no broadcast carries
-// buddy info. Perks: 1.25× coin ticks while standing near your buddy (daily
-// minute cap), a bonus when the pair finishes a duel together (daily cap),
-// and a one-shot "get to know you" quiz that pays per correct guess.
-// Pairing is lazy: the first player of the week gets Huddles (the NPC) as a
+// Secret DAILY pairings (weekly until Aug 2026 — the boss wanted a faster
+// shuffle): every email-backed player gets ONE buddy per UTC day. Only the
+// pair ever learns who's who — no broadcast carries buddy info. Perks: 1.25×
+// coin ticks while standing near your buddy (daily minute cap), a bonus when
+// the pair finishes a duel together (daily cap), and a one-shot "get to know
+// you" quiz that pays per correct guess.
+// Pairing is lazy: the first player of the day gets Huddles (the NPC) as a
 // placeholder buddy; the next unpaired player upgrades that placeholder into
-// a real pair. Odd player out simply keeps Huddles for the week.
+// a real pair. Odd player out simply keeps Huddles for the day.
+// NOTE: the period id is still called "week" everywhere (vars, DB column,
+// jpo_buddies.week) — it now just holds a day id. Renaming the column would
+// strand prod history for zero benefit.
 const BUDDY_NPC             = "__huddles__";
 const BUDDY_EARN_MULT       = 1.25;
 const BUDDY_BUFF_DAILY_MIN  = 120;   // boosted minutes per player per UTC day
@@ -783,9 +787,8 @@ const BUDDY_GAME_BONUS      = 50;    // coins EACH when the pair finishes a duel
 const BUDDY_GAME_DAILY_CAP  = 5;     // duel bonuses per pair per UTC day
 const BUDDY_QUIZ_PAY        = 100;   // coins per correct guess (3 questions)
 function buddyWeek(now = new Date()) {
-  // The week id is its Monday's UTC date — rotation happens at Monday 00:00 UTC.
+  // Period id = today's UTC date — a fresh buddy every day at 00:00 UTC.
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
   return d.toISOString().slice(0, 10);
 }
 // Daily caps live in jpo_buddy_caps (day,key → n) so a server restart can't
