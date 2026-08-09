@@ -709,7 +709,41 @@ function catalogOf(item) {
   if (Object.hasOwn(PET_ACCESSORIES, item)) return PET_ACCESSORIES;
   return null;
 }
+// NOTE: always BASE prices (overrides included, sale NOT applied). Clients
+// apply the sale % themselves from saleState, so the F8 editor keeps seeing
+// true base prices and can never accidentally save a discounted number.
 function allPrices() { return { ...SHOP, ...PETS, ...PET_ACCESSORIES }; }
+
+// ── Flash sale (Aug 2026) ────────────────────────────────────────────────────
+// Instead of retyping every price, the owner enters "X% off for N minutes"
+// (F8 → Prices). Every non-rare shop/pet/accessory price is discounted at
+// BUY time via salePrice(); base prices/overrides are untouched, so when the
+// timer runs out (or the owner ends it) everything snaps back automatically.
+// Persisted in jpo_flash_sale so a restart mid-sale keeps the sale honest.
+let sale = null;          // { percent, endsAt(ms) } or null
+let _saleTimer = null;
+const SALE_PCT_MIN = 1, SALE_PCT_MAX = 90, SALE_MIN_MINUTES = 1, SALE_MAX_MINUTES = 7 * 24 * 60;
+function saleActive() { return !!(sale && Date.now() < sale.endsAt); }
+function salePrice(c) {
+  if (!c || !saleActive()) return c;   // undefined/0 stays as-is — buy gates rely on falsy cost
+  return Math.max(1, Math.round(c * (100 - sale.percent) / 100));
+}
+function _saleState() { return saleActive() ? { percent: sale.percent, endsAt: sale.endsAt } : null; }
+function _armSale(percent, endsAt) {
+  sale = { percent, endsAt };
+  clearTimeout(_saleTimer);
+  _saleTimer = setTimeout(() => { _endSale("expired"); }, Math.max(0, endsAt - Date.now()) + 250);
+}
+async function _endSale(reason) {
+  clearTimeout(_saleTimer); _saleTimer = null;
+  if (!sale) return;
+  sale = null;
+  try { await pool.query(`DELETE FROM jpo_flash_sale`); }
+  catch (err) { console.error("flash sale cleanup failed:", err); }
+  io.emit("saleState", null);
+  io.emit("priceList", allPrices());
+  console.log(`Flash sale ended (${reason}).`);
+}
 
 // ── Coin gifting (July 2026) ─────────────────────────────────────────────────
 // Player→player coin sends. Per-sender daily cap keeps "send me coins"
@@ -3821,6 +3855,7 @@ io.on("connection", (socket) => {
   // shop labels are right even after an admin price change (drift only ever
   // mislabels the UI — the server stays authoritative on every buy).
   socket.emit("priceList", allPrices());
+  socket.emit("saleState", _saleState());
 
   // Per-connection rate-limit state — closed over by the handlers below and
   // GC'd with the socket on disconnect (no global map to clean up).
@@ -4293,6 +4328,44 @@ io.on("connection", (socket) => {
   // Persists to jpo_shop_prices, updates the in-memory catalog (every buy
   // handler reads it), and broadcasts the new label to every open client.
   // Setting an item back to its shipped default deletes the override row.
+  // ── Admin: flash sale — "X% off everything for N minutes" ────────────
+  socket.on("adminSaleStart", async (payload) => {
+    if (!admins.has(socket.id)) return;
+    const pct = Math.round(Number(payload?.percent));
+    const mins = Math.round(Number(payload?.minutes));
+    if (!Number.isInteger(pct) || pct < SALE_PCT_MIN || pct > SALE_PCT_MAX) {
+      socket.emit("adminSaleResult", { ok: false, message: `Percent must be ${SALE_PCT_MIN}–${SALE_PCT_MAX}.` }); return;
+    }
+    if (!Number.isInteger(mins) || mins < SALE_MIN_MINUTES || mins > SALE_MAX_MINUTES) {
+      socket.emit("adminSaleResult", { ok: false, message: `Duration must be ${SALE_MIN_MINUTES}–${SALE_MAX_MINUTES} minutes.` }); return;
+    }
+    const endsAt = Date.now() + mins * 60_000;
+    try {
+      await pool.query(
+        `INSERT INTO jpo_flash_sale (id, percent, ends_at) VALUES (1, $1, $2)
+         ON CONFLICT (id) DO UPDATE SET percent = $1, ends_at = $2`,
+        [pct, new Date(endsAt)],
+      );
+    } catch (err) {
+      console.error("adminSaleStart failed:", err);
+      socket.emit("adminSaleResult", { ok: false, message: "Saving the sale failed — try again." });
+      return;
+    }
+    _armSale(pct, endsAt);
+    logAdmin(socket, "Flash sale", `${pct}% off everything for ${mins} minute${mins === 1 ? "" : "s"}`);
+    io.emit("saleState", _saleState());
+    io.emit("priceList", allPrices());
+    socket.emit("adminSaleResult", { ok: true, message: `Sale is ON: ${pct}% off for ${mins} min.` });
+    console.log(`ADMIN flash sale: ${pct}% off for ${mins} min`);
+  });
+  socket.on("adminSaleEnd", async () => {
+    if (!admins.has(socket.id)) return;
+    if (!saleActive()) { socket.emit("adminSaleResult", { ok: false, message: "No sale is running." }); return; }
+    logAdmin(socket, "Flash sale", "Ended the sale early");
+    await _endSale("ended by owner");
+    socket.emit("adminSaleResult", { ok: true, message: "Sale ended — prices are back to normal." });
+  });
+
   socket.on("adminSetPrice", async (payload) => {
     if (!admins.has(socket.id)) return;
     const { item, price } = payload || {};
@@ -4320,7 +4393,7 @@ io.on("connection", (socket) => {
       const oldPrice = cat[item];
       cat[item] = p;
       if (oldPrice !== p) logAdmin(socket, "Price change", `${item}: ${Number(oldPrice).toLocaleString()} → ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (back to default)" : ""}`);
-      io.emit("priceUpdate", { item, price: p });
+      io.emit("priceUpdate", { item, price: p });   // base price — clients apply the sale % locally
       socket.emit("adminPriceResult", { ok: true, message: `${item} is now ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (default)" : ""}.` });
       console.log(`ADMIN price change: ${item} → ${p}`);
     } catch (err) {
@@ -5816,7 +5889,7 @@ io.on("connection", (socket) => {
 
   socket.on("buyCosmetic", async (payload) => {
     const { item } = payload || {};
-    const p = players[socket.id], cost = SHOP[item];
+    const p = players[socket.id], cost = salePrice(SHOP[item]);
     if (!p) return;
     // Rare wearables are shop-visible bait, never purchasable — gift-only.
     if (RARE_COSMETICS.has(item)) { socket.emit("shopError", "This one can't be bought — only the boss can gift it. 🎁"); return; }
@@ -5970,7 +6043,7 @@ io.on("connection", (socket) => {
   // cosmetics array) and the auto-equip into equipped_pet all commit together.
   socket.on("buyPet", async (payload) => {
     const { item } = payload || {};
-    const p = players[socket.id], cost = PETS[item];
+    const p = players[socket.id], cost = salePrice(PETS[item]);
     if (!p) return;
     // Rare pets are shop-visible bait, never purchasable — gift-only.
     if (RARE_PETS.has(item)) { socket.emit("shopError", "This one can't be bought — only the boss can gift it. 🎁"); return; }
@@ -6062,7 +6135,7 @@ io.on("connection", (socket) => {
   // and the auto-equip into equipped_pet_acc all commit together.
   socket.on("buyPetAcc", async (payload) => {
     const { item } = payload || {};
-    const p = players[socket.id], cost = PET_ACCESSORIES[item];
+    const p = players[socket.id], cost = salePrice(PET_ACCESSORIES[item]);
     if (!p || !cost) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
     if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
@@ -7535,6 +7608,24 @@ try {
     if (cat && Number.isInteger(r.price) && r.price >= PRICE_MIN && r.price <= PRICE_MAX) {
       cat[r.item_id] = r.price;
       console.log(`price override: ${r.item_id} → ${r.price}`);
+    }
+  }
+  // Flash sale survives restarts: single-row table, re-armed at boot if the
+  // end time is still in the future (otherwise cleaned up).
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_flash_sale (
+    id integer PRIMARY KEY CHECK (id = 1),
+    percent integer NOT NULL,
+    ends_at timestamptz NOT NULL
+  )`);
+  const saleRows = (await pool.query(`SELECT percent, ends_at FROM jpo_flash_sale WHERE id = 1`)).rows;
+  if (saleRows.length) {
+    const endsAt = new Date(saleRows[0].ends_at).getTime();
+    const pct = saleRows[0].percent;
+    if (endsAt > Date.now() && pct >= SALE_PCT_MIN && pct <= SALE_PCT_MAX) {
+      _armSale(pct, endsAt);
+      console.log(`flash sale resumed: ${pct}% off until ${new Date(endsAt).toISOString()}`);
+    } else {
+      await pool.query(`DELETE FROM jpo_flash_sale`);
     }
   }
 } catch (err) {

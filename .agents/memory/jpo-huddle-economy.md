@@ -49,3 +49,8 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - Login success socket event for headless tests is `approved` (not loginSuccess); login inputs are `login-email`/`login-password` + `tryLogin()`.
 
 **Zero-price rares & falsy checks:** rare gift-only items (unicorn/phoenix pets, phoenix wings) sit in the PETS/SHOP catalogs at price 0. Any catalog-membership validation MUST use `Object.hasOwn(catalog, id)` — a truthiness check like `!PETS[item]` silently rejects rares (broke the Bring button in prod, Aug 2026). Purchase paths keep the falsy check on purpose (0 = not buyable); trade paths block rares via RARE_IDS explicitly.
+
+## Flash sale (Aug 2026)
+- Global "X% off for N min" lives in server memory + single-row `jpo_flash_sale` (re-armed at boot). Buy handlers charge `salePrice(catalog[item])` at request time.
+- **Rule:** `priceList`/`priceUpdate` always broadcast BASE prices; clients apply the sale % locally from `saleState`. **Why:** sale-adjusted broadcasts corrupted the F8 editor — the owner could save a discounted number as the permanent override.
+- salePrice() must pass through falsy costs untouched (rare/unknown items rely on `!cost` gates).
