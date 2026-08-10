@@ -3704,6 +3704,7 @@ const RLGL_PHASES = [
 // their safe private lanes and into shove range. House pays.
 const RLGL_COIN_N = 8, RLGL_COIN_VALUE = 25, RLGL_COIN_GRAB_PX = 40;
 const RLGL_PUSH_RANGE_PX = 70, RLGL_PUSH_DIST_PX = 130, RLGL_PUSH_COOLDOWN_MS = 5_000;
+const RLGL_PUSH_ARM_MS   = 3_000;   // owner rule: no shoving in the first ~3s of a round (start-line massacres)
 const RLGL_SLIPPERY_AT  = 3;             // ≤3 runners still on the field → slippery floor
 const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on total rounds/replays
 const RLGL_SAFE_STREAK  = 3;             // 2 players left who BOTH survived this many rounds → co-champions
@@ -3823,6 +3824,7 @@ function rlglStartAttempt() {
   const bounds = rlglBoundsNow();
   rlgl.slippery = !!ph.slippery;   // sudden death: iced from the first step
   rlgl.endsAt = Date.now() + RLGL_ATTEMPT_MS;
+  rlgl.beganAt = Date.now();   // shove arm-delay reference (RLGL_PUSH_ARM_MS)
   // Scatter the coin bait — random spots on the legal strip, away from the
   // start and finish so nobody scoops them standing still.
   rlgl.coins = Array.from({ length: RLGL_COIN_N }, () => ({
@@ -3848,7 +3850,7 @@ function rlglStartAttempt() {
     arena: RLGL_ARENA, bounds, startY: RLGL_START_Y, finishY: RLGL_FINISH_Y, doll: RLGL_DOLL,
     players: rlglRoster(), light: "green", slippery: rlgl.slippery,
     coins: rlgl.coins.map((c, i) => ({ idx: i, x: c.x, y: c.y })), coinValue: RLGL_COIN_VALUE,
-    pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS,
+    pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS, pushArmMs: RLGL_PUSH_ARM_MS,
   });
   if (rlgl.slippery) io.emit("rlglSlippery", { on: true });
   rlglScheduleFake();
@@ -5020,6 +5022,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!me || !p || !me.alive || me.finished) return;
     const now = Date.now();
+    if (rlgl.beganAt && now - rlgl.beganAt < RLGL_PUSH_ARM_MS) return;   // shoving not armed yet this round
     if (now - me.lastPushAt < RLGL_PUSH_COOLDOWN_MS) return;
     const targetId = payload?.targetId;
     if (typeof targetId !== "string" || targetId === socket.id) return;

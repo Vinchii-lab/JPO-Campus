@@ -7134,6 +7134,9 @@
       _rlgl.on = true; _rlgl.running = true; _rlgl.slippery = false;
       _rlgl.light = d.light || 'green';
       _rlgl.pushCd = d.pushCooldownMs || 5000;
+      // Shoving is DISARMED for the first seconds of every round (server
+      // enforces the same window) — stops the start-line massacre.
+      _rlgl.pushArmedAt = Date.now() + (d.pushArmMs || 3000);
       _rlgl.alive = {};
       let meIn = false;
       for (const p of d.players || []) { _rlgl.alive[p.id] = p.alive && !p.finished; if (p.id === socket.id) meIn = true; }
@@ -7274,6 +7277,7 @@
     window._rlglTryPush = (sc) => {
       if (!_rlgl.running || !_rlgl.joined || !_rlgl.meAlive || _rlgl.meFinished) return false;
       const now = Date.now();
+      if (_rlgl.pushArmedAt && now < _rlgl.pushArmedAt) { showToast(`🖐️ Easy! Shoving unlocks in ${Math.ceil((_rlgl.pushArmedAt - now) / 1000)}s…`, 1200); return true; }
       if (now - _rlgl.pushAt < _rlgl.pushCd) { showToast('🖐️ Shove recharging…', 1200); return true; }
       let best = null, bestD = 75 * 75;
       for (const id in _rlgl.alive) {
