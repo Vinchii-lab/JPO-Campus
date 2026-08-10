@@ -12,6 +12,15 @@ false red-light eliminations, and there is no second movement-tracking system to
 Eliminated runners are frozen server-side via `rlglFrozen(socket.id)` right next to the `phFrozen` check.
 A 700ms grace after each red flip forgives in-flight moves (client latency), epsilon 10px ignores jitter.
 
+## Vertical lawn track + phases (owner spec, Aug 2026)
+Arena is the WEST LAWN (tiles 12-19 × 16-95, all Ext grass): runners race DOWNWARD (faces visible), doll at the
+bottom. Doll art semantics for top-down: green = front view (facing away downhill), red = back view w/ red glow.
+Phases escalate by attempt via RLGL_PHASES (CLASSIC → ANGRY DOLL → NARROW PATH halfW strip w/ "path" elimination →
+SUDDEN DEATH: narrower + slippery + rlglFake doll twitches, client-only theater). Coin bait scattered per attempt,
+claimed server-side from validated positions. Boosts (coffee/pizza) fully banned for active runners: item use,
+group-boost receipt, coffee machines, move-budget multiplier, and stripped at attempt start (coffeeBoost
+durationMs:1 = client "off" signal — durationMs:0 falls back to the 45s default!).
+
 ## Tournament rounds (owner spec, Aug 2026)
 Crossing the line only survives the ROUND. 0 finishers → `rlglReplay`, same field revived. 1 finisher → sole
 champion, whole pot. ≥2 finishers → `rlglRound`: non-finishers deleted from members (auto-releases their freeze,

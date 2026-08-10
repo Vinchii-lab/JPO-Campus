@@ -3680,18 +3680,29 @@ function phFinish(found, winnerName, reason) {
 // glide with momentum, so stopping for red light gets dicey. Finishers split
 // the pot via the same guarded additive-payout pattern as After Dark/Bingo.
 // In-memory only: a restart cancels the game harmlessly (nothing was debited).
-const RLGL_ARENA = { x0: 4464, y0: 2130, x1: 6560, y1: 2718 };   // open floor block (tiles 93-137 × 44-56), verified clear
-const RLGL_START_X  = 4560;    // runners line up here (left edge)
-const RLGL_FINISH_X = 6460;    // cross this → survived the round (~1900px run)
-const RLGL_DOLL = { x: 6524, y: 2424 };
+// West lawn (tiles 12-19 × 16-95, all Ext grass, verified clear): runners race
+// DOWNWARD so everyone's face/outfit is visible, doll waits at the bottom.
+const RLGL_ARENA = { x0: 576, y0: 768, x1: 960, y1: 4608 };
+const RLGL_START_Y  = 880;     // runners line up here (top edge)
+const RLGL_FINISH_Y = 4420;    // cross this → survived the round (~3540px run)
+const RLGL_DOLL = { x: 768, y: 4560 };
 const RLGL_JOIN_MS       = Number(process.env.RLGL_JOIN_MS) || 45_000;
 const RLGL_MIN_PLAYERS   = Number(process.env.RLGL_MIN_PLAYERS) || 3;
 const RLGL_ATTEMPT_MS    = 180_000;      // per attempt; timer expiry wipes the field → replay
 const RLGL_PRIZE_MIN = 100, RLGL_PRIZE_MAX = 100_000;
-const RLGL_GREEN_MS = [1_500, 3_500];    // random green window (short — the doll is impatient)
-const RLGL_RED_MS   = [3_000, 6_000];    // random red window
-const RLGL_RED_GRACE_MS = 700;           // latency slack after the doll turns
 const RLGL_MOVE_EPS_PX  = 10;            // drift under this during red is forgiven (jitter)
+// Escalating phases, indexed by attempt (last one repeats forever).
+// halfW = half-width of the legal strip in px (null = full lawn); stepping
+// outside the strip is elimination. fakeouts = the doll twitches during green.
+const RLGL_PHASES = [
+  { name: "CLASSIC",       green: [1_500, 3_500], red: [3_000, 6_000], grace: 700, halfW: null, slippery: false, fakeouts: false },
+  { name: "ANGRY DOLL",    green: [1_000, 2_500], red: [2_500, 5_000], grace: 450, halfW: null, slippery: false, fakeouts: false },
+  { name: "NARROW PATH",   green: [1_000, 2_500], red: [2_500, 5_000], grace: 450, halfW: 96,   slippery: false, fakeouts: false },
+  { name: "SUDDEN DEATH",  green: [900, 2_000],   red: [2_500, 4_500], grace: 400, halfW: 72,   slippery: true,  fakeouts: true  },
+];
+// Coin bait: scattered on the track each attempt — greed drags runners off
+// their safe private lanes and into shove range. House pays.
+const RLGL_COIN_N = 8, RLGL_COIN_VALUE = 25, RLGL_COIN_GRAB_PX = 40;
 const RLGL_PUSH_RANGE_PX = 70, RLGL_PUSH_DIST_PX = 130, RLGL_PUSH_COOLDOWN_MS = 5_000;
 const RLGL_SLIPPERY_AT  = 3;             // ≤3 runners still on the field → slippery floor
 const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on total rounds/replays
@@ -3708,6 +3719,18 @@ function rlglFrozen(id) {
   if (!rlgl || rlgl.state !== "running") return false;
   const m = rlgl.members.get(id);
   return !!m && !m.alive;
+}
+
+function rlglPhaseOf(attempt) {
+  return RLGL_PHASES[Math.min(Math.max(attempt, 1), RLGL_PHASES.length) - 1];
+}
+function rlglPhase() { return rlglPhaseOf(rlgl ? rlgl.attempt : 1); }
+// Legal x-strip for the current phase (the y-extent is always the full lawn).
+function rlglBoundsNow() {
+  const ph = rlglPhase();
+  if (!ph.halfW) return { x0: RLGL_ARENA.x0, x1: RLGL_ARENA.x1 };
+  const cx = (RLGL_ARENA.x0 + RLGL_ARENA.x1) / 2;
+  return { x0: cx - ph.halfW, x1: cx + ph.halfW };
 }
 
 // An alive, not-yet-finished runner in a live round — the subset that the
@@ -3732,7 +3755,7 @@ function rlglCancel(reason) {
   if (!rlgl) return;
   const g = rlgl;
   rlgl = null;
-  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer);
+  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer); clearTimeout(g.fakeTimer);
   io.emit("rlglCancelled", { reason });
   console.log(`RLGL: cancelled (${reason})`);
 }
@@ -3743,23 +3766,40 @@ function rlglCancel(reason) {
 function rlglPlaceAtStart(id, idx) {
   const p = players[id];
   if (!p) return;
+  const b = rlglBoundsNow();
   const lanes = Math.max(rlgl.members.size, 1);
-  const laneH = (RLGL_ARENA.y1 - RLGL_ARENA.y0 - 60) / lanes;
-  p.x = RLGL_START_X;
-  p.y = Math.round(RLGL_ARENA.y0 + 30 + laneH * (idx + 0.5));
-  p.anim = "idle"; p.dir = "right";
+  const laneW = (b.x1 - b.x0 - 40) / lanes;
+  p.x = Math.round(b.x0 + 20 + laneW * (idx + 0.5));
+  p.y = RLGL_START_Y;
+  p.anim = "idle"; p.dir = "down";
   io.to(id).emit("rlglTeleport", { x: p.x, y: p.y });
   io.emit("playerMoved", { id, ...p });
 }
 
+// Sudden-death theater: mid-green the doll TWITCHES like she's turning
+// (client-only animation, the light genuinely stays green — panic stops are
+// their own punishment: pure lost time).
+function rlglScheduleFake() {
+  const ph = rlglPhase();
+  if (!ph.fakeouts || rlgl.light !== "green") return;
+  clearTimeout(rlgl.fakeTimer);
+  rlgl.fakeTimer = setTimeout(() => {
+    if (!rlgl || rlgl.state !== "running" || rlgl.light !== "green") return;
+    io.emit("rlglFake", {});
+  }, 500 + Math.floor(Math.random() * 1_200));
+}
+
 function rlglScheduleLight() {
   if (!rlgl || rlgl.state !== "running") return;
-  const [lo, hi] = rlgl.light === "green" ? RLGL_GREEN_MS : RLGL_RED_MS;
+  const ph = rlglPhase();
+  const [lo, hi] = rlgl.light === "green" ? ph.green : ph.red;
   rlgl.lightTimer = setTimeout(() => {
     if (!rlgl || rlgl.state !== "running") return;
     rlgl.light = rlgl.light === "green" ? "red" : "green";
     if (rlgl.light === "red") rlgl.redAt = Date.now();
-    io.emit("rlglLight", { light: rlgl.light, graceMs: RLGL_RED_GRACE_MS });
+    io.emit("rlglLight", { light: rlgl.light, graceMs: ph.grace });
+    if (rlgl.light === "green") rlglScheduleFake();
+    else clearTimeout(rlgl.fakeTimer);
     rlglScheduleLight();
   }, lo + Math.floor(Math.random() * (hi - lo)));
 }
@@ -3779,8 +3819,17 @@ function rlglStartAttempt() {
   rlgl.replayTimer = null;   // fired (or unused) — a set value now means "between attempts"
   rlgl.light = "green";
   rlgl.redAt = 0;
-  rlgl.slippery = false;
+  const ph = rlglPhaseOf(rlgl.attempt);
+  const bounds = rlglBoundsNow();
+  rlgl.slippery = !!ph.slippery;   // sudden death: iced from the first step
   rlgl.endsAt = Date.now() + RLGL_ATTEMPT_MS;
+  // Scatter the coin bait — random spots on the legal strip, away from the
+  // start and finish so nobody scoops them standing still.
+  rlgl.coins = Array.from({ length: RLGL_COIN_N }, () => ({
+    x: Math.round(bounds.x0 + 25 + Math.random() * (bounds.x1 - bounds.x0 - 50)),
+    y: Math.round(RLGL_START_Y + 250 + Math.random() * (RLGL_FINISH_Y - RLGL_START_Y - 450)),
+    taken: false,
+  }));
   let idx = 0;
   for (const [id, m] of rlgl.members) {
     m.alive = true; m.finished = false;
@@ -3791,16 +3840,20 @@ function rlglStartAttempt() {
     if (p && p.boostUntil) { p.boostUntil = 0; io.emit("coffeeBoost", { id, durationMs: 1, mult: 1 }); }
     rlglPlaceAtStart(id, idx++);
   }
-  clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer);
+  clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.fakeTimer);
   rlgl.attemptTimer = setTimeout(rlglTimeUp, RLGL_ATTEMPT_MS);
   io.emit("rlglBegin", {
     attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
-    arena: RLGL_ARENA, startX: RLGL_START_X, finishX: RLGL_FINISH_X, doll: RLGL_DOLL,
-    players: rlglRoster(), light: "green",
+    phase: { n: Math.min(rlgl.attempt, RLGL_PHASES.length), name: ph.name },
+    arena: RLGL_ARENA, bounds, startY: RLGL_START_Y, finishY: RLGL_FINISH_Y, doll: RLGL_DOLL,
+    players: rlglRoster(), light: "green", slippery: rlgl.slippery,
+    coins: rlgl.coins.map((c, i) => ({ idx: i, x: c.x, y: c.y })), coinValue: RLGL_COIN_VALUE,
     pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS,
   });
+  if (rlgl.slippery) io.emit("rlglSlippery", { on: true });
+  rlglScheduleFake();
   rlglScheduleLight();
-  console.log(`RLGL: attempt ${rlgl.attempt} started with ${rlgl.members.size} runners`);
+  console.log(`RLGL: attempt ${rlgl.attempt} (${ph.name}) started with ${rlgl.members.size} runners`);
 }
 
 function rlglMaybeSlippery() {
@@ -3836,7 +3889,7 @@ function rlglTimeUp() {
 function rlglCheckAttemptEnd() {
   if (!rlgl || rlgl.state !== "running" || rlglRunnersLeft() > 0) return;
   const finishers = [...rlgl.members].filter(([, m]) => m.alive && m.finished);
-  clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer);
+  clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.fakeTimer);
   // Tournament rules (owner's spec, Aug 2026): crossing the line only survives
   // the ROUND. Non-finishers are out for good; finishers race again until ONE
   // player owns the whole pot — unless exactly two are left who have each
@@ -3878,7 +3931,7 @@ async function rlglFinish(finisherPairs) {
   if (!rlgl || rlgl.state === "ending") return;
   const g = rlgl;
   g.state = "ending";
-  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer);
+  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer); clearTimeout(g.fakeTimer);
   const winners = finisherPairs.map(([id, m]) => ({ id, name: m.name, email: m.email || players[id]?.email || null }));
   const each = Math.floor(g.prize / winners.length);
   for (const w of winners) {
@@ -3948,16 +4001,48 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
   if (!rlgl || rlgl.state !== "running") return;
   const m = rlgl.members.get(id);
   if (!m || !m.alive || m.finished) return;
-  // Runaways: an alive runner who leaves the arena forfeits (no hiding in the pantry).
-  if (x < RLGL_ARENA.x0 - 60 || x > RLGL_ARENA.x1 + 60 || y < RLGL_ARENA.y0 - 60 || y > RLGL_ARENA.y1 + 60) {
-    rlglEliminate(id, "fled");
+  const ph = rlglPhase();
+  const b = rlglBoundsNow();
+  // Runaways: leaving the lawn forfeits. In narrow phases the legal strip is
+  // tighter than the lawn — stepping off the path is its own death (no slack:
+  // the borders are drawn on everyone's screen).
+  if (x < b.x0 - (ph.halfW ? 0 : 60) || x > b.x1 + (ph.halfW ? 0 : 60) ||
+      y < RLGL_ARENA.y0 - 60 || y > RLGL_ARENA.y1 + 60) {
+    rlglEliminate(id, ph.halfW && x >= RLGL_ARENA.x0 - 60 && x <= RLGL_ARENA.x1 + 60 ? "path" : "fled");
     return;
   }
-  if (rlgl.light === "red" && now > rlgl.redAt + RLGL_RED_GRACE_MS) {
+  if (rlgl.light === "red" && now > rlgl.redAt + ph.grace) {
     const dx = x - prevX, dy = y - prevY;
     if (dx * dx + dy * dy > RLGL_MOVE_EPS_PX * RLGL_MOVE_EPS_PX) { rlglEliminate(id, "moved"); return; }
   }
-  if (x >= RLGL_FINISH_X) {
+  // Coin bait: grab everything in reach (validated position only).
+  if (rlgl.coins) {
+    for (let i = 0; i < rlgl.coins.length; i++) {
+      const c = rlgl.coins[i];
+      if (c.taken) continue;
+      const cdx = x - c.x, cdy = y - c.y;
+      if (cdx * cdx + cdy * cdy > RLGL_COIN_GRAB_PX * RLGL_COIN_GRAB_PX) continue;
+      c.taken = true;
+      io.emit("rlglCoin", { idx: i, byId: id, byName: m.name, value: RLGL_COIN_VALUE });
+      const p = players[id];
+      if (p) {
+        if (p.email) {
+          pool.query(`UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`,
+            [p.email, RLGL_COIN_VALUE])
+            .then(({ rows }) => {
+              if (rows[0] && players[id] && players[id].email === p.email) {
+                players[id].coins = rows[0].coins;
+                io.to(id).emit("coinUpdate", { coins: rows[0].coins });
+              }
+            }).catch((err) => console.error("RLGL coin payout failed:", err));
+        } else {
+          p.coins += RLGL_COIN_VALUE;
+          io.to(id).emit("coinUpdate", { coins: p.coins });
+        }
+      }
+    }
+  }
+  if (y >= RLGL_FINISH_Y) {
     m.finished = true;
     io.emit("rlglFinished", { id, name: m.name });
     console.log(`RLGL: ${m.name} crossed the finish line`);
@@ -4860,8 +4945,10 @@ io.on("connection", (socket) => {
       } else if (rlgl.state === "running") {
         socket.emit("rlglBegin", {
           attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
-          arena: RLGL_ARENA, startX: RLGL_START_X, finishX: RLGL_FINISH_X, doll: RLGL_DOLL,
-          players: rlglRoster(), light: rlgl.light, spectator: true,
+          phase: { n: Math.min(rlgl.attempt, RLGL_PHASES.length), name: rlglPhase().name },
+          arena: RLGL_ARENA, bounds: rlglBoundsNow(), startY: RLGL_START_Y, finishY: RLGL_FINISH_Y, doll: RLGL_DOLL,
+          players: rlglRoster(), light: rlgl.light, spectator: true, slippery: rlgl.slippery,
+          coins: (rlgl.coins || []).map((c, i) => ({ idx: i, x: c.x, y: c.y, taken: c.taken })).filter((c) => !c.taken), coinValue: RLGL_COIN_VALUE,
           pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS,
         });
         if (rlgl.slippery) socket.emit("rlglSlippery", { on: true });
@@ -4942,21 +5029,24 @@ io.on("connection", (socket) => {
     const dx = tp.x - p.x, dy = tp.y - p.y;
     if (dx * dx + dy * dy > RLGL_PUSH_RANGE_PX * RLGL_PUSH_RANGE_PX) return;
     me.lastPushAt = now;
-    // Shove direction: away from the pusher (normalized), clamped to the arena.
+    // Shove direction: away from the pusher (normalized), clamped to the
+    // legal strip — a shove can't throw the victim off the path (their own
+    // panic-run after the shove does that just fine).
+    const b = rlglBoundsNow();
     const d = Math.max(Math.hypot(dx, dy), 1);
-    tp.x = Math.min(RLGL_ARENA.x1 - 20, Math.max(RLGL_ARENA.x0 + 20, tp.x + (dx / d) * RLGL_PUSH_DIST_PX));
+    tp.x = Math.min(b.x1 - 15, Math.max(b.x0 + 15, tp.x + (dx / d) * RLGL_PUSH_DIST_PX));
     tp.y = Math.min(RLGL_ARENA.y1 - 20, Math.max(RLGL_ARENA.y0 + 20, tp.y + (dy / d) * RLGL_PUSH_DIST_PX));
     tp.x = Math.round(tp.x); tp.y = Math.round(tp.y);
     io.emit("playerMoved", { id: targetId, ...tp });
     io.emit("rlglPushed", { id: targetId, name: tm.name, byId: socket.id, byName: me.name, x: tp.x, y: tp.y });
     console.log(`RLGL: ${me.name} pushed ${tm.name}`);
     // Pushed while the doll is watching → the VICTIM moved. Squid Game rules.
-    if (rlgl.light === "red" && now > rlgl.redAt + RLGL_RED_GRACE_MS) {
+    if (rlgl.light === "red" && now > rlgl.redAt + rlglPhase().grace) {
       rlglEliminate(targetId, "pushed", me.name);
       return;
     }
     // Pushed across the finish line during green → congratulations, I guess.
-    if (tp.x >= RLGL_FINISH_X) {
+    if (tp.y >= RLGL_FINISH_Y) {
       tm.finished = true;
       io.emit("rlglFinished", { id: targetId, name: tm.name });
       rlglMaybeSlippery();

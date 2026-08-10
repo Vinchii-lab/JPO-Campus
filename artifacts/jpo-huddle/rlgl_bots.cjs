@@ -25,7 +25,7 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 function mkBot(cfg) {
   const s = io(URL, { transports: ["websocket"], reconnection: true, reconnectionDelay: 2000 });
   const b = { ...cfg, s, x: 0, y: 0, alive: false, fin: false, light: "green", redAt: 0,
-              stopAt: 0, arena: null, finishX: 0, others: {}, myId: null, lastPush: 0, wobble: 0 };
+              stopAt: 0, arena: null, bounds: null, finishY: 0, others: {}, myId: null, lastPush: 0, wobble: 0 };
 
   s.on("buildStamp", () => s.emit("clientBuild"));
   s.on("connect", () => s.emit("login", { email: cfg.email, password: PW }));
@@ -37,7 +37,7 @@ function mkBot(cfg) {
   s.on("playerMoved", (d) => { if (d && d.id && d.id !== b.myId) b.others[d.id] = { x: d.x, y: d.y, name: d.name }; });
   s.on("playerLeft", (id) => delete b.others[id]);
   s.on("rlglBegin", (d) => {
-    b.arena = d.arena; b.finishX = d.finishX;
+    b.arena = d.arena; b.bounds = d.bounds || d.arena; b.finishY = d.finishY;
     b.roster = {};
     for (const p of d.players || []) b.roster[p.id] = p.alive && !p.finished;
     b.alive = !!b.roster[b.myId]; b.fin = false; b.light = d.light || "green"; b.stopAt = 0;
@@ -59,10 +59,12 @@ function mkBot(cfg) {
     if (!b.alive || b.fin || !b.arena) return;
     const now = Date.now();
     const step = (b.speed * TICK) / 1000;
-    const move = (dx, dy) => {
-      b.x = Math.min(b.finishX + 30, b.x + dx);
-      b.y = Math.max(b.arena.y0 + 30, Math.min(b.arena.y1 - 30, b.y + dy));
-      s.emit("playerMove", { x: b.x, y: b.y, dir: "right", anim: "run" });
+    // Vertical lawn track: forward = +y (downhill), wobble = x, clamped to
+    // the phase's legal strip so bots never step off the narrow path.
+    const move = (fwd, side) => {
+      b.y = Math.min(b.finishY + 30, b.y + fwd);
+      b.x = Math.max(b.bounds.x0 + 25, Math.min(b.bounds.x1 - 25, b.x + side));
+      s.emit("playerMove", { x: b.x, y: b.y, dir: "down", anim: "run" });
     };
     if (b.light === "green") {
       b.wobble += rnd(-0.4, 0.4);
@@ -78,7 +80,7 @@ function mkBot(cfg) {
         if (best && bd <= 65 * 65) { b.lastPush = now; s.emit("rlglPush", { targetId: best.id }); log(cfg.name, "SHOVES", best.name || best.id); return; }
         if (best && bd < 400 * 400) {
           const len = Math.sqrt(bd) || 1;
-          move(((best.x - b.x) / len) * step, ((best.y - b.y) / len) * step);
+          move(((best.y - b.y) / len) * step, ((best.x - b.x) / len) * step);
           return;
         }
       }

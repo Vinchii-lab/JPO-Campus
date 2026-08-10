@@ -6996,7 +6996,9 @@
       _rlgl.fallen.clear();
     }
     function _rlglClearWorld() {
-      for (const k of ['doll', 'lineF', 'lineS']) { try { _rlgl[k]?.destroy(); } catch {} _rlgl[k] = null; }
+      for (const k of ['doll', 'lineF', 'lineS', 'strip0', 'strip1']) { try { _rlgl[k]?.destroy(); } catch {} _rlgl[k] = null; }
+      for (const k in _rlgl.coinSprites || {}) { try { _rlgl.coinSprites[k]?.destroy(); } catch {} }
+      _rlgl.coinSprites = {};
     }
     function _rlglTeardown() {
       _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner();
@@ -7009,11 +7011,28 @@
       const sc = window._gameScene;
       if (!sc || !sc.add) return;
       _rlglClearWorld();
-      const midY = (d.arena.y0 + d.arena.y1) / 2, h = d.arena.y1 - d.arena.y0;
-      _rlgl.lineS = sc.add.rectangle(d.startX,  midY, 6, h, 0xffdd55, 0.5).setDepth(4);
-      _rlgl.lineF = sc.add.rectangle(d.finishX, midY, 8, h, 0x55ff88, 0.65).setDepth(4);
-      const key = (d.light === 'red') ? 'rlgl_doll_front' : 'rlgl_doll_back';
-      const img = sc.textures.get('rlgl_doll_front')?.getSourceImage();
+      // Vertical track on the west lawn: horizontal start & finish lines, the
+      // doll waiting at the bottom. Narrow phases draw the legal strip's rope
+      // borders — step past them and you're out.
+      const b = d.bounds || d.arena;
+      const midX = (d.arena.x0 + d.arena.x1) / 2, w = d.arena.x1 - d.arena.x0;
+      _rlgl.lineS = sc.add.rectangle(midX, d.startY,  w, 6, 0xffdd55, 0.5).setDepth(4);
+      _rlgl.lineF = sc.add.rectangle(midX, d.finishY, w, 8, 0x55ff88, 0.65).setDepth(4);
+      if (b.x0 > d.arena.x0 + 1) {
+        const midY = (d.startY + d.finishY) / 2, h = d.finishY - d.startY + 120;
+        _rlgl.strip0 = sc.add.rectangle(b.x0, midY, 5, h, 0xff4a4a, 0.75).setDepth(4);
+        _rlgl.strip1 = sc.add.rectangle(b.x1, midY, 5, h, 0xff4a4a, 0.75).setDepth(4);
+      }
+      // Keyed by the coin's SERVER index (stable across resyncs — a reconnect
+      // mid-attempt only receives unclaimed coins, but claim events still
+      // carry the original idx).
+      _rlgl.coinSprites = {};
+      for (let i = 0; i < (d.coins || []).length; i++) {
+        const c = d.coins[i];
+        _rlgl.coinSprites[c.idx ?? i] = sc.add.text(c.x, c.y, '🪙', { fontSize: '22px' }).setOrigin(0.5).setDepth(5);
+      }
+      const key = (d.light === 'red') ? 'rlgl_doll_red' : 'rlgl_doll_green';
+      const img = sc.textures.get('rlgl_doll_red')?.getSourceImage();
       const scale = img ? 300 / img.height : 0.3;
       _rlgl.doll = sc.add.image(d.doll.x, d.doll.y + 130, key).setOrigin(0.5, 1).setScale(scale).setDepth(9000);
     }
@@ -7063,25 +7082,44 @@
       const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
       _rlglUnfallAll();
       _rlglSpawnWorld(d);
+      const phaseTag = d.phase ? `PHASE ${d.phase.n} — ${d.phase.name}` : `attempt ${d.attempt}`;
+      const phaseHint = d.phase && d.phase.name === 'NARROW PATH' ? ' ⚠️ Stay INSIDE the red ropes!' :
+                        d.phase && d.phase.name === 'SUDDEN DEATH' ? ' ⚠️ Red ropes + ICE + she FAKES turns!' : '';
       _rlglBanner(
-        `🚦 RED LIGHT, GREEN LIGHT — attempt ${d.attempt}<br>` +
-        `<span style="font-size:13px;font-weight:600;">${meIn ? 'Run on GREEN, freeze on RED. Cross the line to survive the round — last one standing takes the WHOLE pot! Press <b>F</b> to SHOVE. 😈' : 'Spectating — watch the field!'}</span>`,
+        `🚦 RED LIGHT, GREEN LIGHT — <span style="color:#ffd24a;">${phaseTag}</span><br>` +
+        `<span style="font-size:13px;font-weight:600;">${meIn ? 'RUN DOWN on GREEN, freeze on RED. Grab 🪙 on the way. Press <b>F</b> to SHOVE. 😈' + phaseHint : 'Spectating — watch the lawn!'}</span>`,
         6000);
     });
     socket.on('rlglLight', (d = {}) => {
       if (!_rlgl.running) return;
       _rlgl.light = d.light;
       const sc = window._gameScene;
-      if (_rlgl.doll && sc) _rlgl.doll.setTexture(d.light === 'red' ? 'rlgl_doll_front' : 'rlgl_doll_back');
+      if (_rlgl.doll && sc) _rlgl.doll.setTexture(d.light === 'red' ? 'rlgl_doll_red' : 'rlgl_doll_green');
       if (d.light === 'red') _rlglBanner(`<span style="color:#ff5a5a;">🔴 RED LIGHT — FREEZE!</span>`);
       else _rlglBanner(`<span style="color:#7be08a;">🟢 GREEN LIGHT — RUN!</span>`);
+    });
+    socket.on('rlglFake', () => {
+      // Sudden-death theater: she twitches but does NOT turn — light stays
+      // green. Anyone who panic-stops just loses ground.
+      if (!_rlgl.running || !_rlgl.doll) return;
+      _rlgl.doll.setTexture('rlgl_doll_red');
+      _rlglBanner(`<span style="color:#ffb84a;">😱 SHE TWITCHED…!</span>`, 700);
+      setTimeout(() => {
+        if (_rlgl.running && _rlgl.doll && _rlgl.light === 'green') _rlgl.doll.setTexture('rlgl_doll_green');
+      }, 350);
+    });
+    socket.on('rlglCoin', (d = {}) => {
+      const s = (_rlgl.coinSprites || {})[d.idx];
+      if (s) { try { s.destroy(); } catch {} delete _rlgl.coinSprites[d.idx]; }
+      if (d.byId === socket.id) showToast(`🪙 +${d.value} coins — greed pays!`, 2500);
     });
     socket.on('rlglOut', (d = {}) => {
       _rlgl.alive[d.id] = false;
       if (d.cause !== 'left') _rlglFall(d.id);
       const causeTxt = d.cause === 'pushed' ? `pushed by ${d.byName}` :
                        d.cause === 'moved'  ? 'moved on red light' :
-                       d.cause === 'fled'   ? 'ran off the field' :
+                       d.cause === 'fled'   ? 'ran off the lawn' :
+                       d.cause === 'path'   ? 'stepped off the path' :
                        d.cause === 'time'   ? "time's up" : 'left';
       if (d.id === socket.id) {
         window._rlglFrozenMe = true;
@@ -9940,8 +9978,8 @@
         // cooler, drawn against the north wall. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
         // Red Light Green Light: the doll's two poses (back turned / watching).
-        this.load.image('rlgl_doll_back',  '/assets/rlgl_doll_back.png');
-        this.load.image('rlgl_doll_front', '/assets/rlgl_doll_front.png');
+        this.load.image('rlgl_doll_green', '/assets/rlgl_doll_green.png');   // facing away downhill — safe to run
+        this.load.image('rlgl_doll_red',   '/assets/rlgl_doll_red.png');     // back of head + red glow — she's WATCHING
         // Gym animation strips (LimeZu): bag sway + punch, treadmill belt.
         // Bag frames are 32px wide but the bag art fills only the LEFT 16px
         // column (the right half is sway room); treadmill frames carry 2px of
