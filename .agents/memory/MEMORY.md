@@ -14,4 +14,6 @@
 - [JPO Huddle Prop Hunt / hidden-player rounds](jpo-huddle-prophunt.md) — client-side sprite hiding is NOT secrecy: mask every snapshot, suppress broadcasts, block position-leaking items; mutual exclusion with other rounds.
 - [JPO Huddle map furniture ID](jpo-huddle-map-furniture.md) — confirm a GID by cropping the tileset tile with magick before anchoring a station; known plant/sofa/whiteboard/kettlebell GIDs.
 - [JPO Huddle Deal or No Deal](jpo-huddle-dealornodeal.md) — owner-only hosting; "revealing" state blocks offers mid-reveal; single-attempt payouts (no double-pay); test on isolated PORT instance.
+- [JPO Huddle HR quiz NPC](jpo-huddle-hr-quiz.md) — Ms. Poli daily AI-graded quiz: typed answers, per-day claim gating, echo player's answer back on wrong.
+- [JPO Huddle Red Light Green Light](jpo-huddle-rlgl.md) — red-light detection rides validated playerMove; replay-until-survivor limbo flag; finishers survive refresh (email-keyed payout).
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.

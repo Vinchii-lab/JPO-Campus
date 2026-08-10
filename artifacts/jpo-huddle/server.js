@@ -229,6 +229,7 @@ app.post("/admin/purge", express.json(), async (req, res) => {
       // it before/after the players[] delete both work; order matches
       // dropLiveByEmail (delete first is fine).
       roundHandleLeave(id);
+      rlglHandleLeave(id);
       delete players[id];
       io.to(id).emit("kicked");
       io.emit("playerLeft", id);
@@ -2396,6 +2397,7 @@ function dropLiveByEmail(email, exceptId) {
     // which rebinds the round spot. Paths with NO successor restore must call
     // roundLeaveGoneByEmail themselves (password reset, pending-queue exits).
     if (!roundDeferLeave(id)) roundHandleLeave(id);
+    rlglHandleLeave(id);
     if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
@@ -3667,6 +3669,249 @@ function phFinish(found, winnerName, reason) {
   propHunt = null;
 }
 
+// ── Red Light, Green Light (the doll game) ──────────────────────────────
+// Admin-started from F8 Events. Players join a lobby, get teleported to the
+// start line of a big open-floor arena, and race to the finish while a giant
+// doll turns around: moving during RED LIGHT (validated server-side off the
+// same playerMove pipeline as anti-cheat) eliminates you on the spot. Pushing
+// (rlglPush) shoves a nearby runner forward — during red light that's murder.
+// If NOBODY reaches the finish, the same game replays until someone survives
+// (owner request). When few runners remain, the floor turns SLIPPERY: clients
+// glide with momentum, so stopping for red light gets dicey. Finishers split
+// the pot via the same guarded additive-payout pattern as After Dark/Bingo.
+// In-memory only: a restart cancels the game harmlessly (nothing was debited).
+const RLGL_ARENA = { x0: 4464, y0: 2130, x1: 6260, y1: 2718 };   // open floor block (tiles 93-130 × 44-56), verified clear
+const RLGL_START_X  = 4560;    // runners line up here (left edge)
+const RLGL_FINISH_X = 6100;    // cross this → survived
+const RLGL_DOLL = { x: 6210, y: 2424 };
+const RLGL_JOIN_MS       = Number(process.env.RLGL_JOIN_MS) || 45_000;
+const RLGL_MIN_PLAYERS   = Number(process.env.RLGL_MIN_PLAYERS) || 3;
+const RLGL_ATTEMPT_MS    = 180_000;      // per attempt; timer expiry wipes the field → replay
+const RLGL_PRIZE_MIN = 100, RLGL_PRIZE_MAX = 100_000;
+const RLGL_GREEN_MS = [2_000, 5_000];    // random green window
+const RLGL_RED_MS   = [3_000, 6_000];    // random red window
+const RLGL_RED_GRACE_MS = 700;           // latency slack after the doll turns
+const RLGL_MOVE_EPS_PX  = 10;            // drift under this during red is forgiven (jitter)
+const RLGL_PUSH_RANGE_PX = 70, RLGL_PUSH_DIST_PX = 130, RLGL_PUSH_COOLDOWN_MS = 5_000;
+const RLGL_SLIPPERY_AT  = 3;             // ≤3 runners still on the field → slippery floor
+const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on "until someone survives"
+let rlgl = null;
+// { state:'joining'|'running'|'ending', prize, starterName, attempt,
+//   members: Map<socketId,{name,email,alive,finished,lastPushAt}>,
+//   light:'green'|'red', redAt, slippery,
+//   joinTimer, joinEndsAt, lightTimer, attemptTimer, endsAt, replayTimer }
+
+// Eliminated runners lie where they fell until the attempt ends — the server
+// rejects their movement outright (a body that walks off ruins the drama).
+function rlglFrozen(id) {
+  if (!rlgl || rlgl.state !== "running") return false;
+  const m = rlgl.members.get(id);
+  return !!m && !m.alive;
+}
+
+function rlglRunnersLeft() {
+  let n = 0;
+  for (const m of rlgl.members.values()) if (m.alive && !m.finished) n++;
+  return n;
+}
+
+function rlglRoster() {
+  return [...rlgl.members].map(([id, m]) => ({ id, name: m.name, alive: m.alive, finished: m.finished }));
+}
+
+function rlglCancel(reason) {
+  if (!rlgl) return;
+  const g = rlgl;
+  rlgl = null;
+  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer);
+  io.emit("rlglCancelled", { reason });
+  console.log(`RLGL: cancelled (${reason})`);
+}
+
+// Teleport a member to the start line (join + every replay). The server owns
+// the position; the member's own client snaps via rlglTeleport, everyone else
+// syncs through the ordinary playerMoved broadcast.
+function rlglPlaceAtStart(id, idx) {
+  const p = players[id];
+  if (!p) return;
+  const lanes = Math.max(rlgl.members.size, 1);
+  const laneH = (RLGL_ARENA.y1 - RLGL_ARENA.y0 - 60) / lanes;
+  p.x = RLGL_START_X;
+  p.y = Math.round(RLGL_ARENA.y0 + 30 + laneH * (idx + 0.5));
+  p.anim = "idle"; p.dir = "right";
+  io.to(id).emit("rlglTeleport", { x: p.x, y: p.y });
+  io.emit("playerMoved", { id, ...p });
+}
+
+function rlglScheduleLight() {
+  if (!rlgl || rlgl.state !== "running") return;
+  const [lo, hi] = rlgl.light === "green" ? RLGL_GREEN_MS : RLGL_RED_MS;
+  rlgl.lightTimer = setTimeout(() => {
+    if (!rlgl || rlgl.state !== "running") return;
+    rlgl.light = rlgl.light === "green" ? "red" : "green";
+    if (rlgl.light === "red") rlgl.redAt = Date.now();
+    io.emit("rlglLight", { light: rlgl.light, graceMs: RLGL_RED_GRACE_MS });
+    rlglScheduleLight();
+  }, lo + Math.floor(Math.random() * (hi - lo)));
+}
+
+function rlglStartAttempt() {
+  if (!rlgl) return;
+  // Drop members whose player entry vanished between attempts.
+  for (const id of [...rlgl.members.keys()]) if (!players[id]) rlgl.members.delete(id);
+  if (rlgl.members.size < 2) { rlglCancel("Not enough players left on the field."); return; }
+  rlgl.state = "running";
+  rlgl.replayTimer = null;   // fired (or unused) — a set value now means "between attempts"
+  rlgl.light = "green";
+  rlgl.redAt = 0;
+  rlgl.slippery = false;
+  rlgl.endsAt = Date.now() + RLGL_ATTEMPT_MS;
+  let idx = 0;
+  for (const [id, m] of rlgl.members) { m.alive = true; m.finished = false; rlglPlaceAtStart(id, idx++); }
+  clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer);
+  rlgl.attemptTimer = setTimeout(rlglTimeUp, RLGL_ATTEMPT_MS);
+  io.emit("rlglBegin", {
+    attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
+    arena: RLGL_ARENA, startX: RLGL_START_X, finishX: RLGL_FINISH_X, doll: RLGL_DOLL,
+    players: rlglRoster(), light: "green",
+    pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS,
+  });
+  rlglScheduleLight();
+  console.log(`RLGL: attempt ${rlgl.attempt} started with ${rlgl.members.size} runners`);
+}
+
+function rlglMaybeSlippery() {
+  if (!rlgl || rlgl.state !== "running" || rlgl.slippery) return;
+  const left = rlglRunnersLeft();
+  if (left > 0 && left <= RLGL_SLIPPERY_AT && rlgl.members.size > RLGL_SLIPPERY_AT) {
+    rlgl.slippery = true;
+    io.emit("rlglSlippery", { on: true });
+    console.log("RLGL: floor is now SLIPPERY");
+  }
+}
+
+function rlglEliminate(id, cause, byName) {
+  const m = rlgl?.members.get(id);
+  if (!m || !m.alive || m.finished) return;
+  m.alive = false;
+  const p = players[id];
+  io.emit("rlglOut", {
+    id, name: m.name, cause, byName: byName || null,
+    x: p ? Math.round(p.x) : 0, y: p ? Math.round(p.y) : 0,
+  });
+  console.log(`RLGL: ${m.name} eliminated (${cause}${byName ? ` by ${byName}` : ""})`);
+  rlglMaybeSlippery();
+  rlglCheckAttemptEnd();
+}
+
+function rlglTimeUp() {
+  if (!rlgl || rlgl.state !== "running") return;
+  for (const [id, m] of rlgl.members) if (m.alive && !m.finished) rlglEliminate(id, "time");
+  // rlglEliminate → rlglCheckAttemptEnd handles the rest (replay: nobody finished).
+}
+
+function rlglCheckAttemptEnd() {
+  if (!rlgl || rlgl.state !== "running" || rlglRunnersLeft() > 0) return;
+  const finishers = [...rlgl.members].filter(([, m]) => m.alive && m.finished);
+  if (finishers.length > 0) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
+  // NOBODY survived → same game again, everyone revived (owner's rule).
+  if (rlgl.attempt >= RLGL_MAX_ATTEMPTS) { rlglCancel("Twenty rounds and NOBODY survived. The doll wins. No payout."); return; }
+  rlgl.attempt++;
+  clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer);
+  rlgl.state = "joining";   // brief limbo so red-light checks stop during the reset
+  io.emit("rlglReplay", { attempt: rlgl.attempt });
+  rlgl.replayTimer = setTimeout(rlglStartAttempt, 4_000);
+  console.log(`RLGL: nobody survived — replaying (attempt ${rlgl.attempt})`);
+}
+
+// SYNCHRONOUS state flip before any await — same double-settle discipline as
+// endRound. Winner identities snapshotted before the payout SQL.
+async function rlglFinish(finisherPairs) {
+  if (!rlgl || rlgl.state !== "running") return;
+  const g = rlgl;
+  g.state = "ending";
+  clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer);
+  const winners = finisherPairs.map(([id, m]) => ({ id, name: m.name, email: m.email || players[id]?.email || null }));
+  const each = Math.floor(g.prize / winners.length);
+  for (const w of winners) {
+    try {
+      if (w.email) {
+        const { rows } = await pool.query(
+          `UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins`,
+          [w.email, each],
+        );
+        const p = players[w.id];
+        if (rows[0] && p && p.email === w.email) {
+          p.coins = rows[0].coins;
+          io.to(w.id).emit("coinUpdate", { coins: p.coins });
+        }
+      } else {
+        const p = players[w.id];
+        if (p) { p.coins += each; io.to(w.id).emit("coinUpdate", { coins: p.coins }); }
+      }
+    } catch (err) { console.error("RLGL payout failed:", err); }
+  }
+  io.emit("rlglEnd", { winners: winners.map((w) => w.name), each, prize: g.prize, attempt: g.attempt });
+  if (rlgl === g) rlgl = null;
+  console.log(`RLGL: over after attempt ${g.attempt} — ${winners.length} survivor(s) × ${each} coins`);
+}
+
+// Leave seam — hooked into the same places as roundHandleLeave (disconnect,
+// kickPlayer, dropLiveByEmail, purge). No grace: a refresh mid-doll-game is
+// an elimination-by-cowardice, which everyone agrees is funnier.
+function rlglHandleLeave(id) {
+  if (!rlgl || !rlgl.members.has(id)) return;
+  if (rlgl.state === "ending") return;   // settlement stands
+  const m = rlgl.members.get(id);
+  // A FINISHER already crossed the line — a refresh/blip must not void their
+  // prize. Keep the member row: the payout is keyed by email (same offline-
+  // winner path as After Dark), so it pays even if they never reconnect.
+  // (Replays only happen when there are ZERO finishers, so a kept finisher
+  // can never be revived onto the field with a dead socket.)
+  if (rlgl.state === "running" && m.finished && m.alive && m.email) return;
+  rlgl.members.delete(id);
+  if (rlgl.state === "joining") {
+    if (rlgl.replayTimer) {
+      // Between attempts (nobody-survived limbo): no lobby UI to refresh —
+      // just make sure the replay still has a field worth restarting.
+      if (rlgl.members.size < 2) rlglCancel("Not enough players left on the field.");
+      return;
+    }
+    io.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
+    if (rlgl.members.size === 0) rlglCancel("Everyone left before the game began.");
+    return;
+  }
+  io.emit("rlglOut", { id, name: m.name, cause: "left", byName: null, x: 0, y: 0 });
+  rlglMaybeSlippery();
+  rlglCheckAttemptEnd();
+}
+
+// Post-move hook, called from playerMove AFTER a move passes anti-cheat.
+// Red-light detection rides the validated pipeline: a modified client that
+// skips sending moves also never moves server-side, so there is nothing to
+// catch — the authoritative position simply stays put.
+function rlglOnMove(id, prevX, prevY, x, y, now) {
+  if (!rlgl || rlgl.state !== "running") return;
+  const m = rlgl.members.get(id);
+  if (!m || !m.alive || m.finished) return;
+  // Runaways: an alive runner who leaves the arena forfeits (no hiding in the pantry).
+  if (x < RLGL_ARENA.x0 - 60 || x > RLGL_ARENA.x1 + 60 || y < RLGL_ARENA.y0 - 60 || y > RLGL_ARENA.y1 + 60) {
+    rlglEliminate(id, "fled");
+    return;
+  }
+  if (rlgl.light === "red" && now > rlgl.redAt + RLGL_RED_GRACE_MS) {
+    const dx = x - prevX, dy = y - prevY;
+    if (dx * dx + dy * dy > RLGL_MOVE_EPS_PX * RLGL_MOVE_EPS_PX) { rlglEliminate(id, "moved"); return; }
+  }
+  if (x >= RLGL_FINISH_X) {
+    m.finished = true;
+    io.emit("rlglFinished", { id, name: m.name });
+    console.log(`RLGL: ${m.name} crossed the finish line`);
+    rlglMaybeSlippery();
+    rlglCheckAttemptEnd();
+  }
+}
+
 // Roster sent to EVERY participant (ids/names/alive are not secret — clients
 // need it for the kill affordance, 💀 flashes, and spectator rendering).
 // Grace-window ghosts (members marked `gone`) stay listed on purpose: their
@@ -4289,6 +4534,7 @@ io.on("connection", (socket) => {
     if (propHunt) { socket.emit("phResult", { ok: false, message: "A Hide & Seek round is already running." }); return; }
     if (round)    { socket.emit("phResult", { ok: false, message: "Office After Dark is running — wait for it to finish." }); return; }
     if (deal)     { socket.emit("phResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
+    if (rlgl)     { socket.emit("phResult", { ok: false, message: "Red Light Green Light is running — wait for the doll to finish." }); return; }
     const disguise = String(payload?.disguise || "");
     if (!PH_DISGUISES.has(disguise)) { socket.emit("phResult", { ok: false, message: "Pick a disguise first." }); return; }
     const hideSecs = Math.min(300,  Math.max(5,  Math.round(Number(payload?.hideSecs)) || 60));
@@ -4552,6 +4798,116 @@ io.on("connection", (socket) => {
     } else {
       socket.emit("dealOver", {});
     }
+    // Red Light Green Light resync: rebuild the doll/arena for reconnecting
+    // spectators, or clear a dead overlay after a server restart mid-game.
+    if (rlgl) {
+      if (rlgl.state === "joining" && !rlgl.replayTimer) {
+        socket.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
+      } else if (rlgl.state === "running") {
+        socket.emit("rlglBegin", {
+          attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
+          arena: RLGL_ARENA, startX: RLGL_START_X, finishX: RLGL_FINISH_X, doll: RLGL_DOLL,
+          players: rlglRoster(), light: rlgl.light, spectator: true,
+          pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS,
+        });
+        if (rlgl.slippery) socket.emit("rlglSlippery", { on: true });
+      }
+    } else {
+      socket.emit("rlglOver", {});
+    }
+  });
+
+  // ── Admin: Red Light, Green Light ─────────────────────────────────────
+  socket.on("adminRlglStart", (payload) => {
+    if (!admins.has(socket.id)) return;
+    if (rlgl)     { socket.emit("adminRlglResult", { ok: false, message: "A doll game is already running." }); return; }
+    if (bingo)    { socket.emit("adminRlglResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
+    if (round)    { socket.emit("adminRlglResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
+    if (propHunt) { socket.emit("adminRlglResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
+    if (deal)     { socket.emit("adminRlglResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
+    const prize = Math.round(Number(payload?.prize));
+    if (!Number.isSafeInteger(prize) || prize < RLGL_PRIZE_MIN || prize > RLGL_PRIZE_MAX) {
+      socket.emit("adminRlglResult", { ok: false, message: `Prize must be ${RLGL_PRIZE_MIN}–${RLGL_PRIZE_MAX.toLocaleString()} coins.` });
+      return;
+    }
+    rlgl = {
+      state: "joining", prize, starterName: players[socket.id]?.name || "an admin",
+      attempt: 1, members: new Map(), light: "green", redAt: 0, slippery: false,
+      joinEndsAt: Date.now() + RLGL_JOIN_MS,
+      joinTimer: setTimeout(() => {
+        if (!rlgl || rlgl.state !== "joining") return;
+        for (const id of [...rlgl.members.keys()]) if (!players[id]) rlgl.members.delete(id);
+        if (rlgl.members.size < RLGL_MIN_PLAYERS) { rlglCancel(`Not enough players — it takes at least ${RLGL_MIN_PLAYERS} to face the doll.`); return; }
+        rlglStartAttempt();
+      }, RLGL_JOIN_MS),
+      lightTimer: null, attemptTimer: null, replayTimer: null, endsAt: 0,
+    };
+    io.emit("rlglLobby", { prize, count: 0, msLeft: RLGL_JOIN_MS });
+    socket.emit("adminRlglResult", { ok: true, message: `Doll game announced — ${prize.toLocaleString()} coin pot, ${RLGL_JOIN_MS / 1000}s to join. Survivors split it.` });
+    logAdmin(socket, "Red Light Green Light started", `Pot ${prize.toLocaleString()} coins`);
+    console.log(`ADMIN RLGL start: pot ${prize}`);
+  });
+  socket.on("adminRlglCancel", () => {
+    if (!admins.has(socket.id) || !rlgl) return;
+    if (rlgl.state === "ending") return;
+    rlglCancel("The office called the game off.");
+    logAdmin(socket, "Red Light Green Light cancelled", "");
+    socket.emit("adminRlglResult", { ok: true, message: "Doll game cancelled." });
+  });
+
+  socket.on("rlglJoin", () => {
+    const p = players[socket.id];
+    if (!p || !rlgl || rlgl.state !== "joining" || rlgl.replayTimer) return;
+    if (!takeToken(interactBucket)) return;
+    if (rlgl.members.has(socket.id)) return;
+    // One live socket per email in the game (mirror of bingo's email keying).
+    if (p.email) for (const m of rlgl.members.values()) if (m.email === p.email) return;
+    rlgl.members.set(socket.id, { name: p.name, email: p.email || null, alive: true, finished: false, lastPushAt: 0 });
+    rlglPlaceAtStart(socket.id, rlgl.members.size - 1);
+    io.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
+    socket.emit("rlglYouIn", {});
+    console.log(`RLGL join: ${p.name} (${rlgl.members.size} in)`);
+  });
+
+  // The shove. Alive runner shoves another alive runner within range: victim
+  // is displaced server-side (authoritative — anti-cheat unaffected), gets a
+  // red flash client-side, and if the doll is watching… that's on the pusher's
+  // conscience. Publicly credited, cooldown-gated.
+  socket.on("rlglPush", (payload) => {
+    if (!rlgl || rlgl.state !== "running") return;
+    const me = rlgl.members.get(socket.id);
+    const p = players[socket.id];
+    if (!me || !p || !me.alive || me.finished) return;
+    const now = Date.now();
+    if (now - me.lastPushAt < RLGL_PUSH_COOLDOWN_MS) return;
+    const targetId = payload?.targetId;
+    if (typeof targetId !== "string" || targetId === socket.id) return;
+    const tm = rlgl.members.get(targetId);
+    const tp = players[targetId];
+    if (!tm || !tp || !tm.alive || tm.finished) return;
+    const dx = tp.x - p.x, dy = tp.y - p.y;
+    if (dx * dx + dy * dy > RLGL_PUSH_RANGE_PX * RLGL_PUSH_RANGE_PX) return;
+    me.lastPushAt = now;
+    // Shove direction: away from the pusher (normalized), clamped to the arena.
+    const d = Math.max(Math.hypot(dx, dy), 1);
+    tp.x = Math.min(RLGL_ARENA.x1 - 20, Math.max(RLGL_ARENA.x0 + 20, tp.x + (dx / d) * RLGL_PUSH_DIST_PX));
+    tp.y = Math.min(RLGL_ARENA.y1 - 20, Math.max(RLGL_ARENA.y0 + 20, tp.y + (dy / d) * RLGL_PUSH_DIST_PX));
+    tp.x = Math.round(tp.x); tp.y = Math.round(tp.y);
+    io.emit("playerMoved", { id: targetId, ...tp });
+    io.emit("rlglPushed", { id: targetId, name: tm.name, byId: socket.id, byName: me.name, x: tp.x, y: tp.y });
+    console.log(`RLGL: ${me.name} pushed ${tm.name}`);
+    // Pushed while the doll is watching → the VICTIM moved. Squid Game rules.
+    if (rlgl.light === "red" && now > rlgl.redAt + RLGL_RED_GRACE_MS) {
+      rlglEliminate(targetId, "pushed", me.name);
+      return;
+    }
+    // Pushed across the finish line during green → congratulations, I guess.
+    if (tp.x >= RLGL_FINISH_X) {
+      tm.finished = true;
+      io.emit("rlglFinished", { id: targetId, name: tm.name });
+      rlglMaybeSlippery();
+      rlglCheckAttemptEnd();
+    }
   });
 
   // ── Admin: Office Bingo ───────────────────────────────────────────────
@@ -4561,6 +4917,7 @@ io.on("connection", (socket) => {
     if (round) { socket.emit("adminBingoResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("adminBingoResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
     if (deal) { socket.emit("adminBingoResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
+    if (rlgl) { socket.emit("adminBingoResult", { ok: false, message: "Red Light Green Light is running — wait for the doll to finish." }); return; }
     const prize = Math.round(Number(payload?.prize));
     if (!Number.isSafeInteger(prize) || prize < BINGO_PRIZE_MIN || prize > BINGO_PRIZE_MAX) {
       socket.emit("adminBingoResult", { ok: false, message: `Prize must be ${BINGO_PRIZE_MIN}–${BINGO_PRIZE_MAX.toLocaleString()} coins.` });
@@ -4693,6 +5050,7 @@ io.on("connection", (socket) => {
     if (bingo)    { socket.emit("ownerDealResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
     if (round)    { socket.emit("ownerDealResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("ownerDealResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
+    if (rlgl)     { socket.emit("ownerDealResult", { ok: false, message: "Red Light Green Light is running — wait for the doll to finish." }); return; }
     const jackpot = Math.round(Number(payload?.jackpot));
     if (!Number.isSafeInteger(jackpot) || jackpot < DEAL_JACKPOT_MIN || jackpot > DEAL_JACKPOT_MAX) {
       socket.emit("ownerDealResult", { ok: false, message: `Jackpot must be ${DEAL_JACKPOT_MIN}–${DEAL_JACKPOT_MAX.toLocaleString()} coins.` });
@@ -5046,6 +5404,7 @@ io.on("connection", (socket) => {
     // match is a forfeit: being kicked mid-match pays the opponent).
     forfeitMatchForLeave(targetId);
     roundHandleLeave(targetId);
+    rlglHandleLeave(targetId);
     delete players[targetId];
     io.to(targetId).emit("kicked");
     io.emit("playerLeft", targetId);
@@ -5135,6 +5494,8 @@ io.on("connection", (socket) => {
     // hides; the hider is furniture (immobile) once the hunt begins. Dropped
     // server-side so a modified client can't wander early.
     if (phFrozen(socket.id)) return;
+    // RLGL: eliminated runners lie where they fell until the attempt ends.
+    if (rlglFrozen(socket.id)) return;
 
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
@@ -5196,12 +5557,16 @@ io.on("connection", (socket) => {
       if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return; }   // teleport / speed hack (silently dropped)
     }
 
+    const rlglPrevX = me.x, rlglPrevY = me.y;
     me.x = x; me.y = y;
     if (typeof data.dir === "string") me.dir = data.dir;
     me.anim = data.anim;
     wasSitting = sitting;
     lastMoveAt = now;
     if (LT_METRICS) ltState.mvOk++;
+    // Red Light Green Light rides the validated pipeline: the move was already
+    // accepted as legit, so red-light detection can't false-positive off junk.
+    rlglOnMove(socket.id, rlglPrevX, rlglPrevY, x, y, now);
     // Prop Hunt secrecy: the hider's live position is never broadcast while a
     // round runs — the server tracks it (me.x/me.y above), everyone else only
     // ever learns the prop's frozen spot from phHunt.
@@ -7470,6 +7835,7 @@ io.on("connection", (socket) => {
     if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (propHunt) { socket.emit("roundError", { message: "Hide & Seek is running — wait for it to finish!" }); return; }
     if (deal)     { socket.emit("roundError", { message: "Deal or No Deal is running — wait for the show to end!" }); return; }
+    if (rlgl)     { socket.emit("roundError", { message: "Red Light Green Light is running — wait for the doll to finish!" }); return; }
     if (round) {
       socket.emit("roundError", {
         message: round.state === "joining" ? "A round is already gathering — join that one!" : "A round is already in progress.",
@@ -7573,6 +7939,7 @@ io.on("connection", (socket) => {
     // grace timer below expires (which then applies the leave rules) or a
     // resume rebinds it (restorePlayer). Everyone else leaves immediately.
     if (!roundDeferLeave(socket.id)) roundHandleLeave(socket.id);
+    rlglHandleLeave(socket.id);
     // Prop Hunt: the hider leaving ends the round (nothing left to find);
     // seekers just drop out, and an empty hunt ends early.
     if (propHunt) {

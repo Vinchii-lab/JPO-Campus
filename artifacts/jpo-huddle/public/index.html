@@ -2227,6 +2227,17 @@
         </div>
         <div id="op-bingo-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
       </div>
+      <div class="owner-section" data-otab="events">
+        <h3>🚦 Red Light, Green Light</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">The doll game, on the big open floor: 45s to join, runners race the field while the giant doll turns around — move during RED LIGHT and you're OUT where you stand. Players can SHOVE each other (F key). Nobody survives? The same game replays until someone does. When only a few remain, the floor turns slippery. Survivors split the pot — house pays, free to join, needs 3+.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="op-rlgl-prize" type="number" min="100" max="100000" step="100" value="2000" placeholder="Pot (coins)"
+                 style="width:120px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-approve" onclick="ownerStartRlgl()">Start the doll game</button>
+          <button class="o-btn o-btn-reject" onclick="ownerRlglCancel()">Cancel game</button>
+        </div>
+        <div id="op-rlgl-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
       <div class="owner-section" data-otab="events" id="op-owner-deal" style="display:none;">
         <h3>💼 Deal or No Deal <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">The Vince Show, real-show rules: 16 briefcases, one holds the jackpot. The office votes cases open in rounds of 5 → 4 → 3 → 2 → 1. After every round the Banker's phone rings — that's YOU: make a per-player offer (from the gold controls inside the game panel) or skip. They vote DEAL or NO DEAL (majority of all players). Ride to the last case and its value splits between everyone. House pays, free to join, 60s lobby, needs 2+ players.</p>
@@ -6923,6 +6934,219 @@
     // this script's scope, so raw onclick="socket.emit(...)" silently fails.
     window.ownerBingoCall   = () => socket.emit('adminBingoCall');
     window.ownerBingoCancel = () => socket.emit('adminBingoCancel');
+
+    // ── Red Light, Green Light: F8 controls ─────────────────────────────
+    window.ownerStartRlgl = () => {
+      const prize = Math.round(Number(document.getElementById('op-rlgl-prize').value));
+      socket.emit('adminRlglStart', { prize });
+    };
+    window.ownerRlglCancel = () => socket.emit('adminRlglCancel');
+    socket.on('adminRlglResult', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-rlgl-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+    });
+
+    // ── Red Light, Green Light: game client ─────────────────────────────
+    // All UI is built here (no static markup): a top banner, the join card,
+    // and a full-screen red hit-flash. World objects (doll, lines) live on
+    // the Phaser scene and are torn down on every end/cancel/replay path.
+    const _rlgl = { on: false, running: false, joined: false, meAlive: false, meFinished: false,
+                    slippery: false, light: 'green', alive: {}, fallen: new Set(),
+                    doll: null, lineF: null, lineS: null, lobbyTimer: null, pushAt: 0, pushCd: 5000 };
+    window._rlglFrozenMe = false;
+    function _rlglEl(id, css) {
+      let el = document.getElementById(id);
+      if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText = css; document.body.appendChild(el); }
+      return el;
+    }
+    const _RLGL_BANNER_CSS = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+      'padding:10px 22px;border-radius:12px;font-weight:800;font-size:20px;letter-spacing:1px;color:#fff;' +
+      'background:rgba(20,20,28,0.88);border:2px solid rgba(255,255,255,0.25);text-align:center;pointer-events:none;text-shadow:0 2px 6px rgba(0,0,0,0.6);';
+    const _RLGL_CARD_CSS = 'position:fixed;bottom:96px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+      'padding:14px 18px;border-radius:14px;background:rgba(20,20,28,0.92);border:2px solid #e05a7a;color:#fff;' +
+      'font-size:14px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.5);';
+    const _RLGL_FLASH_CSS = 'position:fixed;inset:0;z-index:9900;background:rgba(255,0,0,0.45);opacity:0;pointer-events:none;transition:opacity 0.12s;';
+    function _rlglBanner(html, ms) {
+      const el = _rlglEl('rlgl-banner', _RLGL_BANNER_CSS);
+      el.innerHTML = html;
+      el.style.display = 'block';
+      clearTimeout(el._t);
+      if (ms) el._t = setTimeout(() => { el.style.display = 'none'; }, ms);
+    }
+    function _rlglHideBanner() { const el = document.getElementById('rlgl-banner'); if (el) { clearTimeout(el._t); el.style.display = 'none'; } }
+    function _rlglHitFlash() {
+      const el = _rlglEl('rlgl-flash', _RLGL_FLASH_CSS);
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.opacity = '0'; }, 180);
+      window._gameScene?.cameras?.main?.shake(280, 0.012);
+    }
+    function _rlglSpriteOf(id) {
+      const sc = window._gameScene;
+      if (!sc) return null;
+      return id === socket.id ? sc.player : (sc.otherPlayers?.[id]?.sprite || null);
+    }
+    function _rlglFall(id) {
+      const s = _rlglSpriteOf(id);
+      if (s) { s.setAngle(90); s.setTint(0xb0b0b0); }
+      _rlgl.fallen.add(id);
+    }
+    function _rlglUnfallAll() {
+      for (const id of _rlgl.fallen) { const s = _rlglSpriteOf(id); if (s) { s.setAngle(0); s.clearTint(); } }
+      _rlgl.fallen.clear();
+    }
+    function _rlglClearWorld() {
+      for (const k of ['doll', 'lineF', 'lineS']) { try { _rlgl[k]?.destroy(); } catch {} _rlgl[k] = null; }
+    }
+    function _rlglTeardown() {
+      _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner();
+      clearInterval(_rlgl.lobbyTimer); _rlgl.lobbyTimer = null;
+      const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
+      _rlgl.on = _rlgl.running = _rlgl.joined = _rlgl.meAlive = _rlgl.meFinished = _rlgl.slippery = false;
+      _rlgl.alive = {}; window._rlglFrozenMe = false;
+    }
+    function _rlglSpawnWorld(d) {
+      const sc = window._gameScene;
+      if (!sc || !sc.add) return;
+      _rlglClearWorld();
+      const midY = (d.arena.y0 + d.arena.y1) / 2, h = d.arena.y1 - d.arena.y0;
+      _rlgl.lineS = sc.add.rectangle(d.startX,  midY, 6, h, 0xffdd55, 0.5).setDepth(4);
+      _rlgl.lineF = sc.add.rectangle(d.finishX, midY, 8, h, 0x55ff88, 0.65).setDepth(4);
+      const key = (d.light === 'red') ? 'rlgl_doll_front' : 'rlgl_doll_back';
+      const img = sc.textures.get('rlgl_doll_front')?.getSourceImage();
+      const scale = img ? 300 / img.height : 0.3;
+      _rlgl.doll = sc.add.image(d.doll.x, d.doll.y + 130, key).setOrigin(0.5, 1).setScale(scale).setDepth(9000);
+    }
+    socket.on('rlglLobby', (d = {}) => {
+      _rlgl.on = true;
+      const card = _rlglEl('rlgl-card', _RLGL_CARD_CSS);
+      const deadline = Date.now() + (d.msLeft || 0);
+      card.innerHTML =
+        `<div style="font-size:17px;font-weight:800;margin-bottom:4px;">🚦 RED LIGHT, GREEN LIGHT</div>` +
+        `<div style="margin-bottom:8px;">The doll game! Survivors split <b style="color:#ffd24a;">${(d.prize || 0).toLocaleString()} coins</b> · <span id="rlgl-count">${d.count || 0}</span> in · <span id="rlgl-left">--</span>s</div>` +
+        (_rlgl.joined
+          ? `<div style="color:#7be08a;font-weight:700;">✅ You're in — you'll be teleported to the start line!</div>`
+          : `<button id="rlgl-join-btn" style="padding:10px 26px;border:none;border-radius:10px;background:#e05a7a;color:#fff;font-weight:800;font-size:15px;cursor:pointer;">JOIN THE GAME</button>`);
+      card.style.display = 'block';
+      document.getElementById('rlgl-join-btn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); socket.emit('rlglJoin'); });
+      clearInterval(_rlgl.lobbyTimer);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        const el = document.getElementById('rlgl-left'); if (el) el.textContent = s;
+        if (s <= 0) clearInterval(_rlgl.lobbyTimer);
+      };
+      tick(); _rlgl.lobbyTimer = setInterval(tick, 500);
+    });
+    socket.on('rlglYouIn', () => {
+      _rlgl.joined = true;
+      const card = document.getElementById('rlgl-card');
+      if (card) {
+        const btn = document.getElementById('rlgl-join-btn');
+        if (btn) btn.outerHTML = `<div style="color:#7be08a;font-weight:700;">✅ You're in — you'll be teleported to the start line!</div>`;
+      }
+    });
+    socket.on('rlglTeleport', (d = {}) => {
+      const sc = window._gameScene;
+      if (sc?.player) { if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y); }
+    });
+    socket.on('rlglBegin', (d = {}) => {
+      _rlgl.on = true; _rlgl.running = true; _rlgl.slippery = false;
+      _rlgl.light = d.light || 'green';
+      _rlgl.pushCd = d.pushCooldownMs || 5000;
+      _rlgl.alive = {};
+      let meIn = false;
+      for (const p of d.players || []) { _rlgl.alive[p.id] = p.alive && !p.finished; if (p.id === socket.id) meIn = true; }
+      _rlgl.joined = meIn;
+      _rlgl.meAlive = meIn; _rlgl.meFinished = false;
+      window._rlglFrozenMe = false;
+      clearInterval(_rlgl.lobbyTimer);
+      const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
+      _rlglUnfallAll();
+      _rlglSpawnWorld(d);
+      _rlglBanner(
+        `🚦 RED LIGHT, GREEN LIGHT — attempt ${d.attempt}<br>` +
+        `<span style="font-size:13px;font-weight:600;">${meIn ? 'Run on GREEN, freeze on RED. Reach the green line! Press <b>F</b> to SHOVE. 😈' : 'Spectating — watch the field!'}</span>`,
+        6000);
+    });
+    socket.on('rlglLight', (d = {}) => {
+      if (!_rlgl.running) return;
+      _rlgl.light = d.light;
+      const sc = window._gameScene;
+      if (_rlgl.doll && sc) _rlgl.doll.setTexture(d.light === 'red' ? 'rlgl_doll_front' : 'rlgl_doll_back');
+      if (d.light === 'red') _rlglBanner(`<span style="color:#ff5a5a;">🔴 RED LIGHT — FREEZE!</span>`);
+      else _rlglBanner(`<span style="color:#7be08a;">🟢 GREEN LIGHT — RUN!</span>`);
+    });
+    socket.on('rlglOut', (d = {}) => {
+      _rlgl.alive[d.id] = false;
+      if (d.cause !== 'left') _rlglFall(d.id);
+      const causeTxt = d.cause === 'pushed' ? `pushed by ${d.byName}` :
+                       d.cause === 'moved'  ? 'moved on red light' :
+                       d.cause === 'fled'   ? 'ran off the field' :
+                       d.cause === 'time'   ? "time's up" : 'left';
+      if (d.id === socket.id) {
+        window._rlglFrozenMe = true;
+        _rlgl.meAlive = false;
+        _rlglHitFlash();
+        _rlglBanner(`<span style="color:#ff5a5a;">💀 YOU'RE OUT — ${causeTxt}!</span>`, 5000);
+      } else if (_rlgl.joined || _rlgl.on) {
+        showToast(`💀 ${d.name} is OUT — ${causeTxt}!`, 4000);
+      }
+    });
+    socket.on('rlglPushed', (d = {}) => {
+      if (d.id === socket.id) {
+        const sc = window._gameScene;
+        if (sc?.player) { if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y); }
+        _rlglHitFlash();
+        showToast(`💥 ${d.byName} PUSHED you!`, 4000);
+      }
+    });
+    socket.on('rlglFinished', (d = {}) => {
+      _rlgl.alive[d.id] = false;   // no longer a push target
+      if (d.id === socket.id) {
+        _rlgl.meFinished = true; _rlgl.meAlive = false;
+        _rlglBanner(`<span style="color:#7be08a;">🏁 YOU MADE IT! Wait for the field to clear…</span>`, 5000);
+      } else {
+        showToast(`🏁 ${d.name} made it across!`, 4000);
+      }
+    });
+    socket.on('rlglSlippery', () => {
+      _rlgl.slippery = true;
+      _rlglBanner(`<span style="color:#7ad7ff;">🧊 THE FLOOR IS SLIPPERY — good luck stopping!</span>`, 5000);
+    });
+    socket.on('rlglReplay', (d = {}) => {
+      _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
+      _rlglUnfallAll();
+      _rlglBanner(`<span style="color:#ffd24a;">☠️ NOBODY SURVIVED — AGAIN! (attempt ${d.attempt})</span>`, 4000);
+    });
+    socket.on('rlglEnd', (d = {}) => {
+      const names = (d.winners || []).join(', ') || 'nobody';
+      _rlglTeardown();
+      _rlglBanner(`🏆 SURVIVORS: <span style="color:#ffd24a;">${names.replace(/</g, '&lt;')}</span><br>` +
+        `<span style="font-size:14px;">They split the ${(d.prize || 0).toLocaleString()}-coin pot — ${(d.each || 0).toLocaleString()} each! (attempt ${d.attempt})</span>`, 9000);
+    });
+    socket.on('rlglCancelled', (d = {}) => {
+      _rlglTeardown();
+      if (d.reason) showToast(`🚦 Doll game cancelled: ${d.reason}`, 5000);
+    });
+    socket.on('rlglOver', () => _rlglTeardown());
+    // Hooks for the Phaser update loop (different scope):
+    window._rlglSlipActive = () => _rlgl.running && _rlgl.slippery && _rlgl.joined && _rlgl.meAlive && !_rlgl.meFinished;
+    window._rlglTryPush = (sc) => {
+      if (!_rlgl.running || !_rlgl.joined || !_rlgl.meAlive || _rlgl.meFinished) return false;
+      const now = Date.now();
+      if (now - _rlgl.pushAt < _rlgl.pushCd) { showToast('🖐️ Shove recharging…', 1200); return true; }
+      let best = null, bestD = 75 * 75;
+      for (const id in _rlgl.alive) {
+        if (!_rlgl.alive[id] || id === socket.id) continue;
+        const s = _rlglSpriteOf(id);
+        if (!s) continue;
+        const dx = s.x - sc.player.x, dy = s.y - sc.player.y, dd = dx * dx + dy * dy;
+        if (dd < bestD) { bestD = dd; best = id; }
+      }
+      if (best) { _rlgl.pushAt = now; socket.emit('rlglPush', { targetId: best }); }
+      else showToast('🖐️ Nobody close enough to shove.', 1500);
+      return true;
+    };
     socket.on('adminBingoResult', ({ ok, mode, active, phase, message } = {}) => {
       const msg = _bgEl('op-bingo-msg');
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
@@ -9699,6 +9923,9 @@
         // Custom furniture sprite (not part of the Tiled map): the Market water
         // cooler, drawn against the north wall. 16×32 source px.
         this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
+        // Red Light Green Light: the doll's two poses (back turned / watching).
+        this.load.image('rlgl_doll_back',  '/assets/rlgl_doll_back.png');
+        this.load.image('rlgl_doll_front', '/assets/rlgl_doll_front.png');
         // Gym animation strips (LimeZu): bag sway + punch, treadmill belt.
         // Bag frames are 32px wide but the bag art fills only the LEFT 16px
         // column (the right half is sway room); treadmill frames carry 2px of
@@ -11698,7 +11925,7 @@
           if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta, oe.seated === true);
         }
 
-        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen || window._ph.frozen) {
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen || window._ph.frozen || window._rlglFrozenMe) {
           player.setVelocity(0,0);
           this._moving = false;
           if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
@@ -11852,6 +12079,9 @@
         // F is the advertised "Find" key (owner request — E stays for sit/read/
         // objects); touch users still go through the action button below.
         if (interact?.type === 'phGuess' && Phaser.Input.Keyboard.JustDown(this.keyF)) socket.emit('phGuess');
+        // Red Light Green Light: F = SHOVE the nearest runner (game only —
+        // outside a doll game F keeps its Prop Hunt meaning above).
+        else if (Phaser.Input.Keyboard.JustDown(this.keyF) && !_typing && window._rlglTryPush) window._rlglTryPush(this);
         // P = pet trick on demand (NOT T — T opens the chat box): play it
         // locally right away, and tell the server so everyone else's client
         // plays it on this pet too. Only for lively pets, only while visible
@@ -11999,6 +12229,18 @@
           else if (right) player.setVelocityX( spd);
           if (up)         player.setVelocityY(-spd);
           else if (down)  player.setVelocityY( spd);
+          // Slippery floor (Red Light Green Light endgame): velocity chases the
+          // input instead of obeying it — you glide into speed and, crucially,
+          // glide long after you let go. Sliding during red light is moving. 🧊
+          if (window._rlglSlipActive?.()) {
+            if (!this._rlglSlideV) this._rlglSlideV = { x: 0, y: 0 };
+            const tv = player.body.velocity, k = 1 - Math.pow(0.92, delta / 16.7);
+            this._rlglSlideV.x += (tv.x - this._rlglSlideV.x) * k;
+            this._rlglSlideV.y += (tv.y - this._rlglSlideV.y) * k;
+            player.setVelocity(this._rlglSlideV.x, this._rlglSlideV.y);
+          } else if (this._rlglSlideV) {
+            this._rlglSlideV = null;
+          }
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
           // Void containment: zero any velocity axis that would carry the
           // feet onto an unpainted tile (per-axis, so you slide along the
