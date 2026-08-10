@@ -762,6 +762,7 @@ const HR_TALK_RADIUS   = 200;      // same feel as Huddles
 const HR_SESSION_MS    = 120000;   // stamp window (same pattern as coachTalkAt)
 const HR_QUIZ_PAY_FIRST = 100;     // first attempt correct
 const HR_QUIZ_PAY_LATE  = 50;      // correct after one or more wrong tries
+const HR_QUIZ_MAX_TRIES = 6;       // per day — also caps AI grading spend per player
 const hrSessionOk = (p) => p?.hrTalkAt && Date.now() - p.hrTalkAt < HR_SESSION_MS;
 // Hand-authored from JPO's Code of Discipline (Ver. 2023-02) — answers cite
 // the section so people can verify on the shelf. `ans` = index into opts.
@@ -803,11 +804,38 @@ function hrQuestionIdx(email, day) {
 function hrQuizView(row, extra = {}) {
   const item = COD_QUIZ[row.qid] || COD_QUIZ[0];
   return {
-    q: item.q, opts: item.opts, attempts: row.attempts, solved: row.solved,
+    // Typed-answer mode: the options never leave the server — opts[ans] is
+    // only the grading reference for the AI. No shelf, no choices: the
+    // "research" path is literally walking to HR (Vince + HR's design).
+    q: item.q, attempts: row.attempts, solved: row.solved,
+    triesLeft: Math.max(0, HR_QUIZ_MAX_TRIES - row.attempts),
     ref: row.solved ? item.ref : undefined,   // the citation is the reward
     paid: row.paid || 0,
     ...extra,
   };
+}
+// AI semantic grading: "did they capture the main point?" — not word-for-word.
+// Deliberately strict-but-fair prompt; the numeric fact must match. Throws on
+// AI unavailability/timeouts so the caller can tell the player to retry (a
+// grading failure must never burn an attempt).
+async function hrGradeAnswer(item, answer) {
+  const ai = coachAiClient();
+  if (!ai) throw new Error("AI unavailable");
+  const rsp = await Promise.race([
+    ai.chat.completions.create({
+      model: "gpt-5.6-terra",
+      max_completion_tokens: 2048,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "You grade a workplace policy quiz. You get a question, the official correct answer, and an employee's typed answer. Mark it correct if the employee's answer expresses the SAME key fact/meaning as the official answer — wording, spelling, grammar, language mix (English/Tagalog/Taglish) and extra detail don't matter. Numbers/durations/quantities must match the official answer. Vague non-answers, guesses of a different value, or contradictions are incorrect. Reply ONLY with JSON: {\"correct\": boolean}." },
+        { role: "user", content: JSON.stringify({ question: item.q, official_answer: item.opts[item.ans], employee_answer: answer }) },
+      ],
+    }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("HR grading timeout (9s)")), 9000)),
+  ]);
+  const raw = rsp?.choices?.[0]?.message?.content || "";
+  const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  return parsed.correct === true;
 }
 
 // ── Coin gifting (July 2026) ─────────────────────────────────────────────────
@@ -5360,7 +5388,8 @@ io.on("connection", (socket) => {
     if (!p?.email || !takeToken(coachBucket)) return;
     if (!hrSessionOk(p)) { socket.emit("interactError", { message: "Walk over to Ms. Poli first!" }); return; }
     p.hrTalkAt = Date.now();
-    const choice = Math.round(Number(payload?.choice));
+    const answer = String(payload?.answer ?? "").trim().slice(0, 300);
+    if (answer.length < 2) return;
     const day = new Date().toISOString().slice(0, 10);
     try {
       const { rows } = await pool.query(
@@ -5368,9 +5397,19 @@ io.on("connection", (socket) => {
       const row = rows[0];
       if (!row) { socket.emit("interactError", { message: "Talk to Ms. Poli first!" }); return; }
       if (row.solved) { socket.emit("hrQuiz", hrQuizView(row, { already: true })); return; }
+      if (row.attempts >= HR_QUIZ_MAX_TRIES) { socket.emit("hrQuiz", hrQuizView(row, { capped: true })); return; }
       const item = COD_QUIZ[row.qid];
-      if (!item || !Number.isInteger(choice) || choice < 0 || choice >= item.opts.length) return;
-      if (choice !== item.ans) {
+      if (!item) return;
+      let correct;
+      try {
+        correct = await hrGradeAnswer(item, answer);
+      } catch (gradeErr) {
+        // Grading hiccup must NOT burn an attempt — tell them to just retry.
+        console.error("hrGradeAnswer failed:", gradeErr.message);
+        socket.emit("hrQuiz", hrQuizView(row, { checkFailed: true }));
+        return;
+      }
+      if (!correct) {
         const upd = await pool.query(
           `UPDATE jpo_cod_quiz SET attempts = attempts + 1 WHERE day=$1 AND email=$2 AND solved=FALSE RETURNING *`,
           [day, p.email]);

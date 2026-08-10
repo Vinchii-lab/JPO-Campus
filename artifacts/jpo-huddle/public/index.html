@@ -4024,20 +4024,6 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && _hrPanelOpen) { e.preventDefault(); closeHrPanel(); }
     });
-    // Condensed Code of Discipline for the shelf — the real thing lives with
-    // HR; this is the study copy Ms. Poli quizzes from.
-    const COD_SHELF = `
-      <h4>⚖️ Due process (how discipline works)</h4>
-      <p>Simple offenses (verbal/written warning): your superior issues a Coaching Form and discusses improvement. They're disregarded after <b>6 months</b> — unless they reached suspension, then they stay in your 201 file.</p>
-      <p>Grave offenses: Incident Report → HR review → <b>Notice To Explain within 24h</b> of probable cause → you get <b>5 calendar days</b> to explain → investigation (you, your supervisor, dept manager, HR) → decision. Termination uses the Twin-Notice rule (NTE, then Notice of Dismissal).</p>
-      <p>Progressive steps: Verbal Reprimand → Written Warning → Suspension (5/10/15 days, max 30 — beyond 30 = with pay) → Dismissal. Two final written warnings in one category = next sanction level.</p>
-      <h4>🕐 Attendance</h4>
-      <p>Tardiness: 2× a week or 60 accumulated minutes/week. AWOL after 3 days of no notice. Critical Working Days: holidays, 1st Monday of Jan, every Monday, day after a holiday, payday — "missing" = unreachable 15+ min. Sick leave form within 2 days of returning; leave notice 2h before shift; med cert for 2+ days absent (telemedicine certs not accepted).</p>
-      <h4>💼 Professionalism & integrity</h4>
-      <p>No gifts/bribes from clients (dismissal). No sharing passwords, log-ins, or salary info. No logging in/out for someone else. Report record changes (civil status, address) within 30 days. Personal internet use over 30 min during work hours is an offense.</p>
-      <h4>🚫 Terminable offenses (straight to dismissal)</h4>
-      <p>Sexual harassment, fraud/theft, bribery, falsifying records, secret deals, competing with the company, leaking confidential info (including this COD outside JPO!), weapons on premises, drugs, two successive below-average appraisals.</p>
-      <p style="color:#8a755d">Full details: ask HR — Junell, Claire, or Klynn. 💛</p>`;
     function openHrPanel(d) {
       _hrPanelOpen = true;
       document.getElementById('hr-panel').classList.add('open');
@@ -4050,27 +4036,42 @@
       // Server-sent strings are escaped before touching innerHTML — the bank
       // is static today, but this keeps the contract safe if it ever isn't.
       const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      const shelfBtn = '<button class="coach-btn secondary" style="margin-top:10px;" onclick="hrToggleShelf()">📖 Browse the Code of Discipline</button>' +
-        `<div class="hr-shelf" id="hr-shelf" style="display:none;">${COD_SHELF}</div>`;
       if (d.solved) {
         body.innerHTML = `<div class="hr-say">${d.justPaid
-            ? `🎉 Correct! <b>+${d.justPaid} coins.</b>${d.paid >= 50 ? ' First try — you know your COD!' : ' Research pays off!'}`
+            ? `🎉 Correct! <b>+${d.justPaid} coins.</b>${d.paid >= 100 ? ' First try — you know your COD!' : ' See? Talking to HR pays off!'}`
             : `You already aced today's question${d.paid ? ` (+${d.paid} coins)` : ''}. Come back tomorrow for a new one!`}
-          ${d.ref ? `<br><br><span style="color:#8a755d">📌 See: ${esc(d.ref)}</span>` : ''}</div>` + shelfBtn;
+          ${d.ref ? `<br><br><span style="color:#8a755d">📌 See: ${esc(d.ref)}</span>` : ''}</div>`;
+        return;
+      }
+      if (d.capped) {
+        body.innerHTML = '<div class="hr-say">That\'s all your tries for today! 😅 Go have a chat with <b>Junell, Claire, or Klynn</b> and come back tomorrow — new question, fresh tries.</div>';
         return;
       }
       body.innerHTML =
-        `<div class="hr-say">${d.wrong ? '❌ Hmm, not quite — check the shelf, or go ask <b>Junell, Claire, or Klynn</b>. They love this stuff. 😄<br><br>' : ''}
+        `<div class="hr-say">${d.checkFailed ? '😵 Oops — I lost my notes while checking that. Your try was NOT counted, just send it again!<br><br>' : ''}${d.wrong ? '❌ Hmm, not quite — go ask <b>Junell, Claire, or Klynn</b> in person. They love this stuff. 😄<br><br>' : ''}
          📋 <b>Today's question:</b><br><br>${esc(d.q)}</div>` +
-        (d.opts || []).map((o, i) => `<button class="hr-opt" onclick="hrAnswer(${i})">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join('') +
-        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +100 coins · after research: +50 ${d.attempts ? `· attempts so far: ${d.attempts}` : ''}</div>` +
-        shelfBtn;
+        `<textarea id="hr-answer-input" rows="3" maxlength="300" placeholder="Type your answer in your own words…"
+           style="width:100%;box-sizing:border-box;background:#31261b;color:#f5eee7;border:1px solid #5e452f;border-radius:8px;font-family:monospace;font-size:13px;padding:10px 12px;resize:vertical;"></textarea>` +
+        `<button class="coach-btn" id="hr-answer-send" style="margin-top:8px;" onclick="hrSendAnswer()">Submit answer</button>` +
+        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +100 coins · after asking around: +50 · tries left today: ${d.triesLeft ?? '?'}</div>`;
+      const ta = document.getElementById('hr-answer-input');
+      ta.focus();
+      // Don't let the game eat typing; Enter submits (Shift+Enter = newline).
+      ta.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); hrSendAnswer(); }
+      });
+      ta.addEventListener('keyup', (e) => e.stopPropagation());
     }
-    window.hrToggleShelf = function () {
-      const s = document.getElementById('hr-shelf');
-      if (s) s.style.display = s.style.display === 'none' ? 'block' : 'none';
+    window.hrSendAnswer = function () {
+      const ta = document.getElementById('hr-answer-input');
+      const btn = document.getElementById('hr-answer-send');
+      const text = (ta?.value || '').trim();
+      if (text.length < 2) return;
+      if (btn) { btn.disabled = true; btn.textContent = '🤔 Ms. Poli is reading your answer…'; }
+      if (ta) ta.disabled = true;
+      socket.emit('hrAnswer', { answer: text });
     };
-    window.hrAnswer = function (i) { socket.emit('hrAnswer', { choice: i }); };
     socket.on('hrQuiz', (d) => openHrPanel(d || {}));
 
     function openCoachPanel(d) {
