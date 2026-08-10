@@ -12325,6 +12325,12 @@
               ? SPEED * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)
               : SPEED;
           }
+          // Red Light Green Light: ANY speed boost is banned on the lawn
+          // (MUST mirror the server's playerMove budget rule — the server
+          // gives runners NO boosted budget, so a client still moving at
+          // boost speed gets every step silently rejected and looks frozen
+          // to the whole office).
+          if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished) spd = SPEED;
           if (left)       player.setVelocityX(-spd);
           else if (right) player.setVelocityX( spd);
           if (up)         player.setVelocityY(-spd);
