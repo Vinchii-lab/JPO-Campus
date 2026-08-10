@@ -3710,6 +3710,14 @@ function rlglFrozen(id) {
   return !!m && !m.alive;
 }
 
+// An alive, not-yet-finished runner in a live round — the subset that the
+// speed-fairness rules apply to (no coffee/pizza boosts, owner's rule).
+function rlglActiveRunner(id) {
+  if (!rlgl || rlgl.state !== "running") return false;
+  const m = rlgl.members.get(id);
+  return !!m && m.alive && !m.finished;
+}
+
 function rlglRunnersLeft() {
   let n = 0;
   for (const m of rlgl.members.values()) if (m.alive && !m.finished) n++;
@@ -3774,7 +3782,15 @@ function rlglStartAttempt() {
   rlgl.slippery = false;
   rlgl.endsAt = Date.now() + RLGL_ATTEMPT_MS;
   let idx = 0;
-  for (const [id, m] of rlgl.members) { m.alive = true; m.finished = false; rlglPlaceAtStart(id, idx++); }
+  for (const [id, m] of rlgl.members) {
+    m.alive = true; m.finished = false;
+    // Fair race: any coffee/pizza boost still running is stripped at the start
+    // line (durationMs:1 expires the client's mirror immediately — the client
+    // handler treats 0 as "use the default", so 1ms is the "off" signal).
+    const p = players[id];
+    if (p && p.boostUntil) { p.boostUntil = 0; io.emit("coffeeBoost", { id, durationMs: 1, mult: 1 }); }
+    rlglPlaceAtStart(id, idx++);
+  }
   clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer);
   rlgl.attemptTimer = setTimeout(rlglTimeUp, RLGL_ATTEMPT_MS);
   io.emit("rlglBegin", {
@@ -5577,7 +5593,10 @@ io.on("connection", (socket) => {
       // with a live coffee boost by the LARGER of the two (never the product);
       // alive CREW clamp to base speed — even a legit pre-round boost timer
       // must not let them outrun the killers (the boost resumes after).
-      const boosted = me.boostUntil && now < me.boostUntil + BOOST_GRACE_MS;
+      // RLGL runners never get the boosted budget — "any speed" is banned on
+      // the field (owner's rule), so even a boost that slipped through renders
+      // no server-side speed allowance.
+      const boosted = me.boostUntil && now < me.boostUntil + BOOST_GRACE_MS && !rlglActiveRunner(socket.id);
       let mult = boosted ? COFFEE_MULT : 1;
       if (round && round.state === "active") {
         const rm = round.members.get(socket.id);
@@ -7562,6 +7581,13 @@ io.on("connection", (socket) => {
       }
     }
 
+    // Red Light Green Light: no coffee, no pizza, no speed while you're on the
+    // field (owner's rule). Runs BEFORE the charge is spent.
+    if (BOOST_ITEMS.has(item) && rlglActiveRunner(socket.id)) {
+      socket.emit("itemError", { message: "🚦 The doll is watching — no coffee, no pizza, NO speed until the race is over!" });
+      return;
+    }
+
     // Consume one use.
     if (!p.email) {
       const have = (p.items && p.items[item]) || 0;
@@ -7611,7 +7637,9 @@ io.on("connection", (socket) => {
       // (or hand a killer a boost bubble that outs them). Ghosts and everyone
       // else nearby are boosted normally. The user can't be in the dark here
       // (blocked by the gate above), so self stays included.
-      const ids = nearbyIds(socket.id, GROUP_RADIUS).filter((rid) => !inTheDark(rid));
+      // …and RLGL runners can't be boosted from the sidelines either — a buddy
+      // buying a pizza party next to the arena must not speed up a racer.
+      const ids = nearbyIds(socket.id, GROUP_RADIUS).filter((rid) => !inTheDark(rid) && !rlglActiveRunner(rid));
       for (const rid of ids) {
         const q = players[rid];
         if (!q) continue;
@@ -7682,6 +7710,10 @@ io.on("connection", (socket) => {
       // refused brew never burns the machine.
       if (inTheDark(socket.id)) {
         socket.emit("interactError", { message: "🌙 Too dark to brew — no boosts until the lights come back on!" });
+        return;
+      }
+      if (rlglActiveRunner(socket.id)) {
+        socket.emit("interactError", { message: "🚦 No brews mid-race — the doll is watching!" });
         return;
       }
       if (p.boostUntil && now < p.boostUntil) {
