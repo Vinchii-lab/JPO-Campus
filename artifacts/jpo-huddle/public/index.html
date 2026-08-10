@@ -218,6 +218,23 @@
       font-size: 14px; cursor: pointer; padding: 0 2px;
     }
     #chat-img-x:hover { color: #fff; }
+    /* DM staged-image chip — same look as the chat one */
+    #dm-img-preview { display: none; align-items: center; gap: 6px; }
+    #dm-img-preview.on { display: flex; }
+    #dm-img-preview img {
+      max-height: 44px; max-width: 80px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.3); display: block;
+    }
+    #dm-img-x {
+      background: none; border: none; color: rgba(255,255,255,0.6);
+      font-size: 14px; cursor: pointer; padding: 0 2px;
+    }
+    #dm-img-x:hover { color: #fff; }
+    /* Whisper image thumbnails in the top-right DM feed */
+    .dm-msg img.dm-img {
+      display: block; max-width: 110px; max-height: 90px; border-radius: 6px;
+      margin-top: 3px; cursor: zoom-in; border: 1px solid rgba(255,255,255,0.25);
+    }
     /* Images inside the chat log */
     .cl-msg img.cl-img {
       display: block; max-width: 100%; max-height: 140px; border-radius: 8px;
@@ -1615,6 +1632,7 @@
     <div id="dm-suggest"></div>
     <div id="dm-error"></div>
     <span class="dm-label">🤫 To:</span>
+    <div id="dm-img-preview"><img alt="staged image" /><button id="dm-img-x" type="button" aria-label="Remove image">✕</button></div>
     <input id="dm-to" type="text" placeholder="name…" maxlength="24" autocomplete="off" />
     <input id="dm-input" type="text" placeholder="Private message… (Enter to send, Esc to cancel)" maxlength="120" autocomplete="off" />
     <button id="dm-send" class="chat-touch-btn" type="button" aria-label="Send DM">➤</button>
@@ -4048,7 +4066,7 @@
         return;
       }
       body.innerHTML =
-        `<div class="hr-say">${d.checkFailed ? '😵 Oops — I lost my notes while checking that. Your try was NOT counted, just send it again!<br><br>' : ''}${d.wrong ? '❌ Hmm, not quite — go ask <b>Junell, Claire, or Klynn</b> in person. They love this stuff. 😄<br><br>' : ''}
+        `<div class="hr-say">${d.checkFailed ? '😵 Oops — I lost my notes while checking that. Your try was NOT counted, just send it again!<br><br>' : ''}${d.wrong ? '❌ Hmm, not quite — go ask <b>Junell, Claire, or Klynn</b> in person. They love this stuff. 😄<br><br>' : ''}${d.wrong && d.yourAnswer ? `<div style="background:#1c150e;border:1px dashed #5e452f;border-radius:8px;padding:8px 10px;margin-bottom:10px;color:#d8c9b8;">✍️ Your answer: “${esc(d.yourAnswer)}”</div>` : ''}
          📋 <b>Today's question:</b><br><br>${esc(d.q)}</div>` +
         `<textarea id="hr-answer-input" rows="3" maxlength="300" placeholder="Type your answer in your own words…"
            style="width:100%;box-sizing:border-box;background:#31261b;color:#f5eee7;border:1px solid #5e452f;border-radius:8px;font-family:monospace;font-size:13px;padding:10px 12px;resize:vertical;"></textarea>` +
@@ -4973,7 +4991,14 @@
     document.addEventListener('paste', (e) => {
       if (!document.body.classList.contains('playing')) return;
       const ae = document.activeElement;
-      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ae !== chatInput) return;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ae !== chatInput) {
+        // Pasting a picture into the DM composer stages it there instead.
+        if ((ae.id === 'dm-input' || ae.id === 'dm-to') && window._dmStageImage) {
+          const dmItem = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+          if (dmItem) { e.preventDefault(); window._dmStageImage(dmItem.getAsFile()); }
+        }
+        return;
+      }
       const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
       if (!item) return;
       e.preventDefault();
@@ -4986,7 +5011,10 @@
       e.preventDefault();
       if (!document.body.classList.contains('playing')) return;
       const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
-      if (f) _stageChatImage(f);
+      if (!f) return;
+      // If the DM composer is open, the drop is meant for the whisper.
+      if (window._dmIsOpen?.() && window._dmStageImage) window._dmStageImage(f);
+      else _stageChatImage(f);
     });
 
     socket.on('chatImgError', (m) => showToast('🐢 ' + m));
@@ -5289,6 +5317,7 @@
       document.body.classList.remove('chatting');
       dmBar.classList.remove('open');
       _dmHideSuggest(); _dmSetError('');
+      if (typeof _setDmPendingImg === 'function') _setDmPendingImg(null);   // discard staged picture
       document.querySelector('canvas')?.focus();
     }
 
@@ -5311,18 +5340,39 @@
       return null;
     }
 
+    // Staged whisper image (paste or drop while the DM composer is open) —
+    // reuses the chat pipeline's shrink helper, sent via 'whisperImage'.
+    let _pendingDmImg = null;
+    const _dmImgPreview = document.getElementById('dm-img-preview');
+    function _setDmPendingImg(dataUrl) {
+      _pendingDmImg = dataUrl;
+      _dmImgPreview.querySelector('img').src = dataUrl || '';
+      _dmImgPreview.classList.toggle('on', !!dataUrl);
+    }
+    document.getElementById('dm-img-x').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); _setDmPendingImg(null); dmInput.focus();
+    });
+    window._dmStageImage = function (file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      _shrinkChatImage(file)
+        .then((dataUrl) => _setDmPendingImg(dataUrl))
+        .catch(() => showToast("😵 Couldn't read that picture — try a PNG or JPEG."));
+    };
+    window._dmIsOpen = () => _dmOpen;
+
     function sendDM() {
       const target = _dmResolveTarget();
       if (!target) return;
       const msg = dmInput.value.trim();
-      if (!msg) { dmInput.focus(); return; }
-      socket.emit('whisper', { targetId: target, message: msg });
+      if (!msg && !_pendingDmImg) { dmInput.focus(); return; }
+      if (msg) socket.emit('whisper', { targetId: target, message: msg });
+      if (_pendingDmImg) socket.emit('whisperImage', { targetId: target, img: _pendingDmImg });
       closeDM();
     }
 
     // Session-only DM feed (top-right). Entries fade after a while; received
     // whispers are clickable to reply.
-    function _dmLogAdd(kind, who, text, fromId) {
+    function _dmLogAdd(kind, who, text, fromId, img) {
       const div = document.createElement('div');
       div.className = 'dm-msg ' + kind;   // 'in' | 'out' | 'err'
       if (kind !== 'err') {
@@ -5331,7 +5381,13 @@
         whoSpan.textContent = kind === 'in' ? `(whisper) ${who}: ` : `(to ${who}): `;
         div.appendChild(whoSpan);
       }
-      div.appendChild(document.createTextNode(text));   // textContent path — never innerHTML
+      if (text) div.appendChild(document.createTextNode(text));   // textContent path — never innerHTML
+      if (typeof img === 'string' && img.startsWith('data:image/')) {
+        const im = document.createElement('img');
+        im.className = 'dm-img'; im.src = img; im.alt = 'whispered image';
+        im.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); _openLightbox(img); });
+        div.appendChild(im);
+      }
       if (kind === 'in' && fromId) {
         div.title = 'Click to reply';
         div.addEventListener('pointerdown', (ev) => {
@@ -5349,18 +5405,22 @@
     }
 
     socket.on('whisper', (payload) => {
-      const { fromId, fromName, message } = payload || {};
-      if (typeof message !== 'string' || !message) return;
-      _dmLogAdd('in', fromName || '?', message, fromId);
-      _chatLogAdd('whisper', fromName || '?', message, { dir: 'in' });   // history log (private, only we see it)
+      const { fromId, fromName, message, img } = payload || {};
+      const hasImg = typeof img === 'string' && img.startsWith('data:image/');
+      if ((typeof message !== 'string' || !message) && !hasImg) return;
+      _dmLogAdd('in', fromName || '?', message || '', fromId, hasImg ? img : undefined);
+      if (message) _chatLogAdd('whisper', fromName || '?', message, { dir: 'in' });   // history log (private, only we see it)
+      if (hasImg) _chatLogAddImg('whisper', fromName || '?', img, { dir: 'in' });
       // Also show a purple whisper bubble over the sender's avatar if visible.
-      if (fromId && window._gameScene) window._gameScene._showWhisperBubble(fromId, message);
+      if (fromId && window._gameScene) window._gameScene._showWhisperBubble(fromId, message || '📷 sent you a picture');
     });
     socket.on('whisperSent', (payload) => {
-      const { toName, message } = payload || {};
-      if (typeof message !== 'string' || !message) return;
-      _dmLogAdd('out', toName || '?', message);
-      _chatLogAdd('whisper', toName || '?', message, { dir: 'out' });   // history log
+      const { toName, message, img } = payload || {};
+      const hasImg = typeof img === 'string' && img.startsWith('data:image/');
+      if ((typeof message !== 'string' || !message) && !hasImg) return;
+      _dmLogAdd('out', toName || '?', message || '', undefined, hasImg ? img : undefined);
+      if (message) _chatLogAdd('whisper', toName || '?', message, { dir: 'out' });   // history log
+      if (hasImg) _chatLogAddImg('whisper', toName || '?', img, { dir: 'out' });
     });
     socket.on('whisperFailed', (payload) => {
       const { message } = payload || {};
@@ -5479,20 +5539,25 @@
     // CHATLOG_IMG_MAX image entries keep their pixels — older ones collapse
     // to a "📷 (photo expired)" stub so scrollback stays light.
     const CHATLOG_IMG_MAX = 30;
-    socket.on('chatImage', (payload) => {
-      const p = payload || {};
-      if (typeof p.img !== 'string' || !p.img.startsWith('data:image/')) return;
+    // Shared image-entry renderer: public chat images AND whispered images
+    // land in the history log the same way (label differs).
+    function _chatLogAddImg(kind, who, img, o = {}) {
+      _clImgEntry(kind === 'whisper'
+        ? (o.dir === 'out' ? `(to ${who}): ` : `(whisper) ${who}: `)
+        : `${who}: `, img, !!o.me);
+    }
+    function _clImgEntry(label, img, me) {
       const div = document.createElement('div');
-      div.className = 'cl-msg' + (p.id === socket.id ? ' me' : '');
+      div.className = 'cl-msg' + (me ? ' me' : '');
       const t = document.createElement('span');
       t.className = 'cl-time'; t.textContent = _clTime();
       div.appendChild(t);
       const n = document.createElement('span');
-      n.className = 'cl-name'; n.textContent = `${p.name || '?'}: `;
+      n.className = 'cl-name'; n.textContent = label;
       div.appendChild(n);
       const im = document.createElement('img');
-      im.className = 'cl-img'; im.src = p.img; im.alt = 'shared image';
-      im.addEventListener('pointerdown', (e) => { e.preventDefault(); _openLightbox(p.img); });
+      im.className = 'cl-img'; im.src = img; im.alt = 'shared image';
+      im.addEventListener('pointerdown', (e) => { e.preventDefault(); _openLightbox(img); });
       div.appendChild(im);
       const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
       clEmpty.style.display = 'none';
@@ -5505,6 +5570,11 @@
       }
       if (!_logOpen) { _logUnread++; _clBadgeRender(); }
       else if (nearBottom) clScroll.scrollTop = clScroll.scrollHeight;
+    }
+    socket.on('chatImage', (payload) => {
+      const p = payload || {};
+      if (typeof p.img !== 'string' || !p.img.startsWith('data:image/')) return;
+      _clImgEntry(`${p.name || '?'}: `, p.img, p.id === socket.id);
     });
 
     // Full-size lightbox: click a thumbnail to zoom, click anywhere to close.

@@ -5314,6 +5314,28 @@ io.on("connection", (socket) => {
     coachWhisperExchanged(socket.id, targetId);
   });
 
+  // Whisper images: same validation as chatImage (cap + data-URL shape +
+  // shared image throttle), same targeting/dark rules as text whispers.
+  // Ephemeral like everything else in chat — target-only + sender echo.
+  socket.on("whisperImage", (payload) => {
+    const { targetId, img } = payload || {};
+    const sender = players[socket.id];
+    if (!sender) return;
+    if (typeof img !== "string" || img.length > CHAT_IMG_MAX_B64 || !CHAT_IMG_RE.test(img)) return;
+    if (!takeToken(chatImgBucket)) { socket.emit("whisperFailed", { message: "Sending pictures a bit fast — give it a few seconds." }); return; }
+    if (typeof targetId !== "string" || targetId === socket.id) return;
+    const target = players[targetId];
+    if (!target) { socket.emit("whisperFailed", { message: "They're not in the office right now." }); return; }
+    if (inTheDark(targetId) && !inTheDark(socket.id)) {
+      socket.emit("whisperFailed", { message: "🌙 They're in the dark — wait until the round ends." });
+      return;
+    }
+    io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, img });
+    socket.emit("whisperSent", { toId: targetId, toName: target.name, img });
+    coachWhisperExchanged(socket.id, targetId);
+    console.log(`${sender.name} whispered an image to ${target.name} (${Math.round(img.length / 1024)} KB b64)`);
+  });
+
   // ── Push-to-talk voice: opaque signaling relay (see voicePairOk block) ──
   // Every relay is re-validated HERE, per message — sender live, target live,
   // within earshot + slack, same side of the After Dark split. Failures are
@@ -5413,7 +5435,8 @@ io.on("connection", (socket) => {
         const upd = await pool.query(
           `UPDATE jpo_cod_quiz SET attempts = attempts + 1 WHERE day=$1 AND email=$2 AND solved=FALSE RETURNING *`,
           [day, p.email]);
-        if (upd.rows[0]) socket.emit("hrQuiz", hrQuizView(upd.rows[0], { wrong: true }));
+        // Echo their typed answer back so they can screenshot it and show HR.
+        if (upd.rows[0]) socket.emit("hrQuiz", hrQuizView(upd.rows[0], { wrong: true, yourAnswer: answer }));
         return;
       }
       // Correct: flip solved exactly once (guards restarts + double-clicks),
