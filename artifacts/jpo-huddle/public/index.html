@@ -6976,7 +6976,9 @@
     }
     function _rlglHideBanner() { const el = document.getElementById('rlgl-banner'); if (el) { clearTimeout(el._t); el.style.display = 'none'; } }
     // Per-round countdown chip (owner rule: the time limit must be VISIBLE).
-    const _RLGL_TIMER_CSS = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+    // Top-RIGHT corner — the top-center lane belongs to toasts (#daily-toast,
+    // shove/elimination messages); a centered timer chip sat right on top of them.
+    const _RLGL_TIMER_CSS = 'position:fixed;top:16px;right:16px;z-index:9600;display:none;' +
       'padding:5px 16px;border-radius:10px;font-weight:800;font-size:17px;letter-spacing:1px;color:#fff;' +
       'background:rgba(20,20,28,0.88);border:2px solid rgba(255,255,255,0.25);pointer-events:none;font-variant-numeric:tabular-nums;';
     function _rlglTimerStart(endsAt) {
