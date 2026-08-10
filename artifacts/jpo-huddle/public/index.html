@@ -12134,8 +12134,12 @@
         // objects); touch users still go through the action button below.
         if (interact?.type === 'phGuess' && Phaser.Input.Keyboard.JustDown(this.keyF)) socket.emit('phGuess');
         // Red Light Green Light: F = SHOVE the nearest runner (game only —
-        // outside a doll game F keeps its Prop Hunt meaning above).
-        else if (Phaser.Input.Keyboard.JustDown(this.keyF) && !_typing && window._rlglTryPush) window._rlglTryPush(this);
+        // outside a doll game F keeps its Prop Hunt meaning above). NOTE: the
+        // shared `_typing` const is declared BELOW this line — reading it here
+        // is a TDZ crash, so this check must stay inline.
+        else if (Phaser.Input.Keyboard.JustDown(this.keyF) && window._rlglTryPush
+                 && !(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')))
+          window._rlglTryPush(this);
         // P = pet trick on demand (NOT T — T opens the chat box): play it
         // locally right away, and tell the server so everyone else's client
         // plays it on this pet too. Only for lively pets, only while visible
