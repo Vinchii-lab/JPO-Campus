@@ -3918,7 +3918,10 @@ function rlglCheckAttemptEnd() {
     console.log(`RLGL: round survived by ${finishers.length} — next round (attempt ${rlgl.attempt})`);
     return;
   }
-  // NOBODY survived → same game again, whole field revived (owner's rule).
+  // NOBODY survived → ONE mercy replay, and that's it (owner's rule, Aug 2026):
+  // wipe the field twice and the game is OVER — nobody wins, no payout.
+  rlgl.wipes = (rlgl.wipes || 0) + 1;
+  if (rlgl.wipes >= 2) { rlglCancel("Two rounds and NOBODY crossed the line. The doll wins. Nobody gets the pot."); return; }
   if (rlgl.attempt >= RLGL_MAX_ATTEMPTS) { rlglCancel("Twenty rounds and NOBODY survived. The doll wins. No payout."); return; }
   rlgl.attempt++;
   rlgl.state = "joining";   // brief limbo so red-light checks stop during the reset
