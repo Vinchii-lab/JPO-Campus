@@ -3892,32 +3892,9 @@ function rlglCheckAttemptEnd() {
   if (!rlgl || rlgl.state !== "running" || rlglRunnersLeft() > 0) return;
   const finishers = [...rlgl.members].filter(([, m]) => m.alive && m.finished);
   clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.fakeTimer);
-  // Tournament rules (owner's spec, Aug 2026): crossing the line only survives
-  // the ROUND. Non-finishers are out for good; finishers race again until ONE
-  // player owns the whole pot — unless exactly two are left who have each
-  // survived RLGL_SAFE_STREAK rounds, in which case they split it as co-champions.
-  if (finishers.length === 1) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
-  if (finishers.length >= 2) {
-    for (const [, m] of finishers) m.safe = (m.safe || 0) + 1;
-    const coChamps = finishers.length === 2 && finishers.every(([, m]) => m.safe >= RLGL_SAFE_STREAK);
-    if (coChamps || rlgl.attempt >= RLGL_MAX_ATTEMPTS) {
-      rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err));
-      return;
-    }
-    // Cut the field: everyone who didn't cross is OUT of the tournament. Their
-    // membership ends here, which also releases their frozen body to spectate.
-    for (const [id, m] of [...rlgl.members]) if (!(m.alive && m.finished)) rlgl.members.delete(id);
-    rlgl.attempt++;
-    rlgl.state = "joining";   // limbo: red-light checks stop during the reset
-    io.emit("rlglRound", {
-      attempt: rlgl.attempt,
-      remaining: finishers.map(([, m]) => ({ name: m.name, safe: m.safe })),
-      safeNeeded: RLGL_SAFE_STREAK,
-    });
-    rlgl.replayTimer = setTimeout(rlglStartAttempt, 5_000);
-    console.log(`RLGL: round survived by ${finishers.length} — next round (attempt ${rlgl.attempt})`);
-    return;
-  }
+  // Owner's rule (Aug 2026): no more elimination tournament — EVERYONE who
+  // crosses the line splits the pot evenly, right there. One round, paid out.
+  if (finishers.length >= 1) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
   // NOBODY survived → ONE mercy replay, and that's it (owner's rule, Aug 2026):
   // wipe the field twice and the game is OVER — nobody wins, no payout.
   rlgl.wipes = (rlgl.wipes || 0) + 1;
