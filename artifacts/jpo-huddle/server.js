@@ -3680,21 +3680,22 @@ function phFinish(found, winnerName, reason) {
 // glide with momentum, so stopping for red light gets dicey. Finishers split
 // the pot via the same guarded additive-payout pattern as After Dark/Bingo.
 // In-memory only: a restart cancels the game harmlessly (nothing was debited).
-const RLGL_ARENA = { x0: 4464, y0: 2130, x1: 6260, y1: 2718 };   // open floor block (tiles 93-130 × 44-56), verified clear
+const RLGL_ARENA = { x0: 4464, y0: 2130, x1: 6560, y1: 2718 };   // open floor block (tiles 93-137 × 44-56), verified clear
 const RLGL_START_X  = 4560;    // runners line up here (left edge)
-const RLGL_FINISH_X = 6100;    // cross this → survived
-const RLGL_DOLL = { x: 6210, y: 2424 };
+const RLGL_FINISH_X = 6460;    // cross this → survived the round (~1900px run)
+const RLGL_DOLL = { x: 6524, y: 2424 };
 const RLGL_JOIN_MS       = Number(process.env.RLGL_JOIN_MS) || 45_000;
 const RLGL_MIN_PLAYERS   = Number(process.env.RLGL_MIN_PLAYERS) || 3;
 const RLGL_ATTEMPT_MS    = 180_000;      // per attempt; timer expiry wipes the field → replay
 const RLGL_PRIZE_MIN = 100, RLGL_PRIZE_MAX = 100_000;
-const RLGL_GREEN_MS = [2_000, 5_000];    // random green window
+const RLGL_GREEN_MS = [1_500, 3_500];    // random green window (short — the doll is impatient)
 const RLGL_RED_MS   = [3_000, 6_000];    // random red window
 const RLGL_RED_GRACE_MS = 700;           // latency slack after the doll turns
 const RLGL_MOVE_EPS_PX  = 10;            // drift under this during red is forgiven (jitter)
 const RLGL_PUSH_RANGE_PX = 70, RLGL_PUSH_DIST_PX = 130, RLGL_PUSH_COOLDOWN_MS = 5_000;
 const RLGL_SLIPPERY_AT  = 3;             // ≤3 runners still on the field → slippery floor
-const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on "until someone survives"
+const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on total rounds/replays
+const RLGL_SAFE_STREAK  = 3;             // 2 players left who BOTH survived this many rounds → co-champions
 let rlgl = null;
 // { state:'joining'|'running'|'ending', prize, starterName, attempt,
 //   members: Map<socketId,{name,email,alive,finished,lastPushAt}>,
@@ -3716,7 +3717,7 @@ function rlglRunnersLeft() {
 }
 
 function rlglRoster() {
-  return [...rlgl.members].map(([id, m]) => ({ id, name: m.name, alive: m.alive, finished: m.finished }));
+  return [...rlgl.members].map(([id, m]) => ({ id, name: m.name, alive: m.alive, finished: m.finished, safe: m.safe || 0 }));
 }
 
 function rlglCancel(reason) {
@@ -3759,6 +3760,12 @@ function rlglStartAttempt() {
   if (!rlgl) return;
   // Drop members whose player entry vanished between attempts.
   for (const id of [...rlgl.members.keys()]) if (!players[id]) rlgl.members.delete(id);
+  // Everyone else bailed between rounds → the one still standing takes the pot.
+  if (rlgl.members.size === 1) {
+    rlgl.state = "running";   // rlglFinish's settlement guard expects a live game
+    rlglFinish([...rlgl.members]).catch((err) => console.error("RLGL finish failed:", err));
+    return;
+  }
   if (rlgl.members.size < 2) { rlglCancel("Not enough players left on the field."); return; }
   rlgl.state = "running";
   rlgl.replayTimer = null;   // fired (or unused) — a set value now means "between attempts"
@@ -3813,11 +3820,36 @@ function rlglTimeUp() {
 function rlglCheckAttemptEnd() {
   if (!rlgl || rlgl.state !== "running" || rlglRunnersLeft() > 0) return;
   const finishers = [...rlgl.members].filter(([, m]) => m.alive && m.finished);
-  if (finishers.length > 0) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
-  // NOBODY survived → same game again, everyone revived (owner's rule).
+  clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer);
+  // Tournament rules (owner's spec, Aug 2026): crossing the line only survives
+  // the ROUND. Non-finishers are out for good; finishers race again until ONE
+  // player owns the whole pot — unless exactly two are left who have each
+  // survived RLGL_SAFE_STREAK rounds, in which case they split it as co-champions.
+  if (finishers.length === 1) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
+  if (finishers.length >= 2) {
+    for (const [, m] of finishers) m.safe = (m.safe || 0) + 1;
+    const coChamps = finishers.length === 2 && finishers.every(([, m]) => m.safe >= RLGL_SAFE_STREAK);
+    if (coChamps || rlgl.attempt >= RLGL_MAX_ATTEMPTS) {
+      rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err));
+      return;
+    }
+    // Cut the field: everyone who didn't cross is OUT of the tournament. Their
+    // membership ends here, which also releases their frozen body to spectate.
+    for (const [id, m] of [...rlgl.members]) if (!(m.alive && m.finished)) rlgl.members.delete(id);
+    rlgl.attempt++;
+    rlgl.state = "joining";   // limbo: red-light checks stop during the reset
+    io.emit("rlglRound", {
+      attempt: rlgl.attempt,
+      remaining: finishers.map(([, m]) => ({ name: m.name, safe: m.safe })),
+      safeNeeded: RLGL_SAFE_STREAK,
+    });
+    rlgl.replayTimer = setTimeout(rlglStartAttempt, 5_000);
+    console.log(`RLGL: round survived by ${finishers.length} — next round (attempt ${rlgl.attempt})`);
+    return;
+  }
+  // NOBODY survived → same game again, whole field revived (owner's rule).
   if (rlgl.attempt >= RLGL_MAX_ATTEMPTS) { rlglCancel("Twenty rounds and NOBODY survived. The doll wins. No payout."); return; }
   rlgl.attempt++;
-  clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer);
   rlgl.state = "joining";   // brief limbo so red-light checks stop during the reset
   io.emit("rlglReplay", { attempt: rlgl.attempt });
   rlgl.replayTimer = setTimeout(rlglStartAttempt, 4_000);
@@ -3827,7 +3859,7 @@ function rlglCheckAttemptEnd() {
 // SYNCHRONOUS state flip before any await — same double-settle discipline as
 // endRound. Winner identities snapshotted before the payout SQL.
 async function rlglFinish(finisherPairs) {
-  if (!rlgl || rlgl.state !== "running") return;
+  if (!rlgl || rlgl.state === "ending") return;
   const g = rlgl;
   g.state = "ending";
   clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer);
@@ -3872,9 +3904,15 @@ function rlglHandleLeave(id) {
   rlgl.members.delete(id);
   if (rlgl.state === "joining") {
     if (rlgl.replayTimer) {
-      // Between attempts (nobody-survived limbo): no lobby UI to refresh —
-      // just make sure the replay still has a field worth restarting.
-      if (rlgl.members.size < 2) rlglCancel("Not enough players left on the field.");
+      // Between rounds: if exactly one contender remains, they win by
+      // walkover; an empty field cancels the game.
+      if (rlgl.members.size === 1) {
+        clearTimeout(rlgl.replayTimer);
+        rlgl.state = "running";   // rlglFinish's settlement guard expects a live game
+        rlglFinish([...rlgl.members]).catch((err) => console.error("RLGL finish failed:", err));
+      } else if (rlgl.members.size === 0) {
+        rlglCancel("Everyone left the field.");
+      }
       return;
     }
     io.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });

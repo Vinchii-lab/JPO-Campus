@@ -50,6 +50,8 @@ function mkBot(cfg) {
   s.on("rlglOut", (d) => { if (b.roster) b.roster[d.id] = false; if (d.id === b.myId) { b.alive = false; log(cfg.name, "OUT:", d.cause); } });
   s.on("rlglFinished", (d) => { if (b.roster) b.roster[d.id] = false; if (d.id === b.myId) { b.fin = true; log(cfg.name, "FINISHED! 🏁"); } });
   s.on("rlglPushed", (d) => { if (d.id === b.myId) { b.x = d.x; b.y = d.y; } });
+  s.on("rlglRound", () => { b.alive = false; b.fin = false; });   // wait for next rlglBegin
+  s.on("rlglReplay", () => { b.alive = false; b.fin = false; });
   s.on("rlglEnd", () => { b.alive = false; b.fin = false; });
   s.on("rlglCancelled", () => { b.alive = false; b.fin = false; });
 

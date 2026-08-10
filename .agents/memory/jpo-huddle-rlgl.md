@@ -12,11 +12,13 @@ false red-light eliminations, and there is no second movement-tracking system to
 Eliminated runners are frozen server-side via `rlglFrozen(socket.id)` right next to the `phFrozen` check.
 A 700ms grace after each red flip forgives in-flight moves (client latency), epsilon 10px ignores jitter.
 
-## Replay-until-survivor + limbo state
-If an attempt ends with zero finishers, `rlglReplay` fires and the game restarts 4s later with everyone revived
-(Vince's rule: "same game until someone survives"). Between attempts state is `joining` **with `replayTimer` set** —
-that flag distinguishes replay-limbo from the original lobby (no lobby UI refresh, cancel if <2 members remain).
-`rlglStartAttempt` clears `replayTimer` to null.
+## Tournament rounds (owner spec, Aug 2026)
+Crossing the line only survives the ROUND. 0 finishers → `rlglReplay`, same field revived. 1 finisher → sole
+champion, whole pot. ≥2 finishers → `rlglRound`: non-finishers deleted from members (auto-releases their freeze,
+they spectate), survivors race again; each finish bumps `m.safe`. Exactly 2 left with safe ≥ 3 each → co-champions
+split. Between attempts state is `joining` **with `replayTimer` set** — that flag distinguishes round/replay-limbo
+from the original lobby. `rlglStartAttempt` clears `replayTimer`; 1 member left between rounds = walkover win
+(flip state to "running" first — rlglFinish guards against state "ending").
 
 ## Leaves: refresh = out, EXCEPT finishers
 `rlglHandleLeave` at the same 4 seams as `roundHandleLeave` (purge, dropLiveByEmail, kick, disconnect). Active
