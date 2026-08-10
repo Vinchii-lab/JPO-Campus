@@ -3688,7 +3688,7 @@ const RLGL_FINISH_Y = 3400;    // cross this → survived the round (~2520px run
 const RLGL_DOLL = { x: 768, y: 3540 };
 const RLGL_JOIN_MS       = Number(process.env.RLGL_JOIN_MS) || 45_000;
 const RLGL_MIN_PLAYERS   = Number(process.env.RLGL_MIN_PLAYERS) || 3;
-const RLGL_ATTEMPT_MS    = 180_000;      // per attempt; timer expiry wipes the field → replay
+const RLGL_ATTEMPT_MS    = 90_000;       // per attempt; timer expiry wipes the field → replay (owner: visible per-round time limit)
 const RLGL_PRIZE_MIN = 100, RLGL_PRIZE_MAX = 100_000;
 const RLGL_MOVE_EPS_PX  = 10;            // drift under this during red is forgiven (jitter)
 // Escalating phases, indexed by attempt (last one repeats forever).

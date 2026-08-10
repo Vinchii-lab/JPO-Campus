@@ -6975,6 +6975,29 @@
       if (ms) el._t = setTimeout(() => { el.style.display = 'none'; }, ms);
     }
     function _rlglHideBanner() { const el = document.getElementById('rlgl-banner'); if (el) { clearTimeout(el._t); el.style.display = 'none'; } }
+    // Per-round countdown chip (owner rule: the time limit must be VISIBLE).
+    const _RLGL_TIMER_CSS = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+      'padding:5px 16px;border-radius:10px;font-weight:800;font-size:17px;letter-spacing:1px;color:#fff;' +
+      'background:rgba(20,20,28,0.88);border:2px solid rgba(255,255,255,0.25);pointer-events:none;font-variant-numeric:tabular-nums;';
+    function _rlglTimerStart(endsAt) {
+      clearInterval(_rlgl.timerIv); _rlgl.timerIv = null;
+      if (!endsAt) return;
+      const el = _rlglEl('rlgl-timer', _RLGL_TIMER_CSS);
+      const tick = () => {
+        const left = Math.max(0, endsAt - Date.now());
+        const s = Math.ceil(left / 1000);
+        el.textContent = `⏱ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        el.style.color = s <= 10 ? '#ff5a5a' : '#fff';
+        if (left <= 0) _rlglTimerStop();
+      };
+      tick();
+      el.style.display = 'block';
+      _rlgl.timerIv = setInterval(tick, 250);
+    }
+    function _rlglTimerStop() {
+      clearInterval(_rlgl.timerIv); _rlgl.timerIv = null;
+      const el = document.getElementById('rlgl-timer'); if (el) el.style.display = 'none';
+    }
     function _rlglHitFlash() {
       const el = _rlglEl('rlgl-flash', _RLGL_FLASH_CSS);
       el.style.opacity = '1';
@@ -7005,7 +7028,7 @@
       _rlgl.coinSprites = {};
     }
     function _rlglTeardown() {
-      _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner();
+      _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner(); _rlglTimerStop();
       clearInterval(_rlgl.lobbyTimer); _rlgl.lobbyTimer = null;
       const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
       _rlgl.on = _rlgl.running = _rlgl.joined = _rlgl.meAlive = _rlgl.meFinished = _rlgl.slippery = false;
@@ -7103,6 +7126,7 @@
       const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
       _rlglUnfallAll();
       _rlglSpawnWorld(d);
+      _rlglTimerStart(d.endsAt);
       // Cinematic intro: when a new attempt starts, zoom out and fly the
       // camera down the lawn to the doll, then back to the player, staying a
       // bit zoomed out for the game (owner preferred this over the per-frame
@@ -7197,6 +7221,7 @@
       // Round survived by 2+: field is cut, survivors go again. Fallen bodies
       // get up (the permanently-out become free spectators), floor un-ices.
       _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
+      _rlglTimerStop();
       _rlglUnfallAll();
       const names = (d.remaining || []).map((r) => `${String(r.name).replace(/</g, '&lt;')}${r.safe ? ` <span style="opacity:.7;">(safe ×${r.safe})</span>` : ''}`).join(', ');
       const duo = (d.remaining || []).length === 2
@@ -7205,6 +7230,7 @@
     });
     socket.on('rlglReplay', (d = {}) => {
       _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
+      _rlglTimerStop();
       _rlglUnfallAll();
       _rlglBanner(`<span style="color:#ffd24a;">☠️ NOBODY SURVIVED — AGAIN! (attempt ${d.attempt})</span>`, 4000);
     });
