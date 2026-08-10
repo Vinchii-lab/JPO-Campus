@@ -3696,7 +3696,7 @@ const RLGL_MOVE_EPS_PX  = 10;            // drift under this during red is forgi
 // outside the strip is elimination. fakeouts = the doll twitches during green.
 const RLGL_PHASES = [
   { name: "CLASSIC",       green: [1_500, 3_500], red: [3_000, 6_000], grace: 700, halfW: null, slippery: false, fakeouts: false },
-  { name: "ANGRY DOLL",    green: [1_000, 2_500], red: [2_500, 5_000], grace: 450, halfW: null, slippery: false, fakeouts: false },
+  { name: "ANGRY DOLL",    green: [1_500, 3_500], red: [2_500, 5_000], grace: 700, halfW: null, slippery: false, fakeouts: false },
   { name: "NARROW PATH",   green: [1_000, 2_500], red: [2_500, 5_000], grace: 450, halfW: 96,   slippery: false, fakeouts: false },
   { name: "SUDDEN DEATH",  green: [900, 2_000],   red: [2_500, 4_500], grace: 400, halfW: 72,   slippery: true,  fakeouts: true  },
 ];
