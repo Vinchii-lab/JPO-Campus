@@ -28,7 +28,13 @@ function mkBot(cfg) {
               stopAt: 0, arena: null, bounds: null, finishY: 0, others: {}, myId: null, lastPush: 0, wobble: 0 };
 
   s.on("buildStamp", () => s.emit("clientBuild"));
-  s.on("connect", () => s.emit("login", { email: cfg.email, password: PW }));
+  s.on("connect", () => {
+    // Fresh (re)connection — e.g. after a server restart. Drop any stale game
+    // state or the bot keeps "playing" a ghost game (running, shoving) until
+    // the next real rlglBegin arrives.
+    b.alive = false; b.fin = false; b.arena = null; b.roster = null; b.stopAt = 0;
+    s.emit("login", { email: cfg.email, password: PW });
+  });
   s.on("approved", () => { b.myId = s.id; log(cfg.name, "in the office"); });
   s.on("loginFail", (d) => log(cfg.name, "login failed:", JSON.stringify(d)));
 
