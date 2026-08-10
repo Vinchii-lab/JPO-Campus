@@ -3684,8 +3684,8 @@ function phFinish(found, winnerName, reason) {
 // DOWNWARD so everyone's face/outfit is visible, doll waits at the bottom.
 const RLGL_ARENA = { x0: 576, y0: 768, x1: 960, y1: 4608 };
 const RLGL_START_Y  = 880;     // runners line up here (top edge)
-const RLGL_FINISH_Y = 3400;    // cross this → survived the round (~2520px run, shortened per owner)
-const RLGL_DOLL = { x: 768, y: 3540 };
+const RLGL_FINISH_Y = 3020;    // cross this → survived the round (~2140px run, ~15% shorter per owner)
+const RLGL_DOLL = { x: 768, y: 3160 };
 const RLGL_JOIN_MS       = Number(process.env.RLGL_JOIN_MS) || 45_000;
 const RLGL_MIN_PLAYERS   = Number(process.env.RLGL_MIN_PLAYERS) || 3;
 const RLGL_ATTEMPT_MS    = 90_000;       // per attempt; timer expiry wipes the field → replay (owner: visible per-round time limit)
