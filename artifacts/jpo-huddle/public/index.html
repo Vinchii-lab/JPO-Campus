@@ -7016,7 +7016,7 @@
         sc.cameras.main.zoomTo(_rlgl.preZoom, 500, 'Sine.easeInOut');
         if (sc.player) sc.cameras.main.startFollow(sc.player);
       }
-      _rlgl.preZoom = null; _rlgl.camOwned = false; _rlgl.dollPos = null;
+      _rlgl.preZoom = null; _rlgl.introAttempt = null;
     }
     function _rlglSpawnWorld(d) {
       const sc = window._gameScene;
@@ -7103,11 +7103,27 @@
       const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
       _rlglUnfallAll();
       _rlglSpawnWorld(d);
-      // Doll-in-frame camera (owner request): the per-frame hook
-      // window._rlglCamUpdate keeps BOTH the player and the doll visible for
-      // the whole game, centered on the grass strip. Just record the targets.
-      _rlgl.dollPos = d.doll || null;
-      _rlgl.arenaMidX = d.arena ? (d.arena.x0 + d.arena.x1) / 2 : null;
+      // Cinematic intro: when a new attempt starts, zoom out and fly the
+      // camera down the lawn to the doll, then back to the player, staying a
+      // bit zoomed out for the game (owner preferred this over the per-frame
+      // "always frame the doll" director, which showed the whole office).
+      if (meIn && d.doll && _rlgl.introAttempt !== d.attempt) {
+        _rlgl.introAttempt = d.attempt;
+        const scc = window._gameScene;
+        const cam = scc?.cameras?.main;
+        if (cam && scc.player) {
+          if (_rlgl.preZoom == null) _rlgl.preZoom = cam.zoom || 1;
+          cam.stopFollow();
+          cam.zoomTo(0.45, 700, 'Sine.easeInOut');
+          cam.pan(d.doll.x, d.doll.y - 120, 1100, 'Sine.easeInOut', false, (c, prog) => {
+            if (prog === 1) scc.time.delayedCall(700, () => {
+              cam.pan(scc.player.x, scc.player.y, 900, 'Sine.easeInOut', false, (c2, p2) => {
+                if (p2 === 1) { cam.zoomTo(0.65, 500, 'Sine.easeInOut'); cam.startFollow(scc.player); }
+              });
+            });
+          });
+        }
+      }
       const phaseTag = d.phase ? `PHASE ${d.phase.n} — ${d.phase.name}` : `attempt ${d.attempt}`;
       const phaseHint = d.phase && d.phase.name === 'NARROW PATH' ? ' ⚠️ Stay INSIDE the red ropes!' :
                         d.phase && d.phase.name === 'SUDDEN DEATH' ? ' ⚠️ Red ropes + ICE + she FAKES turns!' : '';
@@ -7211,42 +7227,6 @@
     socket.on('rlglOver', () => _rlglTeardown());
     // Hooks for the Phaser update loop (different scope):
     window._rlglSlipActive = () => _rlgl.running && _rlgl.slippery && _rlgl.joined && _rlgl.meAlive && !_rlgl.meFinished;
-    // Camera director for the doll game: every frame, frame the shot so the
-    // player AND the doll are both on screen (that's the whole point of the
-    // game — you watch her while you run). Centers on the grass strip, zooms
-    // in as you get closer, and hands the camera back when you're done.
-    window._rlglCamUpdate = (sc) => {
-      const cam = sc?.cameras?.main, p = sc?.player;
-      if (!cam || !p) return false;
-      const active = _rlgl.running && _rlgl.joined && _rlgl.meAlive && !_rlgl.meFinished && _rlgl.dollPos;
-      if (!active) {
-        if (_rlgl.camOwned) {   // player just died/finished or game ended
-          _rlgl.camOwned = false;
-          cam.zoomTo(_rlgl.preZoom || 1, 500, 'Sine.easeInOut');
-          cam.startFollow(p);
-          _rlgl.preZoom = null;
-        }
-        return false;
-      }
-      if (!_rlgl.camOwned) {
-        _rlgl.camOwned = true;
-        if (_rlgl.preZoom == null) _rlgl.preZoom = cam.zoom || 1;
-        cam.stopFollow();
-      }
-      // Fit the vertical span player→doll (plus breathing room), then ease
-      // zoom & center toward the target so it feels like a camera operator,
-      // not a spreadsheet.
-      const span = Math.abs(_rlgl.dollPos.y - p.y) + 320;
-      const zTarget = Phaser.Math.Clamp(cam.height / span, 0.2, 0.9);
-      cam.setZoom(cam.zoom + (zTarget - cam.zoom) * 0.06);
-      const cx = _rlgl.arenaMidX ?? p.x;
-      const cy = (p.y + _rlgl.dollPos.y) / 2;
-      cam.centerOn(
-        cam.midPoint.x + (cx - cam.midPoint.x) * 0.08,
-        cam.midPoint.y + (cy - cam.midPoint.y) * 0.08
-      );
-      return true;
-    };
     window._rlglTryPush = (sc) => {
       if (!_rlgl.running || !_rlgl.joined || !_rlgl.meAlive || _rlgl.meFinished) return false;
       const now = Date.now();
@@ -12202,8 +12182,6 @@
         else if (Phaser.Input.Keyboard.JustDown(this.keyF) && window._rlglTryPush
                  && !(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')))
           window._rlglTryPush(this);
-        // Doll game camera director: keeps me + the doll in frame while I run.
-        if (window._rlglCamUpdate) window._rlglCamUpdate(this);
         // P = pet trick on demand (NOT T — T opens the chat box): play it
         // locally right away, and tell the server so everyone else's client
         // plays it on this pet too. Only for lively pets, only while visible
