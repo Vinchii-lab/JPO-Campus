@@ -7040,10 +7040,13 @@
       _rlgl.coinSprites = {};
       for (let i = 0; i < (d.coins || []).length; i++) {
         const c = d.coins[i];
-        // High depth + glow disc + bob tween: coins must pop against the grass
-        // (a flat depth-5 emoji hid behind players and read as invisible).
-        const glow = sc.add.circle(c.x, c.y + 2, 18, 0xffd24a, 0.35).setDepth(949);
-        const coin = sc.add.text(c.x, c.y, '🪙', { fontSize: '30px', resolution: 2 }).setOrigin(0.5).setDepth(950);
+        // Drawn coin (the 🪙 emoji renders as an empty box in this WebGL font,
+        // per the boss's screenshot): pulsing glow + BRIGHT yellow disc with a
+        // darker rim and a bold "C", bobbing, always on top.
+        const glow = sc.add.circle(c.x, c.y + 2, 20, 0xffee00, 0.35).setDepth(949);
+        const disc = sc.add.circle(0, 0, 13, 0xffee00, 1).setStrokeStyle(3, 0xcc9900, 1);
+        const letter = sc.add.text(0, 0, 'C', { fontSize: '17px', fontFamily: 'Arial Black, Arial, sans-serif', fontStyle: 'bold', color: '#996600', resolution: 2 }).setOrigin(0.5, 0.54);
+        const coin = sc.add.container(c.x, c.y, [disc, letter]).setDepth(950);
         sc.tweens.add({ targets: coin, y: c.y - 7, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
         sc.tweens.add({ targets: glow, alpha: 0.12, scale: 1.35, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
         coin._rlglGlow = glow;
