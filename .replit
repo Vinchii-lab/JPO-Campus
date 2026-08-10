@@ -18,15 +18,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Deal Show Test Bots"
+args = "RLGL Test Bots"
 
 [[workflows.workflow]]
-name = "Deal Show Test Bots"
+name = "RLGL Test Bots"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "node /tmp/deal_bots2.cjs"
+args = "node /home/runner/workspace/artifacts/jpo-huddle/rlgl_bots.cjs"
 
 [workflows.workflow.metadata]
 outputType = "console"
