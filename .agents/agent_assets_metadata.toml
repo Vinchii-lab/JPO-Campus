@@ -83,3 +83,17 @@ uri = "file://attached_assets/dragon_anim_preview.png"
 type = "image"
 title = "Baby Dragon — animated frames preview"
 description = "Walk 1-2-3, sit, and fire-breathing frames in the new style"
+
+[[outputs]]
+id = "_puvvneMcuu3NmOngytoK"
+uri = "file://attached_assets/generated_images/squid_doll_concept.png"
+type = "image"
+title = "The Doll — green light / red light"
+description = "Concept: back turned = run; turned around with red eyes = FREEZE."
+
+[[outputs]]
+id = "bDY0f4dV8hwq-As1Fhwo3"
+uri = "file://attached_assets/generated_images/push_fall_frames.png"
+type = "image"
+title = "Push & fall animation frames"
+description = "Shove → stumble → face-plant → dizzy stars, frame by frame."
