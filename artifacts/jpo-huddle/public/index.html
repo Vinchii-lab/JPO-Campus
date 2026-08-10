@@ -7110,7 +7110,23 @@
     });
     socket.on('rlglTeleport', (d = {}) => {
       const sc = window._gameScene;
-      if (sc?.player) { if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y); }
+      if (!sc?.player) return;
+      // Teleported to the start line while SITTING: stand up FIRST — otherwise
+      // the runner arrives still rendered in the chair pose with a disabled
+      // physics body (can't walk), and a later E-press would snap them back to
+      // the office seat they came from. Mirrors the E-press stand-up block,
+      // minus the _preSitPos snap-back (the start line IS the new position).
+      if (sc.sitting) {
+        sc.sitting = false;
+        sc._deskPose = null;
+        sc._preSitPos = null;
+        try { _setWorkChip(false); } catch {}
+        try { sc._clearOccluders(sc._seatOccluders); } catch {}
+        sc._seatOccluders = [];
+        if (sc.playerTexKey) sc.player.setTexture(sc.playerTexKey);
+        if (sc.player.body) sc.player.body.enable = true;
+      }
+      if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y);
     });
     socket.on('rlglBegin', (d = {}) => {
       _rlgl.on = true; _rlgl.running = true; _rlgl.slippery = false;
