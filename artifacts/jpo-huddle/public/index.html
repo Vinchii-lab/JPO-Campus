@@ -6997,7 +6997,11 @@
     }
     function _rlglClearWorld() {
       for (const k of ['doll', 'lineF', 'lineS', 'strip0', 'strip1']) { try { _rlgl[k]?.destroy(); } catch {} _rlgl[k] = null; }
-      for (const k in _rlgl.coinSprites || {}) { try { _rlgl.coinSprites[k]?.destroy(); } catch {} }
+      for (const k in _rlgl.coinSprites || {}) {
+        const s = _rlgl.coinSprites[k];
+        try { s?._rlglGlow?.destroy(); } catch {}
+        try { s?.destroy(); } catch {}
+      }
       _rlgl.coinSprites = {};
     }
     function _rlglTeardown() {
@@ -7029,7 +7033,14 @@
       _rlgl.coinSprites = {};
       for (let i = 0; i < (d.coins || []).length; i++) {
         const c = d.coins[i];
-        _rlgl.coinSprites[c.idx ?? i] = sc.add.text(c.x, c.y, '🪙', { fontSize: '22px' }).setOrigin(0.5).setDepth(5);
+        // High depth + glow disc + bob tween: coins must pop against the grass
+        // (a flat depth-5 emoji hid behind players and read as invisible).
+        const glow = sc.add.circle(c.x, c.y + 2, 18, 0xffd24a, 0.35).setDepth(949);
+        const coin = sc.add.text(c.x, c.y, '🪙', { fontSize: '30px', resolution: 2 }).setOrigin(0.5).setDepth(950);
+        sc.tweens.add({ targets: coin, y: c.y - 7, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        sc.tweens.add({ targets: glow, alpha: 0.12, scale: 1.35, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        coin._rlglGlow = glow;
+        _rlgl.coinSprites[c.idx ?? i] = coin;
       }
       const key = (d.light === 'red') ? 'rlgl_doll_red' : 'rlgl_doll_green';
       const img = sc.textures.get('rlgl_doll_red')?.getSourceImage();
@@ -7110,7 +7121,7 @@
     });
     socket.on('rlglCoin', (d = {}) => {
       const s = (_rlgl.coinSprites || {})[d.idx];
-      if (s) { try { s.destroy(); } catch {} delete _rlgl.coinSprites[d.idx]; }
+      if (s) { try { s._rlglGlow?.destroy(); } catch {} try { s.destroy(); } catch {} delete _rlgl.coinSprites[d.idx]; }
       if (d.byId === socket.id) showToast(`🪙 +${d.value} coins — greed pays!`, 2500);
     });
     socket.on('rlglOut', (d = {}) => {
