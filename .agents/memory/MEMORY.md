@@ -16,4 +16,5 @@
 - [JPO Huddle Deal or No Deal](jpo-huddle-dealornodeal.md) — owner-only hosting; "revealing" state blocks offers mid-reveal; single-attempt payouts (no double-pay); test on isolated PORT instance.
 - [JPO Huddle HR quiz NPC](jpo-huddle-hr-quiz.md) — Ms. Poli daily AI-graded quiz: typed answers, per-day claim gating, echo player's answer back on wrong.
 - [JPO Huddle Red Light Green Light](jpo-huddle-rlgl.md) — red-light detection rides validated playerMove; replay-until-survivor limbo flag; finishers survive refresh (email-keyed payout).
+- [JPO Huddle pet sprite pipeline](jpo-huddle-pet-sprites.md) — one-sheet gen → bbox slicing → flood-erase opaque white checkerboard; art faces RIGHT; present options before building.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.
