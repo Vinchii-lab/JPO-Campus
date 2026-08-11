@@ -237,3 +237,17 @@ uri = "file://attached_assets/generated_images/choco_s3.png"
 type = "image"
 title = "🍫 Choco Stage 3 — BEAR-DOG 👑 (70 treats)"
 description = "Big burly bear-sized final form, tiny fangs, still a gentle boy in his bandana."
+
+[[outputs]]
+id = "39baxfhYwKuLhfwgm383h"
+uri = "file://attached_assets/generated_images/dog_s3_goldenwolf.png"
+type = "image"
+title = "🐶 Shiba Stage 3 — GOLDEN WOLF 👑 (70 treats)"
+description = "Wolf shape, but keeps the shiba's golden-orange fur — bandana stays."
+
+[[outputs]]
+id = "W3KkvsZndWcD0PE0Awzfk"
+uri = "file://attached_assets/generated_images/choco_s3_bigdog.png"
+type = "image"
+title = "🍫 Choco Stage 3 — GRAND CHOCO 👑 (70 treats)"
+description = "No more bear — a big noble chocolate dog, floppy ears and all."
