@@ -11920,6 +11920,11 @@
             }
           }
         }
+        // A trick tween owns x/y while it plays — the follow step dragging the
+        // pet at the same time visually cancelled the whirl when the owner was
+        // walking. Real dogs stop to chase their tail; ours does too, then the
+        // smooth catch-up (or the >300px snap) reels it back in afterwards.
+        if (petObj._trickBusy) { this._placePetAcc(petObj); return; }
         if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
