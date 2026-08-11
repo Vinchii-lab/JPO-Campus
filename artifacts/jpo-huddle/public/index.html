@@ -11971,8 +11971,22 @@
           petObj._animT = (petObj._animT || 0) + delta;
           const bs = petObj._baseScale || 1, walking = dist > gap + 1;
           if (walking) {
-            petObj.angle = Math.sin(petObj._animT * 0.02) * 6;                       // waddle
-            petObj.setScale(bs, bs * (1 + 0.05 * Math.sin(petObj._animT * 0.028)));  // trot bounce
+            // Final forms MOVE differently too — each spirit has its own gait:
+            //   blaze (golden wolf) = powerful prowl: barely sways, long deep
+            //     strides, unhurried frame cadence — pure confidence.
+            //   frost (winter spirit) = ethereal glide: almost no waddle, a
+            //     slow weightless shimmer, drifting like it's on ice.
+            //   cocoa (cocoa storm) = heavy happy lumber: BIG side-to-side
+            //     waddle and a bouncy chonky bound.
+            // Everyone else keeps the classic puppy trot.
+            const gait = {
+              blaze: { sway: 2, swayF: 0.011, bounce: 0.085, bounceF: 0.020, frameMs: 165 },
+              frost: { sway: 1, swayF: 0.009, bounce: 0.020, bounceF: 0.014, frameMs: 180 },
+              cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
+            }[petObj._mythic] || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
+            petObj.angle = Math.sin(petObj._animT * gait.swayF) * gait.sway;                     // waddle
+            petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
+            petObj._gaitFrameMs = gait.frameMs;
             petObj._trickAt = 0;                  // re-roll the trick timer on next stop
             // Final-form spirits leave an elemental paw trail while trotting:
             // husky frost crystals, shiba embers, choco cocoa drips.
@@ -11989,7 +12003,7 @@
             }
             // Animated-frames pilot: step the walk cycle (~140ms per frame).
             if (petObj._animSet) {
-              const fr = petObj._animSet.walk[Math.floor(petObj._animT / 140) % petObj._animSet.walk.length];
+              const fr = petObj._animSet.walk[Math.floor(petObj._animT / (petObj._gaitFrameMs || 140)) % petObj._animSet.walk.length];
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
           } else {
