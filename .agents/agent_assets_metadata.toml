@@ -272,3 +272,10 @@ uri = "file://attached_assets/wolf_final_preview.png"
 type = "image"
 title = "Aurora Wolf — full pose set + evolution line 🐺✨"
 description = "Top: the 6 in-game frames (stand, 3 walk steps, sit, howl). Bottom: baby → 2nd form → final form at in-game relative sizes."
+
+[[outputs]]
+id = "zlKBPLcu5Bq9BpOhMMtes"
+uri = "file://attached_assets/alpha_husky_preview.png"
+type = "image"
+title = "Alpha Husky — full pose set + evolution line 👑🐺"
+description = "Top: the 6 in-game frames (stand, 3 trot steps, royal sit, howl). Bottom: baby → 2nd form → alpha final form at in-game relative sizes."
