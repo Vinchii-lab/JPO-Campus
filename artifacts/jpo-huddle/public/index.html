@@ -11716,20 +11716,28 @@
             return;
           }
           if (st === 2) {
-            // Play-bow crouch, then a tail-chase whirl: the dog leaps and
-            // turns AROUND (horizontal flip, feet down the whole time) like a
-            // real excited dog — no cartwheel rotation.
+            // Tail-chase whirl the way a REAL dog does it: it runs two tight
+            // little circles on the ground. No sprite rotation, no mirror-flip
+            // "card spin" — just position on a small circle, facing wherever
+            // it's currently running, with the walk frames cycling.
             petObj._trickBusy = true;
-            const sx = petObj.scaleX;   // preserve current facing (sign)
-            this.tweens.chain({
-              targets: petObj,
-              tweens: [
-                { scaleY: bs * 0.82, scaleX: sx * 1.1, duration: 150, yoyo: true, ease: 'Sine.easeInOut' },
-                { y: y0 - 14, scaleY: bs, scaleX: -sx, duration: 190, ease: 'Sine.easeOut' },   // whirl away…
-                { scaleX: sx, duration: 190, ease: 'Sine.easeInOut' },                          // …and back around
-                { y: y0, duration: 200, ease: 'Bounce.easeOut' },
-              ],
-              onComplete: () => { petObj.scaleX = sx; petObj.scaleY = bs; petObj.y = y0; petObj._trickBusy = false; },
+            const x0 = petObj.x, flip0 = petObj.flipX;
+            const r = 9, turns = 2;
+            const spin = { t: 0 };
+            const walkFrames = petObj._animSet ? petObj._animSet.walk : null;
+            this.tweens.add({
+              targets: spin, t: 1, duration: 950, ease: 'Sine.easeInOut',
+              onUpdate: () => {
+                const a = spin.t * turns * Math.PI * 2;
+                petObj.x = x0 + Math.sin(a) * r;
+                petObj.y = y0 - Math.abs(Math.sin(a * 0.5)) * 2 - (1 - Math.cos(a)) * 1.5;
+                petObj.flipX = Math.cos(a) < 0;                      // face the way it's running
+                if (walkFrames) petObj.setTexture(walkFrames[Math.floor(spin.t * turns * 8) % walkFrames.length]);
+              },
+              onComplete: () => {
+                petObj.x = x0; petObj.y = y0; petObj.flipX = flip0;
+                petObj._trickBusy = false;
+              },
             });
             return;
           }
