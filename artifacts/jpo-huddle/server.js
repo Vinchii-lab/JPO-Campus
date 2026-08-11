@@ -1327,8 +1327,52 @@ const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
 // No daily cap on purpose (owner: rich players may speedrun it).
 // The client mirrors these thresholds for its stage rendering.
 const PET_EVOLVE_XP = [30, 70];
+const PET_TREAT_PRICE = 250;   // one price everywhere: cafeteria menu AND the click-your-pet panel
 function petStageOf(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
 function petStageFor(p) { return petStageOf(((p.petXp || {})[p.pet]) || 0); }
+
+// Shared feed path for BOTH the cafeteria pet-treat menu item and the
+// click-your-pet "Feed" button. Coins out + XP in commit in ONE statement
+// for account players, so a crash can't charge without feeding (or vice
+// versa). Caller has already applied buy throttle + wager/round blocks.
+async function feedPetTreat(io, socket, p) {
+  if (!p.pet) { socket.emit("foodError", { message: "Adopt a pet first — the treat is for THEM! 🐾" }); return; }
+  const pet = p.pet;
+  let xp;
+  if (!p.email) {
+    if ((p.coins ?? 0) < PET_TREAT_PRICE) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+    p.coins -= PET_TREAT_PRICE;
+    p.petXp = p.petXp || {};
+    xp = p.petXp[pet] = (p.petXp[pet] || 0) + 1;
+  } else {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE jpo_players
+            SET coins = coins - $2,
+                pet_xp = jsonb_set(coalesce(pet_xp, '{}'::jsonb), ARRAY[$3::text],
+                         to_jsonb(coalesce((pet_xp->>$3)::int, 0) + 1)),
+                updated_at = now()
+          WHERE email = $1 AND coins >= $2
+          RETURNING coins, (pet_xp->>$3)::int AS xp`,
+        [p.email, PET_TREAT_PRICE, pet],
+      );
+      if (rows.length === 0) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+      p.coins = rows[0].coins;
+      p.petXp = p.petXp || {};
+      xp = p.petXp[pet] = rows[0].xp;
+    } catch (err) { console.error("pet treat failed:", err); return; }
+  }
+  const stage = petStageOf(xp), prevStage = petStageOf(xp - 1);
+  socket.emit("coinUpdate", { coins: p.coins });
+  socket.emit("petFed", { pet, xp, stage, next: PET_EVOLVE_XP.find((t) => t > xp) ?? null });
+  io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
+  if (stage > prevStage) {
+    io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
+    io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage });
+    console.log(`${p.name}'s ${pet} evolved to stage ${stage} (${xp} treats)`);
+  }
+  console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
+}
 
 const FOOD_MENUS = {
   sweets: { title: "🍬 Candy Stand", items: [
@@ -6730,6 +6774,18 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("buyCosmetic failed:", err); }
   });
 
+  // ── Click-your-pet panel: feed a treat from anywhere ─────────────────────
+  // Same throttle + wager/round blocks as buyFood, minus the counter
+  // proximity — you carry treats for YOUR pet, not the cafeteria's.
+  socket.on("feedPet", async () => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(buyBucket)) return;
+    if (rpsBySocket.has(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
+    if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
+    await feedPetTreat(io, socket, p);
+  });
+
   // ── Cafeteria kitchen: buy a specific item off a station's menu ──────────
   // Mirrors buyCosmetic: bucket first, the same wager-invariant blocks, price
   // from the SERVER's menu table only, and one atomic conditional UPDATE for
@@ -6755,48 +6811,8 @@ io.on("connection", (socket) => {
     const menuItem = FOOD_MENUS[FOOD_STATIONS[station]].items.find((it) => it.id === item);
     if (!menuItem) return;
 
-    // ── Pet Treat: feeding the EQUIPPED pet earns it XP (Pokémon-style) ──
-    // Coins out + XP in commit in ONE statement for account players, so a
-    // crash can't charge without feeding (or feed without charging).
-    if (menuItem.id === "pet_treat") {
-      if (!p.pet) { socket.emit("foodError", { message: "Adopt a pet first — the treat is for THEM! 🐾" }); return; }
-      const pet = p.pet;
-      let xp;
-      if (!p.email) {
-        if ((p.coins ?? 0) < menuItem.price) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
-        p.coins -= menuItem.price;
-        p.petXp = p.petXp || {};
-        xp = p.petXp[pet] = (p.petXp[pet] || 0) + 1;
-      } else {
-        try {
-          const { rows } = await pool.query(
-            `UPDATE jpo_players
-                SET coins = coins - $2,
-                    pet_xp = jsonb_set(coalesce(pet_xp, '{}'::jsonb), ARRAY[$3::text],
-                             to_jsonb(coalesce((pet_xp->>$3)::int, 0) + 1)),
-                    updated_at = now()
-              WHERE email = $1 AND coins >= $2
-              RETURNING coins, (pet_xp->>$3)::int AS xp`,
-            [p.email, menuItem.price, pet],
-          );
-          if (rows.length === 0) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
-          p.coins = rows[0].coins;
-          p.petXp = p.petXp || {};
-          xp = p.petXp[pet] = rows[0].xp;
-        } catch (err) { console.error("pet treat failed:", err); return; }
-      }
-      const stage = petStageOf(xp), prevStage = petStageOf(xp - 1);
-      socket.emit("coinUpdate", { coins: p.coins });
-      socket.emit("petFed", { pet, xp, stage, next: PET_EVOLVE_XP.find((t) => t > xp) ?? null });
-      io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
-      if (stage > prevStage) {
-        io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
-        io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage });
-        console.log(`${p.name}'s ${pet} evolved to stage ${stage} (${xp} treats)`);
-      }
-      console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
-      return;
-    }
+    // ── Pet Treat: same shared feed path as the click-your-pet panel ─────
+    if (menuItem.id === "pet_treat") { await feedPetTreat(io, socket, p); return; }
 
     if (!p.email) {
       // Session-only players (no email): memory-only purchase.
