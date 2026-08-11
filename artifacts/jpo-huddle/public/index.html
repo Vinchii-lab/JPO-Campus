@@ -11713,14 +11713,42 @@
           const st = petObj._petStage || 1;
           const bs = petObj._baseScale || 1, y0 = petObj.y;
           if (st >= 3) {
-            // Rear the head back, hold the howl, moon-notes drift up.
             petObj._trickBusy = true;
             const fwd = (petObj.flipX ? -1 : 1);
-            this.tweens.add({
-              targets: petObj, angle: -14 * fwd, duration: 260, ease: 'Sine.easeOut',
-              yoyo: true, hold: petObj._mythic ? 1350 : 950,
-              onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
-            });
+            // Each final form performs its OWN signature move — only the
+            // winter spirit actually howls:
+            //   blaze  = SOLAR LEAP: deep crouch, then a powerful skyward
+            //            leap with the flare bursting at the apex.
+            //   cocoa  = COCOA QUAKE: plants its paws and does a huge
+            //            full-body shake, like shaking off molten chocolate.
+            //   frost  = AURORA HOWL: rear the head back and hold it long.
+            if (petObj._mythic === 'blaze') {
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  { scaleY: bs * 0.72, scaleX: bs * 1.15, duration: 340, ease: 'Sine.easeIn' },   // coil
+                  { y: y0 - 34, scaleY: bs * 1.18, scaleX: bs * 0.9, angle: -8 * fwd,
+                    duration: 380, ease: 'Sine.easeOut' },                                        // launch
+                  { y: y0 - 34, duration: 420 },                                                  // hang at the apex
+                  { y: y0, scaleY: bs, scaleX: bs, angle: 0, duration: 300, ease: 'Bounce.easeOut' },
+                ],
+                onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
+              });
+            } else if (petObj._mythic === 'cocoa') {
+              this.tweens.add({ targets: petObj, scaleY: bs * 0.88, scaleX: bs * 1.1,
+                duration: 200, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });                  // churning squash
+              this.tweens.add({
+                targets: petObj, angle: { from: -13, to: 13 }, duration: 110,
+                yoyo: true, repeat: 11, ease: 'Sine.easeInOut',
+                onComplete: () => { petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false; },
+              });
+            } else {
+              this.tweens.add({
+                targets: petObj, angle: -14 * fwd, duration: 260, ease: 'Sine.easeOut',
+                yoyo: true, hold: petObj._mythic ? 1350 : 950,
+                onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+              });
+            }
             if (petObj._mythic) {
               // SIGNATURE HOWLS — each final form calls its own element:
               //   frost = AURORA HOWL (northern lights), blaze = SOLAR HOWL
