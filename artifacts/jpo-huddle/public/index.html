@@ -10340,9 +10340,16 @@
         // texture is missing, so a failed load never breaks joining.
         for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
         // Evolution stage art (approved lines only; species without stage art
-        // fall back to the grow + golden-tint treatment in _makePet).
+        // fall back to the grow + golden-tint treatment in _makePet). Each
+        // stage also ships its own animation frames — evolved pets move
+        // differently, not just look different.
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco'])
-          for (const s of [2, 3]) this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
+          for (const s of [2, 3]) {
+            this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
+            const stem = id.replace(/^pet_/, '');
+            for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+              this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png`);
+          }
         // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
         // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
         // static bunny art) swapped via setTexture in _stepPet/_petTrick.
@@ -11550,8 +11557,10 @@
         // this exact pet id loaded (walk cycle + sit + action). All frames
         // are 64x64 bottom-aligned, so one setScale fits them all;
         // setTexture never changes the scale.
-        const stem = pet.replace(/^pet_/, '');
-        if (!stageKey && obj.setTexture &&
+        // Evolved stages use their OWN frame set (…_s2_walk1 etc.) so the
+        // animations evolve along with the art.
+        const stem = pet.replace(/^pet_/, '') + (stageKey ? `_s${stage}` : '');
+        if (obj.setTexture &&
             ['walk1', 'walk2', 'walk3', 'sit', 'action'].every(f => this.textures.exists(`petanim_${stem}_${f}`))) {
           obj._animSet = {
             walk: [`petanim_${stem}_walk1`, `petanim_${stem}_walk2`, `petanim_${stem}_walk3`, `petanim_${stem}_walk2`],
