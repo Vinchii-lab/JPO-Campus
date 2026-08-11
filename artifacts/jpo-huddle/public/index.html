@@ -11988,18 +11988,30 @@
             petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
             petObj._gaitFrameMs = gait.frameMs;
             petObj._trickAt = 0;                  // re-roll the trick timer on next stop
-            // Final-form spirits leave an elemental paw trail while trotting:
-            // husky frost crystals, shiba embers, choco cocoa drips.
+            // Final-form spirits trail a NATURAL aura while trotting — no
+            // emoji, just soft layered glow wisps in the line's element:
+            // frost = cold icy mist hanging low, blaze = warm embers of light
+            // curling upward, cocoa = rich warm steam drifting off the floor.
             if (petObj._mythic && (!petObj._trailAt || _now >= petObj._trailAt)) {
-              petObj._trailAt = _now + 260 + Math.random() * 120;
-              const tg = { frost: ['❄', '💠'], blaze: ['🔥', '✦'], cocoa: ['🤎', '🍫'] }[petObj._mythic];
-              const f = this.add.text(petObj.x + (Math.random() * 8 - 4), petObj.y - 1,
-                tg[Math.random() < 0.35 ? 1 : 0], { fontSize: '9px', resolution: 2 })
-                .setOrigin(0.5, 1).setAlpha(0.85).setDepth(1);
-              // Embers float up as they die; frost/cocoa settle into the floor.
-              this.tweens.add({ targets: f, alpha: 0, scale: 0.5,
-                y: f.y + (petObj._mythic === 'blaze' ? -10 : -4),
-                duration: 1100, ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, f) });
+              petObj._trailAt = _now + 150 + Math.random() * 90;
+              const th = {
+                frost: { core: 0xdff4ff, glow: 0x9fd8ff, rise: -3, drift: 6 },
+                blaze: { core: 0xffe9b8, glow: 0xff9a3d, rise: -14, drift: 4 },
+                cocoa: { core: 0xf3e5ab, glow: 0xc08a4e, rise: -8, drift: 5 },
+              }[petObj._mythic];
+              const wx = petObj.x + (Math.random() * 10 - 5), wy = petObj.y - 2 - Math.random() * 3;
+              const r = 2.5 + Math.random() * 2.5;
+              // Two stacked soft circles read as one glowing wisp: a wide
+              // translucent halo with a small bright core.
+              const halo = this.add.circle(wx, wy, r * 2.4, th.glow, 0.18).setDepth(1);
+              const core = this.add.circle(wx, wy, r, th.core, 0.5).setDepth(1);
+              const dx = (Math.random() * 2 - 1) * th.drift;
+              for (const w of [halo, core]) {
+                this.tweens.add({ targets: w, alpha: 0, scale: 0.25,
+                  x: w.x + dx, y: w.y + th.rise + Math.random() * 3,
+                  duration: 950 + Math.random() * 350, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, w) });
+              }
             }
             // Animated-frames pilot: step the walk cycle (~140ms per frame).
             if (petObj._animSet) {
