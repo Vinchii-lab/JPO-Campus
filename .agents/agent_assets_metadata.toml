@@ -97,3 +97,24 @@ uri = "file://attached_assets/generated_images/push_fall_frames.png"
 type = "image"
 title = "Push & fall animation frames"
 description = "Shove → stumble → face-plant → dizzy stars, frame by frame."
+
+[[outputs]]
+id = "uu57Ysxtdb5ypuRTm6C-I"
+uri = "file://attached_assets/generated_images/dragon_stage1_hatchling.png"
+type = "image"
+title = "Stage 1 — Hatchling 🐣"
+description = "The baby dragon — what you get from the shop."
+
+[[outputs]]
+id = "kderJDDfjUTWdlrgFBOO0"
+uri = "file://attached_assets/generated_images/dragon_stage2_drake.png"
+type = "image"
+title = "Stage 2 — Drake ✨ (30 treats)"
+description = "First evolution: real wings, growing horns, smoke puffs."
+
+[[outputs]]
+id = "3RWbBZ4s64NMnfx5mFyR8"
+uri = "file://attached_assets/generated_images/dragon_stage3_elder.png"
+type = "image"
+title = "Stage 3 — ELDER DRAGON 👑 (70 treats)"
+description = "Final form: gold-tipped horns, flame breath, ember aura."
