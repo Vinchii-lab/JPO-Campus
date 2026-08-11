@@ -11886,7 +11886,10 @@
         const ty = py + 10;                       // anchor beside the feet
         let dx = petObj.x - px, dy = petObj.y - ty;
         let dist = Math.hypot(dx, dy) || 1;
-        if (dist > 300) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
+        const _now = performance.now();
+        const sprinting = petObj._sprintUntil && _now < petObj._sprintUntil;
+        // No teleport while sprinting back after a trick — it RUNS to you.
+        if (dist > 300 && !sprinting) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
         // Lively pets pilot: procedural walk waddle / idle breathing / random
         // idle tricks for PET_LIVELY species. Runs before the follow step so
@@ -11924,9 +11927,15 @@
         // pet at the same time visually cancelled the whirl when the owner was
         // walking. Real dogs stop to chase their tail; ours does too, then the
         // smooth catch-up (or the >300px snap) reels it back in afterwards.
-        if (petObj._trickBusy) { this._placePetAcc(petObj); return; }
+        if (petObj._trickBusy) { petObj._wasTricking = true; this._placePetAcc(petObj); return; }
+        if (petObj._wasTricking) {
+          // Trick just finished with the owner possibly far away: give the pet
+          // a short sprint window so it RUNS back instead of teleporting.
+          petObj._wasTricking = false;
+          petObj._sprintUntil = _now + 2500;
+        }
         if (dist > gap || (seated && dist < gap - 2)) {
-          const k = Math.min(1, delta * 0.008);   // smooth catch-up, frame-rate safe
+          const k = Math.min(1, delta * (sprinting ? 0.022 : 0.008));   // smooth catch-up (fast sprint after tricks)
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
           petObj.x += mx;
           petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;
