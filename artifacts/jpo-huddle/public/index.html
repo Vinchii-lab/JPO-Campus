@@ -11887,9 +11887,18 @@
         let dx = petObj.x - px, dy = petObj.y - ty;
         let dist = Math.hypot(dx, dy) || 1;
         const _now = performance.now();
-        const sprinting = petObj._sprintUntil && _now < petObj._sprintUntil;
-        // No teleport while sprinting back after a trick — it RUNS to you.
-        if (dist > 300 && !sprinting) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
+        // Trick just ended? Open the sprint window BEFORE the snap check below
+        // gets a chance to teleport (it used to fire on this very frame).
+        if (!petObj._trickBusy && petObj._wasTricking) {
+          petObj._wasTricking = false;
+          petObj._sprintUntil = _now + 2500;
+        }
+        let sprinting = petObj._sprintUntil && _now < petObj._sprintUntil;
+        // Keep the sprint alive until the pet has actually closed the gap —
+        // a fixed window expired mid-run for far owners and snapped it home.
+        if (sprinting && dist > 120) petObj._sprintUntil = _now + 800;
+        // No teleport while a trick plays or while sprinting back afterwards.
+        if (dist > 300 && !sprinting && !petObj._trickBusy) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
         // Lively pets pilot: procedural walk waddle / idle breathing / random
         // idle tricks for PET_LIVELY species. Runs before the follow step so
@@ -11928,12 +11937,6 @@
         // walking. Real dogs stop to chase their tail; ours does too, then the
         // smooth catch-up (or the >300px snap) reels it back in afterwards.
         if (petObj._trickBusy) { petObj._wasTricking = true; this._placePetAcc(petObj); return; }
-        if (petObj._wasTricking) {
-          // Trick just finished with the owner possibly far away: give the pet
-          // a short sprint window so it RUNS back instead of teleporting.
-          petObj._wasTricking = false;
-          petObj._sprintUntil = _now + 2500;
-        }
         if (dist > gap || (seated && dist < gap - 2)) {
           const k = Math.min(1, delta * (sprinting ? 0.022 : 0.008));   // smooth catch-up (fast sprint after tricks)
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
