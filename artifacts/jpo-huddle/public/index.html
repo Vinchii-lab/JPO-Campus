@@ -11733,22 +11733,39 @@
               if (!owner) { petObj._trickBusy = false; return; }
               const x0 = petObj.x, sitTex = petObj._animSet && petObj._animSet.sit;
               const walkTex = petObj._animSet && petObj._animSet.walk;
-              const perchX = owner.x, perchY = owner.y - 26;   // riding the shoulders/head
               const d0 = petObj.depth;
-              petObj.setDepth(5);                              // render over the owner while riding
+              const ownAngle0 = owner.angle;                   // don't fight RLGL knockdowns etc.
+              const tipDir = (owner.x >= petObj.x ? 1 : -1);   // topple AWAY from the incoming dog
+              const perchX = owner.x, perchY = owner.y - 10;   // standing atop the flattened owner
+              const knocked = () => {                          // the RLGL-style knockdown
+                this.tweens.add({ targets: owner, angle: 90 * tipDir, duration: 190, ease: 'Back.easeIn' });
+                this.cameras.main.shake(160, 0.004);           // THUD.
+              };
+              const getUp = () => {
+                this.tweens.add({ targets: owner, angle: ownAngle0, duration: 260, ease: 'Sine.easeOut' });
+              };
+              petObj.setDepth(5);                              // render over the owner while on top
               this.tweens.chain({
                 targets: petObj,
                 tweens: [
-                  { scaleY: bs * 0.75, scaleX: bs * 1.12, duration: 300, ease: 'Sine.easeIn' },  // deep crouch
-                  { x: perchX, y: perchY - 22, scaleY: bs * 1.12, scaleX: bs * 0.94,
-                    duration: 330, ease: 'Sine.easeOut',
-                    onStart: () => { petObj.flipX = perchX < x0; } },                            // spring UP...
-                  { y: perchY, scaleY: bs, scaleX: bs, duration: 150, ease: 'Sine.easeIn',
-                    onComplete: () => { if (sitTex) petObj.setTexture(sitTex); } },              // ...land on top
-                  { y: perchY - 2, duration: 380, yoyo: true, repeat: 2, ease: 'Sine.easeInOut' }, // happy perch bounce
+                  { scaleY: bs * 0.72, scaleX: bs * 1.14, duration: 320, ease: 'Sine.easeIn' },  // deep crouch, winding up
+                  { x: perchX, y: perchY - 30, scaleY: bs * 1.14, scaleX: bs * 0.92,
+                    duration: 280, ease: 'Sine.easeOut',
+                    onStart: () => { petObj.flipX = perchX < x0; } },                            // launch AT the owner...
+                  { y: perchY, scaleY: bs * 0.9, scaleX: bs * 1.08, duration: 130, ease: 'Sine.easeIn',
+                    onComplete: () => {                                                          // ...IMPACT: owner goes DOWN
+                      knocked();
+                      if (sitTex) petObj.setTexture(sitTex);
+                    } },
+                  { scaleY: bs, scaleX: bs, y: perchY - 4, duration: 420, yoyo: true, repeat: 2,
+                    ease: 'Sine.easeInOut' },                                                    // smug bounces on the fallen owner
                   { x: x0, y: y0 - 18, duration: 260, ease: 'Sine.easeOut',
-                    onStart: () => { if (walkTex) petObj.setTexture(walkTex[0]); petObj.flipX = x0 < perchX; } },
-                  { y: y0, duration: 170, ease: 'Bounce.easeOut' },                              // hop back down
+                    onStart: () => {
+                      getUp();                                                                   // owner staggers back to their feet
+                      if (walkTex) petObj.setTexture(walkTex[0]);
+                      petObj.flipX = x0 < perchX;
+                    } },
+                  { y: y0, duration: 170, ease: 'Bounce.easeOut' },                              // hop off
                 ],
                 onComplete: () => {
                   petObj.setDepth(d0); petObj.setScale(bs); petObj.y = y0; petObj.angle = 0;
