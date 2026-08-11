@@ -202,3 +202,10 @@ uri = "file://attached_assets/generated_images/turtle_s3_ancient.png"
 type = "image"
 title = "🐢 Turtle Stage 3 — Ancient Tortoise 👑 (70 treats)"
 description = "Mossy shell with a tiny bonsai, wise eyebrows."
+
+[[outputs]]
+id = "W0qpcMd1ZsRHjyfJqYP_O"
+uri = "file://attached_assets/generated_images/dog_s3_wolf_v2.png"
+type = "image"
+title = "🐶 Dog Stage 3 — WOLF 👑 (70 treats)"
+description = "A real wolf now: silver-gray fur with shiba orange on the ears, amber eyes, fangs — still wearing his puppy bandana."
