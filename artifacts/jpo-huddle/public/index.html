@@ -11716,17 +11716,20 @@
             return;
           }
           if (st === 2) {
-            // Play-bow crouch, then a leaping 360° spin — show-off energy.
+            // Play-bow crouch, then a tail-chase whirl: the dog leaps and
+            // turns AROUND (horizontal flip, feet down the whole time) like a
+            // real excited dog — no cartwheel rotation.
             petObj._trickBusy = true;
+            const sx = petObj.scaleX;   // preserve current facing (sign)
             this.tweens.chain({
               targets: petObj,
               tweens: [
-                { scaleY: bs * 0.82, scaleX: bs * 1.1, duration: 150, yoyo: true, ease: 'Sine.easeInOut' },
-                { y: y0 - 16, angle: petObj.flipX ? -360 : 360, scaleX: bs, scaleY: bs,
-                  duration: 430, ease: 'Sine.easeOut' },
+                { scaleY: bs * 0.82, scaleX: sx * 1.1, duration: 150, yoyo: true, ease: 'Sine.easeInOut' },
+                { y: y0 - 14, scaleY: bs, scaleX: -sx, duration: 190, ease: 'Sine.easeOut' },   // whirl away…
+                { scaleX: sx, duration: 190, ease: 'Sine.easeInOut' },                          // …and back around
                 { y: y0, duration: 200, ease: 'Bounce.easeOut' },
               ],
-              onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj.y = y0; petObj._trickBusy = false; },
+              onComplete: () => { petObj.scaleX = sx; petObj.scaleY = bs; petObj.y = y0; petObj._trickBusy = false; },
             });
             return;
           }
