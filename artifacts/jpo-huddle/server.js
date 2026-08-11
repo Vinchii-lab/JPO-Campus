@@ -3905,9 +3905,30 @@ function rlglCheckAttemptEnd() {
   if (!rlgl || rlgl.state !== "running" || rlglRunnersLeft() > 0) return;
   const finishers = [...rlgl.members].filter(([, m]) => m.alive && m.finished);
   clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.fakeTimer);
-  // Owner's rule (Aug 2026): no more elimination tournament — EVERYONE who
-  // crosses the line splits the pot evenly, right there. One round, paid out.
-  if (finishers.length >= 1) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
+  if (finishers.length === 1) { rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err)); return; }
+  if (finishers.length >= 2) {
+    // Owner's rule (Aug 2026): survivors don't split on round 1 — the field
+    // is cut and they race AGAIN. Only when the SAME group survives two
+    // rounds in a row do they split the pot.
+    const setNow = finishers.map(([id]) => id).sort().join("|");
+    if (rlgl.lastFinishers === setNow || rlgl.attempt >= RLGL_MAX_ATTEMPTS) {
+      rlglFinish(finishers).catch((err) => console.error("RLGL finish failed:", err));
+      return;
+    }
+    rlgl.lastFinishers = setNow;
+    // Cut the field: everyone who didn't cross is OUT of the tournament.
+    for (const [id, m] of [...rlgl.members]) if (!(m.alive && m.finished)) rlgl.members.delete(id);
+    rlgl.attempt++;
+    rlgl.state = "joining";   // limbo: red-light checks stop during the reset
+    io.emit("rlglRound", {
+      attempt: rlgl.attempt,
+      remaining: finishers.map(([, m]) => ({ name: m.name, safe: m.safe || 0 })),
+      safeNeeded: 2,
+    });
+    rlgl.replayTimer = setTimeout(rlglStartAttempt, 5_000);
+    console.log(`RLGL: round survived by ${finishers.length} — next round (attempt ${rlgl.attempt})`);
+    return;
+  }
   // NOBODY survived → ONE mercy replay, and that's it (owner's rule, Aug 2026):
   // wipe the field twice and the game is OVER — nobody wins, no payout.
   rlgl.wipes = (rlgl.wipes || 0) + 1;
