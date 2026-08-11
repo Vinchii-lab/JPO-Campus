@@ -7256,7 +7256,10 @@
       // the server holds the first green ~8-9s and disarms shoving to match.
       if (meIn) {
         const cdAttempt = d.attempt;
-        const steps = [[3900, '3️⃣'], [4900, '2️⃣'], [5900, '1️⃣'], [6900, '🏃 GO — SPREAD OUT & RUN!']];
+        // Camera pan takes ~4.5s total — the countdown must wait for it to
+        // FINISH, and the server guarantees green for ≥3s after GO (first
+        // red at 11s+), so nobody dies for obeying "GO".
+        const steps = [[5000, '3️⃣'], [6000, '2️⃣'], [7000, '1️⃣'], [8000, '🏃 GO — SPREAD OUT & RUN!']];
         for (const [ms, txt] of steps) setTimeout(() => {
           if (_rlgl.joined && _rlgl.introAttempt === cdAttempt) _rlglBanner(`<span style="font-size:30px;color:#7be08a;">${txt}</span>`, 950);
         }, ms);
