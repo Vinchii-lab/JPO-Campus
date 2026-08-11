@@ -1368,7 +1368,8 @@ async function feedPetTreat(io, socket, p) {
   io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
   if (stage > prevStage) {
     io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
-    io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage });
+    io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage,
+                            petName: ((p.petNames || {})[pet]) || "" });
     console.log(`${p.name}'s ${pet} evolved to stage ${stage} (${xp} treats)`);
   }
   console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
@@ -2326,6 +2327,7 @@ function rowToPlayerState(row) {
     pet:       row.equipped_pet || "",
     petAcc:    row.equipped_pet_acc || "",
     petXp:     row.pet_xp || {},
+    petNames:  row.pet_names || {},
     items:     row.items || {},
     avatarChanges: row.avatar_changes ?? 0,
     // Shared-treat earnings buff survives refreshes/restarts (epoch ms, 0 = none).
@@ -2519,6 +2521,8 @@ async function restorePlayer(socket, row) {
     wings:     state.wings || "",
     pet:       state.pet || "",
     petAcc:    state.petAcc || "",
+    petXp:     state.petXp || {},      // without these, a refresh rendered an
+    petNames:  state.petNames || {},   // evolved pet as a nameless baby again
     items:     state.items || {},
     avatarChanges: state.avatarChanges ?? 0,
     x:         state.x,
@@ -6935,6 +6939,33 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("buyPet failed:", err); }
   });
 
+  // ── Pets: name your companion (per-pet, sticks across evolutions) ────────
+  // Free, so not blocked mid-match. Name is sanitized + capped server-side;
+  // stored per-pet in jpo_players.pet_names so each companion keeps its own.
+  socket.on("namePet", async (payload) => {
+    const p = players[socket.id];
+    if (!p || !p.pet) return;
+    if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
+    const raw = String((payload || {}).petName ?? "");
+    const petName = raw.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 16);
+    const pet = p.pet;
+    if (p.email) {
+      try {
+        await pool.query(
+          `UPDATE jpo_players
+              SET pet_names = jsonb_set(coalesce(pet_names, '{}'::jsonb), ARRAY[$2::text], to_jsonb($3::text)),
+                  updated_at = now()
+            WHERE email = $1`,
+          [p.email, pet, petName],
+        );
+      } catch (err) { console.error("namePet failed:", err); return; }
+    }
+    p.petNames = p.petNames || {};
+    p.petNames[pet] = petName;
+    socket.emit("petNamed", { pet, petName });
+    console.log(`${p.name} named ${pet} "${petName}"`);
+  });
+
   // ── Pets: switch which owned pet follows you ('' = send it home) ─────────
   // Free (no coin movement), so like equipCosmetic it is NOT blocked
   // mid-match. Ownership is enforced inside the UPDATE's WHERE clause, so a
@@ -8385,6 +8416,7 @@ try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_pet_acc text NOT NULL DEFAULT ''`);
   // Pet evolution: per-pet treat XP, keyed by pet id ({"pet_cat": 12, ...}).
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_xp jsonb NOT NULL DEFAULT '{}'::jsonb`);
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_names jsonb NOT NULL DEFAULT '{}'::jsonb`);
   // Wings slot (Aug 2026): separate from equipped_cosmetic so wings + a
   // wearable can be worn together. One-time self-healing migration: anyone
   // whose old single slot holds wings gets them moved to the new slot.

@@ -1939,7 +1939,7 @@
 
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
-    💰 <span id="coin-count">0</span>
+    <img src="assets/ui/jpo_coin.png" alt="coins" style="height:17px; vertical-align:-3px;"> <span id="coin-count">0</span>
     <button id="shop-btn" onclick="openShop()">Shop</button>
     <button id="voice-btn" onclick="toggleVoice()" title="Voice: on — hold V to talk">🎙️</button>
   </div>
@@ -2147,13 +2147,16 @@
       width:290px; text-align:center; color:#eee; font-family:inherit; box-shadow:0 10px 40px rgba(0,0,0,.5);">
       <img id="pet-panel-img" src="" alt="" style="height:72px; image-rendering:pixelated; margin-bottom:6px;">
       <h3 id="pet-panel-name" style="margin:0 0 2px; font-size:17px;"></h3>
+      <div id="pet-panel-species" style="font-size:11px; color:#999; margin-bottom:2px;"></div>
+      <button id="pet-panel-rename" style="background:none; border:none; color:#8f88ff; font-size:12px;
+        cursor:pointer; font-family:inherit; margin-bottom:4px;">✏️ name your pet</button>
       <div id="pet-panel-stage" style="font-size:13px; color:#ffd97a; margin-bottom:12px;"></div>
       <div style="background:#141021; border-radius:8px; height:14px; overflow:hidden; border:1px solid #443a66;">
         <div id="pet-panel-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#6c63ff,#ffd97a); transition:width .4s;"></div>
       </div>
       <div id="pet-panel-xp" style="font-size:12px; color:#bbb; margin:6px 0 14px;"></div>
       <button id="pet-panel-feed" style="width:100%; background:#6c63ff; color:#fff; border:none; border-radius:10px;
-        padding:10px; font-size:14px; cursor:pointer; font-family:inherit;">🦴 Feed a Treat — 250 🪙</button>
+        padding:10px; font-size:14px; cursor:pointer; font-family:inherit;">🦴 Feed a Treat — 250 <img src="assets/ui/jpo_coin.png" alt="coins" style="height:15px; vertical-align:-2px;"></button>
       <button id="pet-panel-close" style="margin-top:8px; background:none; border:none; color:#888;
         font-size:13px; cursor:pointer; font-family:inherit;">Close</button>
     </div>
@@ -3356,6 +3359,7 @@
     // Pet evolution: per-pet treat XP for MY pets (server-authoritative via
     // petFed / join payload). Thresholds MUST mirror PET_EVOLVE_XP in server.js.
     let _myPetXp = {};
+    let _myPetNames = {};   // per-pet custom names ("pet_dog" → "Brownie")
     const PET_EVOLVE_XP = [30, 70];
     function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
     function _myPetStage(pet) { return _petStageOfXp((_myPetXp || {})[pet] || 0); }
@@ -3929,6 +3933,7 @@
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
       _myPetXp = data.petXp || {};
+      _myPetNames = data.petNames || {};
       _playerItems    = data.items || {};
       _avatarChanges  = data.avatarChanges ?? 0;
       _renderItemBar();
@@ -4419,9 +4424,10 @@
       showToast(`🦴 Yum! Your pet gained XP${prog}`, 4000);
       if (_petPanelOpen) renderPetPanel();
     });
-    socket.on('petEvolved', ({ id, name, stage }) => {
+    socket.on('petEvolved', ({ id, name, stage, petName }) => {
       const label = stage >= 3 ? 'reached FINAL FORM! 👑✨' : 'EVOLVED! ✨';
-      showToast(`🎉 ${name}'s pet ${label}`, 6000);
+      const who = petName ? `${name}'s ${petName}` : `${name}'s pet`;
+      showToast(`🎉 ${who} ${label}`, 6000);
       if (id === socket.id) {
         window._gameScene?._setLocalPet(_equippedPet);
         window._evoPop?.();
@@ -4441,7 +4447,10 @@
       const stage = _petStageOfXp(xp);
       const next = PET_EVOLVE_XP.find((t) => t > xp) ?? null;
       const def = PETS.find((c) => c.id === pet);
-      document.getElementById('pet-panel-name').textContent = def ? def.name : 'Your pet';
+      const custom = (_myPetNames || {})[pet] || '';
+      document.getElementById('pet-panel-name').textContent = custom || (def ? def.name : 'Your pet');
+      document.getElementById('pet-panel-species').textContent = custom && def ? def.name : '';
+      document.getElementById('pet-panel-rename').textContent = custom ? '✏️ rename' : '✏️ name your pet';
       document.getElementById('pet-panel-stage').textContent =
         stage >= 3 ? 'FINAL FORM 👑' : stage === 2 ? 'Evolved ✨' : 'Baby 🐣';
       const img = document.getElementById('pet-panel-img');
@@ -4471,6 +4480,19 @@
     document.getElementById('pet-panel-feed').addEventListener('click', () => {
       socket.emit('feedPet');
       document.getElementById('pet-panel-feed').blur();
+    });
+    document.getElementById('pet-panel-rename').addEventListener('click', () => {
+      const cur = (_myPetNames || {})[_equippedPet] || '';
+      const raw = prompt('Name your pet (max 16 characters):', cur);
+      if (raw === null) return;   // cancelled
+      socket.emit('namePet', { petName: raw });
+      document.getElementById('pet-panel-rename').blur();
+    });
+    socket.on('petNamed', ({ pet, petName }) => {
+      _myPetNames = _myPetNames || {};
+      _myPetNames[pet] = petName;
+      if (_petPanelOpen) renderPetPanel();
+      showToast(petName ? `🐾 Say hello to ${petName}!` : '🐾 Name cleared.', 3000);
     });
 
     // Owner-only evolve preview: cycle MY pet's displayed stage (1 → 2 → 3 →
@@ -11573,7 +11595,7 @@
         // Evolution stages (fed with cafeteria treats). With real stage art the
         // sprite itself sells the evolution, so only a mild size bump; without
         // art, grow harder and gild the final form so status still shows.
-        const evoMult = stageKey ? (stage >= 3 ? 1.35 : 1.15)
+        const evoMult = stageKey ? (stage >= 3 ? 1.6 : 1.3)   // evolutions should visibly GROW
                                  : (stage >= 3 ? 1.6 : stage === 2 ? 1.3 : 1);
         if (evoMult !== 1) {
           obj._baseScale *= evoMult;
