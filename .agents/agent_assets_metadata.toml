@@ -251,3 +251,10 @@ uri = "file://attached_assets/generated_images/choco_s3_bigdog.png"
 type = "image"
 title = "🍫 Choco Stage 3 — GRAND CHOCO 👑 (70 treats)"
 description = "No more bear — a big noble chocolate dog, floppy ears and all."
+
+[[outputs]]
+id = "I2gThmWHgOl3Oq2ZWwxVr"
+uri = "file://attached_assets/wolf_options.png"
+type = "image"
+title = "Wolf final-form options 🐺"
+description = "Left to right: BABY (current) · A grown husky · B frost husky · C aurora spirit · D alpha with crown"
