@@ -7220,6 +7220,9 @@
       // Shoving is DISARMED for the first seconds of every round (server
       // enforces the same window) — stops the start-line massacre.
       _rlgl.pushArmedAt = Date.now() + (d.pushArmMs || 3000);
+      // Pre-GO corral: until GO (~8s in) the start line is a hard wall.
+      _rlgl.goAt = Date.now() + 8000;
+      _rlgl.startY = d.startY;
       _rlgl.alive = {};
       let meIn = false;
       for (const p of d.players || []) { _rlgl.alive[p.id] = p.alive && !p.finished; if (p.id === socket.id) meIn = true; }
@@ -12510,6 +12513,14 @@
           else if (right) player.setVelocityX( spd);
           if (up)         player.setVelocityY(-spd);
           else if (down)  player.setVelocityY( spd);
+          // Pre-GO corral (mirrors the server): before GO you may only move
+          // ALONG the start line — the line itself is a hard wall. Kills any
+          // downward velocity at the line so you can't even visually cross it.
+          if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished &&
+              _rlgl.goAt && Date.now() < _rlgl.goAt && _rlgl.startY != null) {
+            if (player.body.velocity.y > 0 && player.y >= _rlgl.startY - 2) player.setVelocityY(0);
+            if (player.y > _rlgl.startY) player.body.reset(player.x, _rlgl.startY);
+          }
           // Slippery floor (Red Light Green Light endgame): velocity chases the
           // input instead of obeying it — you glide into speed and, crucially,
           // glide long after you let go. Sliding during red light is moving. 🧊
