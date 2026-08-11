@@ -209,3 +209,31 @@ uri = "file://attached_assets/generated_images/dog_s3_wolf_v2.png"
 type = "image"
 title = "🐶 Dog Stage 3 — WOLF 👑 (70 treats)"
 description = "A real wolf now: silver-gray fur with shiba orange on the ears, amber eyes, fangs — still wearing his puppy bandana."
+
+[[outputs]]
+id = "J3yVj883llk2ZNWAftkuG"
+uri = "file://attached_assets/generated_images/husky_s2.png"
+type = "image"
+title = "🐺 Husky Stage 2 — Sled Husky ✨ (30 treats)"
+description = "Grown husky: same gray/white mask, icy blue eyes, red bandana."
+
+[[outputs]]
+id = "ATCRhrMYJVj2gDFM7db2r"
+uri = "file://attached_assets/generated_images/husky_s3.png"
+type = "image"
+title = "🐺 Husky Stage 3 — ARCTIC WOLF 👑 (70 treats)"
+description = "Real wolf, snow-white and silver, glowing icy eyes, frost sparkles — bandana stays."
+
+[[outputs]]
+id = "X8XZDoZWHPqLPmfiHLvEy"
+uri = "file://attached_assets/generated_images/choco_s2.png"
+type = "image"
+title = "🍫 Choco Stage 2 — Chocolate Lab ✨ (30 treats)"
+description = "Grown choco boy: rich brown coat, cream chest, red bandana."
+
+[[outputs]]
+id = "UmOrZrMbniTcbPP4Q9Gni"
+uri = "file://attached_assets/generated_images/choco_s3.png"
+type = "image"
+title = "🍫 Choco Stage 3 — BEAR-DOG 👑 (70 treats)"
+description = "Big burly bear-sized final form, tiny fangs, still a gentle boy in his bandana."
