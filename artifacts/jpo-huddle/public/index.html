@@ -7169,6 +7169,16 @@
           });
         }
       }
+      // 3-2-1 countdown right after the camera pan (owner rule): time to
+      // spread out before the doll's game really begins. Purely visual —
+      // the server holds the first green ~8-9s and disarms shoving to match.
+      if (meIn) {
+        const cdAttempt = d.attempt;
+        const steps = [[3900, '3️⃣'], [4900, '2️⃣'], [5900, '1️⃣'], [6900, '🏃 GO — SPREAD OUT & RUN!']];
+        for (const [ms, txt] of steps) setTimeout(() => {
+          if (_rlgl.joined && _rlgl.introAttempt === cdAttempt) _rlglBanner(`<span style="font-size:30px;color:#7be08a;">${txt}</span>`, 950);
+        }, ms);
+      }
       const phaseTag = d.phase ? `PHASE ${d.phase.n} — ${d.phase.name}` : `attempt ${d.attempt}`;
       const phaseHint = d.phase && d.phase.name === 'NARROW PATH' ? ' ⚠️ Stay INSIDE the red ropes!' :
                         d.phase && d.phase.name === 'SUDDEN DEATH' ? ' ⚠️ Red ropes + ICE + she FAKES turns!' : '';

@@ -3704,7 +3704,7 @@ const RLGL_PHASES = [
 // their safe private lanes and into shove range. House pays.
 const RLGL_COIN_N = 8, RLGL_COIN_VALUE = 25, RLGL_COIN_GRAB_PX = 40;
 const RLGL_PUSH_RANGE_PX = 70, RLGL_PUSH_DIST_PX = 130, RLGL_PUSH_COOLDOWN_MS = 5_000;
-const RLGL_PUSH_ARM_MS   = 3_000;   // owner rule: no shoving in the first ~3s of a round (start-line massacres)
+const RLGL_PUSH_ARM_MS   = 8_000;   // owner rule: no shoving until after the camera intro + 3-2-1 countdown (~8s) so runners can spread out first
 const RLGL_SLIPPERY_AT  = 3;             // ≤3 runners still on the field → slippery floor
 const RLGL_MAX_ATTEMPTS = 20;            // sanity cap on total rounds/replays
 const RLGL_SAFE_STREAK  = 3;             // 2 players left who BOTH survived this many rounds → co-champions
@@ -3797,7 +3797,8 @@ function rlglScheduleLight() {
   // cinematic intro eats ~4s, so a normal-length green would flip to red
   // before players even see the field.
   let [lo, hi] = rlgl.light === "green" ? ph.green : ph.red;
-  if (rlgl.light === "green" && rlgl.firstLight) { lo = 6_000; hi = 7_500; rlgl.firstLight = false; }
+  // (~4s camera intro + 3-2-1 countdown ≈ 7s → first red only after ~8s.)
+  if (rlgl.light === "green" && rlgl.firstLight) { lo = 8_000; hi = 9_000; rlgl.firstLight = false; }
   rlgl.lightTimer = setTimeout(() => {
     if (!rlgl || rlgl.state !== "running") return;
     rlgl.light = rlgl.light === "green" ? "red" : "green";
