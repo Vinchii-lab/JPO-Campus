@@ -3834,7 +3834,9 @@ function rlglStartAttempt() {
   const ph = rlglPhaseOf(rlgl.attempt);
   const bounds = rlglBoundsNow();
   rlgl.slippery = !!ph.slippery;   // sudden death: iced from the first step
-  rlgl.endsAt = Date.now() + RLGL_ATTEMPT_MS;
+  // The 90s clock starts at GO, not at the camera intro — the ~8s of
+  // cinematic + 3-2-1 countdown is free (owner: "is 90s enough?!").
+  rlgl.endsAt = Date.now() + 8_000 + RLGL_ATTEMPT_MS;
   rlgl.beganAt = Date.now();   // shove arm-delay reference (RLGL_PUSH_ARM_MS)
   // Scatter the coin bait — random spots on the legal strip, away from the
   // start and finish so nobody scoops them standing still.
@@ -3854,7 +3856,7 @@ function rlglStartAttempt() {
     rlglPlaceAtStart(id, idx++);
   }
   clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.fakeTimer);
-  rlgl.attemptTimer = setTimeout(rlglTimeUp, RLGL_ATTEMPT_MS);
+  rlgl.attemptTimer = setTimeout(rlglTimeUp, 8_000 + RLGL_ATTEMPT_MS);
   io.emit("rlglBegin", {
     attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
     phase: { n: Math.min(rlgl.attempt, RLGL_PHASES.length), name: ph.name },
