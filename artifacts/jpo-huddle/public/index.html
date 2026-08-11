@@ -3331,7 +3331,7 @@
     // Pet evolution: per-pet treat XP for MY pets (server-authoritative via
     // petFed / join payload). Thresholds MUST mirror PET_EVOLVE_XP in server.js.
     let _myPetXp = {};
-    const PET_EVOLVE_XP = [10, 30];
+    const PET_EVOLVE_XP = [30, 70];
     function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
     function _myPetStage(pet) { return _petStageOfXp((_myPetXp || {})[pet] || 0); }
 

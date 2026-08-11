@@ -1322,10 +1322,11 @@ const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
 // free-snack cooldown) in either direction: the price + buyBucket are the
 // limiters, and a paid meal shouldn't lock the free dining-table nibbles.
 // Pet evolution (owner's Pokémon idea, Aug 2026): feed your equipped pet
-// treats from the cafeteria and it levels up. Stage 2 ("evolved") at 10
-// treats, stage 3 ("final form") at 30. XP is per-pet in jpo_players.pet_xp.
+// treats from the cafeteria and it levels up. Stage 2 ("evolved") at 30
+// treats, stage 3 ("final form") at 70. XP is per-pet in jpo_players.pet_xp.
+// No daily cap on purpose (owner: rich players may speedrun it).
 // The client mirrors these thresholds for its stage rendering.
-const PET_EVOLVE_XP = [10, 30];
+const PET_EVOLVE_XP = [30, 70];
 function petStageOf(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
 function petStageFor(p) { return petStageOf(((p.petXp || {})[p.pet]) || 0); }
 
