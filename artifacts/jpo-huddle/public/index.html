@@ -2148,6 +2148,15 @@
       <img id="pet-panel-img" src="" alt="" style="height:72px; image-rendering:pixelated; margin-bottom:6px;">
       <h3 id="pet-panel-name" style="margin:0 0 2px; font-size:17px;"></h3>
       <div id="pet-panel-species" style="font-size:11px; color:#999; margin-bottom:2px;"></div>
+      <div id="pet-rename-row" style="display:none; gap:6px; margin:6px 0 4px; align-items:center;">
+        <input id="pet-rename-input" type="text" maxlength="16" placeholder="Pet name…"
+               style="flex:1; min-width:0; background:#1b1b2b; border:1px solid #4a4a6a; border-radius:8px;
+                      color:#fff; font-size:13px; padding:7px 10px; outline:none;">
+        <button id="pet-rename-save" style="background:#6c63ff; color:#fff; border:none; border-radius:8px;
+                font-size:13px; padding:7px 12px; cursor:pointer;">Save</button>
+        <button id="pet-rename-cancel" style="background:none; color:#888; border:none; font-size:13px;
+                cursor:pointer; padding:7px 4px;">✕</button>
+      </div>
       <button id="pet-panel-rename" style="background:none; border:none; color:#8f88ff; font-size:12px;
         cursor:pointer; font-family:inherit; margin-bottom:4px;">✏️ name your pet</button>
       <div id="pet-panel-stage" style="font-size:13px; color:#ffd97a; margin-bottom:12px;"></div>
@@ -4481,12 +4490,29 @@
       socket.emit('feedPet');
       document.getElementById('pet-panel-feed').blur();
     });
-    document.getElementById('pet-panel-rename').addEventListener('click', () => {
-      const cur = (_myPetNames || {})[_equippedPet] || '';
-      const raw = prompt('Name your pet (max 16 characters):', cur);
-      if (raw === null) return;   // cancelled
-      socket.emit('namePet', { petName: raw });
-      document.getElementById('pet-panel-rename').blur();
+    // Inline rename: the input lives INSIDE the card (the boss hated the
+    // browser prompt bar at the top of the page).
+    function _petRenameRow(show) {
+      const row = document.getElementById('pet-rename-row');
+      row.style.display = show ? 'flex' : 'none';
+      document.getElementById('pet-panel-rename').style.display = show ? 'none' : '';
+      if (show) {
+        const inp = document.getElementById('pet-rename-input');
+        inp.value = (_myPetNames || {})[_equippedPet] || '';
+        inp.focus(); inp.select();
+      }
+    }
+    document.getElementById('pet-panel-rename').addEventListener('click', () => _petRenameRow(true));
+    document.getElementById('pet-rename-cancel').addEventListener('click', () => _petRenameRow(false));
+    function _petRenameSave() {
+      socket.emit('namePet', { petName: document.getElementById('pet-rename-input').value });
+      _petRenameRow(false);
+    }
+    document.getElementById('pet-rename-save').addEventListener('click', _petRenameSave);
+    document.getElementById('pet-rename-input').addEventListener('keydown', (e) => {
+      e.stopPropagation();                              // typing must not move the character
+      if (e.key === 'Enter') _petRenameSave();
+      if (e.key === 'Escape') _petRenameRow(false);
     });
     socket.on('petNamed', ({ pet, petName }) => {
       _myPetNames = _myPetNames || {};
@@ -11747,7 +11773,7 @@
               const getUp = () => {
                 this.tweens.add({ targets: owner, angle: ownAngle0, duration: 260, ease: 'Sine.easeOut' });
               };
-              petObj.setDepth(991);                            // over the owner AND the name tag (tags sit at 990)
+              petObj.setDepth(5);                              // over the owner (and tags, which sit at 1) while riding
               // The final form has NO frame set (static approved art), so the
               // whole leap is sold with body language: wind-up squash, tilted
               // stretch on launch, a real arc, and a hard belly-flop squash on
@@ -12349,7 +12375,7 @@
         return this.add.text(x, y-40, name, {
           fontSize:'14px', fontFamily:'monospace', color:'#fff',
           backgroundColor:'#000000bb', padding:{x:5,y:3}, resolution:2,
-        }).setOrigin(0.5,1).setDepth(990);
+        }).setOrigin(0.5,1).setDepth(1);   // BEHIND pets (2), wings (10) etc. — the boss wants sprites to cover the tag, never the reverse
       }
 
       _showChatBubble(sprite, message, isLocal, isWhisper) {
