@@ -7113,6 +7113,7 @@
     }
     function _rlglTeardown() {
       _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner(); _rlglTimerStop();
+      clearInterval(_rlgl.spectIv); _rlgl.spectIv = null; _rlgl.spectOn = null;
       clearInterval(_rlgl.lobbyTimer); _rlgl.lobbyTimer = null;
       const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
       _rlgl.on = _rlgl.running = _rlgl.joined = _rlgl.meAlive = _rlgl.meFinished = _rlgl.slippery = false;
@@ -7295,6 +7296,34 @@
       if (s) { try { s._rlglGlow?.destroy(); } catch {} try { s.destroy(); } catch {} delete _rlgl.coinSprites[d.idx]; }
       if (d.byId === socket.id) showToast(`🪙 +${d.value} coins — greed pays!`, 2500);
     });
+    // ── Death cam (owner request): once you're out, the camera stops staring
+    // at your corpse and follows the race leader (the alive runner furthest
+    // down the track). Re-picks every second as people die/finish; every
+    // round-end path restores the normal follow-cam. ──
+    function _rlglSpectateStart() {
+      clearInterval(_rlgl.spectIv);
+      const pick = () => {
+        const sc = window._gameScene;
+        if (!sc || !_rlgl.running) return;
+        let leader = null, bestY = -Infinity;
+        for (const id in _rlgl.alive) {
+          if (!_rlgl.alive[id] || id === socket.id) continue;
+          const s = _rlglSpriteOf(id);
+          if (s && s.y > bestY) { bestY = s.y; leader = s; }
+        }
+        if (leader && _rlgl.spectOn !== leader) { _rlgl.spectOn = leader; sc.cameras.main.startFollow(leader); }
+      };
+      _rlgl.spectOn = null;
+      setTimeout(pick, 1200);   // let the "YOU'RE OUT" flash land first
+      _rlgl.spectIv = setInterval(pick, 1000);
+      _rlglBanner(`<span style="color:#9ad7ff;">🎥 Spectating the survivors…</span>`, 2500);
+    }
+    function _rlglSpectateStop() {
+      clearInterval(_rlgl.spectIv);
+      _rlgl.spectIv = null; _rlgl.spectOn = null;
+      const sc = window._gameScene;
+      if (sc?.player) sc.cameras.main.startFollow(sc.player);
+    }
     socket.on('rlglOut', (d = {}) => {
       _rlgl.alive[d.id] = false;
       if (d.cause !== 'left') _rlglFall(d.id);
@@ -7308,6 +7337,7 @@
         _rlgl.meAlive = false;
         _rlglHitFlash();
         _rlglBanner(`<span style="color:#ff5a5a;">💀 YOU'RE OUT — ${causeTxt}!</span>`, 5000);
+        if (_rlgl.running) _rlglSpectateStart();
       } else if (_rlgl.joined || _rlgl.on) {
         showToast(`💀 ${d.name} is OUT — ${causeTxt}!`, 4000);
       }
@@ -7338,6 +7368,7 @@
       // get up (the permanently-out become free spectators), floor un-ices.
       _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
       _rlglTimerStop();
+      _rlglSpectateStop();
       _rlglUnfallAll();
       const names = (d.remaining || []).map((r) => `${String(r.name).replace(/</g, '&lt;')}${r.safe ? ` <span style="opacity:.7;">(safe ×${r.safe})</span>` : ''}`).join(', ');
       const duo = (d.remaining || []).length === 2
@@ -7347,6 +7378,7 @@
     socket.on('rlglReplay', (d = {}) => {
       _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
       _rlglTimerStop();
+      _rlglSpectateStop();
       _rlglUnfallAll();
       _rlglBanner(`<span style="color:#ffd24a;">☠️ NOBODY SURVIVED — AGAIN! (attempt ${d.attempt})</span>`, 4000);
     });
