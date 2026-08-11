@@ -3793,7 +3793,11 @@ function rlglScheduleFake() {
 function rlglScheduleLight() {
   if (!rlgl || rlgl.state !== "running") return;
   const ph = rlglPhase();
-  const [lo, hi] = rlgl.light === "green" ? ph.green : ph.red;
+  // The FIRST green of every attempt is extra long (owner rule): the client's
+  // cinematic intro eats ~4s, so a normal-length green would flip to red
+  // before players even see the field.
+  let [lo, hi] = rlgl.light === "green" ? ph.green : ph.red;
+  if (rlgl.light === "green" && rlgl.firstLight) { lo = 6_000; hi = 7_500; rlgl.firstLight = false; }
   rlgl.lightTimer = setTimeout(() => {
     if (!rlgl || rlgl.state !== "running") return;
     rlgl.light = rlgl.light === "green" ? "red" : "green";
@@ -3819,6 +3823,7 @@ function rlglStartAttempt() {
   rlgl.state = "running";
   rlgl.replayTimer = null;   // fired (or unused) — a set value now means "between attempts"
   rlgl.light = "green";
+  rlgl.firstLight = true;   // first green runs extra long (cinematic intro cover)
   rlgl.redAt = 0;
   const ph = rlglPhaseOf(rlgl.attempt);
   const bounds = rlglBoundsNow();
