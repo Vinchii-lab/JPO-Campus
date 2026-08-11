@@ -258,3 +258,10 @@ uri = "file://attached_assets/wolf_options.png"
 type = "image"
 title = "Wolf final-form options 🐺"
 description = "Left to right: BABY (current) · A grown husky · B frost husky · C aurora spirit · D alpha with crown"
+
+[[outputs]]
+id = "7CKcSld9wiaFA-Q1PqjGA"
+uri = "file://attached_assets/generated_images/wolf_mature_aurora.png"
+type = "image"
+title = "Mature Aurora Wolf — sketch 🐺✨"
+description = "Adult wolf proportions like the shiba & choco final forms, aurora mane + glowing markings, red scarf."
