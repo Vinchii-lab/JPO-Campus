@@ -3360,7 +3360,6 @@
     // petFed / join payload). Thresholds MUST mirror PET_EVOLVE_XP in server.js.
     let _myPetXp = {};
     let _myPetNames = {};   // per-pet custom names ("pet_dog" → "Brownie")
-    let _myPetShiny = {};   // per-pet shiny rolls ("pet_dog" → true)
     const PET_EVOLVE_XP = [30, 70];
     function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
     function _myPetStage(pet) { return _petStageOfXp((_myPetXp || {})[pet] || 0); }
@@ -3935,7 +3934,6 @@
       _equippedPetAcc = data.petAcc || '';
       _myPetXp = data.petXp || {};
       _myPetNames = data.petNames || {};
-      _myPetShiny = data.petShiny || {};
       _playerItems    = data.items || {};
       _avatarChanges  = data.avatarChanges ?? 0;
       _renderItemBar();
@@ -4426,11 +4424,10 @@
       showToast(`🦴 Yum! Your pet gained XP${prog}`, 4000);
       if (_petPanelOpen) renderPetPanel();
     });
-    socket.on('petEvolved', ({ id, name, pet, stage, petName, shiny }) => {
+    socket.on('petEvolved', ({ id, name, stage, petName }) => {
       const label = stage >= 3 ? 'reached FINAL FORM! 👑✨' : 'EVOLVED! ✨';
       const who = petName ? `${name}'s ${petName}` : `${name}'s pet`;
-      if (id === socket.id && shiny) { _myPetShiny = _myPetShiny || {}; _myPetShiny[pet] = true; }
-      showToast(shiny ? `🎉 ${who} ${label} …and it's ✨ SHINY ✨?! WHAT?! 🌟` : `🎉 ${who} ${label}`, shiny ? 8000 : 6000);
+      showToast(`🎉 ${who} ${label}`, 6000);
       if (id === socket.id) {
         window._gameScene?._setLocalPet(_equippedPet);
         window._evoPop?.();
@@ -4440,10 +4437,8 @@
     // ── Pet card: click YOUR pet → feed treats, watch the XP bar fill ────
     let _petPanelOpen = false;
     function _petStageArt(pet, stage) {
-      // Prefer real stage art if it shipped for this pet (dog lines so far);
-      // shiny lines get their recolored version.
-      const shiny = (_myPetShiny || {})[pet] && stage >= 2 ? '_shiny' : '';
-      return stage >= 2 ? `/assets/pets/${pet}_s${stage}${shiny}.png` : `/assets/pets/${pet}.png`;
+      // Prefer real stage art if it shipped for this pet (dog lines so far).
+      return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
     }
     function renderPetPanel() {
       const pet = _equippedPet;
@@ -4456,9 +4451,8 @@
       document.getElementById('pet-panel-name').textContent = custom || (def ? def.name : 'Your pet');
       document.getElementById('pet-panel-species').textContent = custom && def ? def.name : '';
       document.getElementById('pet-panel-rename').textContent = custom ? '✏️ rename' : '✏️ name your pet';
-      const isShiny = !!((_myPetShiny || {})[pet]) && stage >= 2;
       document.getElementById('pet-panel-stage').textContent =
-        (stage >= 3 ? 'FINAL FORM 👑' : stage === 2 ? 'Evolved ✨' : 'Baby 🐣') + (isShiny ? ' · 🌟 SHINY' : '');
+        stage >= 3 ? 'FINAL FORM 👑' : stage === 2 ? 'Evolved ✨' : 'Baby 🐣';
       const img = document.getElementById('pet-panel-img');
       img.src = _petStageArt(pet, stage);
       img.onerror = () => { img.onerror = null; img.src = `/assets/pets/${pet}.png`; };
@@ -4539,8 +4533,8 @@
       window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
     });
 
-    socket.on('playerPetUpdate', ({ id, pet, petAcc, petStage, petShiny }) => {
-      window._gameScene?._updatePlayerPet(id, pet, petAcc, petStage, petShiny);
+    socket.on('playerPetUpdate', ({ id, pet, petAcc, petStage }) => {
+      window._gameScene?._updatePlayerPet(id, pet, petAcc, petStage);
     });
 
     // ── Usable items (cigarettes, coffee) ─────────────────────────────
@@ -10374,12 +10368,9 @@
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco'])
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
-            this.load.image(`${id}_s${s}_shiny`, `/assets/pets/${id}_s${s}_shiny.png`);
             const stem = id.replace(/^pet_/, '');
-            for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action']) {
+            for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
               this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png`);
-              this.load.image(`petanim_${stem}_s${s}_shiny_${f}`, `/assets/pets/anim/${stem}_s${s}_shiny_${f}.png`);
-            }
           }
         // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
         // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
@@ -11560,15 +11551,12 @@
       // its owner's sprite each frame (see _stepPet in update()), so pets
       // cost zero movement traffic. Depth 2: above the floor and the player
       // bodies (default 0) but below seat occluders (900) and nametags (990).
-      _makePet(pet, x, y, acc, stage, shiny) {
+      _makePet(pet, x, y, acc, stage) {
         const emoji = PET_EMOJI[pet];
         if (!emoji) return null;                    // unknown id — not a pet
         let obj;
         // Evolution art: dedicated stage sprite when one shipped for this pet.
-        // Shiny lines get their own recolored art (rolled at first evolution).
-        const useShiny = !!shiny && stage >= 2 && this.textures.exists(`${pet}_s${stage}_shiny`);
-        const stageKey = useShiny ? `${pet}_s${stage}_shiny`
-          : (stage >= 2 && this.textures.exists(`${pet}_s${stage}`)) ? `${pet}_s${stage}` : null;
+        const stageKey = (stage >= 2 && this.textures.exists(`${pet}_s${stage}`)) ? `${pet}_s${stage}` : null;
         if (stageKey || this.textures.exists(pet)) { // pixel-art sprite (preloaded per PETS id)
           obj = this.add.image(x - PET_GAP, y + 10, stageKey || pet).setOrigin(0.5, 1).setDepth(2);
           obj.setScale(PET_PX / Math.max(obj.width, obj.height));
@@ -11593,7 +11581,7 @@
         // setTexture never changes the scale.
         // Evolved stages use their OWN frame set (…_s2_walk1 etc.) so the
         // animations evolve along with the art.
-        const stem = pet.replace(/^pet_/, '') + (stageKey ? `_s${stage}${useShiny ? '_shiny' : ''}` : '');
+        const stem = pet.replace(/^pet_/, '') + (stageKey ? `_s${stage}` : '');
         if (obj.setTexture &&
             ['walk1', 'walk2', 'walk3', 'sit', 'action'].every(f => this.textures.exists(`petanim_${stem}_${f}`))) {
           obj._animSet = {
@@ -11608,7 +11596,6 @@
         // sprite itself sells the evolution, so only a mild size bump; without
         // art, grow harder and gild the final form so status still shows.
         obj._petStage = stage || 1;   // tricks & body language get more sophisticated per stage
-        obj._shiny = useShiny;        // shiny pets shed the occasional sparkle (see _stepPet)
         // Final-form spirits: each dog line ascends into its own element —
         // ambient aura + paw trail while walking + a signature howl trick
         // (see _stepPet/_petTrick + PET_MYTHIC themes).
@@ -12055,14 +12042,6 @@
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             const now = performance.now();
-            // Shiny pets shed a lone sparkle now and then — subtle flex.
-            if (petObj._shiny && (!petObj._shineAt || now >= petObj._shineAt)) {
-              petObj._shineAt = now + 3500 + Math.random() * 4000;
-              const s = this.add.text(petObj.x + (Math.random() * 20 - 10), petObj.y - 6 - Math.random() * 14,
-                '✨', { fontSize: '10px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
-              this.tweens.add({ targets: s, alpha: { from: 0.9, to: 0 }, y: s.y - 14,
-                duration: 900, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
-            }
             // Final-form spirits idle inside their own ambient element:
             // husky = drifting snow (falls), shiba = rising embers, choco =
             // curling steam — plus a faint elemental glow pulse at the feet.
@@ -12172,7 +12151,7 @@
       _setLocalPet(pet) {
         if (this.localPet) { this._destroyPet(this.localPet); this.localPet = null; }
         if (!this.player) return;
-        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc, _evoPreview || _myPetStage(pet), !!(_myPetShiny || {})[pet]);
+        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc, _evoPreview || _myPetStage(pet));
         // Your own pet is clickable → opens the pet card (feed / progress).
         if (this.localPet) {
           this.localPet.setInteractive({ useHandCursor: true });
@@ -12180,13 +12159,12 @@
         }
       }
 
-      _updatePlayerPet(id, pet, petAcc, petStage, petShiny) {
+      _updatePlayerPet(id, pet, petAcc, petStage) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
         if (petStage != null) entry.petStage = petStage;
-        if (petShiny != null) entry.petShiny = !!petShiny;
         if (entry.pet) { this._destroyPet(entry.pet); entry.pet = null; }
-        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1, entry.petShiny);
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1);
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -12534,10 +12512,9 @@
         const wings = madeW ? madeW.obj : null;
         const wingsDef = madeW ? madeW.def : null;
         const petStage = _petStageOfXp(((data.petXp || {})[data.pet]) || 0);
-        const petShiny = !!((data.petShiny || {})[data.pet]);
-        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage, petShiny);
+        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, petStage, petShiny, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.
