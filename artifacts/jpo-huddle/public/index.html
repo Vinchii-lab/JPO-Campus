@@ -3361,7 +3361,7 @@
     // Species base id for any pet id: 'pet_dragon_crimson' → 'pet_dragon'.
     // Accessory anchors key by species, so variants inherit placement free.
     const petSpeciesId = (id) => (id || '').split('_').slice(0, 2).join('_');
-    const PET_GAP     = 48; // px the pet trails behind its owner (follow-at-distance)
+    const PET_GAP     = 68; // px the pet trails behind its owner (follow-at-distance)
     const PET_PX      = 42; // longest-side px of a pet sprite in the world (~half a player)
     const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
     let _equippedPet = '';  // active pet ('' = none); server-authoritative
