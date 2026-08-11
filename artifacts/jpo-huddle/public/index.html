@@ -11617,7 +11617,11 @@
             ['walk1', 'walk2', 'walk3', 'sit', 'action'].every(f => this.textures.exists(`petanim_${stem}_${f}`))) {
           obj._animSet = {
             walk: [`petanim_${stem}_walk1`, `petanim_${stem}_walk2`, `petanim_${stem}_walk3`, `petanim_${stem}_walk2`],
-            sit: `petanim_${stem}_sit`, action: `petanim_${stem}_action`, idle: `petanim_${stem}_walk2`,
+            // Idle = the real STANDING art when the stage ships one (evolved
+            // stages always do); base pets keep the mid-stride idle because
+            // some old static base art (bunnies) faces the other way.
+            sit: `petanim_${stem}_sit`, action: `petanim_${stem}_action`,
+            idle: stageKey || `petanim_${stem}_walk2`,
           };
           obj.setTexture(obj._animSet.idle);
           obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
