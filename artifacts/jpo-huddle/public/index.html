@@ -11726,7 +11726,7 @@
             const spin = { t: 0 };
             const walkFrames = petObj._animSet ? petObj._animSet.walk : null;
             this.tweens.add({
-              targets: spin, t: 1, duration: 950, ease: 'Sine.easeInOut',
+              targets: spin, t: 1, duration: 1700, ease: 'Sine.easeInOut',
               onUpdate: () => {
                 const a = spin.t * turns * Math.PI * 2;
                 petObj.x = x0 + Math.sin(a) * r;
