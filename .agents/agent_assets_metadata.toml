@@ -279,3 +279,10 @@ uri = "file://attached_assets/alpha_husky_preview.png"
 type = "image"
 title = "Alpha Husky — full pose set + evolution line 👑🐺"
 description = "Top: the 6 in-game frames (stand, 3 trot steps, royal sit, howl). Bottom: baby → 2nd form → alpha final form at in-game relative sizes."
+
+[[outputs]]
+id = "Pemn9nf5XcH7MxfEAVJXE"
+uri = "file://attached_assets/pet_evolutions_lineup.png"
+type = "image"
+title = "Pet Evolution Lineup 🦆🐱🐢"
+description = "Ducks, cats, and turtles — baby → grown-up → final form, now live in the game."

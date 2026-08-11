@@ -10391,7 +10391,9 @@
         // fall back to the grow + golden-tint treatment in _makePet). Each
         // stage also ships its own animation frames — evolved pets move
         // differently, not just look different.
-        for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco'])
+        for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
+                          'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
+                          'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire'])
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
             const stem = id.replace(/^pet_/, '');
