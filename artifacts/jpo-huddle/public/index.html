@@ -11750,27 +11750,31 @@
                 this.tweens.add({ targets: owner, angle: ownAngle0, duration: 260, ease: 'Sine.easeOut' });
               };
               petObj.setDepth(5);                              // render over the owner while on top
+              // The final form has NO frame set (static approved art), so the
+              // whole leap is sold with body language: wind-up squash, tilted
+              // stretch on launch, a real arc, and a hard belly-flop squash on
+              // impact.
+              const leanDir = (perchX >= x0 ? 1 : -1);         // nose-up toward the jump direction
               this.tweens.chain({
                 targets: petObj,
                 tweens: [
-                  { scaleY: bs * 0.72, scaleX: bs * 1.14, duration: 320, ease: 'Sine.easeIn' },  // deep crouch, winding up
-                  { x: perchX, y: perchY - 30, scaleY: bs * 1.14, scaleX: bs * 0.92,
-                    duration: 280, ease: 'Sine.easeOut',
-                    onStart: () => { petObj.flipX = perchX < x0; } },                            // launch AT the owner...
-                  { y: perchY, scaleY: bs * 0.9, scaleX: bs * 1.08, duration: 130, ease: 'Sine.easeIn',
-                    onComplete: () => {                                                          // ...IMPACT: owner goes DOWN
-                      knocked();
-                      if (sitTex) petObj.setTexture(sitTex);
-                    } },
-                  { scaleY: bs, scaleX: bs, y: perchY - 4, duration: 420, yoyo: true, repeat: 2,
+                  { scaleY: bs * 0.62, scaleX: bs * 1.22, duration: 340, ease: 'Sine.easeIn' },  // deep crouch, winding up
+                  { y: perchY - 46, x: x0 + (perchX - x0) * 0.55,                                // launch: stretch + nose-up tilt
+                    scaleY: bs * 1.24, scaleX: bs * 0.82, angle: -22 * leanDir,
+                    duration: 260, ease: 'Sine.easeOut',
+                    onStart: () => { petObj.flipX = perchX < x0; } },
+                  { y: perchY - 14, x: perchX, angle: 10 * leanDir,                              // arc over, nose tips down
+                    scaleY: bs * 1.05, scaleX: bs * 0.95, duration: 180, ease: 'Sine.easeIn' },
+                  { y: perchY, scaleY: bs * 0.68, scaleX: bs * 1.28, angle: 0,                   // IMPACT: belly-flop squash...
+                    duration: 110, ease: 'Sine.easeIn',
+                    onComplete: knocked },                                                       // ...and the owner goes DOWN
+                  { scaleY: bs, scaleX: bs, duration: 160, ease: 'Back.easeOut' },               // recover from the squash
+                  { y: perchY - 5, scaleY: bs * 1.05, duration: 300, yoyo: true, repeat: 2,
                     ease: 'Sine.easeInOut' },                                                    // smug bounces on the fallen owner
-                  { x: x0, y: y0 - 18, duration: 260, ease: 'Sine.easeOut',
-                    onStart: () => {
-                      getUp();                                                                   // owner staggers back to their feet
-                      if (walkTex) petObj.setTexture(walkTex[0]);
-                      petObj.flipX = x0 < perchX;
-                    } },
-                  { y: y0, duration: 170, ease: 'Bounce.easeOut' },                              // hop off
+                  { y: y0 - 26, x: x0, angle: -12 * leanDir,                                     // hop off with a little flourish
+                    scaleY: bs * 1.12, scaleX: bs * 0.9, duration: 220, ease: 'Sine.easeOut',
+                    onStart: () => { getUp(); petObj.flipX = x0 < perchX; } },                   // owner staggers back up
+                  { y: y0, angle: 0, scaleY: bs, scaleX: bs, duration: 170, ease: 'Bounce.easeOut' },
                 ],
                 onComplete: () => {
                   petObj.setDepth(d0); petObj.setScale(bs); petObj.y = y0; petObj.angle = 0;
@@ -12048,7 +12052,14 @@
               cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
             }[petObj._mythic] || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
             petObj.angle = Math.sin(petObj._animT * gait.swayF) * gait.sway;                     // waddle
-            petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
+            if (petObj._mythic === 'cocoa') {
+              // Static-art final form: sell each STEP with a footfall thump —
+              // squash wide on the plant, stretch tall on the push-off.
+              const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
+              petObj.setScale(bs * (1 + 0.07 * (1 - step)), bs * (1 - 0.06 + (gait.bounce + 0.06) * step));
+            } else {
+              petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
+            }
             petObj._gaitFrameMs = gait.frameMs;
             petObj._trickAt = 0;                  // re-roll the trick timer on next stop
             // Final-form spirits trail a NATURAL aura while trotting — no
