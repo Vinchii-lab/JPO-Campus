@@ -10369,6 +10369,11 @@
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
             const stem = id.replace(/^pet_/, '');
+            // Choco's FINAL FORM deliberately has NO frame set: every AI redraw
+            // of the walk frames came out as a subtly different dog (the boss
+            // noticed immediately). The approved static art is the ONLY choco
+            // s3 on screen — the heavy cocoa waddle in _stepPet animates it.
+            if (id === 'pet_dog_choco' && s === 3) continue;
             for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
               this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png`);
           }
