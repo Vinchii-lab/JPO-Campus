@@ -3328,6 +3328,12 @@
     const PET_PX      = 42; // longest-side px of a pet sprite in the world (~half a player)
     const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
     let _equippedPet = '';  // active pet ('' = none); server-authoritative
+    // Pet evolution: per-pet treat XP for MY pets (server-authoritative via
+    // petFed / join payload). Thresholds MUST mirror PET_EVOLVE_XP in server.js.
+    let _myPetXp = {};
+    const PET_EVOLVE_XP = [10, 30];
+    function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
+    function _myPetStage(pet) { return _petStageOfXp((_myPetXp || {})[pet] || 0); }
 
     // Pet accessories: cosmetic add-ons drawn ON the active pet (one slot,
     // '' = bare pet). Ids MUST stay in lockstep with the server
@@ -3896,6 +3902,7 @@
       _equippedWings  = data.wings || '';
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
+      _myPetXp = data.petXp || {};
       _playerItems    = data.items || {};
       _avatarChanges  = data.avatarChanges ?? 0;
       _renderItemBar();
@@ -4379,14 +4386,25 @@
     });
 
     // Free put-on/take-off confirmation ('' = bare pet).
+    // ── Pet evolution: treat fed / evolved announcements ─────────────────
+    socket.on('petFed', ({ pet, xp, stage, next }) => {
+      _myPetXp[pet] = xp;
+      const prog = next != null ? ` (${xp}/${next} to ${stage === 1 ? 'EVOLVE' : 'FINAL FORM'})` : ' — FINAL FORM, max level! 👑';
+      showToast(`🦴 Yum! Your pet gained XP${prog}`, 4000);
+    });
+    socket.on('petEvolved', ({ id, name, stage }) => {
+      const label = stage >= 3 ? 'reached FINAL FORM! 👑✨' : 'EVOLVED! ✨';
+      showToast(`🎉 ${name}'s pet ${label}`, 6000);
+      if (id === socket.id) window._gameScene?._setLocalPet(_equippedPet);
+    });
     socket.on('petAccUpdate', ({ petAcc }) => {
       _equippedPetAcc = petAcc || '';
       _refreshShopUI();
       window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
     });
 
-    socket.on('playerPetUpdate', ({ id, pet, petAcc }) => {
-      window._gameScene?._updatePlayerPet(id, pet, petAcc);
+    socket.on('playerPetUpdate', ({ id, pet, petAcc, petStage }) => {
+      window._gameScene?._updatePlayerPet(id, pet, petAcc, petStage);
     });
 
     // ── Usable items (cigarettes, coffee) ─────────────────────────────
@@ -11391,7 +11409,7 @@
       // its owner's sprite each frame (see _stepPet in update()), so pets
       // cost zero movement traffic. Depth 2: above the floor and the player
       // bodies (default 0) but below seat occluders (900) and nametags (990).
-      _makePet(pet, x, y, acc) {
+      _makePet(pet, x, y, acc, stage) {
         const emoji = PET_EMOJI[pet];
         if (!emoji) return null;                    // unknown id — not a pet
         let obj;
@@ -11427,6 +11445,14 @@
           obj.setTexture(obj._animSet.idle);
           obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
           obj.setScale(obj._baseScale);
+        }
+        // Evolution stages (fed with cafeteria treats): stage 2 grows the pet,
+        // stage 3 grows it more and gilds it — visible status, no new art needed.
+        const evoMult = stage >= 3 ? 1.6 : stage === 2 ? 1.3 : 1;
+        if (evoMult !== 1) {
+          obj._baseScale *= evoMult;
+          obj.setScale(obj._baseScale);
+          if (stage >= 3 && obj.setTint) obj.setTint(0xffe9a0);   // final form: golden sheen
         }
         const accEmoji = PET_ACC_EMOJI[acc];
         if (accEmoji) {
@@ -11762,14 +11788,15 @@
       _setLocalPet(pet) {
         if (this.localPet) { this._destroyPet(this.localPet); this.localPet = null; }
         if (!this.player) return;
-        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc);
+        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc, _myPetStage(pet));
       }
 
-      _updatePlayerPet(id, pet, petAcc) {
+      _updatePlayerPet(id, pet, petAcc, petStage) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
+        if (petStage != null) entry.petStage = petStage;
         if (entry.pet) { this._destroyPet(entry.pet); entry.pet = null; }
-        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc);
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1);
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -12116,9 +12143,10 @@
         const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite);
         const wings = madeW ? madeW.obj : null;
         const wingsDef = madeW ? madeW.def : null;
-        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc);
+        const petStage = _petStageOfXp(((data.petXp || {})[data.pet]) || 0);
+        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.

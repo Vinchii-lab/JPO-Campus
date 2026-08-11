@@ -1321,6 +1321,14 @@ const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
 // get 2-3 anchors). Paid food deliberately never touches fridgeReadyAt (the
 // free-snack cooldown) in either direction: the price + buyBucket are the
 // limiters, and a paid meal shouldn't lock the free dining-table nibbles.
+// Pet evolution (owner's Pokémon idea, Aug 2026): feed your equipped pet
+// treats from the cafeteria and it levels up. Stage 2 ("evolved") at 10
+// treats, stage 3 ("final form") at 30. XP is per-pet in jpo_players.pet_xp.
+// The client mirrors these thresholds for its stage rendering.
+const PET_EVOLVE_XP = [10, 30];
+function petStageOf(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
+function petStageFor(p) { return petStageOf(((p.petXp || {})[p.pet]) || 0); }
+
 const FOOD_MENUS = {
   sweets: { title: "🍬 Candy Stand", items: [
     { id: "lollipop",  name: "Lollipop",             icon: "🍭", price: 3 },
@@ -1345,6 +1353,7 @@ const FOOD_MENUS = {
     { id: "spaghetti", name: "Spaghetti",            icon: "🍝", price: 11 },
     { id: "burger",    name: "Office burger",        icon: "🍔", price: 12 },
     { id: "curry",     name: "Curry plate",          icon: "🍛", price: 12 },
+    { id: "pet_treat", name: "Pet Treat (+1 pet XP — evolve your pet!)", icon: "🦴", price: 250 },
   ] },
   grill: { title: "🍳 Kitchen Grill", items: [
     { id: "eggs",      name: "Fried eggs",           icon: "🍳", price: 6 },
@@ -2271,6 +2280,7 @@ function rowToPlayerState(row) {
     wings:     row.equipped_wings || "",
     pet:       row.equipped_pet || "",
     petAcc:    row.equipped_pet_acc || "",
+    petXp:     row.pet_xp || {},
     items:     row.items || {},
     avatarChanges: row.avatar_changes ?? 0,
     // Shared-treat earnings buff survives refreshes/restarts (epoch ms, 0 = none).
@@ -5401,7 +5411,7 @@ io.on("connection", (socket) => {
           if (isPet) {
             lp.pet = rows[0].equipped_pet || "";
             io.to(sid).emit("petSuccess", { item: pet, pet: lp.pet, petAcc: lp.petAcc || "" });
-            io.emit("playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "" });
+            io.emit("playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "", petStage: petStageFor(lp) });
           } else {
             lp.equipped = rows[0].equipped_cosmetic || "";
             lp.wings = rows[0].equipped_wings || "";
@@ -6744,6 +6754,49 @@ io.on("connection", (socket) => {
     const menuItem = FOOD_MENUS[FOOD_STATIONS[station]].items.find((it) => it.id === item);
     if (!menuItem) return;
 
+    // ── Pet Treat: feeding the EQUIPPED pet earns it XP (Pokémon-style) ──
+    // Coins out + XP in commit in ONE statement for account players, so a
+    // crash can't charge without feeding (or feed without charging).
+    if (menuItem.id === "pet_treat") {
+      if (!p.pet) { socket.emit("foodError", { message: "Adopt a pet first — the treat is for THEM! 🐾" }); return; }
+      const pet = p.pet;
+      let xp;
+      if (!p.email) {
+        if ((p.coins ?? 0) < menuItem.price) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+        p.coins -= menuItem.price;
+        p.petXp = p.petXp || {};
+        xp = p.petXp[pet] = (p.petXp[pet] || 0) + 1;
+      } else {
+        try {
+          const { rows } = await pool.query(
+            `UPDATE jpo_players
+                SET coins = coins - $2,
+                    pet_xp = jsonb_set(coalesce(pet_xp, '{}'::jsonb), ARRAY[$3::text],
+                             to_jsonb(coalesce((pet_xp->>$3)::int, 0) + 1)),
+                    updated_at = now()
+              WHERE email = $1 AND coins >= $2
+              RETURNING coins, (pet_xp->>$3)::int AS xp`,
+            [p.email, menuItem.price, pet],
+          );
+          if (rows.length === 0) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
+          p.coins = rows[0].coins;
+          p.petXp = p.petXp || {};
+          xp = p.petXp[pet] = rows[0].xp;
+        } catch (err) { console.error("pet treat failed:", err); return; }
+      }
+      const stage = petStageOf(xp), prevStage = petStageOf(xp - 1);
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("petFed", { pet, xp, stage, next: PET_EVOLVE_XP.find((t) => t > xp) ?? null });
+      io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
+      if (stage > prevStage) {
+        io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
+        io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage });
+        console.log(`${p.name}'s ${pet} evolved to stage ${stage} (${xp} treats)`);
+      }
+      console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
+      return;
+    }
+
     if (!p.email) {
       // Session-only players (no email): memory-only purchase.
       if ((p.coins ?? 0) < menuItem.price) { socket.emit("foodError", { message: "Not enough coins!" }); return; }
@@ -6834,7 +6887,7 @@ io.on("connection", (socket) => {
       p.pet = item;   // buying auto-adopts
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       console.log(`${p.name} adopted ${item} (session-only)`);
       return;
     }
@@ -6860,7 +6913,7 @@ io.on("connection", (socket) => {
       p.pet = rows[0].equipped_pet || "";
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       console.log(`${p.name} adopted ${item}`);
     } catch (err) { console.error("buyPet failed:", err); }
   });
@@ -6882,7 +6935,7 @@ io.on("connection", (socket) => {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = item;
       socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       return;
     }
 
@@ -6897,7 +6950,7 @@ io.on("connection", (socket) => {
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = rows[0].equipped_pet || "";
       socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "" });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
     } catch (err) { console.error("equipPet failed:", err); }
   });
 
@@ -6923,7 +6976,7 @@ io.on("connection", (socket) => {
       p.petAcc = item;   // buying auto-equips
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       console.log(`${p.name} bought ${item} (session-only)`);
       return;
     }
@@ -6949,7 +7002,7 @@ io.on("connection", (socket) => {
       p.petAcc = rows[0].equipped_pet_acc || "";
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       console.log(`${p.name} bought ${item}`);
     } catch (err) { console.error("buyPetAcc failed:", err); }
   });
@@ -6971,7 +7024,7 @@ io.on("connection", (socket) => {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       p.petAcc = item;
       socket.emit("petAccUpdate", { petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       return;
     }
 
@@ -6986,7 +7039,7 @@ io.on("connection", (socket) => {
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.petAcc = rows[0].equipped_pet_acc || "";
       socket.emit("petAccUpdate", { petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc });
+      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
     } catch (err) { console.error("equipPetAcc failed:", err); }
   });
 
@@ -7203,7 +7256,7 @@ io.on("connection", (socket) => {
       pl.cosmetics = row.cosmetics || [];
       pl.pet = row.equipped_pet || "";
       io.to(id).emit("coinUpdate", { coins: pl.coins });
-      io.emit("playerPetUpdate", { id, pet: pl.pet, petAcc: pl.petAcc || "" });
+      io.emit("playerPetUpdate", { id, pet: pl.pet, petAcc: pl.petAcc || "", petStage: petStageFor(pl) });
       io.emit("playerCosmeticUpdate", { id, cosmetics: pl.cosmetics, equipped: pl.equipped || "", wings: pl.wings || "" });
     }
     t.state = "done";
@@ -7482,7 +7535,7 @@ io.on("connection", (socket) => {
       p.petAcc = done.sellerRow.equipped_pet_acc || "";
       socket.emit("coinUpdate", { coins: p.coins });
       if (hadCos !== p.equipped || hadWings !== p.wings) io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings });
-      if (hadPet !== p.pet || hadAcc !== p.petAcc) io.emit("playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc });
+      if (hadPet !== p.pet || hadAcc !== p.petAcc) io.emit("playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc, petStage: petStageFor(p) });
     }
     socket.emit("storeOk", { message: `Sold! ${label} went for ${done.win.amount.toLocaleString()} coins.` });
     // Winner: live sync or queued note.
@@ -8313,6 +8366,8 @@ try {
   // Pet accessories (July 2026): the worn accessory slot ('' = bare pet).
   // Idempotent self-heal so prod gets the column on first boot after deploy.
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_pet_acc text NOT NULL DEFAULT ''`);
+  // Pet evolution: per-pet treat XP, keyed by pet id ({"pet_cat": 12, ...}).
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_xp jsonb NOT NULL DEFAULT '{}'::jsonb`);
   // Wings slot (Aug 2026): separate from equipped_cosmetic so wings + a
   // wearable can be worn together. One-time self-healing migration: anyone
   // whose old single slot holds wings gets them moved to the new slot.
