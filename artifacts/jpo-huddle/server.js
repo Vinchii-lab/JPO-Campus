@@ -4019,6 +4019,18 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
   if (!m || !m.alive || m.finished) return;
   const ph = rlglPhase();
   const b = rlglBoundsNow();
+  // Pre-GO corral (owner rule): the free-move window before GO (~8s of
+  // intro + countdown) is for spreading out ALONG the start line — not for
+  // sneaking a head start. Cross the line early and the doll shoves you back.
+  if (now - rlgl.beganAt < 8_000 && y > RLGL_START_Y + 90) {
+    const p = players[id];
+    if (p) {
+      p.x = x; p.y = RLGL_START_Y;
+      io.to(id).emit("rlglPushed", { id, x: p.x, y: p.y, byName: "The doll — wait for GO!" });
+      io.emit("playerMoved", { id, ...p });
+    }
+    return;
+  }
   // Runaways: leaving the lawn forfeits. In narrow phases the legal strip is
   // tighter than the lawn — stepping off the path is its own death (no slack:
   // the borders are drawn on everyone's screen).
