@@ -11722,12 +11722,38 @@
                 onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
               });
             } else if (petObj._mythic === 'cocoa') {
-              this.tweens.add({ targets: petObj, scaleY: bs * 0.88, scaleX: bs * 1.1,
-                duration: 200, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });                  // churning squash
-              this.tweens.add({
-                targets: petObj, angle: { from: -13, to: 13 }, duration: 110,
-                yoyo: true, repeat: 11, ease: 'Sine.easeInOut',
-                onComplete: () => { petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false; },
+              // COCOA POUNCE: the big lug jumps ON TOP of its owner, perches
+              // there like a smug bear rug, then hops back down. Owner =
+              // whoever this pet follows (local player or a remote sprite).
+              let owner = null;
+              if (petObj === this.localPet) owner = this.player;
+              else for (const oid in this.otherPlayers) {
+                if (this.otherPlayers[oid].pet === petObj) { owner = this.otherPlayers[oid].sprite; break; }
+              }
+              if (!owner) { petObj._trickBusy = false; return; }
+              const x0 = petObj.x, sitTex = petObj._animSet && petObj._animSet.sit;
+              const walkTex = petObj._animSet && petObj._animSet.walk;
+              const perchX = owner.x, perchY = owner.y - 26;   // riding the shoulders/head
+              const d0 = petObj.depth;
+              petObj.setDepth(5);                              // render over the owner while riding
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  { scaleY: bs * 0.75, scaleX: bs * 1.12, duration: 300, ease: 'Sine.easeIn' },  // deep crouch
+                  { x: perchX, y: perchY - 22, scaleY: bs * 1.12, scaleX: bs * 0.94,
+                    duration: 330, ease: 'Sine.easeOut',
+                    onStart: () => { petObj.flipX = perchX < x0; } },                            // spring UP...
+                  { y: perchY, scaleY: bs, scaleX: bs, duration: 150, ease: 'Sine.easeIn',
+                    onComplete: () => { if (sitTex) petObj.setTexture(sitTex); } },              // ...land on top
+                  { y: perchY - 2, duration: 380, yoyo: true, repeat: 2, ease: 'Sine.easeInOut' }, // happy perch bounce
+                  { x: x0, y: y0 - 18, duration: 260, ease: 'Sine.easeOut',
+                    onStart: () => { if (walkTex) petObj.setTexture(walkTex[0]); petObj.flipX = x0 < perchX; } },
+                  { y: y0, duration: 170, ease: 'Bounce.easeOut' },                              // hop back down
+                ],
+                onComplete: () => {
+                  petObj.setDepth(d0); petObj.setScale(bs); petObj.y = y0; petObj.angle = 0;
+                  petObj._trickBusy = false;
+                },
               });
             } else {
               this.tweens.add({
