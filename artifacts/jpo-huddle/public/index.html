@@ -12145,14 +12145,14 @@
             // Final forms MOVE differently too — each spirit has its own gait:
             //   blaze (golden wolf) = powerful prowl: barely sways, long deep
             //     strides, unhurried frame cadence — pure confidence.
-            //   frost (winter spirit) = ethereal glide: almost no waddle, a
-            //     slow weightless shimmer, drifting like it's on ice.
+            //   frost (alpha husky 👑) = royal strut: chest-out swagger with a
+            //     proud measured bounce — the king parades, he doesn't scurry.
             //   cocoa (cocoa storm) = heavy happy lumber: BIG side-to-side
             //     waddle and a bouncy chonky bound.
             // Everyone else keeps the classic puppy trot.
             const gait = {
               blaze: { sway: 2, swayF: 0.011, bounce: 0.085, bounceF: 0.020, frameMs: 165 },
-              frost: { sway: 1, swayF: 0.009, bounce: 0.020, bounceF: 0.014, frameMs: 180 },
+              frost: { sway: 4, swayF: 0.012, bounce: 0.055, bounceF: 0.018, frameMs: 170 },
               cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
             }[petObj._mythic] || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
             petObj.angle = Math.sin(petObj._animT * gait.swayF) * gait.sway;                     // waddle
