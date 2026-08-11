@@ -118,3 +118,17 @@ uri = "file://attached_assets/generated_images/dragon_stage3_elder.png"
 type = "image"
 title = "Stage 3 — ELDER DRAGON 👑 (70 treats)"
 description = "Final form: gold-tipped horns, flame breath, ember aura."
+
+[[outputs]]
+id = "r-Kr7O-YFG_AB5KdI1mKf"
+uri = "file://attached_assets/generated_images/dragon_v2_stage2_drake.png"
+type = "image"
+title = "Stage 2 — Drake ✨ (30 treats)"
+description = "Same purple boy, grown up: bigger orange wings, baby horns, smoke puffs."
+
+[[outputs]]
+id = "Zotbkk3oD1UTdR6i_ndaK"
+uri = "file://attached_assets/generated_images/dragon_v2_stage3_elder.png"
+type = "image"
+title = "Stage 3 — ELDER DRAGON 👑 (70 treats)"
+description = "Final form: royal purple, gold-tipped horns, flame wisp, embers."
