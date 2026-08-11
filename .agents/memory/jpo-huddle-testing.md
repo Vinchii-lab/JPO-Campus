@@ -239,14 +239,16 @@ with an in-page `setInterval` latch (`window.__hit = true`), never by polling
 Single-page runs are full speed (that's why a solo diag can pass while the
 3-player run fails on the identical code path).
 
-## Puppeteer ↔ pinned chromium version lock
-The nix chromium binary is 114.0.5735.90 — drive it with puppeteer-core@20.7.2
-(the Chrome-for-Testing 114 pairing). A freshly-installed modern puppeteer-core
-doesn't error; it just TIMES OUT on page.goto, which looks like an app bug.
-When a previously-green browser test suddenly times out on goto after a /tmp
-rebuild, suspect the pin before debugging the app.
+## Puppeteer ↔ pinned chromium version lock (updated Aug 2026)
+The old chromium-114 nix path no longer has a usable binary. Working pairing:
+`puppeteer-core@21` + `/nix/store/m7qi78k6711fpwnrm4r2kn4p3ga3jal9-ungoogled-chromium-123.0.6312.105/bin/chromium`.
+General rule: match puppeteer-core major to the chromium major era; a mismatch
+doesn't error, it TIMES OUT on launch/goto, which looks like an app bug.
+Gotcha: the /tmp harness scripts read `process.env.URL` — an unset URL surfaces
+as `Protocol error (Page.navigate): Invalid parameters ... deserialize
+params.url`, not a clear "missing URL". Export `URL="https://$REPLIT_DEV_DOMAIN/"`.
 
 ## /tmp test deps are fragile
-- `npm install <pkg> --no-save` in /tmp PRUNES the other throwaway deps (installing socket.io-client deleted puppeteer-core). Reinstall pinned `puppeteer-core@21` (matches nix chromium 114) if launches fail/hang after any /tmp npm churn.
+- `npm install <pkg> --no-save` in /tmp PRUNES the other throwaway deps (installing socket.io-client deleted puppeteer-core). Reinstall pinned `puppeteer-core@21` (pairs with the nix chromium 123 binary above) if launches fail/hang after any /tmp npm churn.
 - Back-to-back headless logins with the SAME seeded email trip the server's one-live-session-per-email drop (socket shows connected:false) — use a fresh email per run or wait out the grace period.
 - Puppeteer `page.keyboard.press` sometimes never reaches Phaser Key objects headless even when arrows work; dispatch an in-page `new KeyboardEvent('keydown', {keyCode…})` on `window` instead to test key-bound features.
