@@ -1422,6 +1422,10 @@ function pruneCooldowns(map, now) {      // opportunistic sweep so the maps can'
 // Fixed emote allowlist — ids only, the client maps them to emoji. MUST match
 // the EMOTES list in public/index.html.
 const EMOTES = new Set(["wave", "heart", "laugh", "party", "thumbs", "fire", "sad", "shock"]);
+// Chat-log reactions (Teams-style): allowed emoji + a per-boot message id so
+// clients can attach a reaction to a specific (ephemeral) message.
+const CHAT_REACTS = new Set(["👍", "❤️", "😂", "😮", "😢", "🔥"]);
+let chatMsgSeq = 0;
 
 function clampIdx(v, max) {
   return (Number.isInteger(v) && v >= 0 && v <= max) ? v : 0;
@@ -5716,7 +5720,7 @@ io.on("connection", (socket) => {
     if (!takeToken(chatBucket)) return;   // throttle chat spam (silently drop)
     const text = (message || "").trim().slice(0, 200);
     if (!text) return;
-    const msg = { id: socket.id, name: players[socket.id].name, message: text };
+    const msg = { mid: ++chatMsgSeq, id: socket.id, name: players[socket.id].name, message: text };
     // While Office After Dark is live, players in the dark hear ONLY each
     // other. A message from anyone lit up (outsiders, eliminated ghosts) is
     // delivered to everyone EXCEPT alive participants, so observers can't
@@ -5741,7 +5745,7 @@ io.on("connection", (socket) => {
     if (!players[socket.id]) return;
     if (typeof img !== "string" || img.length > CHAT_IMG_MAX_B64 || !CHAT_IMG_RE.test(img)) return;
     if (!takeToken(chatImgBucket)) { socket.emit("chatImgError", "Sending pictures a bit fast — give it a few seconds."); return; }
-    const msg = { id: socket.id, name: players[socket.id].name, img };
+    const msg = { mid: ++chatMsgSeq, id: socket.id, name: players[socket.id].name, img };
     // Same Office After Dark routing as text chat: lit players can't leak
     // to the people still in the dark.
     if (round && round.state === "active" && !inTheDark(socket.id)) {
@@ -5750,6 +5754,24 @@ io.on("connection", (socket) => {
       io.emit("chatImage", msg);
     }
     console.log(`${players[socket.id].name} shared a chat image (${Math.round(img.length / 1024)} KB b64)`);
+  });
+
+  // ── Chat-log reactions (ephemeral, like the messages they attach to) ──
+  // The server only validates + relays; clients aggregate counts and treat a
+  // repeat from the same person as a toggle-off. After Dark routing matches
+  // chat so a reaction can't leak across the dark wall.
+  socket.on("chatReact", (payload) => {
+    const { mid, emoji } = payload || {};
+    if (!players[socket.id]) return;
+    if (!Number.isInteger(mid) || mid <= 0 || mid > chatMsgSeq) return;
+    if (typeof emoji !== "string" || !CHAT_REACTS.has(emoji)) return;
+    if (!takeToken(emoteBucket)) return;   // shares the emote throttle
+    const out = { mid, emoji, id: socket.id, name: players[socket.id].name };
+    if (round && round.state === "active" && !inTheDark(socket.id)) {
+      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatReact", out);
+    } else {
+      io.emit("chatReact", out);
+    }
   });
 
   // ── Emotes (ephemeral reaction bubbles, relayed to everyone) ─────────

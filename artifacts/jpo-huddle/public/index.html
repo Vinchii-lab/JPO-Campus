@@ -251,6 +251,29 @@
       max-width: 92vw; max-height: 92vh; border-radius: 10px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.8);
     }
+    /* Chat-log reactions: hover 🙂 button, emoji picker row, count pills */
+    .cl-msg { position: relative; }
+    .cl-react-btn {
+      display: none; position: absolute; top: 0; right: 2px; cursor: pointer;
+      font-size: 12px; line-height: 16px; padding: 0 4px; border-radius: 8px;
+      background: rgba(255,255,255,0.08); user-select: none;
+    }
+    .cl-msg:hover .cl-react-btn { display: block; }
+    .cl-react-picker {
+      display: none; position: absolute; top: -26px; right: 0; z-index: 5;
+      background: rgba(20,20,40,0.97); border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 14px; padding: 3px 6px; white-space: nowrap;
+    }
+    .cl-react-picker.open { display: block; }
+    .cl-react-picker span { cursor: pointer; font-size: 15px; padding: 0 3px; }
+    .cl-react-picker span:hover { transform: scale(1.25); display: inline-block; }
+    .cl-reacts { margin-top: 2px; }
+    .cl-react-pill {
+      display: inline-block; cursor: pointer; user-select: none;
+      font-size: 11px; padding: 0 6px; margin-right: 4px; border-radius: 9px;
+      background: rgba(255,255,255,0.10); border: 1px solid transparent;
+    }
+    .cl-react-pill.mine { border-color: rgba(108,99,255,0.9); background: rgba(108,99,255,0.25); }
     #chat-hint {
       position: fixed; bottom: 10px; right: 14px; z-index: 99;
       font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.85); pointer-events: none;
@@ -5526,6 +5549,7 @@
         : `${who}: `;
       div.appendChild(n);
       div.appendChild(document.createTextNode(text));
+      if (o.mid) _clAttachReacts(div, o.mid);
       // Only auto-scroll when the reader is already at (or near) the bottom —
       // measured BEFORE appending so scrolling up to re-read is never yanked away.
       const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
@@ -5542,7 +5566,7 @@
     socket.on('chatMessage', (payload) => {
       const p = payload || {};
       if (typeof p.message !== 'string' || !p.message) return;
-      _chatLogAdd('chat', p.name || '?', p.message, { me: p.id === socket.id });
+      _chatLogAdd('chat', p.name || '?', p.message, { me: p.id === socket.id, mid: p.mid });
     });
 
     // Chat images land in the log as clickable thumbnails. Pictures are far
@@ -5557,7 +5581,7 @@
         ? (o.dir === 'out' ? `(to ${who}): ` : `(whisper) ${who}: `)
         : `${who}: `, img, !!o.me);
     }
-    function _clImgEntry(label, img, me) {
+    function _clImgEntry(label, img, me, mid) {
       const div = document.createElement('div');
       div.className = 'cl-msg' + (me ? ' me' : '');
       const t = document.createElement('span');
@@ -5570,6 +5594,7 @@
       im.className = 'cl-img'; im.src = img; im.alt = 'shared image';
       im.addEventListener('pointerdown', (e) => { e.preventDefault(); _openLightbox(img); });
       div.appendChild(im);
+      if (mid) _clAttachReacts(div, mid);
       const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
       clEmpty.style.display = 'none';
       clScroll.appendChild(div);
@@ -5585,7 +5610,64 @@
     socket.on('chatImage', (payload) => {
       const p = payload || {};
       if (typeof p.img !== 'string' || !p.img.startsWith('data:image/')) return;
-      _clImgEntry(`${p.name || '?'}: `, p.img, p.id === socket.id);
+      _clImgEntry(`${p.name || '?'}: `, p.img, p.id === socket.id, p.mid);
+    });
+
+    // ── Chat reactions (Teams-style): hover a log message → 🙂 → pick an
+    // emoji. The server relays {mid, emoji, id, name}; a repeat from the same
+    // person toggles their reaction off. Counts live on the message element. ──
+    const CHAT_REACT_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+    function _clAttachReacts(div, mid) {
+      div.dataset.mid = String(mid);
+      div._reacts = {};   // emoji -> { [socketId]: name }
+      const btn = document.createElement('span');
+      btn.className = 'cl-react-btn'; btn.textContent = '🙂';
+      const picker = document.createElement('span');
+      picker.className = 'cl-react-picker';
+      for (const em of CHAT_REACT_EMOJI) {
+        const s = document.createElement('span');
+        s.textContent = em;
+        s.addEventListener('pointerdown', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          socket.emit('chatReact', { mid, emoji: em });
+          picker.classList.remove('open');
+        });
+        picker.appendChild(s);
+      }
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        for (const p of clScroll.querySelectorAll('.cl-react-picker.open')) if (p !== picker) p.classList.remove('open');
+        picker.classList.toggle('open');
+      });
+      const pills = document.createElement('div');
+      pills.className = 'cl-reacts';
+      div.appendChild(btn); div.appendChild(picker); div.appendChild(pills);
+    }
+    function _clRenderReacts(div) {
+      const pills = div.querySelector('.cl-reacts');
+      if (!pills) return;
+      pills.textContent = '';
+      for (const [em, who] of Object.entries(div._reacts || {})) {
+        const ids = Object.keys(who);
+        if (!ids.length) continue;
+        const pill = document.createElement('span');
+        pill.className = 'cl-react-pill' + (who[socket.id] ? ' mine' : '');
+        pill.textContent = `${em} ${ids.length}`;
+        pill.title = ids.map((i) => who[i]).join(', ');
+        pill.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          socket.emit('chatReact', { mid: Number(div.dataset.mid), emoji: em });
+        });
+        pills.appendChild(pill);
+      }
+    }
+    socket.on('chatReact', (d = {}) => {
+      const div = clScroll.querySelector(`[data-mid="${d.mid}"]`);
+      if (!div || typeof d.emoji !== 'string') return;
+      const who = (div._reacts[d.emoji] = div._reacts[d.emoji] || {});
+      if (who[d.id]) delete who[d.id];   // toggle off
+      else who[d.id] = d.name || '?';
+      _clRenderReacts(div);
     });
 
     // Full-size lightbox: click a thumbnail to zoom, click anywhere to close.
