@@ -12354,13 +12354,17 @@
                       duration: 300 + Math.random() * 100, ease: 'Sine.easeOut',
                       onComplete: this._trackPetFx(petObj, c) });
                   }
-                  if (i % 3 === 0) {                    // stray sparks popping off the flame
-                    const s = this.add.circle(mx + fwdD * (16 + Math.random() * 26) * scC,
-                      my + spread * 5, 1.3 * scC, 0xffd76a, 0.9).setDepth(3.1);
-                    this.tweens.add({ targets: s, alpha: 0,
-                      x: s.x + fwdD * (20 + Math.random() * 16) * scC,
-                      y: s.y - (6 + Math.random() * 12) * scC,
-                      duration: 420 + Math.random() * 180, ease: 'Quad.easeOut',
+                  if (i % 3 === 0) {                    // dark smoke curling off the flame
+                    const s = this.add.image(mx + fwdD * (14 + Math.random() * 20) * scC,
+                      my + spread * 6, `smoke_puff_${(i + 1) % 3}`)
+                      .setTint(0x5a4038).setAlpha(0.5)
+                      .setScale(0.3 * scC).setFlipX(fwdD < 0)
+                      .setAngle(Math.random() * 24 - 12).setDepth(3);
+                    this.tweens.add({ targets: s, alpha: 0, scale: (1.2 + Math.random() * 0.4) * scC,
+                      x: s.x + fwdD * (24 + Math.random() * 18) * scC,
+                      y: s.y - (10 + Math.random() * 14),
+                      angle: s.angle + (Math.random() * 30 - 15),
+                      duration: 720 + Math.random() * 240, ease: 'Sine.easeOut',
                       onComplete: this._trackPetFx(petObj, s) });
                   }
                 });
@@ -12470,8 +12474,24 @@
             const mx = petObj.x + fwd * petObj.displayWidth * 0.22;
             const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
             // Boss call: stage 2 breathes SMOKE — a teen dragon still working
-            // up to real fire. Soft layered gray puffs that billow out of the
-            // mouth, expand, and curl upward. Babies puff tiny smoke too.
+            // up to real fire. Babies DON'T smoke (boss rule): a hatchling just
+            // sputters a few tiny embers — trying his best, no fire yet.
+            if ((petObj._petStage || 1) < 2) {
+              for (let i = 0; i < 6; i++) {
+                this.time.delayedCall(200 + i * 130, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const e = this.add.circle(mx + fwd * (2 + Math.random() * 4),
+                    my + (Math.random() - 0.5) * 3, 1 + Math.random(),
+                    [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
+                  this.tweens.add({ targets: e, alpha: 0,
+                    x: e.x + fwd * (8 + Math.random() * 10),
+                    y: e.y - 2 + Math.random() * 6,
+                    scale: 0.4, duration: 380 + Math.random() * 160,
+                    ease: 'Quad.easeOut', onComplete: this._trackPetFx(petObj, e) });
+                });
+              }
+              return;
+            }
             for (let i = 0; i < 8; i++) {
               this.time.delayedCall(180 + i * 95, () => {
                 if (!petObj.active || !petObj.visible) return;
