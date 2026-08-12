@@ -405,3 +405,10 @@ uri = "file://attached_assets/generated_images/unicorn_gold_accessory_options.pn
 type = "image"
 title = "Gold accessory options — pick one"
 description = "A: Heart Charm · B: Star Medallion · C: Royal Saddle · D: Sun Breastplate"
+
+[[outputs]]
+id = "hyZ6oC6L116sYdlQ7VML9"
+uri = "file://attached_assets/generated_images/phoenix_fx_storyboard.png"
+type = "image"
+title = "Phoenix flight FX options — pick one (or mix)"
+description = "A: Ember Wake · B: Radiant Sun · C: Comet Burn · D: Firestorm Wingbeat — all buildable as-is"
