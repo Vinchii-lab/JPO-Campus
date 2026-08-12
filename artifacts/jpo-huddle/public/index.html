@@ -12190,16 +12190,81 @@
               cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
             }[petObj._mythic] || stageGaits[stageKey]
               || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
-            petObj.angle = Math.sin(petObj._animT * gait.swayF) * gait.sway;                     // waddle
-            if (petObj._mythic === 'cocoa') {
-              // Static-art final form: sell each STEP with a footfall thump —
-              // squash wide on the plant, stretch tall on the push-off.
-              const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
+            // MOVEMENT STYLES ("movement animation + effects animation",
+            // per the boss): each evolved line has a signature body motion
+            // and a step-synced effect, not just different numbers.
+            //   thump   = footfall squash-and-stretch (heavy walkers)
+            //   slink   = long low stretched prowl (young cats)
+            //   float   = no waddle at all, weightless slow ripple (swan,
+            //             mystic black cat, crystal turtle)
+            //   hop     = sharp bouncy |sin| steps (busy mallard)
+            //   strut   = chest-puff on every step (drake, persian queen)
+            const MOTION = {
+              duck_s2: 'hop',    duck_s3: 'strut', duck_snow_s3: 'float',
+              cat_s2: 'slink',   cat_black_s2: 'slink', cat_snow_s2: 'slink',
+              cat_s3: 'thump',   cat_black_s3: 'float', cat_snow_s3: 'strut',
+              turtle_s2: 'thump', turtle_s3: 'thump', turtle_sapphire_s3: 'float',
+            };
+            const motion = petObj._mythic === 'cocoa' ? 'thump' : (MOTION[stageKey] || 'trot');
+            const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
+            petObj.angle = motion === 'float' ? petObj.angle * 0.8
+              : Math.sin(petObj._animT * gait.swayF) * gait.sway;             // waddle
+            if (motion === 'thump') {
+              // Sell each STEP with a footfall thump — squash wide on the
+              // plant, stretch tall on the push-off.
               petObj.setScale(bs * (1 + 0.07 * (1 - step)), bs * (1 - 0.06 + (gait.bounce + 0.06) * step));
+            } else if (motion === 'slink') {
+              petObj.setScale(bs * 1.07, bs * (0.95 + gait.bounce * step));   // long + low prowl
+            } else if (motion === 'float') {
+              petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF * 0.6)));
+            } else if (motion === 'hop') {
+              petObj.setScale(bs * (1 - 0.03 * step), bs * (1 + (gait.bounce + 0.03) * step)); // springy steps
+            } else if (motion === 'strut') {
+              petObj.setScale(bs * (1 + 0.05 * step), bs * (1 + gait.bounce * step)); // chest puff
             } else {
               petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
             }
             petObj._gaitFrameMs = gait.frameMs;
+            // Step-synced effects: fire once per footfall (each half-cycle of
+            // the bounce wave). Every effect self-destroys via _trackPetFx.
+            const stepPh = Math.floor(petObj._animT * gait.bounceF / Math.PI);
+            if (stageKey && stepPh !== petObj._stepPh) {
+              petObj._stepPh = stepPh;
+              const fx = {
+                duck_s2:            { kind: 'dust',  color: 0xcbb98e },
+                duck_s3:            { kind: 'glint', color: 0xffd75e },
+                duck_snow_s3:       { kind: 'ripple', color: 0xdff2ff },
+                cat_s3:             { kind: 'dust',  color: 0xd9c6a8 },
+                cat_black_s3:       { kind: 'ghost', color: 0x9b59ff },
+                cat_snow_s3:        { kind: 'glint', color: 0xe8f4ff },
+                turtle_s2:          { kind: 'dust',  color: 0xc9b892 },
+                turtle_s3:          { kind: 'ripple', color: 0x9dbf7a },
+                turtle_sapphire_s3: { kind: 'glint', color: 0x7fe0ff },
+              }[stageKey];
+              if (fx && fx.kind === 'dust') {
+                const p = this.add.circle(petObj.x - Math.sign(petObj.flipX ? -1 : 1) * 6,
+                  petObj.y - 1, 3 + Math.random() * 2, fx.color, 0.30).setDepth(1);
+                this.tweens.add({ targets: p, alpha: 0, scale: 1.9, y: p.y - 3,
+                  duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
+              } else if (fx && fx.kind === 'glint') {
+                const g = this.add.star(petObj.x + (Math.random() * 14 - 7), petObj.y - 2 - Math.random() * 6,
+                  4, 1.5, 4, fx.color, 0.85).setDepth(3);
+                this.tweens.add({ targets: g, alpha: 0, angle: 90, scale: 0.3, y: g.y - 8,
+                  duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              } else if (fx && fx.kind === 'ripple') {
+                const r = this.add.ellipse(petObj.x, petObj.y - 1, 16, 6, fx.color, 0).setDepth(1)
+                  .setStrokeStyle(1, fx.color, 0.45);
+                this.tweens.add({ targets: r, scaleX: 2.1, scaleY: 2.1, alpha: 0,
+                  duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              } else if (fx && fx.kind === 'ghost') {
+                // Mystic black cat: a fading violet afterimage where she just was.
+                const ghost = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                  .setOrigin(0.5, 1).setScale(petObj.scaleX, petObj.scaleY)
+                  .setFlipX(petObj.flipX).setTint(fx.color).setAlpha(0.28).setDepth(1);
+                this.tweens.add({ targets: ghost, alpha: 0, duration: 480,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ghost) });
+              }
+            }
             petObj._trickAt = 0;                  // re-roll the trick timer on next stop
             // Final-form spirits trail a NATURAL aura while trotting — no
             // emoji, just soft layered glow wisps in the line's element:
