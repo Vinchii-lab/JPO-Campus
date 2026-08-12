@@ -2189,12 +2189,6 @@
   </div>
 
   <!-- ── Owner panel (F8) ── -->
-  <!-- Owner-only pet-evolution preview: cycles the LOCAL pet's displayed
-       stage (visual only, XP untouched) so evolutions can be judged live. -->
-  <button id="evo-test-btn" style="display:none; position:fixed; bottom:74px; right:12px; z-index:60;
-    background:#2c2540; color:#ffd97a; border:1px solid #6c63ff; border-radius:10px;
-    padding:8px 12px; font-size:13px; cursor:pointer; font-family:inherit;">🧬 Evolve (test)</button>
-
   <!-- Pet card: opens when you click YOUR pet. Feed treats, watch XP fill. -->
   <div id="pet-panel" style="display:none; position:fixed; inset:0; z-index:70;
     background:rgba(10,8,20,.55); align-items:center; justify-content:center;">
@@ -4582,20 +4576,6 @@
       _myPetNames[pet] = petName;
       if (_petPanelOpen) renderPetPanel();
       showToast(petName ? `🐾 Say hello to ${petName}!` : '🐾 Name cleared.', 3000);
-    });
-
-    // Owner-only evolve preview: cycle MY pet's displayed stage (1 → 2 → 3 →
-    // back to real). Visual-only and local-only — XP and other clients see
-    // nothing. Lets the boss judge evolution art live before players grind it.
-    document.getElementById('evo-test-btn').addEventListener('click', () => {
-      if (!_equippedPet) { showToast('Equip a pet first! 🐾', 2500); return; }
-      _evoPreview = _evoPreview === 0 ? 2 : _evoPreview === 2 ? 3 : 0;
-      const sc = window._gameScene;
-      sc?._setLocalPet(_equippedPet);
-      const labels = { 0: 'back to its REAL stage', 2: 'Stage 2 ✨ (preview)', 3: 'FINAL FORM 👑 (preview)' };
-      showToast(`🧬 Pet: ${labels[_evoPreview]}`, 3000);
-      window._evoPop?.();
-      document.getElementById('evo-test-btn').blur();   // don't eat WASD after click
     });
 
     // Little evolve pop so a stage change feels like a moment, not a texture
@@ -9859,7 +9839,6 @@
       document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-deal').style.display = (d && d.owner) ? '' : 'none';
       window._ownerAuthed = !!(d && d.owner);
-      document.getElementById('evo-test-btn').style.display = window._ownerAuthed ? 'block' : 'none';
       // Silent path = automatic re-auth after a reconnect (pwd modal not open):
       // refresh the flags but do NOT pop the owner panel open mid-game.
       const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
