@@ -377,3 +377,17 @@ uri = "file://attached_assets/generated_images/dragon_moves_storyboard.png"
 type = "image"
 title = "Dragon moves 1 + 3 + 5 + 12 — the sketch"
 description = "Wing-gust dust, swoop landing, wingtip trails (per-dragon colors), charge-up breath."
+
+[[outputs]]
+id = "ZBlM97PDumR_aZP3KwcS4"
+uri = "file://attached_assets/generated_images/unicorn_moves_storyboard.png"
+type = "image"
+title = "Unicorn move ideas"
+description = "4 sketch concepts: Prism Beam, Stardust Gallop, Halo Blessing, Moonbounce"
+
+[[outputs]]
+id = "WKccF4-6qdf0VOU2j2Yyn"
+uri = "file://attached_assets/generated_images/phoenix_moves_storyboard.png"
+type = "image"
+title = "Phoenix move ideas"
+description = "4 sketch concepts: Solar Flare, Ember Dive, Rebirth, Firestorm Waltz"
