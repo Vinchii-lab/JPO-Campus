@@ -12672,32 +12672,50 @@
             return;
           }
           if (st >= 3) {
-            // ANCIENT BLESSING (elder tortoise): tucks in, the ground RUMBLES,
-            // and a spiral of leaves rises around the old one. Nature answers.
+            // NATURE'S GROWTH (elder tortoise): rears up, STOMPS the ground,
+            // and a trail of grass and flowers SPROUTS up in a ring around
+            // the old one — blooms, sways, then settles back into the earth.
             petObj._trickBusy = true;
             this.tweens.chain({
               targets: petObj,
               tweens: [
-                { scaleX: bs * 0.74, scaleY: bs * 0.64, duration: 260, ease: 'Sine.easeIn',
+                // Rear up...
+                { scaleY: bs * 1.12, scaleX: bs * 0.92, y: y0 - 6, duration: 300, ease: 'Sine.easeOut' },
+                // ...STOMP.
+                { scaleY: bs * 0.8, scaleX: bs * 1.16, y: y0, duration: 120, ease: 'Quad.easeIn',
                   onComplete: () => {
-                    this.cameras.main.shake(300, 0.003);
+                    if (!petObj.active) return;
+                    this.cameras.main.shake(280, 0.004);
+                    if (!petObj.visible) return;
                     const ring = this.add.ellipse(petObj.x, y0, 24, 9, 0x9dbf7a, 0)
-                      .setStrokeStyle(2, 0x9dbf7a, 0.8).setDepth(3);
-                    this.tweens.add({ targets: ring, scaleX: 2.8, scaleY: 2.8, alpha: 0,
-                      duration: 800, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
-                    for (let i = 0; i < 7; i++) {
-                      const a0 = i * 0.95;
-                      const leaf = this.add.text(petObj.x + Math.cos(a0) * 16, y0 - 4, '🍃',
-                        { fontSize: '10px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
-                      this.tweens.add({ targets: leaf, alpha: { from: 0.9, to: 0 },
-                        y: leaf.y - 30 - i * 4, x: leaf.x + Math.cos(a0 + 1.8) * 14,
-                        angle: Math.random() * 120 - 60, delay: 200 + i * 160, duration: 1100,
-                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, leaf) });
+                      .setStrokeStyle(2, 0x9dbf7a, 0.85).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0,
+                      duration: 700, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    // Growth spreads OUTWARD in a ring: grass first, flowers on top.
+                    const sprouts = ['🌱', '🌿', '🌸', '🌼', '🌷', '🌻', '🌿', '🌸', '🌱', '🌼'];
+                    for (let i = 0; i < sprouts.length; i++) {
+                      const a0 = (i / sprouts.length) * Math.PI * 2 + Math.random() * 0.3;
+                      const rr = 20 + (i % 3) * 9 + Math.random() * 5;
+                      this.time.delayedCall(140 + i * 110, () => {
+                        if (!petObj.active || !petObj.visible) return;
+                        const px = petObj.x + Math.cos(a0) * rr;
+                        const py = y0 + Math.sin(a0) * rr * 0.38;   // squashed ring = floor perspective
+                        const s = this.add.text(px, py, sprouts[i],
+                          { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 1).setScale(0).setDepth(3);
+                        // sprout up with a pop, sway gently, then sink away
+                        this.tweens.add({ targets: s, scale: 1, duration: 320, ease: 'Back.easeOut' });
+                        this.tweens.add({ targets: s, angle: { from: -7, to: 7 }, delay: 320,
+                          duration: 420, yoyo: true, repeat: 2, ease: 'Sine.easeInOut' });
+                        this.tweens.add({ targets: s, alpha: 0, scale: 0.4, y: py + 3,
+                          delay: 1900 - i * 60, duration: 420, ease: 'Sine.easeIn',
+                          onComplete: this._trackPetFx(petObj, s) });
+                      });
                     }
-                  }, hold: 1400 },
-                { scaleX: bs, scaleY: bs, duration: 300, ease: 'Back.easeOut' },
+                  }, hold: 2300 },
+                // Settle back, satisfied. The old ways still work.
+                { scaleX: bs, scaleY: bs, y: y0, duration: 320, ease: 'Back.easeOut' },
               ],
-              onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+              onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj._trickBusy = false; },
             });
             return;
           }
