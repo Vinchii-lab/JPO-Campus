@@ -10407,6 +10407,10 @@
         // Empty tucked-in shells for the turtle beyblade trick (side view).
         this.load.image('shell_green',    '/assets/pets/shell_green.png');
         this.load.image('shell_sapphire', '/assets/pets/shell_sapphire.png');
+        // Real pixel ice-crystal clusters for the sapphire FROST STOMP.
+        this.load.image('ice_crystal_0', '/assets/pets/ice_crystal_0.png');
+        this.load.image('ice_crystal_1', '/assets/pets/ice_crystal_1.png');
+        this.load.image('ice_crystal_2', '/assets/pets/ice_crystal_2.png');
         // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
         // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
         // static bunny art) swapped via setTexture in _stepPet/_petTrick.
@@ -12620,44 +12624,53 @@
                         duration: 500, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
                     }
                   } },
-                // Hold the crouch and BLOW: freezing mist puffs drift forward.
+                // Hold the crouch and BLOW: freezing mist streams from the
+                // MOUTH (head height, straight ahead), not the undercarriage.
                 { scaleY: bs * 0.94, scaleX: bs * 1.04, duration: 160, ease: 'Sine.easeOut', hold: 900,
                   onComplete: () => {
                     if (!petObj.active || !petObj.visible) return;
-                    for (let i = 0; i < 9; i++) {
-                      this.time.delayedCall(i * 90, () => {
+                    const mouthY = y0 - petObj.displayHeight * 0.62;   // head height
+                    const mouthX = petObj.x + dir * petObj.displayWidth * 0.42;
+                    for (let i = 0; i < 12; i++) {
+                      this.time.delayedCall(i * 70, () => {
                         if (!petObj.active || !petObj.visible) return;
-                        const spread = (Math.random() - 0.5) * 10;
-                        const m = this.add.circle(petObj.x + dir * 12, petObj.y - 10 + spread * 0.4,
-                          2 + Math.random() * 2, 0xdff4ff, 0.75).setDepth(3);
-                        this.tweens.add({ targets: m, alpha: 0, scale: 2.6,
-                          x: m.x + dir * (26 + Math.random() * 16), y: m.y + spread,
-                          duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, m) });
+                        const spread = (Math.random() - 0.5) * 6;
+                        const m = this.add.circle(mouthX, mouthY + spread,
+                          1.5 + Math.random() * 1.5, 0xdff4ff, 0.8).setDepth(3);
+                        // cone: shoots straight AHEAD, widening + sinking to the ground
+                        this.tweens.add({ targets: m, alpha: 0, scale: 2.8,
+                          x: m.x + dir * (34 + Math.random() * 26),
+                          y: mouthY + spread * 3 + 6 + Math.random() * 10,
+                          duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, m) });
                       });
                     }
-                    // Where the breath lands: ice crystals BLOOM from the ground.
-                    for (let i = 0; i < 4; i++) {
-                      this.time.delayedCall(520 + i * 150, () => {
+                    // Where the breath lands: REAL ice-crystal clusters grow
+                    // out of the ground — small, then medium, then the big one.
+                    for (let i = 0; i < 3; i++) {
+                      this.time.delayedCall(480 + i * 220, () => {
                         if (!petObj.active || !petObj.visible) return;
-                        const cx = petObj.x + dir * (34 + i * 9 + Math.random() * 5);
-                        const cy = y0 + (Math.random() * 8 - 4);
-                        const c = this.add.star(cx, cy, 6, 2, 5 + Math.random() * 2, 0x9fe8ff, 0.95)
-                          .setStrokeStyle(1, 0x3fc8f0, 0.9).setDepth(3).setScale(0).setOrigin(0.5, 0.8);
-                        const glint = this.add.star(cx, cy - 6, 4, 0.8, 2.4, 0xffffff, 0.9)
+                        const cx = petObj.x + dir * (30 + i * 15 + Math.random() * 4);
+                        const cy = y0 + 2 + (Math.random() * 4 - 2);
+                        const c = this.add.image(cx, cy, 'ice_crystal_' + i)
+                          .setOrigin(0.5, 1).setDepth(3).setScale(0);
+                        const targetScale = (14 + i * 7) / c.width;    // grow: 14px → 21px → 28px tall
+                        this.tweens.add({ targets: c, scaleX: targetScale, scaleY: targetScale,
+                          duration: 300, ease: 'Back.easeOut' });
+                        const glint = this.add.star(cx + 2, cy - 10 - i * 5, 4, 0.8, 2.6, 0xffffff, 0.95)
                           .setDepth(3).setScale(0);
-                        this.tweens.add({ targets: c, scale: 1, duration: 260, ease: 'Back.easeOut' });
                         this.tweens.add({ targets: glint, scale: 1, alpha: 0, angle: 90,
-                          delay: 200, duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, glint) });
+                          delay: 260, duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, glint) });
                         // linger frozen, then shatter into sparkles
-                        this.tweens.add({ targets: c, alpha: 0, scale: 1.4, delay: 1050,
-                          duration: 340, ease: 'Sine.easeIn',
+                        this.tweens.add({ targets: c, alpha: 0, scaleY: targetScale * 0.7, delay: 1400 - i * 150,
+                          duration: 320, ease: 'Sine.easeIn',
                           onStart: () => {
                             if (!petObj.active || !petObj.visible) return;
-                            for (let k = 0; k < 3; k++) {
-                              const s = this.add.circle(cx, cy - 4, 1.2, 0xdff4ff, 0.9).setDepth(3);
+                            for (let k = 0; k < 4; k++) {
+                              const s = this.add.circle(cx + (Math.random() * 10 - 5), cy - 6 - Math.random() * 8,
+                                1.2, 0xdff4ff, 0.9).setDepth(3);
                               this.tweens.add({ targets: s, alpha: 0,
-                                x: cx + (Math.random() * 20 - 10), y: cy - 8 - Math.random() * 10,
-                                duration: 380, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                                x: s.x + (Math.random() * 22 - 11), y: s.y - 6 - Math.random() * 10,
+                                duration: 400, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
                             }
                           },
                           onComplete: this._trackPetFx(petObj, c) });
