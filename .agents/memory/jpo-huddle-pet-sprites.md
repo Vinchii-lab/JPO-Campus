@@ -35,6 +35,14 @@ _trackPetFx (lazily recreated if purged) and hide shadow + reset origin when sea
 Black/near-black pets can't be generated on the dark #1e1e28 bg — keying eats them;
 use a light cream bg for dark-colored characters instead.
 
+# Big-winged sheets defeat the auto-slicer — hand-crop + dilated largest-blob
+When sheet characters have huge wings that touch/overlap x-ranges, slice5's blob merge
+produces garbage. Fix: manual x-crops per pose, then keep the largest connected blob
+with DILATED connectivity (radius ~5, /tmp/keepbig2.cjs pattern) — plain 8-connectivity
+fragments the art because keying leaves hairline alpha gaps. Skip darkflood on dark
+purple art (eats rune wings). Chunky silhouettes read better than skinny at 64px.
+Dragons break the pet size cap on purpose: s2 1.3x, s3 1.7x (boss rule: priciest = biggest).
+
 # Walk frames need ONE uniform scale, not per-frame fit
 Per-frame `-resize 60x60` makes compact poses (crouch) render HUGE vs stretched ones —
 the pet visibly "grows" mid-walk. Trim each frame, find the max dimension across the
