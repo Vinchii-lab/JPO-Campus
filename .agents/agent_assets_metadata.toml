@@ -398,3 +398,10 @@ uri = "file://attached_assets/generated_images/unicorn_mature_styles.png"
 type = "image"
 title = "Grown-up unicorn styles — pick one"
 description = "A: Royal Warhorse · B: Celestial · C: Prism Knight · D: Midnight Myth"
+
+[[outputs]]
+id = "H40aejXeA9r87kpCG2n78"
+uri = "file://attached_assets/generated_images/unicorn_gold_accessory_options.png"
+type = "image"
+title = "Gold accessory options — pick one"
+description = "A: Heart Charm · B: Star Medallion · C: Royal Saddle · D: Sun Breastplate"
