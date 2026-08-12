@@ -12298,15 +12298,6 @@
               const scC = Math.max(1, petObj.displayWidth / 64);
               const mx = petObj.x + fwdD * petObj.displayWidth * 0.30;
               const my = yD - petObj.displayHeight * 0.55;
-              // ember-orange rim aura hugging the body
-              const cyC = yD - petObj.displayHeight * ((petObj.originY || 1) - 0.5);
-              const rimC = this.add.ellipse(petObj.x, cyC, petObj.displayWidth * 1.02,
-                petObj.displayHeight * 1.02, 0xff7a2d, 0.07)
-                .setStrokeStyle(1.5, 0xffc98a, 0.85).setDepth(2.9);
-              this.tweens.add({ targets: rimC, scaleX: 1.12, scaleY: 1.12,
-                duration: 420, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
-              this.tweens.add({ targets: rimC, alpha: 0, delay: 1450, duration: 380,
-                onComplete: this._trackPetFx(petObj, rimC) });
               // CHARGE-UP: orb burns yellow-white at the mouth while he rears
               // back, then the torrent ROARS out.
               const orbC = this.add.circle(mx, my, 2 * scC, 0xfff3c9, 0.95).setDepth(3.2);
