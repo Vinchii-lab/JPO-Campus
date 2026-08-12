@@ -10404,6 +10404,9 @@
             for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
               this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png`);
           }
+        // Empty tucked-in shells for the turtle beyblade trick (side view).
+        this.load.image('shell_green',    '/assets/pets/shell_green.png');
+        this.load.image('shell_sapphire', '/assets/pets/shell_sapphire.png');
         // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
         // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
         // static bunny art) swapped via setTexture in _stepPet/_petTrick.
@@ -12670,15 +12673,14 @@
               onComplete: () => {
                 if (!petObj.active) { petObj._trickBusy = false; return; }
                 const wasVisible = petObj.visible;       // (prop-hunt hidden pets stay hidden)
-                petObj.setVisible(false).setScale(bs);   // tucked in — swap to the drawn shell
-                // Little pixel-style shell: dome + pale rim + plate spots.
-                const shell = this.add.container(x0, y0 - 5, [
-                  this.add.ellipse(0, 0, 18, 13, 0x4f7d38).setStrokeStyle(1.5, 0x2c4a1e, 1),
-                  this.add.ellipse(0, 3.5, 17, 6, 0xcfc79a).setStrokeStyle(1, 0x8f875f, 1),
-                  this.add.ellipse(-3.5, -2, 4.5, 3.5, 0x3b6128),
-                  this.add.ellipse(3, -1, 4, 3, 0x3b6128),
-                  this.add.ellipse(0, -4, 3.5, 2.5, 0x3b6128),
-                ]).setDepth(petObj.depth).setVisible(wasVisible).setScale(bs * 1.9); // match the evolved turtle's bulk
+                const shW = petObj.displayWidth, shH = petObj.displayHeight; // capture BEFORE hiding
+                petObj.setVisible(false).setScale(bs);   // tucked in — swap to the real shell art
+                const shellKey = (petObj._petId === 'pet_turtle_sapphire' && this.textures.exists('shell_sapphire'))
+                  ? 'shell_sapphire' : 'shell_green';
+                const shell = this.add.image(x0, y0, shellKey).setOrigin(0.5, 1)
+                  .setDepth(petObj.depth).setVisible(wasVisible);
+                // Match the turtle's on-screen bulk: shell art ~56px wide in a 64 box.
+                shell.setScale(Math.max(shW * 0.8, 20) / 56);
                 const killShellFx = this._trackPetFx(petObj, shell);   // pet destroyed → shell goes too
                 const spinTw = this.tweens.addCounter({
                   from: 0, to: 1, duration: 130, repeat: -1,
