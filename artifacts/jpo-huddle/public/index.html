@@ -10408,6 +10408,8 @@
         // Empty tucked-in shells for the turtle beyblade trick (side view).
         this.load.image('shell_green',    '/assets/pets/shell_green.png');
         this.load.image('shell_sapphire', '/assets/pets/shell_sapphire.png');
+        // Wispy smoke puffs for the stage-2 dragon smoke breath.
+        for (const i of [0, 1, 2]) this.load.image(`smoke_puff_${i}`, `/assets/pets/smoke_puff_${i}.png`);
         // Real pixel ice-crystal clusters for the sapphire FROST STOMP.
         this.load.image('ice_crystal_0', '/assets/pets/ice_crystal_0.png');
         this.load.image('ice_crystal_1', '/assets/pets/ice_crystal_1.png');
@@ -12304,18 +12306,20 @@
               this.time.delayedCall(180 + i * 95, () => {
                 if (!petObj.active || !petObj.visible) return;
                 const spread = (Math.random() - 0.5) * 4;
-                const shade = [0xbdb7c6, 0x9a93a8, 0x7d7689][i % 3];
-                // Each puff = wide faint halo + smaller denser core, so it
-                // reads as billowing smoke rather than a flat dot.
-                const halo = this.add.circle(mx, my + spread, 3.5 + Math.random() * 2, shade, 0.18).setDepth(3);
-                const core = this.add.circle(mx, my + spread, 2 + Math.random() * 1.5, shade, 0.5).setDepth(3);
-                const dx = fwd * (16 + Math.random() * 14), dy = -6 - Math.random() * 10;
-                for (const s of [halo, core]) {
-                  this.tweens.add({ targets: s, alpha: 0, scale: 2.8 + Math.random(),
-                    x: s.x + dx + fwd * Math.random() * 6, y: s.y + dy + spread * 2,
-                    duration: 700 + Math.random() * 250, ease: 'Sine.easeOut',
-                    onComplete: this._trackPetFx(petObj, s) });
-                }
+                // REAL wispy smoke art (boss: "not circles") — small budding
+                // puff near the mouth growing into the big trailing wisp,
+                // gently tumbling as it drifts up and away.
+                const key = `smoke_puff_${i < 3 ? 0 : (i < 6 ? 1 : 2)}`;
+                const s = this.add.image(mx, my + spread, key)
+                  .setScale(0.28 + Math.random() * 0.1).setAlpha(0.75)
+                  .setFlipX(fwd < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
+                this.tweens.add({ targets: s, alpha: 0,
+                  scale: 0.8 + Math.random() * 0.3,
+                  angle: s.angle + (Math.random() * 30 - 15),
+                  x: s.x + fwd * (18 + Math.random() * 14),
+                  y: s.y - 8 - Math.random() * 10 + spread * 2,
+                  duration: 780 + Math.random() * 260, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, s) });
               });
             }
             // One little cough-ring at the end — she's trying, okay.
