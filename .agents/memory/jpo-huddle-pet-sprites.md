@@ -8,6 +8,19 @@ description: How to produce a pet's 6-frame set (static + walk1-3 + sit + action
 - `_animSet` only attaches when ALL 5 anim textures exist — a missing frame silently leaves the pet static.
 - ALL pet art must face RIGHT (client flips with flipX; only legacy static bunnies face left). A left-facing sheet walks backwards — check facing against `pet_<id>.png` stage 1 before installing.
 
+# WHITE pets: don't fight the checkerboard — regenerate on a DARK background
+For white/near-white pets (snow duck/swan, snow cats), NO flood threshold wins:
+strict cutoffs leave opaque checker patches, permissive ones leak through the
+soft anti-aliased outline and eat the fur (happened twice, at 64px AND full res).
+**How to apply:** regenerate the sheet with "plain SOLID very dark charcoal
+background #1e1e28, absolutely NO checkerboard" (no removeBackground), sample
+the real bg color from a corner pixel, `magick -fuzz 9% -transparent <bg>`,
+slice with the light-flood disabled (LIGHT_MIN=255), then a border flood erasing
+DARK pixels (max<=95) on the final frames to catch leftover bg shading — a dark
+flood is always safe on a white subject. Colored pets keep the old light-flood
+pipeline (enclosed pockets, e.g. between feet, still need a targeted local
+erase — border floods can't reach them).
+
 # One-sheet generation beats per-frame generation
 Generate ONE horizontal strip ("exactly 6 evenly-spaced frames of the SAME character, transparent background") — per-frame generations drift into different animals. Describe the pose list left→right (stand, 3 trot steps, sit, howl).
 
