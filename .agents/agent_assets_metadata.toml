@@ -293,3 +293,17 @@ uri = "file://attached_assets/generated_images/queen_trick_concepts.png"
 type = "image"
 title = "Persian Queen — Royal Trick Concepts"
 description = "Four concept sketches for her new P-button signature move"
+
+[[outputs]]
+id = "znOYN-KG2MYNx3KFoRpcA"
+uri = "file://attached_assets/generated_images/bunny_snowball_evo_concept.png"
+type = "image"
+title = "Snowball evolution sketch ❄️"
+description = "Baby → Stage 2 (frost-tipped ears & paws, snowflake hip mark) → FINAL FORM Frost Empress (snow collar ruff, ice-crystal crown, sparkle coat)"
+
+[[outputs]]
+id = "9x2tbYFzXGmGJD-UHmU2c"
+uri = "file://attached_assets/generated_images/bunny_cocoa_evo_concept.png"
+type = "image"
+title = "Cocoa evolution sketch 🏎️"
+description = "Baby → Stage 2 (leaner, cream racing stripe starts) → FINAL FORM Espresso Racer (full racing stripe, speed goggles, smug grin)"
