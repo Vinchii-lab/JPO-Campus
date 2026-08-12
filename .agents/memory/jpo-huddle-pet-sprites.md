@@ -21,6 +21,13 @@ flood is always safe on a white subject. Colored pets keep the old light-flood
 pipeline (enclosed pockets, e.g. between feet, still need a targeted local
 erase — border floods can't reach them).
 
+# Dark-bg pipeline works for COLORED pets too (bunny lines)
+Generating any pet sheet on solid #1e1e28 then keying (corner-sample + fuzz 9%) beats
+removeBackground. Leftover navy patches: border flood erasing pixels with max<=95 AND
+blue>=red — the blue-heavy test spares dark warm-brown outlines, so it's safe on brown
+coats (a plain dark flood is NOT). Trick FX must also gate on petObj.visible, not just
+.active — hidden-round (prop hunt) pets otherwise leak their position via trick particles.
+
 # One-sheet generation beats per-frame generation
 Generate ONE horizontal strip ("exactly 6 evenly-spaced frames of the SAME character, transparent background") — per-frame generations drift into different animals. Describe the pose list left→right (stand, 3 trot steps, sit, howl).
 

@@ -10393,7 +10393,8 @@
         // differently, not just look different.
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
                           'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
-                          'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire'])
+                          'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire',
+                          'pet_bunny', 'pet_bunny_cocoa'])
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
             const stem = id.replace(/^pet_/, '');
@@ -12011,6 +12012,7 @@
             const actTex = petObj._animSet && petObj._animSet.action;
             const sitTex = petObj._animSet && petObj._animSet.sit;
             const flakes = () => {
+              if (!petObj.active || !petObj.visible) return;   // hidden mid-round: no FX leaks
               for (let i = 0; i < 10; i++) {
                 const f = this.add.text(x0 + (Math.random() * 44 - 22), y0 - 10 - Math.random() * 30,
                   Math.random() < 0.7 ? '❄' : '✦', { fontSize: `${9 + Math.random() * 4}px`, resolution: 2 })
@@ -12025,6 +12027,7 @@
               }
             };
             const powder = () => {
+              if (!petObj.active || !petObj.visible) return;
               for (let i = 0; i < 12; i++) {
                 const a = (i / 12) * Math.PI * 2;
                 const p = this.add.circle(x0, y0 - 2, 2 + Math.random() * 2.5, 0xffffff, 0.9).setDepth(3);
@@ -12085,7 +12088,7 @@
                 petObj.y = cy + Math.sin(a) * (r * 0.55);
                 petObj.flipX = Math.sin(a) > 0;                    // face travel direction
                 if (walkFrames) petObj.setTexture(walkFrames[Math.floor(spin.t * turns * 10) % walkFrames.length]);
-                if (spin.t - lastPuff > 0.09) {                    // dust trail
+                if (petObj.visible && spin.t - lastPuff > 0.09) {  // dust trail (skip when hidden)
                   lastPuff = spin.t;
                   const d = this.add.text(petObj.x, petObj.y + 2, '💨', { fontSize: '10px', resolution: 2 })
                     .setOrigin(0.5, 0.5).setAlpha(0.8).setDepth(petObj.depth - 0.1);
@@ -12098,16 +12101,18 @@
                 // Screech to a stop back home + big dust cloud + a wink.
                 petObj.x = x0; petObj.y = y0; petObj.flipX = flip0;
                 if (petObj._animSet && petObj._animSet.sit) petObj.setTexture(petObj._animSet.sit);
-                for (let i = 0; i < 6; i++) {
+                for (let i = 0; i < (petObj.visible ? 6 : 0); i++) {
                   const d = this.add.circle(x0 + (Math.random() * 20 - 10), y0 - Math.random() * 8,
                     2.5 + Math.random() * 2, 0xc9a87a, 0.75).setDepth(3);
                   this.tweens.add({ targets: d, alpha: 0, scale: 2.4, y: d.y - 8,
                     duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
                 }
-                const w = this.add.text(x0 + (flip0 ? -10 : 10), y0 - 24, '😉',
-                  { fontSize: '13px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
-                this.tweens.add({ targets: w, alpha: { from: 1, to: 0 }, y: w.y - 10,
-                  duration: 900, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, w) });
+                if (petObj.visible) {
+                  const w = this.add.text(x0 + (flip0 ? -10 : 10), y0 - 24, '😉',
+                    { fontSize: '13px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                  this.tweens.add({ targets: w, alpha: { from: 1, to: 0 }, y: w.y - 10,
+                    duration: 900, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, w) });
+                }
                 this.time.delayedCall(350, () => { if (petObj.active) petObj._trickBusy = false; });
               },
             });
