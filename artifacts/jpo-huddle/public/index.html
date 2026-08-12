@@ -13635,6 +13635,10 @@
               dragon_crimson_s3:  { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 140 },
               dragon_obsidian_s2: { sway: 1,  swayF: 0.005, bounce: 0.018, bounceF: 0.008, frameMs: 135 },
               dragon_obsidian_s3: { sway: 1,  swayF: 0.004, bounce: 0.018, bounceF: 0.006, frameMs: 160 },
+              // Mythic FINAL FORMS: the unicorn GLIDES (boss: "majestical
+              // being", no lumping waddle), the phoenix drifts light-footed.
+              unicorn_s3:         { sway: 0.8, swayF: 0.004, bounce: 0.012, bounceF: 0.005, frameMs: 220 },
+              phoenix_s3:         { sway: 1.5, swayF: 0.006, bounce: 0.020, bounceF: 0.008, frameMs: 170 },
             };
             const stageKey = (petObj._petStage >= 2 && petObj._petId)
               ? `${petObj._petId.replace(/^pet_/, '')}_s${Math.min(petObj._petStage, 3)}` : null;
@@ -13661,6 +13665,7 @@
               dragon_s2: 'float', dragon_s3: 'float',
               dragon_crimson_s2: 'float', dragon_crimson_s3: 'float',
               dragon_obsidian_s2: 'float', dragon_obsidian_s3: 'float',
+              unicorn_s3: 'float', phoenix_s3: 'float',
             };
             const motion = petObj._mythic === 'cocoa' ? 'thump' : (MOTION[stageKey] || 'trot');
             const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
