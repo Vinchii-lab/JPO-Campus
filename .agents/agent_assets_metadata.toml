@@ -335,3 +335,24 @@ uri = "file://attached_assets/turtle_sapphire_s3_frames.png"
 type = "image"
 title = "Crystal Guardian animation frames"
 description = "Walk 1-2-3, sit, and spin pose — the actual in-game frames"
+
+[[outputs]]
+id = "2H8jPjt05uhUGBgtRB0f3"
+uri = "file://attached_assets/generated_images/dragon_violet_evo_concept.png"
+type = "image"
+title = "Violet 🐉 → ARCANE DRAGON"
+description = "Baby → Stage 2 (already flying) → Final: glowing rune wings, magic sparkles"
+
+[[outputs]]
+id = "9TGhRpM1LNT3oLTS0fo7k"
+uri = "file://attached_assets/generated_images/dragon_crimson_evo_concept.png"
+type = "image"
+title = "Crimson 🐲 → INFERNO DRAGON"
+description = "Baby → Stage 2 (already flying) → Final: ember wings, flames off nostrils & tail"
+
+[[outputs]]
+id = "mBobZzjqJ_XhzgJHv3Aj_"
+uri = "file://attached_assets/generated_images/dragon_obsidian_evo_concept.png"
+type = "image"
+title = "Obsidian 🖤 → VOID DRAGON"
+description = "Baby → Stage 2 (already flying) → Final: molten lava cracks, drifting embers"
