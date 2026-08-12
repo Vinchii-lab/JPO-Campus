@@ -12278,9 +12278,12 @@
             });
             return;
           }
-          // Baby & stage-2: classic fire breath — rear back, then a stream of
-          // 🔥 puffs shoots forward (toward current facing). Every puff
-          // self-destroys (_brewFx pattern).
+          // Baby & stage-2: fire breath — rear back, then a torrent of REAL
+          // flame particles (no emoji) from the MOUTH. Mouth height is
+          // computed from the live display size + hover origin, so it stays
+          // on the snout whether the dragon is grounded (baby) or flying
+          // (stage 2) — it used to hardcode y-14, which on the bigger
+          // hovering bodies put the flames somewhere deeply unfortunate.
           petObj._trickBusy = true;
           // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
           // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
@@ -12289,17 +12292,28 @@
             targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
             onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
           });
-          for (let i = 0; i < 6; i++) {
-            const f = this.add.text(
-              petObj.x + fwd * (16 + Math.random() * 6), petObj.y - 14 + (Math.random() * 6 - 3),
-              Math.random() < 0.8 ? '🔥' : '💨', { fontSize: '11px', resolution: 2 })
-              .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3);
-            this.tweens.add({
-              targets: f, alpha: { from: 0.95, to: 0 },
-              x: f.x + fwd * (16 + Math.random() * 14), y: f.y - 4 - Math.random() * 8,
-              scale: { from: 0.7, to: 1.25 },
-              delay: 180 + i * 90, duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f),
-            });
+          if (petObj.visible) {
+            // Mouth anchor: hover origin shifts the sprite up by
+            // (originY-1)*displayHeight, so fold that into the head height.
+            const mx = petObj.x + fwd * petObj.displayWidth * 0.42;
+            const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.35);
+            for (let i = 0; i < 9; i++) {
+              this.time.delayedCall(180 + i * 70, () => {
+                if (!petObj.active || !petObj.visible) return;
+                const spread = (Math.random() - 0.5) * 5;
+                const f = this.add.circle(mx, my + spread, 2 + Math.random() * 2,
+                  [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
+                this.tweens.add({ targets: f, alpha: 0, scale: 2.2,
+                  x: f.x + fwd * (22 + Math.random() * 16), y: f.y + spread * 2 - 2 + Math.random() * 6,
+                  duration: 440, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                if (i % 3 === 0) {          // wisp of smoke riding the top of the stream
+                  const s = this.add.circle(mx + fwd * 8, my - 3, 2, 0x9a93a8, 0.4).setDepth(3);
+                  this.tweens.add({ targets: s, alpha: 0, scale: 2.6,
+                    x: s.x + fwd * (26 + Math.random() * 10), y: s.y - 6 - Math.random() * 6,
+                    duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                }
+              });
+            }
           }
           return;
         }
@@ -13271,6 +13285,10 @@
           if (flying && !seated) {
             const hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
             petObj.setOrigin(0.5, 1 + hov / Math.max(petObj.displayHeight, 1));
+            // Movement animation: lean the nose INTO the flight direction
+            // while traveling, ease back level when holding position.
+            const leanTgt = (dist > gap + 1) ? (petObj.flipX ? -6 : 6) : 0;
+            petObj.angle += (leanTgt - petObj.angle) * 0.12;
             if (petObj._animSet) {
               // Flight rhythm (boss note): not a bat — THREE quick flaps,
               // then a long wings-level GLIDE, repeat.
