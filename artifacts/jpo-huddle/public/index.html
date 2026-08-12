@@ -302,36 +302,69 @@
       background: rgba(0,0,0,0.6);
     }
     #shop-modal.open { display: flex; }
+    /* Boutique look (Aug 2026, boss ask): dark card, gold accents, real
+       sprite thumbnails in framed tiles. Food modal shares the row classes
+       but stays light — every dark override is scoped under #shop-card. */
     #shop-card {
-      background: #fff; border-radius: 16px; padding: 32px 36px;
-      font-family: monospace; color: #222;
-      width: 380px; max-width: calc(100vw - 32px); box-sizing: border-box;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+      background: linear-gradient(165deg, #1e1f2b 0%, #14151d 60%, #191a24 100%);
+      border: 1px solid rgba(217, 178, 90, 0.28); border-radius: 18px;
+      padding: 30px 34px; font-family: monospace; color: #e8e4d6;
+      width: 400px; max-width: calc(100vw - 32px); box-sizing: border-box;
+      box-shadow: 0 12px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
       max-height: 85vh; overflow-y: auto;
     }
-    #shop-card h3 { font-size: 20px; margin-bottom: 6px; }
-    #shop-balance { font-size: 14px; color: #666; margin-bottom: 14px; }
-    /* Tab bar: Wearables | Items | Wardrobe. One tab visible at a time. */
-    #shop-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    #shop-card h3 {
+      font-size: 19px; margin-bottom: 2px; color: #f3ead2;
+      letter-spacing: 2px; text-transform: uppercase;
+    }
+    #shop-card h3::after {
+      content: ''; display: block; width: 46px; height: 2px; margin-top: 6px;
+      background: linear-gradient(90deg, #d9b25a, rgba(217,178,90,0));
+    }
+    #shop-balance { font-size: 13px; color: #d9b25a; margin: 8px 0 14px; letter-spacing: 0.5px; }
+    /* Tab bar: one tab visible at a time. */
+    #shop-tabs { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
     .shop-tab {
       flex: 1; padding: 8px 2px; font-family: monospace; font-size: 12px;
-      border: none; border-radius: 8px; background: #f0f0f0; color: #555;
-      cursor: pointer; white-space: nowrap; transition: background 0.15s;
+      border: 1px solid transparent; border-radius: 8px;
+      background: rgba(255,255,255,0.05); color: #b6b0a0;
+      cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s;
     }
-    .shop-tab:hover { background: #e2e2e2; }
-    .shop-tab.sel { background: #6c63ff; color: #fff; font-weight: bold; }
+    .shop-tab:hover { background: rgba(255,255,255,0.10); color: #ddd6c4; }
+    .shop-tab.sel {
+      background: linear-gradient(180deg, #e3c06c, #b9903e); color: #221a06;
+      font-weight: bold; border-color: rgba(255,255,255,0.25);
+    }
     /* Pager: shown only when the active tab has more than one page. */
     #shop-pager { display: none; align-items: center; justify-content: center; gap: 14px; margin-top: 10px; }
     #shop-pager.on { display: flex; }
     .shop-page-btn {
       padding: 4px 14px; font-family: monospace; font-size: 14px;
-      border: none; border-radius: 6px; background: #f0f0f0; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+      background: rgba(255,255,255,0.06); color: #ddd6c4; cursor: pointer;
     }
-    .shop-page-btn:hover { background: #e2e2e2; }
-    .shop-page-btn:disabled { opacity: 0.35; cursor: default; }
-    #shop-page-label { font-size: 12px; color: #888; min-width: 34px; text-align: center; }
+    .shop-page-btn:hover { background: rgba(255,255,255,0.12); }
+    .shop-page-btn:disabled { opacity: 0.3; cursor: default; }
+    #shop-page-label { font-size: 12px; color: #8f8878; min-width: 34px; text-align: center; }
     .shop-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; }
+    #shop-card .shop-item { border-bottom: 1px solid rgba(255,255,255,0.07); }
     .shop-item-icon { font-size: 28px; }
+    /* Framed thumbnail tile — sprites and (fallback) emoji sit in the same
+       jewel-case square so every row reads as merchandise. */
+    #shop-card .shop-item-icon {
+      width: 48px; height: 48px; min-width: 48px; font-size: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 32%, #33354a 0%, #1a1b26 78%);
+      border: 1px solid rgba(217, 178, 90, 0.22); border-radius: 10px;
+      box-shadow: inset 0 1px 4px rgba(0,0,0,0.55);
+    }
+    #shop-card .shop-item.rare .shop-item-icon {
+      border-color: rgba(230, 190, 100, 0.65);
+      background: radial-gradient(circle at 50% 32%, #4a3c22 0%, #221b10 80%);
+      box-shadow: inset 0 1px 4px rgba(0,0,0,0.55), 0 0 10px rgba(217,178,90,0.30);
+    }
+    #shop-card .shop-item-name { color: #f0ead9; }
+    #shop-card .shop-item-cost { color: #a49c88; }
     .shop-item-info { flex: 1; }
     .shop-item-name { font-size: 15px; font-weight: bold; }
     .shop-item-cost { font-size: 12px; color: #888; }
@@ -348,25 +381,47 @@
     .buy-btn.wearing { background: #27ae60; }
     .buy-btn.wearing:hover { background: #219653; }
     .buy-btn.poor    { background: #c9c6f0; cursor: not-allowed; }
+    /* Boutique button palette inside the dark shop card only. */
+    #shop-card .buy-btn {
+      background: linear-gradient(180deg, #e3c06c, #b9903e); color: #221a06;
+      font-weight: bold; border: 1px solid rgba(255,255,255,0.2);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+    #shop-card .buy-btn:hover { background: linear-gradient(180deg, #f0cf7e, #c79c46); }
+    #shop-card .buy-btn.wear {
+      background: rgba(255,255,255,0.07); color: #ddd6c4; font-weight: normal;
+      border: 1px solid rgba(255,255,255,0.16); box-shadow: none;
+    }
+    #shop-card .buy-btn.wear:hover { background: rgba(255,255,255,0.13); }
+    #shop-card .buy-btn.wearing {
+      background: linear-gradient(180deg, #37c274, #1f8f50); color: #06180d;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    #shop-card .buy-btn.wearing:hover { background: linear-gradient(180deg, #43d381, #26a05c); }
+    #shop-card .buy-btn.poor {
+      background: rgba(255,255,255,0.06); color: #6d675b;
+      border: 1px solid rgba(255,255,255,0.08); box-shadow: none; cursor: not-allowed;
+    }
     #shop-wardrobe { padding-top: 4px; }
-    .wardrobe-title { font-weight: bold; font-size: 14px; }
-    .wardrobe-sub   { font-size: 12px; color: #888; margin: 2px 0 8px; }
-    .wardrobe-label { font-size: 12px; font-weight: bold; color: #555; margin: 8px 0 4px; }
+    .wardrobe-title { font-weight: bold; font-size: 14px; color: #f0ead9; }
+    .wardrobe-sub   { font-size: 12px; color: #a49c88; margin: 2px 0 8px; }
+    .wardrobe-label { font-size: 12px; font-weight: bold; color: #cfc7b2; margin: 8px 0 4px; }
     .wardrobe-grid  { display: flex; flex-wrap: wrap; gap: 4px; }
-    .cloth-swatch { width: 22px; height: 22px; border-radius: 5px; border: 2px solid #d8d8d8; cursor: pointer; padding: 0; }
+    .cloth-swatch { width: 22px; height: 22px; border-radius: 5px; border: 2px solid #3a3c48; cursor: pointer; padding: 0; }
     .cloth-swatch.orig { background: repeating-linear-gradient(45deg, #f5f5f5 0 4px, #d0d0d0 4px 8px); }
-    .cloth-swatch.sel  { border-color: #333; transform: scale(1.12); }
+    .cloth-swatch.sel  { border-color: #d9b25a; transform: scale(1.12); }
     #wardrobe-apply { margin-top: 10px; width: 100%; }
     .wardrobe-flex  { display: flex; gap: 12px; align-items: flex-start; }
     .wardrobe-opts  { flex: 1; min-width: 0; }
-    #wardrobe-preview { image-rendering: pixelated; display: block; border-radius: 8px; background: #f5f5f5; }
-    #shop-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #e74c3c; }
+    #wardrobe-preview { image-rendering: pixelated; display: block; border-radius: 8px; background: #23242e; border: 1px solid rgba(255,255,255,0.1); }
+    #shop-msg { font-size: 12px; min-height: 18px; margin-top: 14px; color: #ff8f7a; }
     #shop-close-btn {
       width: 100%; margin-top: 16px; padding: 9px;
-      background: #f0f0f0; border: none; border-radius: 8px;
+      background: rgba(255,255,255,0.07); color: #ddd6c4;
+      border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
       font-family: monospace; font-size: 14px; cursor: pointer;
     }
-    #shop-close-btn:hover { background: #e0e0e0; }
+    #shop-close-btn:hover { background: rgba(255,255,255,0.13); }
 
     /* ── Cafeteria food menu (same overlay pattern as the shop) ── */
     #food-modal {
@@ -4794,11 +4849,29 @@
         const im = document.createElement('img');
         im.src = `/assets/pets/${c.id}.png`;
         im.alt = c.name;
-        im.style.cssText = 'width:34px;height:34px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;';
+        im.style.cssText = 'width:38px;height:38px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;';
         icon.append(im);
+      } else if (typeof WEARABLE_DEFS !== 'undefined' && WEARABLE_DEFS[c.id]) {
+        // Wearables & wings: draw frame 0 (front view) of the real 2-frame
+        // sprite sheet onto a small canvas — the actual item, not an emoji.
+        const cv = document.createElement('canvas');
+        cv.width = 38; cv.height = 38;
+        cv.style.cssText = 'width:38px;height:38px;image-rendering:pixelated;';
+        const im = new Image();
+        im.onload = () => {
+          const fw = im.width / 2, fh = im.height;          // frame 0 = left half
+          const s = Math.min(34 / fw, 34 / fh);
+          const dw = fw * s, dh = fh * s;
+          const g = cv.getContext('2d');
+          g.imageSmoothingEnabled = false;
+          g.drawImage(im, 0, 0, fw, fh, (38 - dw) / 2, (38 - dh) / 2, dw, dh);
+        };
+        im.src = `/assets/${WEARABLE_DEFS[c.id].tex}.png`;
+        icon.append(cv);
       } else {
         icon.textContent = c.emoji;
       }
+      if (c.rare) row.classList.add('rare');
       const info = document.createElement('div');
       info.className = 'shop-item-info';
       const nm = document.createElement('div');
@@ -4806,14 +4879,15 @@
       nm.textContent = c.name + (c.pack ? ' ' : '');
       if (c.pack) {
         const pk = document.createElement('span');
-        pk.style.cssText = 'font-weight:normal;color:#888';
+        pk.style.cssText = 'font-weight:normal;color:#a49c88';
         pk.textContent = c.pack;
         nm.append(pk);
       }
       const ct = document.createElement('div');
       ct.className = 'shop-item-cost';
       // Rare pets: no price tag — make it clear coins can't touch this.
-      ct.textContent = c.rare ? `✨ RARE · not for sale — ${c.desc}` : `${c.cost} coins — ${c.desc}`;
+      ct.textContent = c.rare ? `✨ RARE · not for sale — ${c.desc}`
+                             : `${Number(c.cost).toLocaleString()} coins — ${c.desc}`;
       info.append(nm, ct);
       row.append(icon, info, btn);
       return row;
