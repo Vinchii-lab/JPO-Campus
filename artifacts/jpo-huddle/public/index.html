@@ -9867,6 +9867,55 @@
       _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose();
       if (manualUnlock) { closeOwnerPwd(); openOwnerPanel(); }
     });
+    // ── Owner-only: HARD red price-change alerts ─────────────────────────
+    // Every price change made with the plain admin password lands here, live
+    // or as a backlog on login. Stays on screen until the owner dismisses it.
+    let _priceAlerts = [];
+    (function () {
+      const st = document.createElement('style');
+      st.textContent = `
+        @keyframes pa-flash { 0%,100% { box-shadow: 0 0 22px 6px rgba(255,40,40,.85); border-color:#ff2f2f; } 50% { box-shadow: 0 0 10px 2px rgba(255,40,40,.35); border-color:#8f1010; } }
+        #price-alert { position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:10050;
+          background:linear-gradient(180deg,#3a0707,#250404); border:3px solid #ff2f2f; border-radius:12px;
+          padding:14px 18px 12px; min-width:340px; max-width:560px; max-height:60vh; overflow:auto;
+          font-family:monospace; color:#ffd7d7; display:none; animation:pa-flash 1s infinite; }
+        #price-alert h4 { margin:0 0 8px; color:#ff4040; font-size:16px; letter-spacing:2px; text-align:center; }
+        #price-alert .pa-row { background:rgba(255,47,47,.12); border-left:4px solid #ff2f2f; padding:6px 8px; margin:6px 0; font-size:13px; line-height:1.5; }
+        #price-alert .pa-row b { color:#fff; }
+        #price-alert .pa-row .pa-price { color:#ff6b6b; font-weight:bold; }
+        #price-alert .pa-row .pa-who { color:#ffb0b0; }
+        #price-alert button { display:block; margin:10px auto 0; background:#ff2f2f; color:#fff; border:none;
+          border-radius:8px; padding:8px 26px; font-weight:bold; font-family:monospace; cursor:pointer; font-size:13px; }`;
+      document.head.appendChild(st);
+      const el = document.createElement('div');
+      el.id = 'price-alert';
+      el.innerHTML = '<h4>🚨 PRICE CHANGED 🚨</h4><div id="pa-list"></div><button id="pa-dismiss">GOT IT — DISMISS</button>';
+      document.body.appendChild(el);
+      document.getElementById('pa-dismiss').onclick = () => {
+        socket.emit('ownerPriceAlertsSeen', _priceAlerts.map(a => a.id));
+        _priceAlerts = [];
+        el.style.display = 'none';
+      };
+    })();
+    function _renderPriceAlerts() {
+      if (!window._ownerAuthed || !_priceAlerts.length) return;
+      const list = document.getElementById('pa-list');
+      list.innerHTML = _priceAlerts.map(a => {
+        const when = a.at ? new Date(a.at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+        const oldP = (a.oldPrice == null) ? '?' : Number(a.oldPrice).toLocaleString();
+        return `<div class="pa-row"><b>${a.item}</b>: <span class="pa-price">${oldP} → ${Number(a.newPrice).toLocaleString()} coins</span><br>` +
+               `<span class="pa-who">by ${String(a.by || 'Unknown').replace(/</g,'&lt;')}</span> — ${when}</div>`;
+      }).join('');
+      document.getElementById('price-alert').style.display = 'block';
+    }
+    socket.on('ownerPriceAlert', (a) => { if (a && a.id != null) { _priceAlerts.push(a); _renderPriceAlerts(); } });
+    socket.on('ownerPriceAlertBacklog', (list) => {
+      if (!Array.isArray(list)) return;
+      const have = new Set(_priceAlerts.map(x => x.id));
+      for (const a of list) if (a && a.id != null && !have.has(a.id)) _priceAlerts.push(a);
+      _renderPriceAlerts();
+    });
+
     socket.on('adminAuthFail', () => {
       _adminPwdPending = ''; _adminPwd = '';
       // Modal closed = this was a silent reconnect re-auth that failed (e.g.

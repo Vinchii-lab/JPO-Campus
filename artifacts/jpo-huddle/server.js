@@ -4752,6 +4752,17 @@ io.on("connection", (socket) => {
     if (!admins.has(socket.id) && players[socket.id]) logAdmin(socket, "Panel unlocked", "Entered the owner password (F8).");
     admins.add(socket.id);
     socket.emit("adminAuthOk", { owner: owners.has(socket.id) });
+    // Owner tier: deliver every price change he hasn't dismissed yet (made
+    // while he was offline or in another session).
+    if (isOwner) {
+      pool.query(
+        `SELECT id, item_id, old_price, new_price, changed_by, changed_at
+           FROM jpo_price_alerts WHERE NOT seen ORDER BY id`,
+      ).then(({ rows }) => {
+        if (rows.length) socket.emit("ownerPriceAlertBacklog",
+          rows.map(r => ({ id: r.id, item: r.item_id, oldPrice: r.old_price, newPrice: r.new_price, by: r.changed_by, at: r.changed_at })));
+      }).catch((err) => console.error("price alert backlog failed:", err));
+    }
     _pendingList().then(l => socket.emit("pendingList", l)).catch(err => console.error("adminAuth pending list failed:", err));
     socket.emit("playerList",  _playerList());
     // A refreshed host (silent re-auth) gets their bingo host controls back.
@@ -4970,7 +4981,24 @@ io.on("connection", (socket) => {
       }
       const oldPrice = cat[item];
       cat[item] = p;
-      if (oldPrice !== p) logAdmin(socket, "Price change", `${item}: ${Number(oldPrice).toLocaleString()} → ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (back to default)" : ""}`);
+      if (oldPrice !== p) {
+        logAdmin(socket, "Price change", `${item}: ${Number(oldPrice).toLocaleString()} → ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (back to default)" : ""}`);
+        // Owner alert: record every non-owner price change (owner's own changes
+        // are stored pre-seen — he doesn't need an alarm about himself) and
+        // blast it live, in red, to any logged-in owner session.
+        const _pl = players[socket.id];
+        const _who = _pl ? `${_pl.name}${_pl.email ? ` (${_pl.email})` : ""}` : "Unknown admin";
+        const _byOwner = owners.has(socket.id);
+        pool.query(
+          `INSERT INTO jpo_price_alerts (item_id, old_price, new_price, changed_by, seen)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id, changed_at`,
+          [item, Number.isFinite(Number(oldPrice)) ? Number(oldPrice) : null, p, _who.slice(0, 120), _byOwner],
+        ).then(({ rows }) => {
+          if (_byOwner) return;
+          const alert = { id: rows[0].id, item, oldPrice: Number(oldPrice), newPrice: p, by: _who, at: rows[0].changed_at };
+          for (const sid of owners) io.to(sid).emit("ownerPriceAlert", alert);
+        }).catch((err) => console.error("price alert write failed:", err));
+      }
       io.emit("priceUpdate", { item, price: p });   // base price — clients apply the sale % locally
       socket.emit("adminPriceResult", { ok: true, message: `${item} is now ${p.toLocaleString()} coins${p === DEFAULT_PRICES[item] ? " (default)" : ""}.` });
       console.log(`ADMIN price change: ${item} → ${p}`);
@@ -4978,6 +5006,17 @@ io.on("connection", (socket) => {
       console.error("adminSetPrice failed:", err);
       socket.emit("adminPriceResult", { ok: false, message: "Saving the price failed — try again." });
     }
+  });
+
+  // Owner dismissed the red price alerts — mark them seen so they stop
+  // reappearing on every login. Owner tier only.
+  socket.on("ownerPriceAlertsSeen", (ids) => {
+    if (!owners.has(socket.id)) return;
+    if (!Array.isArray(ids)) return;
+    const clean = ids.filter(Number.isInteger).slice(0, 500);
+    if (!clean.length) return;
+    pool.query(`UPDATE jpo_price_alerts SET seen = true WHERE id = ANY($1)`, [clean])
+      .catch((err) => console.error("price alerts seen failed:", err));
   });
 
   // ── Admin: office-wide banner ─────────────────────────────────────────
@@ -8502,6 +8541,19 @@ try {
   // override rows (e.g. the old 55,000 unicorn) so panel/catalog stay honest.
   // Runs at boot so it also heals prod on the next publish (prod DB is
   // never edited by hand).
+  // Owner price-change alerts: every price change by a NON-owner is recorded
+  // here and stays unseen until the owner dismisses it in-game. Survives
+  // restarts, so a change made while the owner is offline still screams at
+  // him on his next login.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_price_alerts (
+    id serial PRIMARY KEY,
+    item_id text NOT NULL,
+    old_price integer,
+    new_price integer NOT NULL,
+    changed_by text NOT NULL,
+    changed_at timestamptz NOT NULL DEFAULT now(),
+    seen boolean NOT NULL DEFAULT false
+  )`);
   await pool.query(`DELETE FROM jpo_shop_prices WHERE item_id = ANY($1)`, [[...RARE_IDS]]);
   const { rows } = await pool.query(`SELECT item_id, price FROM jpo_shop_prices`);
   for (const r of rows) {
