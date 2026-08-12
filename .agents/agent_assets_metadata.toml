@@ -391,3 +391,10 @@ uri = "file://attached_assets/generated_images/phoenix_moves_storyboard.png"
 type = "image"
 title = "Phoenix move ideas"
 description = "4 sketch concepts: Solar Flare, Ember Dive, Rebirth, Firestorm Waltz"
+
+[[outputs]]
+id = "Vyu7FZEfwohYcGR4xh-29"
+uri = "file://attached_assets/generated_images/unicorn_mature_styles.png"
+type = "image"
+title = "Grown-up unicorn styles — pick one"
+description = "A: Royal Warhorse · B: Celestial · C: Prism Knight · D: Midnight Myth"
