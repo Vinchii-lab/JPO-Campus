@@ -12122,6 +12122,20 @@
             const haloTrack = this.time.addEvent({ delay: 50, repeat: 70,
               callback: () => { if (halo.active) { halo.x = petObj.x; halo.y = petObj.y - 2; } } });
             const y0c = petObj.y;
+            // PIROUETTE: while she rises she spins a slow turntable turn —
+            // faked 3D by narrowing scaleX through each half-turn and
+            // mirror-flipping at the crossings. Ends facing her original way.
+            const bs0 = petObj._baseScale || 1, flip0 = petObj.flipX;
+            const spin = { t: 0 };
+            const spinTw = this.tweens.add({
+              targets: spin, t: 1, duration: 1400, ease: 'Sine.easeInOut',
+              onUpdate: () => {
+                const a = spin.t * Math.PI * 2.5;               // 2.5 graceful turns
+                petObj.scaleX = bs0 * Math.max(0.15, Math.abs(Math.cos(a)));
+                petObj.flipX = Math.cos(a) < 0 ? !flip0 : flip0;
+              },
+              onComplete: () => { petObj.scaleX = bs0; petObj.flipX = flip0; },
+            });
             this.tweens.chain({
               targets: petObj,
               tweens: [
