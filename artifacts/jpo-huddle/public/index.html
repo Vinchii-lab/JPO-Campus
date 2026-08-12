@@ -12328,11 +12328,29 @@
                 { y: y0 - 24, scaleY: bs * 1.2, scaleX: bs * 0.85, duration: 240, ease: 'Sine.easeOut' },
                 { y: y0, scaleY: bs, scaleX: bs, duration: 260, ease: 'Bounce.easeOut' },
               ];
+              // A common duck shakes dry. Her Majesty takes a slow ROYAL BOW
+              // under a private aurora, then rises composed.
+              const finale = snow ? [
+                { angle: (riseX >= cx ? -1 : 1) * 16, scaleY: bs * 0.94, duration: 480,
+                  ease: 'Sine.easeInOut', hold: 650, yoyo: true,
+                  onStart: () => {
+                    const bandCols = [0x7fffd4, 0xc5a3ff, 0x9fd8ff, 0xffe9a8];
+                    for (let i = 0; i < 4; i++) {
+                      const band = this.add.ellipse(petObj.x - 24 + i * 16, petObj.y - 46 - (i % 2) * 6,
+                        22, 6, bandCols[i], 0).setAngle(-14).setDepth(3);
+                      this.tweens.add({ targets: band, alpha: { from: 0.5, to: 0 }, y: band.y - 12,
+                        x: band.x + 8, scaleX: 1.6, delay: 120 + i * 140, duration: 1300,
+                        ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, band) });
+                    }
+                  } },
+              ] : [
+                { angle: { from: -14, to: 14 }, duration: 70, yoyo: true, repeat: 4 },  // shake dry
+              ];
               this.tweens.chain({
                 targets: petObj,
                 tweens: [
                   ...apex,
-                  { angle: { from: -14, to: 14 }, duration: 70, yoyo: true, repeat: 4 },  // shake dry
+                  ...finale,
                 ],
                 onComplete: () => {
                   petObj.y = y0; petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false;
@@ -12728,6 +12746,23 @@
                 const g = this.add.ellipse(petObj.x, petObj.y - 1, 26, 9, th.glow, 0.16).setDepth(1);
                 this.tweens.add({ targets: g, alpha: 0, scaleX: 1.7, scaleY: 1.7,
                   duration: 1400, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              }
+              // Her Majesty the swan: a pale-gold crown shimmers into view
+              // just above her head while she rests. Royalty doesn't ask.
+              if (petObj._petId === 'pet_duck_snow' && Math.random() < 0.45) {
+                const cr = this.add.text(petObj.x, petObj.y - 38, '♕', {
+                  fontSize: '12px', color: '#ffe9a8', resolution: 2 })
+                  .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                this.tweens.add({ targets: cr, alpha: { from: 0.95, to: 0 },
+                  y: cr.y - 7, scale: { from: 0.8, to: 1.15 },
+                  duration: 1700, ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, cr) });
+                const tw1 = this.add.star(petObj.x - 9, petObj.y - 42, 4, 1.2, 3.2, 0xffe9a8, 0.9).setDepth(3);
+                const tw2 = this.add.star(petObj.x + 9, petObj.y - 44, 4, 1.2, 3.2, 0xffffff, 0.9).setDepth(3);
+                for (const tw of [tw1, tw2]) {
+                  this.tweens.add({ targets: tw, alpha: 0, angle: 100, scale: 0.4,
+                    duration: 1300, delay: Math.random() * 300, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, tw) });
+                }
               }
             }
             if (!petObj._trickAt) petObj._trickAt = now + 6000 + Math.random() * 10000;
