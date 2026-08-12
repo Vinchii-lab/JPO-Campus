@@ -286,3 +286,10 @@ uri = "file://attached_assets/pet_evolutions_lineup.png"
 type = "image"
 title = "Pet Evolution Lineup 🦆🐱🐢"
 description = "Ducks, cats, and turtles — baby → grown-up → final form, now live in the game."
+
+[[outputs]]
+id = "VerQGFt4H1mbHVHWlJm2H"
+uri = "file://attached_assets/generated_images/queen_trick_concepts.png"
+type = "image"
+title = "Persian Queen — Royal Trick Concepts"
+description = "Four concept sketches for her new P-button signature move"
