@@ -12121,25 +12121,31 @@
               duration: 600, yoyo: true, repeat: 5, ease: 'Sine.easeInOut' });
             const haloTrack = this.time.addEvent({ delay: 50, repeat: 70,
               callback: () => { if (halo.active) { halo.x = petObj.x; halo.y = petObj.y - 2; } } });
-            const y0c = petObj.y;
-            // PIROUETTE: while she rises she spins a slow turntable turn —
-            // faked 3D by narrowing scaleX through each half-turn and
-            // mirror-flipping at the crossings. Ends facing her original way.
-            const bs0 = petObj._baseScale || 1, flip0 = petObj.flipX;
-            const spin = { t: 0 };
-            const spinTw = this.tweens.add({
-              targets: spin, t: 1, duration: 1400, ease: 'Sine.easeInOut',
+            const y0c = petObj.y, x0c = petObj.x, flip0 = petObj.flipX;
+            // SPIRAL ASCENT: no flat card-flips — she RIDES the helix of
+            // light, circling as she climbs (real circular motion, facing
+            // the way she's moving, standing tall), then tucks into the
+            // seated deity pose at the apex.
+            if (petObj._animSet && petObj._animSet.idle) petObj.setTexture(petObj._animSet.idle);
+            const asc = { t: 0 };
+            const ascTw = this.tweens.add({
+              targets: asc, t: 1, duration: 1700, ease: 'Sine.easeInOut',
               onUpdate: () => {
-                const a = spin.t * Math.PI * 2.5;               // 2.5 graceful turns
-                petObj.scaleX = bs0 * Math.max(0.15, Math.abs(Math.cos(a)));
-                petObj.flipX = Math.cos(a) < 0 ? !flip0 : flip0;
+                const a = asc.t * Math.PI * 3;                       // 1.5 orbits on the way up
+                petObj.x = x0c + Math.sin(a) * 13 * (1 - asc.t * 0.5);
+                petObj.y = y0c - asc.t * HOVER;
+                petObj.angle = Math.sin(a) * 5;                      // gentle banking lean
+                if (Math.abs(Math.cos(a)) > 0.25) petObj.flipX = Math.cos(a) < 0;  // face travel dir
               },
-              onComplete: () => { petObj.scaleX = bs0; petObj.flipX = flip0; },
+              onComplete: () => {
+                petObj.x = x0c; petObj.angle = 0; petObj.flipX = flip0;
+                if (sitTex) petObj.setTexture(sitTex);               // deity pose at the apex
+              },
             });
             this.tweens.chain({
               targets: petObj,
               tweens: [
-                { y: y0c - HOVER, angle: 0, duration: 1400, ease: 'Sine.easeInOut' },  // slow ascent
+                { alpha: 1, duration: 1700 },                                          // (spiral owns x/y here)
                 { y: y0c - HOVER - 4, duration: 500, yoyo: true, repeat: 1,             // divine hover-bob
                   ease: 'Sine.easeInOut',
                   onStart: () => {
