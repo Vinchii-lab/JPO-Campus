@@ -12131,11 +12131,12 @@
                 // regal LEAP up onto the seat
                 { x: tx, y: y0c - SEAT - 14, scaleY: bs * 1.06, scaleX: bs * 0.96,
                   angle: fwd * 8, duration: 330, ease: 'Sine.easeOut',
-                  onStart: () => { if (actTex) petObj.setTexture(actTex); } },
+                  onStart: () => { if (petObj.active && actTex) petObj.setTexture(actTex); } },
                 // settle onto the throne, composed
                 { y: y0c - SEAT, angle: 0, scaleX: bs, scaleY: bs, duration: 160,
                   ease: 'Sine.easeIn',
                   onComplete: () => {
+                    if (!petObj.active) return;   // pet destroyed mid-trick (re-equip/leave)
                     if (sitTex) petObj.setTexture(sitTex);
                     petObj.setFlipX(flip0);
                     // ── CORONATION: crown of light + silver rays + frost rings.
@@ -12177,8 +12178,9 @@
                 // hop down as the throne shatters behind her
                 { x: x0c, y: y0c, angle: fwd * -6, duration: 340, ease: 'Sine.easeOut',
                   onStart: () => {
-                    if (actTex) petObj.setTexture(actTex);
+                    if (petObj.active && actTex) petObj.setTexture(actTex);
                     for (const t of throne) {
+                      if (!t.active) continue;    // purged mid-trick
                       this.tweens.add({ targets: t, alpha: 0, y: t.y - 6 - Math.random() * 8,
                         x: t.x + (Math.random() * 16 - 8), angle: Math.random() * 40 - 20,
                         scaleX: 0.4, scaleY: 0.4, duration: 480, ease: 'Sine.easeIn' });
@@ -12190,6 +12192,7 @@
                   } },
               ],
               onComplete: () => {
+                if (!petObj.active) return;
                 petObj.x = x0c; petObj.y = y0c; petObj.angle = 0;
                 petObj.setScale(bs); petObj.setFlipX(flip0);
                 petObj._trickBusy = false;
