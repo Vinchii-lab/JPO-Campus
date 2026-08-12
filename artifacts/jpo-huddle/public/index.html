@@ -12191,8 +12191,10 @@
               // Scale EVERYTHING to her real on-screen size — she's ~1.7x a
               // normal pet, so lighter-flick-sized effects vanish on her.
               const scQ = Math.max(1, petObj.displayWidth / 64);
-              const mxQ = cx + fwdQ * petObj.displayWidth * 0.22;
-              const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
+              // Anchor ON the snout — the beam was floating detached ahead of
+              // her face, so pull it in and up to the open mouth.
+              const mxQ = cx + fwdQ * petObj.displayWidth * 0.15;
+              const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.34);
               // 1) inhale: chest puffs out while the orb grows
               this.tweens.add({ targets: petObj, scaleX: bsD * 1.14, scaleY: bsD * 1.05,
                 delay: 150, duration: 620, ease: 'Sine.easeOut' });
@@ -13537,7 +13539,32 @@
               .setVisible(petObj.visible)
               .setScale(1 + (hov - 11) * -0.02);   // shadow breathes opposite the bob
           } else {
-            if (flying) petObj.setOrigin(0.5, 1);  // seated dragons land
+            if (flying) {
+              // SWOOP LANDING on sit-down (boss rule): when the owner takes a
+              // seat, the dragon drops out of the air with its personality —
+              // dust ring (Violet neat / Crimson kicky / Obsidian THUD+rumble).
+              if (petObj.originY > 1.01 && petObj.visible) {   // was airborne this frame
+                const lfx = {
+                  pet_dragon:          { ring: 2.6, shake: 0,      dust: 0xcfc0a8, mul: 1 },
+                  pet_dragon_crimson:  { ring: 2.9, shake: 0.0016, dust: 0xd9a37e, mul: 1.15 },
+                  pet_dragon_obsidian: { ring: 3.4, shake: 0.0032, dust: 0x8f8880, mul: 1.4 },
+                }[petObj._petId];
+                if (lfx) {
+                  if (lfx.shake) this.cameras.main.shake(140, lfx.shake);
+                  const rr = lfx.ring * lfx.mul;
+                  const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, lfx.dust, 0)
+                    .setStrokeStyle(1.5, lfx.dust, 0.6).setDepth(1.1);
+                  this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
+                    duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  const d = this.add.image(petObj.x, petObj.y - 1, 'smoke_puff_0')
+                    .setTint(lfx.dust).setAlpha(0.35).setScale(0.18 * lfx.mul)
+                    .setAngle(Math.random() * 360).setDepth(1.1);
+                  this.tweens.add({ targets: d, alpha: 0, scale: 0.5 * lfx.mul,
+                    duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                }
+              }
+              petObj.setOrigin(0.5, 1);  // seated dragons land
+            }
             if (petObj._flyShadow && petObj._flyShadow.active) petObj._flyShadow.setVisible(false);
           }
         }
