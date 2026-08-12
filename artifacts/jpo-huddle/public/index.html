@@ -12234,12 +12234,37 @@
               petObj.x = riseX; petObj.flipX = riseX > cx;
               splash(riseX, theme.big);
               petObj.setAlpha(1);
+              // Final forms surface like ROYALTY: they rocket higher, HANG at
+              // the apex wings-out (action frame) under a burst of their
+              // element, and touch down inside an expanding shockwave ring.
+              const apex = theme.big ? [
+                { y: y0 - 46, scaleY: bs * 1.22, scaleX: bs * 0.84, duration: 260, ease: 'Sine.easeOut',
+                  onStart: () => { if (petObj._animSet) petObj.setTexture(petObj._animSet.action); } },
+                { y: y0 - 46, duration: 420,                                             // wings-out hang
+                  onStart: () => {
+                    for (let i = 0; i < 6; i++) {
+                      const g = this.add.star(petObj.x + (Math.random() * 34 - 17),
+                        petObj.y - 40 - Math.random() * 10, 4, 1.5, 4, theme.c, 0.95).setDepth(3);
+                      this.tweens.add({ targets: g, alpha: 0, angle: 120, y: g.y - 14,
+                        x: g.x + (Math.random() * 14 - 7), delay: i * 60, duration: 620,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                    }
+                  } },
+                { y: y0, scaleY: bs, scaleX: bs, duration: 240, ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    const ring = this.add.ellipse(petObj.x, y0, 24, 9, theme.c, 0)
+                      .setStrokeStyle(2, theme.c, 0.85).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0,
+                      duration: 750, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  } },
+              ] : [
+                { y: y0 - 24, scaleY: bs * 1.2, scaleX: bs * 0.85, duration: 240, ease: 'Sine.easeOut' },
+                { y: y0, scaleY: bs, scaleX: bs, duration: 260, ease: 'Bounce.easeOut' },
+              ];
               this.tweens.chain({
                 targets: petObj,
                 tweens: [
-                  { y: y0 - (theme.big ? 34 : 24), scaleY: bs * 1.2, scaleX: bs * 0.85,
-                    duration: 240, ease: 'Sine.easeOut' },
-                  { y: y0, scaleY: bs, scaleX: bs, duration: 260, ease: 'Bounce.easeOut' },
+                  ...apex,
                   { angle: { from: -14, to: 14 }, duration: 70, yoyo: true, repeat: 4 },  // shake dry
                 ],
                 onComplete: () => {
