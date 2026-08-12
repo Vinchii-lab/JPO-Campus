@@ -356,3 +356,17 @@ uri = "file://attached_assets/generated_images/dragon_obsidian_evo_concept.png"
 type = "image"
 title = "Obsidian 🖤 → VOID DRAGON"
 description = "Baby → Stage 2 (already flying) → Final: molten lava cracks, drifting embers"
+
+[[outputs]]
+id = "bOt8KdoR5IWPMhLUu2ih9"
+uri = "file://attached_assets/generated_images/dragon_violet_chunky_concept.png"
+type = "image"
+title = "Violet dragon evolution — chunky royal redo"
+description = "Baby → stage 2 → final form, all in the baby's exact colorway. Final form: massive, ornate rune wings, golden crown horns."
+
+[[outputs]]
+id = "I8KmkhDPGnIsXP_giE1Oa"
+uri = "file://attached_assets/dragon_size_chart.png"
+type = "image"
+title = "True in-game size chart"
+description = "Elder turtle (current biggest) vs baby dragon vs stage-2 vs final form — dragons break the size cap: s2 ~1.3x, final ~1.7x. Biggest pet in the game."
