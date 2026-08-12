@@ -28,6 +28,14 @@ blue>=red — the blue-heavy test spares dark warm-brown outlines, so it's safe 
 coats (a plain dark flood is NOT). Trick FX must also gate on petObj.visible, not just
 .active — hidden-round (prop hunt) pets otherwise leak their position via trick particles.
 
+# Walk frames need ONE uniform scale, not per-frame fit
+Per-frame `-resize 60x60` makes compact poses (crouch) render HUGE vs stretched ones —
+the pet visibly "grows" mid-walk. Trim each frame, find the max dimension across the
+cycle, resize ALL frames by that single factor, then bottom-extent 64x64. Also: blob
+slicing can split one pose (dark goggle straps break connectivity) — merge blobs whose
+x-ranges overlap >=50% of the smaller width before picking poses. Multiply-recolor of a
+white pet into brown loses face detail (mud) — regenerate or rescale instead.
+
 # One-sheet generation beats per-frame generation
 Generate ONE horizontal strip ("exactly 6 evenly-spaced frames of the SAME character, transparent background") — per-frame generations drift into different animals. Describe the pose list left→right (stand, 3 trot steps, sit, howl).
 
