@@ -13733,6 +13733,8 @@
               pet_dragon:          { core: 0xe8c9ff, glow: 0xb45bff, rise: -10, drift: 5 },
               pet_dragon_crimson:  { core: 0xffd9a8, glow: 0xff7a2d, rise: -12, drift: 4 },
               pet_dragon_obsidian: { core: 0xffb066, glow: 0xff5500, rise: -8,  drift: 4 },
+              pet_unicorn:         { core: 0xfff0ff, glow: 0xd9a8ff, rise: -10, drift: 6, stars: true },
+              pet_phoenix:         { core: 0xffe9b8, glow: 0xff7a2d, rise: -12, drift: 4 },
             }[petObj._petId]) || null;
             if (trailTh && (!petObj._trailAt || _now >= petObj._trailAt)) {
               petObj._trailAt = _now + 150 + Math.random() * 90;
@@ -13749,6 +13751,16 @@
                   x: w.x + dx, y: w.y + th.rise + Math.random() * 3,
                   duration: 950 + Math.random() * 350, ease: 'Sine.easeOut',
                   onComplete: this._trackPetFx(petObj, w) });
+              }
+              // Unicorn (boss ask): the little ✨/⭐ stars from the old trick
+              // now fall out of her trail by DEFAULT while she walks.
+              if (th.stars && Math.random() < 0.5) {
+                const st = this.add.text(wx + (Math.random() * 12 - 6), wy - 4 - Math.random() * 8,
+                  Math.random() < 0.5 ? '✨' : '⭐', { fontSize: '10px', resolution: 2 })
+                  .setOrigin(0.5).setAlpha(0.95).setDepth(1.1);
+                this.tweens.add({ targets: st, alpha: 0, y: st.y - 14 - Math.random() * 10,
+                  duration: 750 + Math.random() * 300, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, st) });
               }
             }
             // Animated-frames pilot: step the walk cycle (~140ms per frame).
@@ -13788,6 +13800,8 @@
               pet_dragon:          { glyphs: ['✦', '✧'], glow: 0xb45bff, rise: true },
               pet_dragon_crimson:  { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
               pet_dragon_obsidian: { glyphs: ['✦'],       glow: 0xff5500, rise: true },
+              pet_unicorn:         { glyphs: ['✨', '⭐'], glow: 0xd9a8ff, rise: true },
+              pet_phoenix:         { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
             }[petObj._petId]) || null;
             if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
               petObj._auraAt = now + 1600 + Math.random() * 1800;
