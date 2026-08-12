@@ -11643,6 +11643,12 @@
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
             obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
           }
+          // Boss rule: the rare gift-only pets (unicorn, phoenix) have ONE
+          // form — and it's dragon-final-form sized. Majestic from day one.
+          if (pet === 'pet_unicorn' || pet === 'pet_phoenix') {
+            obj._baseScale *= 1.7;
+            obj._gapMult = 1.9;
+          }
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the
@@ -11740,17 +11746,155 @@
         // _trickBusy, the next _stepPet frame reasserts walk/idle/sit.
         if (petObj._animSet) petObj.setTexture(petObj._animSet.action);
         if (sp === 'pet_unicorn') {
-          // Sparkle burst: a handful of stars pop out and float away.
-          // Client-only flavor; every piece self-destroys (same pattern as
-          // _brewFx) so repeated bursts never leak display objects.
-          for (let i = 0; i < 5; i++) {
-            const s = this.add.text(
-              petObj.x + (Math.random() * 36 - 18), petObj.y - 8 - Math.random() * 18,
-              Math.random() < 0.5 ? '✨' : '⭐', { fontSize: '12px', resolution: 2 })
-              .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
-            this.tweens.add({
-              targets: s, alpha: { from: 0.95, to: 0 }, y: s.y - 26 - Math.random() * 14,
-              delay: i * 110, duration: 850, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s),
+          // The unicorn has ONE form and FOUR signature moves (boss-approved
+          // storyboard) — it cycles through them so every trick feels fresh:
+          //   0 PRISM BEAM      — horn fires a rainbow laser with sparkles
+          //   1 STARDUST GALLOP — dash with a rainbow trail off the hooves
+          //   2 HALO BLESSING   — rears up; golden ring + raining stars
+          //   3 MOONBOUNCE      — leaps over a crescent moon, glitter landing
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, fwd = (petObj.flipX ? -1 : 1);
+          const x0 = petObj.x, y0 = petObj.y;
+          const scU = Math.max(1, petObj.displayWidth / 64);
+          const RAINBOW = [0xff5f6d, 0xffa93d, 0xffe45c, 0x6ee77a, 0x5cc8ff, 0xb08cff];
+          const mv = petObj._moveIdx = ((petObj._moveIdx ?? -1) + 1) % 4;
+          if (mv === 0) {
+            // PRISM BEAM: head dips, then the horn fires a widening rainbow
+            // beam — layered colored blobs racing forward with star sparkles.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: 8 * fwd, duration: 260, ease: 'Sine.easeOut', hold: 1200 },
+                { angle: 0, duration: 240, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const hx = x0 + fwd * petObj.displayWidth * 0.40;
+              const hy = y0 - petObj.displayHeight * 0.72;
+              const chg = this.add.circle(hx, hy, 1.5 * scU, 0xffffff, 0.9).setDepth(3.2);
+              this.tweens.add({ targets: chg, scale: 4, duration: 320, ease: 'Sine.easeIn',
+                onComplete: this._trackPetFx(petObj, chg) });
+              this.tweens.add({ targets: chg, alpha: 0, delay: 330, duration: 120 });
+              for (let i = 0; i < 24; i++) {
+                this.time.delayedCall(340 + i * 42, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const off = ((i % 6) - 2.5) * 1.6 * scU;   // 6 parallel rainbow strands
+                  const b = this.add.circle(hx + fwd * 4 * scU, hy + off, 2.2 * scU,
+                    RAINBOW[i % 6], 0.9).setDepth(3.2);
+                  this.tweens.add({ targets: b, alpha: 0, scale: 1.9,
+                    x: b.x + fwd * (46 + Math.random() * 20) * scU, y: b.y + off * 2.5,
+                    duration: 430 + Math.random() * 120, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, b) });
+                  if (i % 4 === 0) {
+                    const s = this.add.text(hx + fwd * (18 + Math.random() * 34) * scU,
+                      hy + (Math.random() * 16 - 8), '✨', { fontSize: '10px', resolution: 2 })
+                      .setOrigin(0.5).setAlpha(0.95).setDepth(3.3);
+                    this.tweens.add({ targets: s, alpha: 0, y: s.y - 10, duration: 480,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                  }
+                });
+              }
+            }
+          } else if (mv === 1) {
+            // STARDUST GALLOP: a quick out-and-back dash, hooves throwing
+            // rainbow dust and stars the whole way.
+            const dropTrail = () => {
+              if (!petObj.active || !petObj.visible) return;
+              const c = this.add.circle(petObj.x - fwd * petObj.displayWidth * 0.3,
+                petObj.y - 2 - Math.random() * 6 * scU, 2 * scU,
+                RAINBOW[Math.floor(Math.random() * 6)], 0.85).setDepth(2.5);
+              this.tweens.add({ targets: c, alpha: 0, scale: 1.8, y: c.y - 8 * scU,
+                duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, c) });
+              if (Math.random() < 0.35) {
+                const s = this.add.text(petObj.x - fwd * 10, petObj.y - 8 - Math.random() * 10,
+                  '⭐', { fontSize: '9px', resolution: 2 }).setOrigin(0.5).setAlpha(0.9).setDepth(2.6);
+                this.tweens.add({ targets: s, alpha: 0, y: s.y - 12, duration: 600,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+              }
+            };
+            const trailEv = this.time.addEvent({ delay: 45, repeat: 30, callback: dropTrail });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { x: x0 + fwd * 52 * scU, duration: 620, ease: 'Sine.easeInOut' },
+                { x: x0, duration: 620, ease: 'Sine.easeInOut',
+                  onStart: () => { if (petObj.setFlipX) petObj.setFlipX(!petObj.flipX); } },
+              ],
+              onComplete: () => {
+                trailEv.remove(); petObj.x = x0;
+                if (petObj.setFlipX) petObj.setFlipX(fwd < 0);
+                petObj._trickBusy = false;
+              },
+            });
+          } else if (mv === 2) {
+            // HALO BLESSING: rears up; a golden halo expands around her while
+            // little stars and hearts rain down.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: -12 * fwd, scaleY: bs * 1.08, duration: 320, ease: 'Sine.easeOut', hold: 1050 },
+                { angle: 0, scaleY: bs, duration: 280, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const cy = y0 - petObj.displayHeight * 0.5;
+              const halo = this.add.ellipse(x0, cy, 20 * scU, 8 * scU, 0xffd76a, 0)
+                .setStrokeStyle(2 * scU, 0xffd76a, 0.9).setDepth(3.1);
+              this.tweens.add({ targets: halo, scaleX: 3, scaleY: 3, alpha: 0,
+                delay: 260, duration: 900, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, halo) });
+              for (let i = 0; i < 10; i++) {
+                this.time.delayedCall(360 + i * 110, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const t = this.add.text(x0 + (Math.random() * 56 - 28) * scU,
+                    cy - (14 + Math.random() * 10) * scU,
+                    Math.random() < 0.4 ? '💛' : (Math.random() < 0.5 ? '⭐' : '✨'),
+                    { fontSize: '10px', resolution: 2 }).setOrigin(0.5).setAlpha(0.95).setDepth(3.2);
+                  this.tweens.add({ targets: t, alpha: 0, y: t.y + (22 + Math.random() * 14) * scU,
+                    duration: 800 + Math.random() * 300, ease: 'Sine.easeIn',
+                    onComplete: this._trackPetFx(petObj, t) });
+                });
+              }
+            }
+          } else {
+            // MOONBOUNCE: a crescent moon appears, she arcs clean over it,
+            // and the landing pops a glitter burst.
+            const moon = petObj.visible
+              ? this.add.text(x0 + fwd * 30 * scU, y0 + 2, '🌙', { fontSize: `${Math.round(16 * scU)}px`, resolution: 2 })
+                  .setOrigin(0.5, 1).setAlpha(0).setDepth(1.8)
+              : null;
+            if (moon) this.tweens.add({ targets: moon, alpha: 0.9, duration: 260 });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 0.82, duration: 260, ease: 'Sine.easeIn' },           // crouch
+                { y: y0 - 40 * scU, x: x0 + fwd * 30 * scU, scaleY: bs * 1.05,
+                  angle: -10 * fwd, duration: 340, ease: 'Sine.easeOut' },           // up & over
+                { y: y0, x: x0 + fwd * 60 * scU, angle: 8 * fwd, duration: 320,
+                  ease: 'Quad.easeIn' },                                             // down the far side
+                { angle: 0, scaleY: bs, duration: 180, ease: 'Back.easeOut',
+                  onStart: () => {
+                    if (!petObj.active || !petObj.visible) return;
+                    this.cameras.main.shake(80, 0.0012);
+                    for (let i = 0; i < 9; i++) {                                    // glitter burst
+                      const g = this.add.circle(petObj.x + (Math.random() * 14 - 7) * scU,
+                        petObj.y - 2, 1.6 * scU, RAINBOW[i % 6], 0.95).setDepth(3.1);
+                      this.tweens.add({ targets: g, alpha: 0,
+                        x: g.x + (Math.random() * 30 - 15) * scU,
+                        y: g.y - (8 + Math.random() * 16) * scU, scale: 0.4,
+                        duration: 460 + Math.random() * 180, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, g) });
+                    }
+                  } },
+              ],
+              onComplete: () => {
+                petObj.angle = 0; petObj.setScale(bs); petObj.y = y0;
+                if (moon) this.tweens.add({ targets: moon, alpha: 0, duration: 320,
+                  onComplete: this._trackPetFx(petObj, moon) });
+                petObj._trickBusy = false;
+              },
             });
           }
           return;
@@ -13227,29 +13371,169 @@
           });
         }
         if (sp === 'pet_phoenix') {
-          // Blaze-up: wings flare (action frame), a puff of embers rises off
-          // the plumage and fades. Same self-destroying particle pattern as
-          // the dragon (_trackPetFx) so hides/destroys can purge mid-trick.
+          // The phoenix has ONE form and FOUR signature moves (boss-approved
+          // storyboard), cycled per trick:
+          //   0 SOLAR FLARE    — wings wide, blinding ring of golden fire
+          //   1 EMBER DIVE     — comet dive, flame burst on the pull-up
+          //   2 REBIRTH        — bursts to ash, rises reborn from the flame
+          //   3 FIRESTORM WALTZ— corkscrews up in twin flame ribbons
           petObj._trickBusy = true;
-          const bs = petObj._baseScale || 1;
-          this.tweens.chain({
-            targets: petObj,
-            tweens: [
-              { scaleX: bs * 1.15, scaleY: bs * 1.15, duration: 180, ease: 'Sine.easeOut', hold: 700 },
-              { scaleX: bs, scaleY: bs, duration: 220, ease: 'Sine.easeIn' },
-            ],
-            onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
-          });
-          for (let i = 0; i < 7; i++) {
-            const f = this.add.text(
-              petObj.x + (Math.random() * 24 - 12), petObj.y - 6 - Math.random() * 14,
-              Math.random() < 0.6 ? '🔥' : '✨', { fontSize: '10px', resolution: 2 })
-              .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3);
+          const bs = petObj._baseScale || 1, fwd = (petObj.flipX ? -1 : 1);
+          const x0 = petObj.x, y0 = petObj.y;
+          const scP = Math.max(1, petObj.displayWidth / 64);
+          const FIRE = [0xffd76a, 0xff9a3d, 0xff632d];
+          const mv = petObj._moveIdx = ((petObj._moveIdx ?? -1) + 1) % 4;
+          if (mv === 0) {
+            // SOLAR FLARE: rears wide (action frame vibes), a white-gold flash,
+            // then an expanding ring of fire with radial embers.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bs * 1.18, scaleY: bs * 1.18, duration: 240, ease: 'Sine.easeOut', hold: 950 },
+                { scaleX: bs, scaleY: bs, duration: 240, ease: 'Sine.easeIn' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const cy = y0 - petObj.displayHeight * 0.5;
+              const flash = this.add.circle(x0, cy, 6 * scP, 0xfff3c9, 0.9).setDepth(3.3);
+              this.tweens.add({ targets: flash, scale: 3.4, alpha: 0, delay: 240,
+                duration: 300, ease: 'Quad.easeOut', onComplete: this._trackPetFx(petObj, flash) });
+              const ring = this.add.ellipse(x0, cy, 18 * scP, 12 * scP, 0xff9a3d, 0)
+                .setStrokeStyle(2.4 * scP, 0xffd76a, 0.95).setDepth(3.2);
+              this.tweens.add({ targets: ring, scaleX: 3.4, scaleY: 3.4, alpha: 0,
+                delay: 280, duration: 750, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, ring) });
+              this.time.delayedCall(300, () => { this.cameras.main.shake(120, 0.002); });
+              for (let i = 0; i < 12; i++) {           // radial embers
+                this.time.delayedCall(300 + (i % 4) * 60, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const a = (i / 12) * Math.PI * 2;
+                  const e = this.add.circle(x0, cy, 1.8 * scP, FIRE[i % 3], 0.95).setDepth(3.2);
+                  this.tweens.add({ targets: e, alpha: 0,
+                    x: x0 + Math.cos(a) * 34 * scP, y: cy + Math.sin(a) * 22 * scP,
+                    scale: 0.4, duration: 560 + Math.random() * 160, ease: 'Quad.easeOut',
+                    onComplete: this._trackPetFx(petObj, e) });
+                });
+              }
+            }
+          } else if (mv === 1) {
+            // EMBER DIVE: climbs high, hangs, then comet-dives back down —
+            // ember tail the whole way, flame burst + shake on the pull-up.
+            let trailEv = null;
+            const dropEmber = () => {
+              if (!petObj.active || !petObj.visible) return;
+              const c = this.add.circle(petObj.x + (Math.random() * 6 - 3) * scP,
+                petObj.y - petObj.displayHeight * 0.5, (1.4 + Math.random()) * scP,
+                FIRE[Math.floor(Math.random() * 3)], 0.9).setDepth(2.8);
+              this.tweens.add({ targets: c, alpha: 0, scale: 1.8, y: c.y - 6 * scP,
+                duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, c) });
+            };
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 54 * scP, duration: 520, ease: 'Sine.easeOut', hold: 260,
+                  onStart: () => { trailEv = this.time.addEvent({ delay: 40, repeat: 40, callback: dropEmber }); } },
+                { y: y0, angle: 14 * fwd, duration: 240, ease: 'Quad.easeIn' },   // THE DIVE
+                { angle: 0, duration: 200, ease: 'Back.easeOut',
+                  onStart: () => {
+                    if (!petObj.active) return;
+                    this.cameras.main.shake(140, 0.0028);
+                    if (!petObj.visible) return;
+                    for (let i = 0; i < 10; i++) {                                // flame burst
+                      const f = this.add.circle(petObj.x + (Math.random() * 12 - 6) * scP,
+                        y0 - 2, (1.6 + Math.random() * 1.4) * scP, FIRE[i % 3], 0.95).setDepth(3.1);
+                      this.tweens.add({ targets: f, alpha: 0,
+                        x: f.x + (Math.random() * 40 - 20) * scP,
+                        y: f.y - (10 + Math.random() * 18) * scP,
+                        duration: 480 + Math.random() * 200, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, f) });
+                    }
+                  } },
+              ],
+              onComplete: () => {
+                if (trailEv) trailEv.remove();
+                petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false;
+              },
+            });
+          } else if (mv === 2) {
+            // REBIRTH: bursts into ash and vanishes — a little flame flickers
+            // where she stood — then she rises reborn, small to full, in a
+            // ring of fire. The classic.
+            const emberPile = [];
             this.tweens.add({
-              targets: f, alpha: { from: 0.9, to: 0 },
-              y: f.y - 18 - Math.random() * 12, x: f.x + (Math.random() * 10 - 5),
-              scale: { from: 0.7, to: 1.2 },
-              delay: 120 + i * 90, duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f),
+              targets: petObj, alpha: 0, scale: bs * 0.6, duration: 380, ease: 'Quad.easeIn',
+              onComplete: () => {
+                if (!petObj.active) { petObj.setAlpha(1); petObj.setScale(bs); petObj._trickBusy = false; return; }
+                if (petObj.visible !== false) {
+                  for (let i = 0; i < 8; i++) {          // ash burst
+                    const a = this.add.image(x0 + (Math.random() * 14 - 7) * scP, y0 - 6 * scP,
+                      `smoke_puff_${i % 3}`).setTint(0x777077).setAlpha(0.7)
+                      .setScale(0.2 * scP).setAngle(Math.random() * 360).setDepth(3);
+                    this.tweens.add({ targets: a, alpha: 0, scale: 0.8 * scP,
+                      x: a.x + (Math.random() * 36 - 18) * scP, y: a.y - (6 + Math.random() * 14) * scP,
+                      duration: 700 + Math.random() * 300, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, a) });
+                  }
+                  for (let i = 0; i < 3; i++) {          // the wee flame that remains
+                    const f = this.add.circle(x0 + (i - 1) * 3 * scP, y0 - 3, (1.6 + i * 0.5) * scP,
+                      FIRE[i], 0.9).setDepth(3);
+                    emberPile.push(f);
+                    this.tweens.add({ targets: f, scaleY: 1.5, yoyo: true, repeat: 6,
+                      duration: 140, ease: 'Sine.easeInOut' });
+                  }
+                }
+                this.time.delayedCall(1050, () => {      // RISE
+                  for (const f of emberPile) this.tweens.add({ targets: f, alpha: 0, duration: 220,
+                    onComplete: this._trackPetFx(petObj, f) });
+                  if (!petObj.active) { petObj._trickBusy = false; return; }
+                  petObj.setScale(bs * 0.3); petObj.y = y0;
+                  this.tweens.add({ targets: petObj, alpha: 1, scaleX: bs, scaleY: bs,
+                    duration: 620, ease: 'Back.easeOut',
+                    onComplete: () => { petObj.setAlpha(1); petObj.setScale(bs); petObj._trickBusy = false; } });
+                  if (petObj.visible) {
+                    const ring = this.add.ellipse(x0, y0 - petObj.displayHeight * 0.4,
+                      16 * scP, 10 * scP, 0xff9a3d, 0)
+                      .setStrokeStyle(2 * scP, 0xffd76a, 0.9).setDepth(3.1);
+                    this.tweens.add({ targets: ring, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    for (let i = 0; i < 8; i++) {
+                      const s = this.add.circle(x0 + (Math.random() * 20 - 10) * scP,
+                        y0 - Math.random() * 20 * scP, 1.5 * scP, FIRE[i % 3], 0.95).setDepth(3.2);
+                      this.tweens.add({ targets: s, alpha: 0, y: s.y - (12 + Math.random() * 10) * scP,
+                        duration: 520 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  }
+                });
+              },
+            });
+          } else {
+            // FIRESTORM WALTZ: corkscrews upward, twin flame ribbons spiraling
+            // around her, then drifts back down through her own sparks.
+            let t = 0;
+            const spiralEv = this.time.addEvent({ delay: 40, repeat: 34, callback: () => {
+              if (!petObj.active || !petObj.visible) return;
+              t += 0.45;
+              const cy = petObj.y - petObj.displayHeight * 0.5;
+              for (const ph of [0, Math.PI]) {           // twin ribbons
+                const r = this.add.circle(petObj.x + Math.cos(t + ph) * 14 * scP,
+                  cy + Math.sin(t + ph) * 5 * scP, 1.8 * scP,
+                  ph ? 0xff632d : 0xffd76a, 0.9).setDepth(ph ? 2.8 : 3.2);
+                this.tweens.add({ targets: r, alpha: 0, scale: 1.6, y: r.y + 6 * scP,
+                  duration: 460, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              }
+            } });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 44 * scP, angle: -8 * fwd, duration: 780, ease: 'Sine.easeInOut', hold: 220 },
+                { y: y0, angle: 0, duration: 620, ease: 'Sine.easeInOut' },
+              ],
+              onComplete: () => {
+                spiralEv.remove();
+                petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false;
+              },
             });
           }
         }
