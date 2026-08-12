@@ -12139,7 +12139,9 @@
               },
               onComplete: () => {
                 petObj.x = x0c; petObj.angle = 0; petObj.flipX = flip0;
-                if (sitTex) petObj.setTexture(sitTex);               // deity pose at the apex
+                // Apex: ARMS SPREAD to the heavens (the rearing action pose
+                // from the sketch), held through the divine hover + rain.
+                if (petObj._animSet && petObj._animSet.action) petObj.setTexture(petObj._animSet.action);
               },
             });
             this.tweens.chain({
