@@ -11639,9 +11639,10 @@
           // Dragons are the ONLY pets allowed to break the size cap (boss
           // rule: most expensive pet = biggest pet in the office). Stage 2
           // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
-          if (pet.startsWith('pet_dragon') && (stage || 1) >= 2)
+          if (pet.startsWith('pet_dragon') && (stage || 1) >= 2) {
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
             obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
+          }
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the
