@@ -307,3 +307,31 @@ uri = "file://attached_assets/generated_images/bunny_cocoa_evo_concept.png"
 type = "image"
 title = "Cocoa evolution sketch 🏎️"
 description = "Baby → Stage 2 (leaner, cream racing stripe starts) → FINAL FORM Espresso Racer (full racing stripe, speed goggles, smug grin)"
+
+[[outputs]]
+id = "1pyF9NXP1xHlU85CT_tg0"
+uri = "file://attached_assets/turtle_evo_line.png"
+type = "image"
+title = "Turtle evolution line 🐢"
+description = "Baby → Stage 2 → FINAL FORM: the Elder Tortoise — mossy ancient shell, wise old face"
+
+[[outputs]]
+id = "n9-2kolqQMSF6aQkSw5mI"
+uri = "file://attached_assets/turtle_s3_frames.png"
+type = "image"
+title = "Elder Tortoise animation frames"
+description = "Walk 1-2-3, sit, and blessing pose — the actual in-game frames"
+
+[[outputs]]
+id = "4xHhuH4IIvajB240ulAMO"
+uri = "file://attached_assets/turtle_sapphire_evo_line.png"
+type = "image"
+title = "Sapphire Turtle evolution line 💎"
+description = "Baby → Stage 2 → FINAL FORM: the Crystal Guardian — gem-faceted sapphire shell"
+
+[[outputs]]
+id = "lbsyn3cCf85lfSpbRK5xV"
+uri = "file://attached_assets/turtle_sapphire_s3_frames.png"
+type = "image"
+title = "Crystal Guardian animation frames"
+description = "Walk 1-2-3, sit, and spin pose — the actual in-game frames"
