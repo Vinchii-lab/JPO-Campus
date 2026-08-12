@@ -13796,6 +13796,35 @@
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             const now = performance.now();
+            // Boss ask: the grown phoenix BURNS while nesting — flames licking
+            // up around the tucked wings, smoke wisps, and a warm glow pulse.
+            if (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3 && seated
+                && petObj.visible && now >= (petObj._nestAt || 0)) {
+              petObj._nestAt = now + 240 + Math.random() * 120;
+              const scN = Math.max(1, petObj.displayWidth / 64);
+              const fx0 = petObj.x + (Math.random() * 22 - 11) * scN;
+              const f = this.add.circle(fx0, petObj.y - 2 - Math.random() * 4,
+                (1.6 + Math.random() * 1.6) * scN,
+                [0xffd75e, 0xffb347, 0xff7a2d][Math.floor(Math.random() * 3)], 0.8).setDepth(2.9);
+              this.tweens.add({ targets: f, alpha: 0, scale: 0.3,
+                y: f.y - (7 + Math.random() * 8) * scN,
+                duration: 480 + Math.random() * 240, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, f) });
+              if (Math.random() < 0.4) {
+                const s = this.add.image(fx0, petObj.y - 8 * scN, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                  .setTint(0x6b6360).setAlpha(0.35).setScale(0.09 * scN)
+                  .setAngle(Math.random() * 360).setDepth(2.85);
+                this.tweens.add({ targets: s, alpha: 0, scale: 0.3 * scN,
+                  y: s.y - 12 - Math.random() * 8, angle: s.angle + 40,
+                  duration: 1100 + Math.random() * 400, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, s) });
+              }
+              if (Math.random() < 0.3) {
+                const g = this.add.circle(petObj.x, petObj.y - 6 * scN, 15 * scN, 0xffb45e, 0.14).setDepth(1.9);
+                this.tweens.add({ targets: g, alpha: 0, scale: 1.6, duration: 620,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              }
+            }
             // Final-form spirits idle inside their own ambient element:
             // husky = drifting snow (falls), shiba = rising embers, choco =
             // curling steam — plus a faint elemental glow pulse at the feet.
