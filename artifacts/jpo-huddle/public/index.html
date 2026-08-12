@@ -12297,23 +12297,35 @@
             // (originY-1)*displayHeight, so fold that into the head height.
             const mx = petObj.x + fwd * petObj.displayWidth * 0.42;
             const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.35);
-            for (let i = 0; i < 9; i++) {
-              this.time.delayedCall(180 + i * 70, () => {
+            // Boss call: stage 2 breathes SMOKE — a teen dragon still working
+            // up to real fire. Soft layered gray puffs that billow out of the
+            // mouth, expand, and curl upward. Babies puff tiny smoke too.
+            for (let i = 0; i < 8; i++) {
+              this.time.delayedCall(180 + i * 95, () => {
                 if (!petObj.active || !petObj.visible) return;
-                const spread = (Math.random() - 0.5) * 5;
-                const f = this.add.circle(mx, my + spread, 2 + Math.random() * 2,
-                  [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
-                this.tweens.add({ targets: f, alpha: 0, scale: 2.2,
-                  x: f.x + fwd * (22 + Math.random() * 16), y: f.y + spread * 2 - 2 + Math.random() * 6,
-                  duration: 440, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
-                if (i % 3 === 0) {          // wisp of smoke riding the top of the stream
-                  const s = this.add.circle(mx + fwd * 8, my - 3, 2, 0x9a93a8, 0.4).setDepth(3);
-                  this.tweens.add({ targets: s, alpha: 0, scale: 2.6,
-                    x: s.x + fwd * (26 + Math.random() * 10), y: s.y - 6 - Math.random() * 6,
-                    duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                const spread = (Math.random() - 0.5) * 4;
+                const shade = [0xbdb7c6, 0x9a93a8, 0x7d7689][i % 3];
+                // Each puff = wide faint halo + smaller denser core, so it
+                // reads as billowing smoke rather than a flat dot.
+                const halo = this.add.circle(mx, my + spread, 3.5 + Math.random() * 2, shade, 0.18).setDepth(3);
+                const core = this.add.circle(mx, my + spread, 2 + Math.random() * 1.5, shade, 0.5).setDepth(3);
+                const dx = fwd * (16 + Math.random() * 14), dy = -6 - Math.random() * 10;
+                for (const s of [halo, core]) {
+                  this.tweens.add({ targets: s, alpha: 0, scale: 2.8 + Math.random(),
+                    x: s.x + dx + fwd * Math.random() * 6, y: s.y + dy + spread * 2,
+                    duration: 700 + Math.random() * 250, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, s) });
                 }
               });
             }
+            // One little cough-ring at the end — she's trying, okay.
+            this.time.delayedCall(1000, () => {
+              if (!petObj.active || !petObj.visible) return;
+              const ring = this.add.circle(mx + fwd * 10, my - 4, 3, 0x9a93a8, 0)
+                .setStrokeStyle(1.5, 0xbdb7c6, 0.55).setDepth(3);
+              this.tweens.add({ targets: ring, scale: 2.4, alpha: 0, x: ring.x + fwd * 10, y: ring.y - 8,
+                duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+            });
           }
           return;
         }
