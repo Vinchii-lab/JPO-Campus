@@ -12205,13 +12205,27 @@
             // emoji, just soft layered glow wisps in the line's element:
             // frost = cold icy mist hanging low, blaze = warm embers of light
             // curling upward, cocoa = rich warm steam drifting off the floor.
-            if (petObj._mythic && (!petObj._trailAt || _now >= petObj._trailAt)) {
+            // Non-dog FINAL FORMS (stage 3) trail their own element too:
+            // golden drake = gold sparkle dust, swan = cool white mist,
+            // boss tabby = warm amber motes, mystic black = violet embers,
+            // persian queen = silver shimmer, elder tortoise = mossy green
+            // motes, crystal turtle = cyan glints.
+            const trailTh = {
+              frost: { core: 0xdff4ff, glow: 0x9fd8ff, rise: -3, drift: 6 },
+              blaze: { core: 0xffe9b8, glow: 0xff9a3d, rise: -14, drift: 4 },
+              cocoa: { core: 0xf3e5ab, glow: 0xc08a4e, rise: -8, drift: 5 },
+            }[petObj._mythic] || (petObj._petStage >= 3 && {
+              pet_duck:            { core: 0xfff3c4, glow: 0xffc94d, rise: -10, drift: 5 },
+              pet_duck_snow:       { core: 0xffffff, glow: 0xcfe8ff, rise: -4,  drift: 7 },
+              pet_cat:             { core: 0xffe1b8, glow: 0xff9c55, rise: -8,  drift: 4 },
+              pet_cat_black:       { core: 0xe6c9ff, glow: 0x9b59ff, rise: -12, drift: 5 },
+              pet_cat_snow:        { core: 0xffffff, glow: 0xbfd9e8, rise: -6,  drift: 4 },
+              pet_turtle:          { core: 0xd8f0b8, glow: 0x6faa4e, rise: -6,  drift: 3 },
+              pet_turtle_sapphire: { core: 0xd8f6ff, glow: 0x3fc8f0, rise: -9,  drift: 3 },
+            }[petObj._petId]) || null;
+            if (trailTh && (!petObj._trailAt || _now >= petObj._trailAt)) {
               petObj._trailAt = _now + 150 + Math.random() * 90;
-              const th = {
-                frost: { core: 0xdff4ff, glow: 0x9fd8ff, rise: -3, drift: 6 },
-                blaze: { core: 0xffe9b8, glow: 0xff9a3d, rise: -14, drift: 4 },
-                cocoa: { core: 0xf3e5ab, glow: 0xc08a4e, rise: -8, drift: 5 },
-              }[petObj._mythic];
+              const th = trailTh;
               const wx = petObj.x + (Math.random() * 10 - 5), wy = petObj.y - 2 - Math.random() * 3;
               const r = 2.5 + Math.random() * 2.5;
               // Two stacked soft circles read as one glowing wisp: a wide
@@ -12243,13 +12257,27 @@
             // Final-form spirits idle inside their own ambient element:
             // husky = drifting snow (falls), shiba = rising embers, choco =
             // curling steam — plus a faint elemental glow pulse at the feet.
-            if (petObj._mythic && (!petObj._auraAt || now >= petObj._auraAt)) {
+            // Non-dog final forms get an idle element too: gold sparkles for
+            // the drake, drifting snow-feathers for the swan, amber flecks for
+            // the boss tabby, violet stars for the mystic, silver glints for
+            // the queen, falling leaves for the elder, crystal facets for the
+            // sapphire turtle.
+            const auraTh = {
+              frost: { glyphs: ['❄'],       glow: 0x9fd8ff, rise: false },
+              blaze: { glyphs: ['🔥', '✦'], glow: 0xffb347, rise: true },
+              cocoa: { glyphs: ['♨', '🍫'], glow: 0xc08a4e, rise: true },
+            }[petObj._mythic] || (petObj._petStage >= 3 && {
+              pet_duck:            { glyphs: ['✦', '✨'], glow: 0xffc94d, rise: true },
+              pet_duck_snow:       { glyphs: ['❆', '✧'], glow: 0xcfe8ff, rise: false },
+              pet_cat:             { glyphs: ['✦'],       glow: 0xff9c55, rise: true },
+              pet_cat_black:       { glyphs: ['✦', '★'], glow: 0x9b59ff, rise: true },
+              pet_cat_snow:        { glyphs: ['✧', '❄'], glow: 0xbfd9e8, rise: false },
+              pet_turtle:          { glyphs: ['🍃'],      glow: 0x6faa4e, rise: false },
+              pet_turtle_sapphire: { glyphs: ['◆', '✧'], glow: 0x3fc8f0, rise: true },
+            }[petObj._petId]) || null;
+            if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
               petObj._auraAt = now + 1600 + Math.random() * 1800;
-              const th = {
-                frost: { glyphs: ['❄'],       glow: 0x9fd8ff, rise: false },
-                blaze: { glyphs: ['🔥', '✦'], glow: 0xffb347, rise: true },
-                cocoa: { glyphs: ['♨', '🍫'], glow: 0xc08a4e, rise: true },
-              }[petObj._mythic];
+              const th = auraTh;
               const glyph = th.glyphs[Math.floor(Math.random() * th.glyphs.length)];
               const y0 = th.rise ? petObj.y - 8 - Math.random() * 6 : petObj.y - 26 - Math.random() * 10;
               const fl = this.add.text(petObj.x + (Math.random() * 26 - 13), y0,
