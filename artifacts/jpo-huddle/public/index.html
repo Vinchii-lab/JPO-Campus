@@ -12187,23 +12187,26 @@
               // radiating lines; 3) ONE big cone blast of neon magenta flame
               // and purple smoke. Anticipation = drama.
               const fwdQ = fwdD;
+              // Scale EVERYTHING to her real on-screen size — she's ~1.7x a
+              // normal pet, so lighter-flick-sized effects vanish on her.
+              const scQ = Math.max(1, petObj.displayWidth / 64);
               const mxQ = cx + fwdQ * petObj.displayWidth * 0.22;
               const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
               // 1) inhale: chest puffs out while the orb grows
               this.tweens.add({ targets: petObj, scaleX: bsD * 1.14, scaleY: bsD * 1.05,
                 delay: 150, duration: 620, ease: 'Sine.easeOut' });
-              const orb = this.add.circle(mxQ, myQ, 1.5, 0xf0b6ff, 0.9).setDepth(3.2);
-              const orbHalo = this.add.circle(mxQ, myQ, 3, 0xb46bff, 0.3).setDepth(3.1);
-              this.tweens.add({ targets: orb, scale: 4, delay: 150, duration: 750, ease: 'Sine.easeIn' });
-              this.tweens.add({ targets: orbHalo, scale: 4.5, delay: 150, duration: 750, ease: 'Sine.easeIn' });
+              const orb = this.add.circle(mxQ, myQ, 2 * scQ, 0xf0b6ff, 0.95).setDepth(3.2);
+              const orbHalo = this.add.circle(mxQ, myQ, 4 * scQ, 0xb46bff, 0.35).setDepth(3.1);
+              this.tweens.add({ targets: orb, scale: 5, delay: 150, duration: 750, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: orbHalo, scale: 5.5, delay: 150, duration: 750, ease: 'Sine.easeIn' });
               // 2) charge: radiating lines get sucked INTO the orb
-              for (let i = 0; i < 8; i++) {
-                this.time.delayedCall(420 + i * 55, () => {
+              for (let i = 0; i < 10; i++) {
+                this.time.delayedCall(380 + i * 55, () => {
                   if (!petObj.active || !petObj.visible) return;
                   const a = Math.random() * Math.PI * 2;
-                  const ln = this.add.line(0, 0, mxQ + Math.cos(a) * 16, myQ + Math.sin(a) * 14,
-                    mxQ + Math.cos(a) * 9, myQ + Math.sin(a) * 8, 0xe0a6ff, 0.85)
-                    .setOrigin(0).setLineWidth(1).setDepth(3.1);
+                  const ln = this.add.line(0, 0, mxQ + Math.cos(a) * 26 * scQ, myQ + Math.sin(a) * 22 * scQ,
+                    mxQ + Math.cos(a) * 12 * scQ, myQ + Math.sin(a) * 10 * scQ, 0xe0a6ff, 0.9)
+                    .setOrigin(0).setLineWidth(1.5).setDepth(3.1);
                   this.tweens.add({ targets: ln, alpha: 0, duration: 240,
                     ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ln) });
                 });
@@ -12214,31 +12217,32 @@
                 this.tweens.add({ targets: petObj, scaleX: bsD * 0.97, scaleY: bsD * 1.0,
                   duration: 110, yoyo: true, ease: 'Quad.easeOut' });   // recoil kick
                 const pop = () => { const f1 = this._trackPetFx(petObj, orb), f2 = this._trackPetFx(petObj, orbHalo); f1(); f2(); };
-                this.tweens.add({ targets: [orb, orbHalo], scale: 6, alpha: 0, duration: 160,
+                this.tweens.add({ targets: [orb, orbHalo], scale: 8, alpha: 0, duration: 180,
                   ease: 'Quad.easeOut', onComplete: pop });
                 if (!petObj.visible) return;
-                this.cameras.main.shake(140, 0.0018);
-                for (let i = 0; i < 16; i++) {            // the CONE — spreads wider with distance
-                  const spread = (i / 15 - 0.5) * 2;      // -1..1 across the cone
-                  const reach = 26 + Math.random() * 26;
+                this.cameras.main.shake(160, 0.0025);
+                for (let i = 0; i < 22; i++) {            // the CONE — spreads wider with distance
+                  const spread = (i / 21 - 0.5) * 2;      // -1..1 across the cone
+                  const reach = (34 + Math.random() * 34) * scQ;
                   const f = this.add.triangle(mxQ + fwdQ * 4, myQ + spread * 3, 0, 6, 3.5, -5, 7, 6,
                     [0xff6bff, 0xe84dff, 0xff9dff, 0xffffff][i % 4], 1)
-                    .setAngle(fwdQ > 0 ? 90 : -90).setDepth(3.2).setScale(0.8 + Math.random() * 0.6);
-                  this.tweens.add({ targets: f, alpha: 0, scale: 2.4,
-                    x: f.x + fwdQ * reach, y: f.y + spread * (6 + reach * 0.28),
+                    .setAngle(fwdQ > 0 ? 90 : -90).setDepth(3.2)
+                    .setScale((1.1 + Math.random() * 0.8) * scQ);
+                  this.tweens.add({ targets: f, alpha: 0, scale: 3 * scQ,
+                    x: f.x + fwdQ * reach, y: f.y + spread * (7 + reach * 0.30),
                     angle: f.angle + (Math.random() * 50 - 25),
-                    duration: 430 + Math.random() * 160, ease: 'Sine.easeOut',
+                    duration: 460 + Math.random() * 180, ease: 'Sine.easeOut',
                     onComplete: this._trackPetFx(petObj, f) });
                 }
-                for (let i = 0; i < 6; i++) {             // purple smoke rolling off the blast
-                  const spread = (Math.random() - 0.5) * 8;
-                  const s = this.add.image(mxQ + fwdQ * (10 + i * 5), myQ + spread, `smoke_puff_${i % 3}`)
-                    .setTint(0xb46bff).setScale(0.26 + Math.random() * 0.1).setAlpha(0.6)
+                for (let i = 0; i < 8; i++) {             // purple smoke rolling off the blast
+                  const spread = (Math.random() - 0.5) * 10 * scQ;
+                  const s = this.add.image(mxQ + fwdQ * (10 + i * 6) * scQ, myQ + spread, `smoke_puff_${i % 3}`)
+                    .setTint(0xb46bff).setScale((0.3 + Math.random() * 0.12) * scQ).setAlpha(0.65)
                     .setFlipX(fwdQ < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
-                  this.tweens.add({ targets: s, alpha: 0, scale: 1 + Math.random() * 0.4,
-                    x: s.x + fwdQ * (26 + Math.random() * 18), y: s.y - 8 - Math.random() * 10,
+                  this.tweens.add({ targets: s, alpha: 0, scale: (1.1 + Math.random() * 0.4) * scQ,
+                    x: s.x + fwdQ * (30 + Math.random() * 22) * scQ, y: s.y - 10 - Math.random() * 12,
                     angle: s.angle + (Math.random() * 30 - 15),
-                    duration: 760 + Math.random() * 240, ease: 'Sine.easeOut',
+                    duration: 800 + Math.random() * 260, ease: 'Sine.easeOut',
                     onComplete: this._trackPetFx(petObj, s) });
                 }
               });
@@ -13397,15 +13401,16 @@
               // WING-GUST DUST (storyboard #1): each downstroke pushes a
               // little dust puff + swirl off the floor under her.
               if (isViolet && petObj.visible) {
+                const scF = Math.max(1, petObj.displayWidth / 64);   // effects scale with her size
                 const onDown = fr === petObj._animSet.walk[2];
                 if (onDown && !petObj._gustDown && nowF >= (petObj._gustAt || 0)) {
                   petObj._gustAt = nowF + 260;
-                  const d = this.add.image(petObj.x + (Math.random() * 10 - 5), petObj.y - 1,
+                  const d = this.add.image(petObj.x + (Math.random() * 12 - 6) * scF, petObj.y - 1,
                     `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
-                    .setTint(0xcfc0a8).setAlpha(0.32).setScale(0.14)
+                    .setTint(0xcfc0a8).setAlpha(0.32).setScale(0.16 * scF)
                     .setAngle(Math.random() * 360).setDepth(1.1);
-                  this.tweens.add({ targets: d, alpha: 0, scale: 0.4,
-                    x: d.x + (Math.random() * 16 - 8), angle: d.angle + 40,
+                  this.tweens.add({ targets: d, alpha: 0, scale: 0.45 * scF,
+                    x: d.x + (Math.random() * 18 - 9) * scF, angle: d.angle + 40,
                     duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
                 }
                 petObj._gustDown = onDown;
@@ -13415,12 +13420,12 @@
                   petObj._trailTipAt = nowF + 90;
                   const back = petObj.flipX ? 1 : -1;
                   const wy = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
-                  for (const oy of [-3, 3]) {
+                  for (const oy of [-3 * scF, 3 * scF]) {
                     const s = this.add.star(petObj.x + back * petObj.displayWidth * 0.34,
-                      wy + oy + (Math.random() * 4 - 2), 4, 0.9, 2.4,
+                      wy + oy + (Math.random() * 4 - 2), 4, 0.9 * scF, 2.4 * scF,
                       [0xd7a6ff, 0xf0b6ff, 0xb46bff][Math.floor(Math.random() * 3)], 0.9).setDepth(2.9);
                     this.tweens.add({ targets: s, alpha: 0, scale: 0.3, angle: 120,
-                      x: s.x + back * (10 + Math.random() * 8), y: s.y + (Math.random() * 6 - 3),
+                      x: s.x + back * (12 + Math.random() * 10) * scF, y: s.y + (Math.random() * 6 - 3),
                       duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
                       onComplete: this._trackPetFx(petObj, s) });
                   }
