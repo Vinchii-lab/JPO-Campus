@@ -13820,7 +13820,6 @@
               pet_dragon_crimson:  { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
               pet_dragon_obsidian: { glyphs: ['✦'],       glow: 0xff5500, rise: true },
               pet_unicorn:         { glyphs: ['✨', '⭐'], glow: 0xd9a8ff, rise: true },
-              pet_phoenix:         { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
             }[petObj._petId]) || null;
             if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
               petObj._auraAt = now + 1600 + Math.random() * 1800;
@@ -13935,15 +13934,92 @@
                 const onDown = fr === petObj._animSet.walk[2];
                 if (onDown && !petObj._gustDown && nowF >= (petObj._gustAt || 0)) {
                   petObj._gustAt = nowF + 260;
-                  const d = this.add.image(petObj.x + (Math.random() * 12 - 6) * scF, petObj.y - 1,
-                    `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
-                    .setTint(fxT.dust).setAlpha(0.32).setScale(0.16 * scF)
-                    .setAngle(Math.random() * 360).setDepth(1.1);
-                  this.tweens.add({ targets: d, alpha: 0, scale: 0.45 * scF,
-                    x: d.x + (Math.random() * 18 - 9) * scF, angle: d.angle + 40,
-                    duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                  if (petObj._petId === 'pet_phoenix') {
+                    // D: FIRESTORM WINGBEAT — each downstroke throws a wave of
+                    // flame outward plus an expanding ring of smoke.
+                    for (let i = 0; i < 5; i++) {
+                      const ang = Math.PI * (0.15 + 0.7 * (i / 4));          // fan below the wings
+                      const fw = this.add.image(petObj.x, petObj.y - 6 * scF,
+                        `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(i % 2 ? 0xff7a2d : 0xffb347).setAlpha(0.5)
+                        .setScale(0.11 * scF).setAngle(Math.random() * 360).setDepth(1.15);
+                      this.tweens.add({ targets: fw, alpha: 0, scale: 0.26 * scF,
+                        x: fw.x + Math.cos(ang) * (16 + Math.random() * 8) * scF,
+                        y: fw.y + Math.sin(ang) * 8 * scF, angle: fw.angle + 50,
+                        duration: 430 + Math.random() * 150, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, fw) });
+                    }
+                    const ring = this.add.ellipse(petObj.x, petObj.y - 2, 14, 5, 0x9a938c, 0)
+                      .setStrokeStyle(1.5, 0x9a938c, 0.4).setDepth(1.1);
+                    this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                      duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  } else {
+                    const d = this.add.image(petObj.x + (Math.random() * 12 - 6) * scF, petObj.y - 1,
+                      `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
+                      .setTint(fxT.dust).setAlpha(0.32).setScale(0.16 * scF)
+                      .setAngle(Math.random() * 360).setDepth(1.1);
+                    this.tweens.add({ targets: d, alpha: 0, scale: 0.45 * scF,
+                      x: d.x + (Math.random() * 18 - 9) * scF, angle: d.angle + 40,
+                      duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                  }
                 }
                 petObj._gustDown = onDown;
+                if (petObj._petId === 'pet_phoenix') {
+                  const gy = petObj.y - 1;
+                  const wy2 = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
+                  // B: RADIANT SUN — pulsing golden halo + warm glow on the
+                  // floor beneath, always while airborne (even hovering).
+                  if (nowF >= (petObj._radiantAt || 0)) {
+                    petObj._radiantAt = nowF + 520;
+                    const halo = this.add.circle(petObj.x, wy2, 16 * scF, 0xffd75e, 0.15).setDepth(1.95);
+                    this.tweens.add({ targets: halo, alpha: 0, scale: 1.8, duration: 700,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, halo) });
+                    const spot = this.add.ellipse(petObj.x, gy, 26 * scF, 9 * scF, 0xffb45e, 0.12).setDepth(1.02);
+                    this.tweens.add({ targets: spot, alpha: 0, scaleX: 1.5, duration: 700,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, spot) });
+                  }
+                  if (movingFly) {
+                    // B: heat-shimmer afterimages while traveling.
+                    if (nowF >= (petObj._shimmerAt || 0)) {
+                      petObj._shimmerAt = nowF + 210;
+                      const ghost = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                        .setOrigin(petObj.originX, petObj.originY).setScale(petObj.scaleX, petObj.scaleY)
+                        .setFlipX(petObj.flipX).setTint(0xffc966).setAlpha(0.18).setDepth(1.9);
+                      this.tweens.add({ targets: ghost, alpha: 0, duration: 380,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ghost) });
+                    }
+                    // A: EMBER WAKE — every stretch of flight leaves flame
+                    // puffs that cool into gray smoke curls that LINGER,
+                    // plus scorch marks along the floor under his path.
+                    if (nowF >= (petObj._wakeAt || 0)) {
+                      petObj._wakeAt = nowF + 130;
+                      const back = petObj.flipX ? 1 : -1;
+                      const px = petObj.x + back * petObj.displayWidth * 0.30;
+                      const py = wy2 + (Math.random() * 8 - 4);
+                      const fl = this.add.image(px, py, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0xff7a2d).setAlpha(0.55).setScale(0.13 * scF)
+                        .setAngle(Math.random() * 360).setDepth(2.85);
+                      this.tweens.add({ targets: fl, alpha: 0, scale: 0.3 * scF,
+                        x: fl.x + back * 8 * scF, y: fl.y - 3, duration: 380,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, fl) });
+                      const sm = this.add.image(px + back * 6 * scF, py - 2,
+                        `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0x6b6360).setAlpha(0).setScale(0.10 * scF)
+                        .setAngle(Math.random() * 360).setDepth(2.8);
+                      this.tweens.add({ targets: sm, alpha: { from: 0.4, to: 0 }, scale: 0.42 * scF,
+                        x: sm.x + back * (10 + Math.random() * 8) * scF,
+                        y: sm.y - 8 - Math.random() * 6, angle: sm.angle + 40,
+                        delay: 240, duration: 1200 + Math.random() * 400,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, sm) });
+                      if (nowF >= (petObj._scorchAt || 0)) {
+                        petObj._scorchAt = nowF + 750;
+                        const ch = this.add.ellipse(petObj.x, gy, 9 * scF, 3 * scF, 0x3a2c22, 0.3).setDepth(1.04);
+                        this.tweens.add({ targets: ch, alpha: 0, duration: 1900,
+                          ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ch) });
+                      }
+                    }
+                  }
+                }
                 // WINGTIP TRAILS (storyboard #5) — per-dragon flavor.
                 if (movingFly && nowF >= (petObj._trailTipAt || 0)) {
                   petObj._trailTipAt = nowF + 90;
@@ -13963,17 +14039,30 @@
                         duration: 520 + Math.random() * 260, ease: 'Quad.easeIn',
                         onComplete: this._trackPetFx(petObj, e) });
                     } else if (petObj._petId === 'pet_phoenix') {
-                      // FIERY LIGHT (boss ask): bright white-gold light motes
-                      // that flare, drift back and RISE like sparks off a fire.
-                      const c = [0xfff6c8, 0xffd75e, 0xff9a3d][Math.floor(Math.random() * 3)];
-                      const glow = this.add.circle(tx, tyT, (2.2 + Math.random() * 1.6) * scT, c, 0.30).setDepth(2.85);
-                      const mote = this.add.circle(tx, tyT, (0.9 + Math.random() * 0.8) * scT, c, 0.95).setDepth(2.9);
-                      for (const m of [glow, mote]) {
-                        this.tweens.add({ targets: m, alpha: 0, scale: 0.3,
-                          x: m.x + back * (10 + Math.random() * 10) * scT,
-                          y: m.y - 6 - Math.random() * 10,               // sparks RISE
-                          duration: 600 + Math.random() * 300, ease: 'Sine.easeOut',
-                          onComplete: this._trackPetFx(petObj, m) });
+                      // C: COMET BURN — white-hot streak ribbon + embers that
+                      // drop off, burst into flame on the floor and char it.
+                      const c = Math.random() < 0.5 ? 0xfff6c8 : 0xffd75e;
+                      const core = this.add.ellipse(tx, tyT, 10 * scT, 2.5 * scT, c, 0.75).setDepth(2.9);
+                      this.tweens.add({ targets: core, alpha: 0, scaleX: 0.2,
+                        x: core.x + back * (14 + Math.random() * 10) * scT,
+                        duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, core) });
+                      if (Math.random() < 0.2) {
+                        const gy = petObj.y - 1;
+                        const e = this.add.circle(tx, tyT, 1.4 * scT, 0xff9a3d, 0.95).setDepth(2.9);
+                        const doneE = this._trackPetFx(petObj, e);
+                        this.tweens.add({ targets: e, y: gy, x: e.x + back * 6 * scT,
+                          duration: 420 + Math.random() * 180, ease: 'Quad.easeIn',
+                          onComplete: () => {
+                            const ex = e.x; doneE();
+                            if (!petObj.active || !petObj.visible) return;
+                            const f = this.add.circle(ex, gy, 2.2 * scT, 0xffb347, 0.85).setDepth(1.2);
+                            this.tweens.add({ targets: f, alpha: 0, scale: 2.2, y: gy - 4,
+                              duration: 300, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                            const ch = this.add.ellipse(ex, gy, 7 * scT, 2.6 * scT, 0x2e2622, 0.4).setDepth(1.05);
+                            this.tweens.add({ targets: ch, alpha: 0, duration: 1600,
+                              ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ch) });
+                          } });
                       }
                     } else if (petObj._petId === 'pet_dragon_obsidian') {
                       // gray-black smoke that LINGERS longest
