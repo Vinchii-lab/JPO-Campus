@@ -12089,25 +12089,67 @@
             return;
           }
           if (st >= 3 && petObj._petId === 'pet_cat_snow') {
-            // ROYAL GROOM: the persian queen sits, grooms with slow regal
-            // sways, and a spiral of silver sparkles crowns her. Applause.
+            // CELESTIAL ASCENSION (the boss chose it from the concept sheet):
+            // the queen levitates slowly upward wrapped in a rising SPIRAL of
+            // silver light, hangs mid-air glowing like a deity, then descends
+            // softly while sparkles rain down around her. Peak majesty.
             petObj._trickBusy = true;
             const sitTex = petObj._animSet && petObj._animSet.sit;
-            if (sitTex) petObj.setTexture(sitTex);
-            this.tweens.add({
-              targets: petObj, angle: { from: -7, to: 7 }, duration: 420, yoyo: true, repeat: 3,
-              ease: 'Sine.easeInOut',
-              onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
-            });
-            for (let i = 0; i < 8; i++) {
-              const a0 = i * 0.9;
-              const s = this.add.star(petObj.x + Math.cos(a0) * 14, petObj.y - 10, 4, 1.5, 4, 0xe8f4ff, 0)
-                .setDepth(3);
-              this.tweens.add({ targets: s, alpha: { from: 0.9, to: 0 },
-                y: s.y - 26 - i * 3, x: s.x + Math.cos(a0 + 1.8) * 12, angle: 120,
-                delay: 150 + i * 170, duration: 900, ease: 'Sine.easeOut',
-                onComplete: this._trackPetFx(petObj, s) });
+            if (sitTex) petObj.setTexture(sitTex);   // composed, paws tucked
+            const HOVER = 38;
+            // Rising spiral: each mote orbits the queen's CURRENT position
+            // (so the spiral rides up and down with her) while climbing.
+            for (let i = 0; i < 10; i++) {
+              this.time.delayedCall(i * 170, () => {
+                if (!petObj.active || !petObj._trickBusy) return;
+                const a0 = i * 1.1, sp = { t: 0 };
+                const s = this.add.star(petObj.x, petObj.y, 4, 1.6, 4.2,
+                  i % 3 ? 0xe8f4ff : 0xffffff, 0.95).setDepth(3);
+                this.tweens.add({ targets: sp, t: 1, duration: 1500, ease: 'Sine.easeOut',
+                  onUpdate: () => {
+                    const a = a0 + sp.t * Math.PI * 3;
+                    s.x = petObj.x + Math.cos(a) * (16 - sp.t * 4);
+                    s.y = petObj.y - 4 - sp.t * 34;
+                    s.setAlpha(0.95 * (1 - sp.t)); s.angle = sp.t * 180;
+                  },
+                  onComplete: this._trackPetFx(petObj, s) });
+              });
             }
+            // Halo glow that breathes beneath her while she floats.
+            const halo = this.add.ellipse(petObj.x, petObj.y - 2, 30, 10, 0xe8f4ff, 0.22).setDepth(1);
+            const haloTw = this.tweens.add({ targets: halo, alpha: 0.38, scaleX: 1.3, scaleY: 1.3,
+              duration: 600, yoyo: true, repeat: 5, ease: 'Sine.easeInOut' });
+            const haloTrack = this.time.addEvent({ delay: 50, repeat: 70,
+              callback: () => { if (halo.active) { halo.x = petObj.x; halo.y = petObj.y - 2; } } });
+            const y0c = petObj.y;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0c - HOVER, angle: 0, duration: 1400, ease: 'Sine.easeInOut' },  // slow ascent
+                { y: y0c - HOVER - 4, duration: 500, yoyo: true, repeat: 1,             // divine hover-bob
+                  ease: 'Sine.easeInOut',
+                  onStart: () => {
+                    // At the apex: sparkle rain falls from above her, all the way down.
+                    for (let i = 0; i < 9; i++) {
+                      const rx = petObj.x + (Math.random() * 52 - 26);
+                      const r = this.add.star(rx, petObj.y - 26 - Math.random() * 10,
+                        4, 1.3, 3.6, i % 2 ? 0xe8f4ff : 0xfff6d8, 0.95).setDepth(3);
+                      this.tweens.add({ targets: r, y: y0c + 2, alpha: 0,
+                        angle: Math.random() * 160 - 80, delay: i * 130,
+                        duration: 1100 + Math.random() * 500, ease: 'Sine.easeIn',
+                        onComplete: this._trackPetFx(petObj, r) });
+                    }
+                  } },
+                { y: y0c, duration: 900, ease: 'Sine.easeInOut' },                      // soft descent
+              ],
+              onComplete: () => {
+                petObj.y = y0c; petObj.angle = 0; petObj._trickBusy = false;
+                haloTw.stop(); haloTrack.remove();
+                this.tweens.add({ targets: halo, alpha: 0, scaleX: 2.2, scaleY: 2.2,
+                  duration: 500, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, halo) });
+              },
+            });
+            this._trackPetFx(petObj, halo);   // registered so hides/destroys purge it mid-trick
             return;
           }
           if (st >= 3) {
