@@ -28,6 +28,13 @@ blue>=red — the blue-heavy test spares dark warm-brown outlines, so it's safe 
 coats (a plain dark flood is NOT). Trick FX must also gate on petObj.visible, not just
 .active — hidden-round (prop hunt) pets otherwise leak their position via trick particles.
 
+# Flying pets (dragons st2+) hover via display ORIGIN, not y
+Hover bob = petObj.setOrigin(0.5, 1 + hov/displayHeight) so follow logic, tricks, and
+depth (all keyed on x/y) are untouched; pair with a ground-shadow ellipse tracked via
+_trackPetFx (lazily recreated if purged) and hide shadow + reset origin when seated.
+Black/near-black pets can't be generated on the dark #1e1e28 bg — keying eats them;
+use a light cream bg for dark-colored characters instead.
+
 # Walk frames need ONE uniform scale, not per-frame fit
 Per-frame `-resize 60x60` makes compact poses (crouch) render HUGE vs stretched ones —
 the pet visibly "grows" mid-walk. Trim each frame, find the max dimension across the

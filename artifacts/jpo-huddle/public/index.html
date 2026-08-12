@@ -10394,7 +10394,8 @@
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
                           'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
                           'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire',
-                          'pet_bunny', 'pet_bunny_cocoa'])
+                          'pet_bunny', 'pet_bunny_cocoa',
+                          'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian'])
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
             const stem = id.replace(/^pet_/, '');
@@ -12143,8 +12144,138 @@
           return;
         }
         if (sp === 'pet_dragon') {
-          // Fire breath: rear back, then a stream of 🔥 puffs shoots forward
-          // (toward current facing). Every puff self-destroys (_brewFx pattern).
+          const st = petObj._petStage || 1;
+          const bsD = petObj._baseScale || 1, yD = petObj.y;
+          const fwdD = (petObj.flipX ? -1 : 1);
+          if (st >= 3 && petObj._petId === 'pet_dragon') {
+            // ARCANE NOVA (Violet final form): traces a glowing rune circle in
+            // the air, sparkles spiral inward, then a magic PULSE ripples out.
+            petObj._trickBusy = true;
+            this.tweens.add({ targets: petObj, scaleX: bsD * 1.08, scaleY: bsD * 1.08,
+              duration: 300, yoyo: true, hold: 1500, ease: 'Sine.easeOut',
+              onComplete: () => { petObj.setScale(bsD); petObj._trickBusy = false; } });
+            if (petObj.visible) {
+              const cx = petObj.x, cy = yD - petObj.displayHeight * 0.55;
+              const circ = this.add.circle(cx, cy, 4, 0xd06bff, 0)
+                .setStrokeStyle(2, 0xd06bff, 0.9).setDepth(3);
+              this.tweens.add({ targets: circ, radius: 24, duration: 700, ease: 'Sine.easeOut' });
+              this.tweens.add({ targets: circ, alpha: 0, delay: 1500, duration: 380,
+                onComplete: this._trackPetFx(petObj, circ) });
+              for (let i = 0; i < 6; i++) {             // runes orbit the circle
+                const a0 = (i / 6) * Math.PI * 2;
+                const r = this.add.star(cx + Math.cos(a0) * 24, cy + Math.sin(a0) * 24,
+                  4, 1.2, 3.2, 0xe8c9ff, 0).setDepth(3);
+                this.tweens.add({ targets: r, alpha: { from: 0, to: 0.95 }, delay: 250 + i * 90,
+                  duration: 260, ease: 'Sine.easeOut' });
+                this.tweens.add({ targets: r, x: cx, y: cy, alpha: 0, scale: 0.4,
+                  delay: 900 + i * 60, duration: 460, ease: 'Cubic.easeIn',
+                  onComplete: this._trackPetFx(petObj, r) });
+              }
+              this.time.delayedCall(1450, () => {       // the NOVA
+                if (!petObj.active || !petObj.visible) return;
+                this.cameras.main.shake(160, 0.002);
+                const pulse = this.add.circle(cx, cy, 8, 0xd06bff, 0.35).setDepth(3);
+                this.tweens.add({ targets: pulse, scale: 5, alpha: 0, duration: 620,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, pulse) });
+                for (let i = 0; i < 8; i++) {
+                  const a = (i / 8) * Math.PI * 2;
+                  const s = this.add.star(cx, cy, 4, 1.2, 3, 0xffffff, 0.95).setDepth(3);
+                  this.tweens.add({ targets: s, x: cx + Math.cos(a) * 38, y: cy + Math.sin(a) * 30,
+                    alpha: 0, angle: 120, duration: 560, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, s) });
+                }
+              });
+            }
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_dragon_crimson') {
+            // INFERNO BREATH (Crimson final form): rears back mid-air and
+            // torches the floor ahead — the blast leaves flame patches that
+            // flicker and burn out on their own.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: -12 * fwdD, scaleX: bsD * 1.06, scaleY: bsD * 1.06, duration: 260, ease: 'Sine.easeOut' },
+                { angle: 6 * fwdD, duration: 140, ease: 'Quad.easeIn', hold: 1100 },
+                { angle: 0, scaleX: bsD, scaleY: bsD, duration: 260, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bsD); petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const mx = petObj.x + fwdD * petObj.displayWidth * 0.45;
+              const my = yD - petObj.displayHeight * 0.6;
+              for (let i = 0; i < 10; i++) {            // the torrent
+                this.time.delayedCall(380 + i * 75, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const spread = (Math.random() - 0.5) * 7;
+                  const f = this.add.circle(mx, my + spread, 2.5 + Math.random() * 2,
+                    [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
+                  this.tweens.add({ targets: f, alpha: 0, scale: 2.4,
+                    x: f.x + fwdD * (30 + Math.random() * 22), y: my + spread * 3 + 10 + Math.random() * 8,
+                    duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                });
+              }
+              for (let i = 0; i < 3; i++) {             // lingering flame patches
+                this.time.delayedCall(800 + i * 200, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const px = petObj.x + fwdD * (26 + i * 13 + Math.random() * 5), py = yD + 1;
+                  const patch = this.add.ellipse(px, py, 10, 4, 0xff7a2d, 0.55).setDepth(1);
+                  const flame = this.add.circle(px, py - 3, 2.5, 0xffc94d, 0.9).setDepth(3);
+                  this.tweens.add({ targets: flame, scaleY: { from: 1, to: 1.6 }, y: py - 5,
+                    yoyo: true, repeat: 4, duration: 160, ease: 'Sine.easeInOut' });
+                  this.tweens.add({ targets: [patch, flame], alpha: 0, delay: 1300, duration: 420,
+                    onComplete: this._trackPetFx(petObj, patch) });
+                  this._trackPetFx(petObj, flame);
+                });
+              }
+            }
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_dragon_obsidian') {
+            // VOID SLAM (Obsidian final form): lava cracks flare white-hot,
+            // it DIVES into the ground — dark shockwave, camera thump, embers
+            // erupting from the impact.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bsD * 1.05, scaleY: bsD * 1.12, duration: 420, ease: 'Sine.easeOut',
+                  onStart: () => {                      // cracks flare
+                    let n = 0;
+                    const flick = this.time.addEvent({ repeat: 5, delay: 90, callback: () => {
+                      if (!petObj.active) { flick.remove(); return; }
+                      petObj.setTint((n++ % 2) ? 0xffb066 : 0xffffff);
+                    } });
+                  }, hold: 260 },
+                { scaleX: bsD * 1.3, scaleY: bsD * 0.55, duration: 130, ease: 'Quad.easeIn',   // SLAM
+                  onComplete: () => {
+                    if (!petObj.active) return;
+                    petObj.clearTint();
+                    this.cameras.main.shake(300, 0.006);
+                    if (!petObj.visible) return;
+                    const wave = this.add.ellipse(petObj.x, yD, 26, 9, 0x1a0a1e, 0)
+                      .setStrokeStyle(3, 0xff5500, 0.85).setDepth(3);
+                    this.tweens.add({ targets: wave, scaleX: 3.4, scaleY: 3.4, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, wave) });
+                    for (let i = 0; i < 10; i++) {      // embers erupt
+                      const e = this.add.circle(petObj.x + (Math.random() * 16 - 8), yD - 2,
+                        1.5 + Math.random() * 1.5, [0xffb066, 0xff5500, 0xffdf9a][i % 3], 0.95).setDepth(3);
+                      this.tweens.add({ targets: e, alpha: 0,
+                        x: e.x + (Math.random() * 44 - 22), y: e.y - 14 - Math.random() * 26,
+                        duration: 520 + Math.random() * 300, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, e) });
+                    }
+                  } },
+                { scaleX: bsD, scaleY: bsD, duration: 340, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bsD); petObj.clearTint(); petObj._trickBusy = false; },
+            });
+            return;
+          }
+          // Baby & stage-2: classic fire breath — rear back, then a stream of
+          // 🔥 puffs shoots forward (toward current facing). Every puff
+          // self-destroys (_brewFx pattern).
           petObj._trickBusy = true;
           // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
           // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
@@ -12909,6 +13040,13 @@
               turtle_s3:          { sway: 3,  swayF: 0.005, bounce: 0.050, bounceF: 0.007, frameMs: 320 },
               turtle_sapphire_s2: { sway: 3,  swayF: 0.008, bounce: 0.028, bounceF: 0.010, frameMs: 235 },
               turtle_sapphire_s3: { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 280 },
+              // Dragons st>=2 FLY: no waddle, wing-flap frame cadence.
+              dragon_s2:          { sway: 1.5,swayF: 0.006, bounce: 0.020, bounceF: 0.009, frameMs: 130 },
+              dragon_s3:          { sway: 1.5,swayF: 0.005, bounce: 0.020, bounceF: 0.007, frameMs: 155 },
+              dragon_crimson_s2:  { sway: 2,  swayF: 0.007, bounce: 0.022, bounceF: 0.010, frameMs: 120 },
+              dragon_crimson_s3:  { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 140 },
+              dragon_obsidian_s2: { sway: 1,  swayF: 0.005, bounce: 0.018, bounceF: 0.008, frameMs: 135 },
+              dragon_obsidian_s3: { sway: 1,  swayF: 0.004, bounce: 0.018, bounceF: 0.006, frameMs: 160 },
             };
             const stageKey = (petObj._petStage >= 2 && petObj._petId)
               ? `${petObj._petId.replace(/^pet_/, '')}_s${Math.min(petObj._petStage, 3)}` : null;
@@ -12932,6 +13070,9 @@
               cat_s2: 'slink',   cat_black_s2: 'slink', cat_snow_s2: 'slink',
               cat_s3: 'thump',   cat_black_s3: 'float', cat_snow_s3: 'strut',
               turtle_s2: 'thump', turtle_s3: 'thump', turtle_sapphire_s3: 'float',
+              dragon_s2: 'float', dragon_s3: 'float',
+              dragon_crimson_s2: 'float', dragon_crimson_s3: 'float',
+              dragon_obsidian_s2: 'float', dragon_obsidian_s3: 'float',
             };
             const motion = petObj._mythic === 'cocoa' ? 'thump' : (MOTION[stageKey] || 'trot');
             const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
@@ -13015,6 +13156,9 @@
               pet_cat_snow:        { core: 0xffffff, glow: 0xbfd9e8, rise: -6,  drift: 4 },
               pet_turtle:          { core: 0xd8f0b8, glow: 0x6faa4e, rise: -6,  drift: 3 },
               pet_turtle_sapphire: { core: 0xd8f6ff, glow: 0x3fc8f0, rise: -9,  drift: 3 },
+              pet_dragon:          { core: 0xe8c9ff, glow: 0xb45bff, rise: -10, drift: 5 },
+              pet_dragon_crimson:  { core: 0xffd9a8, glow: 0xff7a2d, rise: -12, drift: 4 },
+              pet_dragon_obsidian: { core: 0xffb066, glow: 0xff5500, rise: -8,  drift: 4 },
             }[petObj._petId]) || null;
             if (trailTh && (!petObj._trailAt || _now >= petObj._trailAt)) {
               petObj._trailAt = _now + 150 + Math.random() * 90;
@@ -13067,6 +13211,9 @@
               pet_cat_snow:        { glyphs: ['✧', '❄'], glow: 0xbfd9e8, rise: false },
               pet_turtle:          { glyphs: ['🍃'],      glow: 0x6faa4e, rise: false },
               pet_turtle_sapphire: { glyphs: ['◆', '✧'], glow: 0x3fc8f0, rise: true },
+              pet_dragon:          { glyphs: ['✦', '✧'], glow: 0xb45bff, rise: true },
+              pet_dragon_crimson:  { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
+              pet_dragon_obsidian: { glyphs: ['✦'],       glow: 0xff5500, rise: true },
             }[petObj._petId]) || null;
             if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
               petObj._auraAt = now + 1600 + Math.random() * 1800;
@@ -13108,6 +13255,31 @@
               petObj._trickAt = now + 9000 + Math.random() * 14000;
               this._petTrick(petObj);
             }
+          }
+          // ── FLIGHT (boss rule, Aug 2026): dragons stage 2+ are AIRBORNE at
+          // all times — hover bob via display origin (never touches x/y, so
+          // follow logic and tricks are untouched) + wings always flapping,
+          // even while idling, + a soft ground-shadow blob so you can read
+          // where they are. They only LAND (sit frame, no shadow) when the
+          // owner sits down.
+          const flying = petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon');
+          if (flying && !seated) {
+            const hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
+            petObj.setOrigin(0.5, 1 + hov / Math.max(petObj.displayHeight, 1));
+            if (petObj._animSet) {           // flap cycle even when standing still
+              const fr = petObj._animSet.walk[Math.floor(petObj._animT / (petObj._gaitFrameMs || 140)) % petObj._animSet.walk.length];
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+            }
+            if (!petObj._flyShadow || !petObj._flyShadow.active) {
+              petObj._flyShadow = this.add.ellipse(petObj.x, petObj.y - 1, 20, 6, 0x000000, 0.20).setDepth(1);
+              this._trackPetFx(petObj, petObj._flyShadow);
+            }
+            petObj._flyShadow.setPosition(petObj.x, petObj.y - 1)
+              .setVisible(petObj.visible)
+              .setScale(1 + (hov - 11) * -0.02);   // shadow breathes opposite the bob
+          } else {
+            if (flying) petObj.setOrigin(0.5, 1);  // seated dragons land
+            if (petObj._flyShadow && petObj._flyShadow.active) petObj._flyShadow.setVisible(false);
           }
         }
         // A trick tween owns x/y while it plays — the follow step dragging the
