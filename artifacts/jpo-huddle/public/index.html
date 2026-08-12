@@ -13349,6 +13349,7 @@
           // owner sits down.
           const flying = petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon');
           if (flying && !seated) {
+            const nowF = Date.now();     // idle-block `now` is out of scope here
             const movingFly = dist > gap + 1;
             // SWOOP LANDING (storyboard #3, violet first): on arrival she
             // dips toward the floor in an arc, flares wings up to brake, and
@@ -13356,17 +13357,17 @@
             const isViolet = petObj._petId === 'pet_dragon';
             if (isViolet) {
               if (petObj._wasFlyMove && !movingFly && !petObj._swoopUntil)
-                { petObj._swoopUntil = now + 560; petObj._swoopDusted = false; }
+                { petObj._swoopUntil = nowF + 560; petObj._swoopDusted = false; }
               petObj._wasFlyMove = movingFly;
               if (movingFly) petObj._swoopUntil = 0;    // took off again mid-swoop
             }
             let hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
             let swooping = false;
             if (petObj._swoopUntil) {
-              if (now >= petObj._swoopUntil) petObj._swoopUntil = 0;
+              if (nowF >= petObj._swoopUntil) petObj._swoopUntil = 0;
               else {
                 swooping = true;
-                const p = 1 - (petObj._swoopUntil - now) / 560;      // 0 → 1
+                const p = 1 - (petObj._swoopUntil - nowF) / 560;     // 0 → 1
                 hov *= 1 - Math.sin(p * Math.PI) * 0.85;             // arc: dive low, rise back
                 if (p > 0.35 && !petObj._swoopDusted && petObj.visible) {
                   petObj._swoopDusted = true;                        // dust ring at the low point
@@ -13397,8 +13398,8 @@
               // little dust puff + swirl off the floor under her.
               if (isViolet && petObj.visible) {
                 const onDown = fr === petObj._animSet.walk[2];
-                if (onDown && !petObj._gustDown && now >= (petObj._gustAt || 0)) {
-                  petObj._gustAt = now + 260;
+                if (onDown && !petObj._gustDown && nowF >= (petObj._gustAt || 0)) {
+                  petObj._gustAt = nowF + 260;
                   const d = this.add.image(petObj.x + (Math.random() * 10 - 5), petObj.y - 1,
                     `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
                     .setTint(0xcfc0a8).setAlpha(0.32).setScale(0.14)
@@ -13410,8 +13411,8 @@
                 petObj._gustDown = onDown;
                 // WINGTIP TRAILS (storyboard #5): violet sparkles streaming
                 // off both wingtips while she's traveling fast.
-                if (movingFly && now >= (petObj._trailTipAt || 0)) {
-                  petObj._trailTipAt = now + 90;
+                if (movingFly && nowF >= (petObj._trailTipAt || 0)) {
+                  petObj._trailTipAt = nowF + 90;
                   const back = petObj.flipX ? 1 : -1;
                   const wy = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
                   for (const oy of [-3, 3]) {
