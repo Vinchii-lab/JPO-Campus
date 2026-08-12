@@ -12001,7 +12001,120 @@
           return;
         }
         if (sp === 'pet_bunny') {
-          // Binky! Two quick hops then one BIG spring with squash & stretch.
+          const stB = petObj._petStage || 1;
+          if (stB >= 3 && petObj._petId === 'pet_bunny') {
+            // BLIZZARD BINKY (boss's pick): mega-spring so high she vanishes
+            // off-screen, snowflakes swirl where she left, then she drops back
+            // down and lands in a puff of white powder. ❄️
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const actTex = petObj._animSet && petObj._animSet.action;
+            const sitTex = petObj._animSet && petObj._animSet.sit;
+            const flakes = () => {
+              for (let i = 0; i < 10; i++) {
+                const f = this.add.text(x0 + (Math.random() * 44 - 22), y0 - 10 - Math.random() * 30,
+                  Math.random() < 0.7 ? '❄' : '✦', { fontSize: `${9 + Math.random() * 4}px`, resolution: 2 })
+                  .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3).setTint(0xdff3ff);
+                this.tweens.add({
+                  targets: f, alpha: { from: 0.95, to: 0 },
+                  y: f.y + 18 + Math.random() * 14, x: f.x + (Math.random() * 16 - 8),
+                  angle: Math.random() * 120 - 60,
+                  delay: i * 70, duration: 900 + Math.random() * 400, ease: 'Sine.easeIn',
+                  onComplete: this._trackPetFx(petObj, f),
+                });
+              }
+            };
+            const powder = () => {
+              for (let i = 0; i < 12; i++) {
+                const a = (i / 12) * Math.PI * 2;
+                const p = this.add.circle(x0, y0 - 2, 2 + Math.random() * 2.5, 0xffffff, 0.9).setDepth(3);
+                this.tweens.add({
+                  targets: p, alpha: 0,
+                  x: x0 + Math.cos(a) * (14 + Math.random() * 10),
+                  y: y0 - 2 + Math.sin(a) * (7 + Math.random() * 5) - 4,
+                  scale: 2.1, duration: 480, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, p),
+                });
+              }
+            };
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 10, duration: 120, yoyo: true, ease: 'Sine.easeOut' },   // warm-up hop
+                { y: y0 - 10, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+                { scaleY: bs * 0.72, scaleX: bs * 1.2, duration: 130 },            // DEEP crouch
+                { y: y0 - 300, scaleY: bs * 1.2, scaleX: bs * 0.85, alpha: 0.1,    // GONE.
+                  duration: 420, ease: 'Cubic.easeOut',
+                  onStart: () => { if (petObj.active && actTex) petObj.setTexture(actTex); flakes(); } },
+                { y: y0 - 300, duration: 700,                                       // hang time up there
+                  onStart: () => { flakes(); } },
+                { y: y0, alpha: 1, scaleY: bs, scaleX: bs, duration: 460, ease: 'Bounce.easeOut',
+                  onStart: () => { flakes(); },
+                  onComplete: () => {
+                    if (!petObj.active) return;
+                    powder(); this.cameras.main.shake(120, 0.002);
+                    if (sitTex) petObj.setTexture(sitTex);
+                  } },
+              ],
+              onComplete: () => {
+                if (!petObj.active) return;
+                petObj.setScale(bs); petObj.y = y0; petObj.setAlpha(1);
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          if (stB >= 3 && petObj._petId === 'pet_bunny_cocoa') {
+            // DRIFT DONUTS (boss's pick): burnout-style spinning donuts around
+            // the owner with dust clouds, screeches to a stop with a wink. 🏎️
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x, flip0 = petObj.flipX;
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0, cy = owner ? owner.y : y0;
+            const r = 30, turns = 2.5;
+            const a0 = Math.atan2(y0 - cy, x0 - cx);
+            const walkFrames = petObj._animSet ? petObj._animSet.walk : null;
+            const spin = { t: 0 };
+            let lastPuff = 0;
+            this.tweens.add({
+              targets: spin, t: 1, duration: 2100, ease: 'Cubic.easeInOut',
+              onUpdate: () => {
+                if (!petObj.active) return;
+                const a = a0 + spin.t * turns * Math.PI * 2;
+                petObj.x = cx + Math.cos(a) * r;
+                petObj.y = cy + Math.sin(a) * (r * 0.55);
+                petObj.flipX = Math.sin(a) > 0;                    // face travel direction
+                if (walkFrames) petObj.setTexture(walkFrames[Math.floor(spin.t * turns * 10) % walkFrames.length]);
+                if (spin.t - lastPuff > 0.09) {                    // dust trail
+                  lastPuff = spin.t;
+                  const d = this.add.text(petObj.x, petObj.y + 2, '💨', { fontSize: '10px', resolution: 2 })
+                    .setOrigin(0.5, 0.5).setAlpha(0.8).setDepth(petObj.depth - 0.1);
+                  this.tweens.add({ targets: d, alpha: 0, scale: 1.6, y: d.y - 5,
+                    duration: 430, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                }
+              },
+              onComplete: () => {
+                if (!petObj.active) return;
+                // Screech to a stop back home + big dust cloud + a wink.
+                petObj.x = x0; petObj.y = y0; petObj.flipX = flip0;
+                if (petObj._animSet && petObj._animSet.sit) petObj.setTexture(petObj._animSet.sit);
+                for (let i = 0; i < 6; i++) {
+                  const d = this.add.circle(x0 + (Math.random() * 20 - 10), y0 - Math.random() * 8,
+                    2.5 + Math.random() * 2, 0xc9a87a, 0.75).setDepth(3);
+                  this.tweens.add({ targets: d, alpha: 0, scale: 2.4, y: d.y - 8,
+                    duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                }
+                const w = this.add.text(x0 + (flip0 ? -10 : 10), y0 - 24, '😉',
+                  { fontSize: '13px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                this.tweens.add({ targets: w, alpha: { from: 1, to: 0 }, y: w.y - 10,
+                  duration: 900, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, w) });
+                this.time.delayedCall(350, () => { if (petObj.active) petObj._trickBusy = false; });
+              },
+            });
+            return;
+          }
+          // Baby + Stage 2: the classic binky.
+          // Two quick hops then one BIG spring with squash & stretch.
           petObj._trickBusy = true;
           const bs = petObj._baseScale || 1, y0 = petObj.y;
           this.tweens.chain({
