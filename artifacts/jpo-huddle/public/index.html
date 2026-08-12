@@ -12155,12 +12155,41 @@
             //     proud measured bounce — the king parades, he doesn't scurry.
             //   cocoa (cocoa storm) = heavy happy lumber: BIG side-to-side
             //     waddle and a bouncy chonky bound.
-            // Everyone else keeps the classic puppy trot.
+            // Everyone else keeps the classic puppy trot — EXCEPT evolved
+            // ducks/cats/turtles (Aug 2026): every stage of every line walks
+            // differently, keyed by pet id + stage:
+            //   ducks: s2 = busy determined waddle; s3 golden drake = big slow
+            //     parade waddle; s3 SWAN = weightless glide, barely a ripple.
+            //   cats: s2 = low sleek prowl; s3 boss tabby = heavy slow saunter;
+            //     s3 mystic black = silent float; s3 persian queen = measured
+            //     strut with her chin up.
+            //   turtles: s2 = sturdy slow plod; s3 elder = ancient deliberate
+            //     march (longest stride time in the game); s3 crystal = smooth
+            //     gliding shimmer-step.
+            const stageGaits = {
+              duck_s2:            { sway: 10, swayF: 0.024, bounce: 0.045, bounceF: 0.032, frameMs: 115 },
+              duck_s3:            { sway: 13, swayF: 0.013, bounce: 0.065, bounceF: 0.015, frameMs: 175 },
+              duck_snow_s2:       { sway: 6,  swayF: 0.016, bounce: 0.035, bounceF: 0.022, frameMs: 145 },
+              duck_snow_s3:       { sway: 1.5,swayF: 0.007, bounce: 0.012, bounceF: 0.009, frameMs: 210 },
+              cat_s2:             { sway: 2,  swayF: 0.012, bounce: 0.030, bounceF: 0.024, frameMs: 150 },
+              cat_s3:             { sway: 5,  swayF: 0.009, bounce: 0.075, bounceF: 0.013, frameMs: 190 },
+              cat_black_s2:       { sway: 1.5,swayF: 0.013, bounce: 0.025, bounceF: 0.026, frameMs: 145 },
+              cat_black_s3:       { sway: 1,  swayF: 0.008, bounce: 0.018, bounceF: 0.011, frameMs: 165 },
+              cat_snow_s2:        { sway: 3,  swayF: 0.013, bounce: 0.040, bounceF: 0.022, frameMs: 155 },
+              cat_snow_s3:        { sway: 4,  swayF: 0.010, bounce: 0.050, bounceF: 0.015, frameMs: 180 },
+              turtle_s2:          { sway: 4,  swayF: 0.007, bounce: 0.030, bounceF: 0.009, frameMs: 250 },
+              turtle_s3:          { sway: 3,  swayF: 0.005, bounce: 0.050, bounceF: 0.007, frameMs: 320 },
+              turtle_sapphire_s2: { sway: 3,  swayF: 0.008, bounce: 0.028, bounceF: 0.010, frameMs: 235 },
+              turtle_sapphire_s3: { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 280 },
+            };
+            const stageKey = (petObj._petStage >= 2 && petObj._petId)
+              ? `${petObj._petId.replace(/^pet_/, '')}_s${Math.min(petObj._petStage, 3)}` : null;
             const gait = {
               blaze: { sway: 2, swayF: 0.011, bounce: 0.085, bounceF: 0.020, frameMs: 165 },
               frost: { sway: 4, swayF: 0.012, bounce: 0.055, bounceF: 0.018, frameMs: 170 },
               cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
-            }[petObj._mythic] || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
+            }[petObj._mythic] || stageGaits[stageKey]
+              || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
             petObj.angle = Math.sin(petObj._animT * gait.swayF) * gait.sway;                     // waddle
             if (petObj._mythic === 'cocoa') {
               // Static-art final form: sell each STEP with a footfall thump —
