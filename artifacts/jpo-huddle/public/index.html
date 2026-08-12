@@ -11641,6 +11641,10 @@
           // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
           if (pet.startsWith('pet_dragon') && (stage || 1) >= 2) {
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
+            // Obsidian's s3 art draws her body smaller relative to her huge
+            // wings, so the fit-to-64px scale leaves her ~20% under the other
+            // two final forms — compensate so all three tower equally.
+            if (stage >= 3 && pet === 'pet_dragon_obsidian') obj._baseScale *= 1.2;
             obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
           }
           obj.setScale(obj._baseScale);
