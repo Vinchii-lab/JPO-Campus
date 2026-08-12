@@ -11640,7 +11640,7 @@
           // rule: most expensive pet = biggest pet in the office). Stage 2
           // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
           if (pet.startsWith('pet_dragon') && (stage || 1) >= 2)
-            obj._baseScale *= (stage >= 3 ? 1.7 : 1.3);
+            obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the
@@ -12297,8 +12297,8 @@
           if (petObj.visible) {
             // Mouth anchor: hover origin shifts the sprite up by
             // (originY-1)*displayHeight, so fold that into the head height.
-            const mx = petObj.x + fwd * petObj.displayWidth * 0.42;
-            const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.35);
+            const mx = petObj.x + fwd * petObj.displayWidth * 0.30;
+            const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
             // Boss call: stage 2 breathes SMOKE — a teen dragon still working
             // up to real fire. Soft layered gray puffs that billow out of the
             // mouth, expand, and curl upward. Babies puff tiny smoke too.
