@@ -12162,36 +12162,33 @@
             this.tweens.add({ targets: petObj, scaleX: bsD * 1.08, scaleY: bsD * 1.08,
               duration: 300, yoyo: true, hold: 1500, ease: 'Sine.easeOut',
               onComplete: () => { petObj.setScale(bsD); petObj.clearTint(); petObj._trickBusy = false; } });
-            // Neon body glow: pulse a bright violet tint on and off.
-            petObj.setTint(0xd06bff);
-            for (const t of [350, 700, 1050, 1400]) this.time.delayedCall(t, () => {
-              if (!petObj.active) return;
-              (t / 350) % 2 ? petObj.setTint(0xf0b6ff) : petObj.setTint(0xd06bff);
-            });
-            this.time.delayedCall(1750, () => { if (petObj.active) petObj.clearTint(); });
+            // NEON strobe: short hot flashes so the base art stays visible
+            // between pulses — reads as glowing, not "dipped in purple".
+            for (const t of [250, 620, 990, 1360]) {
+              this.time.delayedCall(t, () => { if (petObj.active) petObj.setTint(0xff9dff); });
+              this.time.delayedCall(t + 140, () => { if (petObj.active) petObj.clearTint(); });
+            }
             if (petObj.visible) {
               const cx = petObj.x, cy = yD - petObj.displayHeight * ((petObj.originY || 1) - 0.5);
-              // AURA: soft violet halo blooming around the whole body,
-              // breathing twice before fading.
-              const aura = this.add.ellipse(cx, cy, petObj.displayWidth * 1.25,
-                petObj.displayHeight * 1.25, 0xa64dff, 0.22).setDepth(2.9);
-              const rim = this.add.ellipse(cx, cy, petObj.displayWidth * 1.25,
-                petObj.displayHeight * 1.25, 0xa64dff, 0)
-                .setStrokeStyle(2, 0xe0a6ff, 0.7).setDepth(2.9);
-              this.tweens.add({ targets: [aura, rim], scaleX: 1.22, scaleY: 1.22,
+              // AURA: subtle — a thin electric rim hugging the body, no big
+              // purple wash drowning the flames.
+              const rim = this.add.ellipse(cx, cy, petObj.displayWidth * 1.02,
+                petObj.displayHeight * 1.02, 0xa64dff, 0.07)
+                .setStrokeStyle(1.5, 0xf0a6ff, 0.85).setDepth(2.9);
+              this.tweens.add({ targets: rim, scaleX: 1.12, scaleY: 1.12,
                 duration: 420, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
-              this.tweens.add({ targets: [aura, rim], alpha: 0, delay: 1450, duration: 420,
-                onComplete: () => { this._trackPetFx(petObj, aura)(); this._trackPetFx(petObj, rim)(); } });
-              // BREATH: purple smoke wisps laced with violet flame tongues.
+              this.tweens.add({ targets: rim, alpha: 0, delay: 1450, duration: 380,
+                onComplete: this._trackPetFx(petObj, rim) });
+              // BREATH: same tight mouth anchor as stage 2 — right off the snout.
               const fwdQ = fwdD;
-              const mxQ = cx + fwdQ * petObj.displayWidth * 0.30;
-              const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.30);
+              const mxQ = cx + fwdQ * petObj.displayWidth * 0.22;
+              const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
               for (let i = 0; i < 9; i++) {
                 this.time.delayedCall(280 + i * 110, () => {
                   if (!petObj.active || !petObj.visible) return;
                   const spread = (Math.random() - 0.5) * 5;
                   const s = this.add.image(mxQ, myQ + spread, `smoke_puff_${i < 3 ? 0 : (i < 6 ? 1 : 2)}`)
-                    .setTint(0xb46bff).setScale(0.3 + Math.random() * 0.12).setAlpha(0.8)
+                    .setTint(0xb46bff).setScale(0.3 + Math.random() * 0.12).setAlpha(0.65)
                     .setFlipX(fwdQ < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
                   this.tweens.add({ targets: s, alpha: 0, scale: 0.95 + Math.random() * 0.35,
                     angle: s.angle + (Math.random() * 30 - 15),
@@ -12199,14 +12196,19 @@
                     y: s.y - 9 - Math.random() * 12 + spread * 2,
                     duration: 820 + Math.random() * 260, ease: 'Sine.easeOut',
                     onComplete: this._trackPetFx(petObj, s) });
-                  // violet flame tongue riding inside the smoke
-                  const f = this.add.triangle(mxQ + fwdQ * 4, myQ + spread, 0, 5, 3, -4, 6, 5,
-                    [0xe86bff, 0xb44dff, 0x8a2dff][i % 3], 0.9)
-                    .setAngle(fwdQ > 0 ? 90 : -90).setDepth(3.1);
-                  this.tweens.add({ targets: f, alpha: 0, scale: 1.9,
-                    x: f.x + fwdQ * (26 + Math.random() * 14), y: f.y + spread - 2,
+                  // NEON flame tongue — hot magenta with a white-hot core so
+                  // it pops out of the smoke instead of blending into it.
+                  const f = this.add.triangle(mxQ + fwdQ * 4, myQ + spread, 0, 6, 3.5, -5, 7, 6,
+                    [0xff6bff, 0xe84dff, 0xff9dff][i % 3], 1)
+                    .setAngle(fwdQ > 0 ? 90 : -90).setDepth(3.2);
+                  this.tweens.add({ targets: f, alpha: 0, scale: 2.2,
+                    x: f.x + fwdQ * (28 + Math.random() * 14), y: f.y + spread - 2,
                     angle: f.angle + (Math.random() * 40 - 20),
-                    duration: 460, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                    duration: 500, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                  const core = this.add.circle(mxQ + fwdQ * 6, myQ + spread, 1.6, 0xffffff, 0.95).setDepth(3.3);
+                  this.tweens.add({ targets: core, alpha: 0, scale: 1.6,
+                    x: core.x + fwdQ * (20 + Math.random() * 12), y: core.y + spread - 1,
+                    duration: 360, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, core) });
                 });
               }
               // Ignition spark burst at the start — the "click" of the lighter.
