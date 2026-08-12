@@ -12180,18 +12180,62 @@
         }
         if (sp === 'pet_duck') {
           const st = petObj._petStage || 1;
-          if (st >= 2) {
-            // SPLASH DIVE (the boss's idea): the duck dives INTO the floor
-            // like it's water, swims under the surface (a moving ripple
-            // trail), and bursts back up on the other side of its owner.
-            // Themed per form: mallard = blue splash, golden drake = golden
-            // geyser, swan = frosty mist plume.
+          if (st === 2) {
+            // SHOW-OFF FLAP (2nd form only — the dive is final-form
+            // exclusive): the mallard rears up tall, throws a rapid-fire
+            // wing-beat tantrum with feathers flying, hops a proud little
+            // half-circle... and finishes with a big QUACK!
             petObj._trickBusy = true;
             const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
-            const theme = {
-              pet_duck:      { c: 0x8fd4ff, drop: '💦', big: false },
-              pet_duck_snow: { c: 0xeaf6ff, drop: '❄',  big: true },
-            }[petObj._petId] || { c: 0xffd75e, drop: '✨', big: true };   // golden drake
+            const fwd = petObj.flipX ? -1 : 1;
+            for (let i = 0; i < 6; i++) {           // feathers fly off the flapping
+              this.time.delayedCall(260 + i * 130, () => {
+                if (!petObj.active) return;
+                const f = this.add.ellipse(petObj.x + (Math.random() * 20 - 10),
+                  petObj.y - 14 - Math.random() * 10, 7, 3, i % 2 ? 0xffffff : 0x8a6b47, 0.9)
+                  .setAngle(Math.random() * 90 - 45).setDepth(3);
+                this.tweens.add({ targets: f, alpha: 0, y: f.y + 16 + Math.random() * 10,
+                  x: f.x + (Math.random() * 26 - 13), angle: f.angle + 160,
+                  duration: 900, ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, f) });
+              });
+            }
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 1.22, scaleX: bs * 0.88, duration: 200, ease: 'Back.easeOut' },  // rear UP tall
+                { angle: { from: -16, to: 16 }, duration: 60, yoyo: true, repeat: 9 },          // wing-beat tantrum
+                { y: y0 - 10, x: x0 + fwd * 12, angle: 0, duration: 150, yoyo: true, ease: 'Sine.easeOut' }, // hop
+                { y: y0 - 10, x: x0 - fwd * 12, duration: 150, yoyo: true, ease: 'Sine.easeOut',             // hop back
+                  onStart: () => { petObj.flipX = !petObj.flipX; } },
+                { scaleY: bs * 1.3, scaleX: bs * 0.92, duration: 140, ease: 'Back.easeOut', hold: 500,       // big finish...
+                  onStart: () => {
+                    petObj.flipX = fwd < 0;
+                    const q = this.add.text(petObj.x + fwd * 14, petObj.y - 30, 'QUACK!', {
+                      fontSize: '10px', fontStyle: 'bold', color: '#fff', resolution: 2,
+                      backgroundColor: '#2e7d32', padding: { x: 4, y: 2 } }).setOrigin(0.5, 1).setDepth(5);
+                    this.tweens.add({ targets: q, alpha: { from: 1, to: 0 }, y: q.y - 14,
+                      scale: { from: 0.6, to: 1.15 }, duration: 950, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, q) });
+                  } },
+                { scaleY: bs, scaleX: bs, duration: 180, ease: 'Sine.easeIn' },
+              ],
+              onComplete: () => {
+                petObj.setScale(bs); petObj.setPosition(x0, y0); petObj.angle = 0;
+                petObj.flipX = fwd < 0; petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          if (st >= 3) {
+            // SPLASH DIVE (the boss's idea — FINAL FORM exclusive): the duck
+            // dives INTO the floor like it's water, swims under the surface
+            // (a moving ripple trail), and bursts back up on the other side
+            // of its owner. Golden drake = golden geyser, swan = frost plume.
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const theme = petObj._petId === 'pet_duck_snow'
+              ? { c: 0xeaf6ff, drop: '❄', big: true }
+              : { c: 0xffd75e, drop: '✨', big: true };   // golden drake
             const owner = ownerOf();
             const cx = owner ? owner.x : x0 + 60;
             const riseX = cx + (x0 >= cx ? -1 : 1) * 36;   // pop up PAST the owner
