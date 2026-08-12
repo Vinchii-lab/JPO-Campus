@@ -13266,8 +13266,15 @@
           if (flying && !seated) {
             const hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
             petObj.setOrigin(0.5, 1 + hov / Math.max(petObj.displayHeight, 1));
-            if (petObj._animSet) {           // flap cycle even when standing still
-              const fr = petObj._animSet.walk[Math.floor(petObj._animT / (petObj._gaitFrameMs || 140)) % petObj._animSet.walk.length];
+            if (petObj._animSet) {
+              // Flight rhythm (boss note): not a bat — THREE quick flaps,
+              // then a long wings-level GLIDE, repeat.
+              const fm = petObj._gaitFrameMs || 140;
+              const flapWin = fm * 12;                 // 3 full flap cycles (4 frames each)
+              const t = petObj._animT % (flapWin + 1100);
+              const fr = t < flapWin
+                ? petObj._animSet.walk[Math.floor(t / fm) % petObj._animSet.walk.length]
+                : petObj._animSet.walk[1];             // glide on the wings-level frame
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             if (!petObj._flyShadow || !petObj._flyShadow.active) {
