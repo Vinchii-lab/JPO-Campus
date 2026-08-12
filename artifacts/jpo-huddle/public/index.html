@@ -12212,15 +12212,15 @@
             if (motion === 'thump') {
               // Sell each STEP with a footfall thump — squash wide on the
               // plant, stretch tall on the push-off.
-              petObj.setScale(bs * (1 + 0.07 * (1 - step)), bs * (1 - 0.06 + (gait.bounce + 0.06) * step));
+              petObj.setScale(bs * (1 + 0.14 * (1 - step)), bs * (1 - 0.12 + (gait.bounce + 0.16) * step));
             } else if (motion === 'slink') {
-              petObj.setScale(bs * 1.07, bs * (0.95 + gait.bounce * step));   // long + low prowl
+              petObj.setScale(bs * 1.14, bs * (0.86 + (gait.bounce + 0.08) * step)); // long + low prowl
             } else if (motion === 'float') {
-              petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF * 0.6)));
+              petObj.setScale(bs, bs * (1 + (gait.bounce + 0.02) * Math.sin(petObj._animT * gait.bounceF * 0.6)));
             } else if (motion === 'hop') {
-              petObj.setScale(bs * (1 - 0.03 * step), bs * (1 + (gait.bounce + 0.03) * step)); // springy steps
+              petObj.setScale(bs * (1 - 0.08 * step), bs * (1 + (gait.bounce + 0.12) * step)); // springy steps
             } else if (motion === 'strut') {
-              petObj.setScale(bs * (1 + 0.05 * step), bs * (1 + gait.bounce * step)); // chest puff
+              petObj.setScale(bs * (1 + 0.12 * step), bs * (1 + (gait.bounce + 0.05) * step)); // chest puff
             } else {
               petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
             }
@@ -12243,8 +12243,8 @@
               }[stageKey];
               if (fx && fx.kind === 'dust') {
                 const p = this.add.circle(petObj.x - Math.sign(petObj.flipX ? -1 : 1) * 6,
-                  petObj.y - 1, 3 + Math.random() * 2, fx.color, 0.30).setDepth(1);
-                this.tweens.add({ targets: p, alpha: 0, scale: 1.9, y: p.y - 3,
+                  petObj.y - 1, 4 + Math.random() * 3, fx.color, 0.55).setDepth(1);
+                this.tweens.add({ targets: p, alpha: 0, scale: 2.4, y: p.y - 5,
                   duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
               } else if (fx && fx.kind === 'glint') {
                 const g = this.add.star(petObj.x + (Math.random() * 14 - 7), petObj.y - 2 - Math.random() * 6,
