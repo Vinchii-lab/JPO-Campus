@@ -3371,9 +3371,12 @@
     let _myPetNames = {};   // per-pet custom names ("pet_dog" → "Brownie")
     const PET_EVOLVE_XP = [30, 70];
     function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
-    // Mythical gift pets have ONE form — always final. MUST mirror server.js.
-    const PET_SINGLE_FORM = new Set(['pet_unicorn', 'pet_phoenix']);
-    function _petStageFor(pet, xp) { return PET_SINGLE_FORM.has(pet) ? 3 : _petStageOfXp(xp); }
+    // Mythical gift pets (boss rule): TWO forms only — baby, then straight to
+    // FINAL FORM at the first treat threshold. No middle stage. MUST mirror server.js.
+    const PET_MYTHIC = new Set(['pet_unicorn', 'pet_phoenix']);
+    function _petStageFor(pet, xp) {
+      return PET_MYTHIC.has(pet) ? (xp >= PET_EVOLVE_XP[0] ? 3 : 1) : _petStageOfXp(xp);
+    }
     function _myPetStage(pet) { return _petStageFor(pet, (_myPetXp || {})[pet] || 0); }
     let _evoPreview = 0;   // owner-only stage override (0 = off): 🧬 test button
 
@@ -4450,8 +4453,6 @@
     let _petPanelOpen = false;
     function _petStageArt(pet, stage) {
       // Prefer real stage art if it shipped for this pet (dog lines so far).
-      // Single-form mythicals only ever have their base art.
-      if (PET_SINGLE_FORM.has(pet)) return `/assets/pets/${pet}.png`;
       return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
     }
     function renderPetPanel() {
@@ -4459,7 +4460,9 @@
       if (!pet) return;
       const xp = (_myPetXp || {})[pet] || 0;
       const stage = _petStageFor(pet, xp);
-      const next = PET_SINGLE_FORM.has(pet) ? null : (PET_EVOLVE_XP.find((t) => t > xp) ?? null);
+      const next = PET_MYTHIC.has(pet)
+        ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
+        : (PET_EVOLVE_XP.find((t) => t > xp) ?? null);
       const def = PETS.find((c) => c.id === pet);
       const custom = (_myPetNames || {})[pet] || '';
       document.getElementById('pet-panel-name').textContent = custom || (def ? def.name : 'Your pet');
@@ -4474,7 +4477,7 @@
       const pct = next ? Math.round(((xp - lo) / (next - lo)) * 100) : 100;
       document.getElementById('pet-panel-bar').style.width = `${pct}%`;
       document.getElementById('pet-panel-xp').textContent =
-        next ? `${xp} treat${xp === 1 ? '' : 's'} — ${next - xp} more to ${stage === 1 ? 'EVOLVE ✨' : 'FINAL FORM 👑'}`
+        next ? `${xp} treat${xp === 1 ? '' : 's'} — ${next - xp} more to ${stage === 1 && !PET_MYTHIC.has(pet) ? 'EVOLVE ✨' : 'FINAL FORM 👑'}`
              : `${xp} treats — max level, what a champion! 👑`;
     }
     window._openPetPanel = () => {
@@ -10404,12 +10407,20 @@
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
             const stem = id.replace(/^pet_/, '');
+            // (mythics load their s3-only art in the loop below)
             // Choco s3 frames are RECOLORS of the original walk cycle (same
             // motion the boss liked), palette-mapped to the approved dark
             // chocolate art — AI redraws kept producing a different dog.
             for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
               this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png`);
           }
+        // Mythic gift pets: baby form + s3 FINAL FORM only (no stage 2 art).
+        for (const id of ['pet_unicorn', 'pet_phoenix']) {
+          this.load.image(`${id}_s3`, `/assets/pets/${id}_s3.png`);
+          const stem = id.replace(/^pet_/, '');
+          for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+            this.load.image(`petanim_${stem}_s3_${f}`, `/assets/pets/anim/${stem}_s3_${f}.png`);
+        }
         // Empty tucked-in shells for the turtle beyblade trick (side view).
         this.load.image('shell_green',    '/assets/pets/shell_green.png');
         this.load.image('shell_sapphire', '/assets/pets/shell_sapphire.png');
@@ -11648,15 +11659,15 @@
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
             obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
           }
-          // Boss rule: the rare gift-only pets (unicorn, phoenix) have ONE
-          // form — and it's dragon-final-form sized. Majestic from day one.
-          if (pet === 'pet_unicorn' || pet === 'pet_phoenix') {
+          // Boss rule: mythic gift pets' FINAL FORM is dragon-final-form
+          // sized — but the baby stays its original baby size.
+          if ((pet === 'pet_unicorn' || pet === 'pet_phoenix') && (stage || 1) >= 3) {
             obj._baseScale *= 1.7;
             obj._gapMult = 1.9;
           }
-          // Boss note: the unicorn is a MAJESTIC being — slow stately trot,
-          // not a scamper. Longer frame time = smooth gliding walk cycle.
-          if (pet === 'pet_unicorn') obj._gaitFrameMs = 210;
+          // Boss note: the grown unicorn is a MAJESTIC being — slow stately
+          // trot, not a scamper. Longer frame time = smooth gliding walk.
+          if (pet === 'pet_unicorn' && (stage || 1) >= 3) obj._gaitFrameMs = 210;
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the

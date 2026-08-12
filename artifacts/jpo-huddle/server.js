@@ -1329,12 +1329,13 @@ const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
 const PET_EVOLVE_XP = [30, 70];
 const PET_TREAT_PRICE = 250;   // one price everywhere: cafeteria menu AND the click-your-pet panel
 function petStageOf(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
-// Mythical gift pets (unicorn, phoenix) have ONE form — born final. No
-// evolution track, no "evolved!" announcements, no next-threshold nudges.
-const PET_SINGLE_FORM = new Set(["pet_unicorn", "pet_phoenix"]);
-function petStageFor(p) {
-  return PET_SINGLE_FORM.has(p.pet) ? 3 : petStageOf(((p.petXp || {})[p.pet]) || 0);
+// Mythical gift pets (unicorn, phoenix): TWO forms only — baby, then straight
+// to FINAL FORM (stage 3) at the FIRST treat threshold. No middle stage.
+const PET_MYTHIC = new Set(["pet_unicorn", "pet_phoenix"]);
+function petStageOfPet(pet, xp) {
+  return PET_MYTHIC.has(pet) ? (xp >= PET_EVOLVE_XP[0] ? 3 : 1) : petStageOf(xp);
 }
+function petStageFor(p) { return petStageOfPet(p.pet, ((p.petXp || {})[p.pet]) || 0); }
 
 // Shared feed path for BOTH the cafeteria pet-treat menu item and the
 // click-your-pet "Feed" button. Coins out + XP in commit in ONE statement
@@ -1367,11 +1368,12 @@ async function feedPetTreat(io, socket, p) {
       xp = p.petXp[pet] = rows[0].xp;
     } catch (err) { console.error("pet treat failed:", err); return; }
   }
-  const single = PET_SINGLE_FORM.has(pet);
-  const stage = single ? 3 : petStageOf(xp), prevStage = single ? 3 : petStageOf(xp - 1);
+  const stage = petStageOfPet(pet, xp), prevStage = petStageOfPet(pet, xp - 1);
   socket.emit("coinUpdate", { coins: p.coins });
   socket.emit("petFed", { pet, xp, stage,
-    next: single ? null : (PET_EVOLVE_XP.find((t) => t > xp) ?? null) });
+    next: PET_MYTHIC.has(pet)
+      ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
+      : (PET_EVOLVE_XP.find((t) => t > xp) ?? null) });
   io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
   if (stage > prevStage) {
     io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
