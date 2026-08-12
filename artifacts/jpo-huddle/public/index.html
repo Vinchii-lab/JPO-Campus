@@ -12678,7 +12678,7 @@
                   this.add.ellipse(-3.5, -2, 4.5, 3.5, 0x3b6128),
                   this.add.ellipse(3, -1, 4, 3, 0x3b6128),
                   this.add.ellipse(0, -4, 3.5, 2.5, 0x3b6128),
-                ]).setDepth(petObj.depth).setVisible(wasVisible);
+                ]).setDepth(petObj.depth).setVisible(wasVisible).setScale(bs * 1.9); // match the evolved turtle's bulk
                 const killShellFx = this._trackPetFx(petObj, shell);   // pet destroyed → shell goes too
                 const spinTw = this.tweens.addCounter({
                   from: 0, to: 1, duration: 130, repeat: -1,
