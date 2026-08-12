@@ -12285,21 +12285,36 @@
               onComplete: () => { petObj.setScale(bsD); petObj.angle = 0; petObj._trickBusy = false; },
             });
             if (petObj.visible) {
+              const scC = Math.max(1, petObj.displayWidth / 64);
               const mx = petObj.x + fwdD * petObj.displayWidth * 0.45;
               const my = yD - petObj.displayHeight * 0.6;
-              for (let i = 0; i < 10; i++) {            // the torrent
-                this.time.delayedCall(380 + i * 75, () => {
+              // CHARGE-UP: orb burns yellow-white at the mouth while he rears
+              // back, then the torrent ROARS out.
+              const orbC = this.add.circle(mx, my, 2 * scC, 0xfff3c9, 0.95).setDepth(3.2);
+              const haloC = this.add.circle(mx, my, 4 * scC, 0xff9a3d, 0.35).setDepth(3.1);
+              this.tweens.add({ targets: orbC, scale: 5, delay: 120, duration: 620, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: haloC, scale: 5.5, delay: 120, duration: 620, ease: 'Sine.easeIn' });
+              this.time.delayedCall(780, () => {
+                const f1 = this._trackPetFx(petObj, orbC), f2 = this._trackPetFx(petObj, haloC);
+                if (!petObj.active) { f1(); f2(); return; }
+                this.tweens.add({ targets: [orbC, haloC], scale: 8, alpha: 0, duration: 160,
+                  ease: 'Quad.easeOut', onComplete: () => { f1(); f2(); } });
+                this.cameras.main.shake(150, 0.0022);
+              });
+              for (let i = 0; i < 20; i++) {            // the torrent — dense, roaring
+                this.time.delayedCall(800 + i * 34, () => {
                   if (!petObj.active || !petObj.visible) return;
                   const spread = (Math.random() - 0.5) * 7;
-                  const f = this.add.circle(mx, my + spread, 2.5 + Math.random() * 2,
+                  const f = this.add.circle(mx, my + spread, (2.5 + Math.random() * 2) * scC,
                     [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
-                  this.tweens.add({ targets: f, alpha: 0, scale: 2.4,
-                    x: f.x + fwdD * (30 + Math.random() * 22), y: my + spread * 3 + 10 + Math.random() * 8,
-                    duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                  this.tweens.add({ targets: f, alpha: 0, scale: 2.6,
+                    x: f.x + fwdD * (36 + Math.random() * 26) * scC,
+                    y: my + spread * 3 + (10 + Math.random() * 8) * scC,
+                    duration: 460, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
                 });
               }
               for (let i = 0; i < 3; i++) {             // lingering flame patches
-                this.time.delayedCall(800 + i * 200, () => {
+                this.time.delayedCall(1150 + i * 200, () => {
                   if (!petObj.active || !petObj.visible) return;
                   const px = petObj.x + fwdD * (26 + i * 13 + Math.random() * 5), py = yD + 1;
                   const patch = this.add.ellipse(px, py, 10, 4, 0xff7a2d, 0.55).setDepth(1);
@@ -12319,6 +12334,22 @@
             // it DIVES into the ground — dark shockwave, camera thump, embers
             // erupting from the impact.
             petObj._trickBusy = true;
+            // CHARGE-UP: a magma orb glows through her chest cracks while the
+            // flare builds — deep orange, like lava under black rock.
+            if (petObj.visible) {
+              const scO = Math.max(1, petObj.displayWidth / 64);
+              const ox = petObj.x, oy = yD - petObj.displayHeight * 0.45;
+              const orbO = this.add.circle(ox, oy, 2 * scO, 0xff5500, 0.75).setDepth(3.1);
+              const haloO = this.add.circle(ox, oy, 4 * scO, 0xffb066, 0.28).setDepth(3.05);
+              this.tweens.add({ targets: orbO, scale: 4.5, duration: 620, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: haloO, scale: 5, duration: 620, ease: 'Sine.easeIn' });
+              this.time.delayedCall(660, () => {
+                const f1 = this._trackPetFx(petObj, orbO), f2 = this._trackPetFx(petObj, haloO);
+                if (!petObj.active) { f1(); f2(); return; }
+                this.tweens.add({ targets: [orbO, haloO], scale: 7, alpha: 0, duration: 150,
+                  ease: 'Quad.easeOut', onComplete: () => { f1(); f2(); } });
+              });
+            }
             this.tweens.chain({
               targets: petObj,
               tweens: [
@@ -12340,13 +12371,25 @@
                       .setStrokeStyle(3, 0xff5500, 0.85).setDepth(3);
                     this.tweens.add({ targets: wave, scaleX: 3.4, scaleY: 3.4, alpha: 0,
                       duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, wave) });
+                    const scS = Math.max(1, petObj.displayWidth / 64);
                     for (let i = 0; i < 10; i++) {      // embers erupt
-                      const e = this.add.circle(petObj.x + (Math.random() * 16 - 8), yD - 2,
-                        1.5 + Math.random() * 1.5, [0xffb066, 0xff5500, 0xffdf9a][i % 3], 0.95).setDepth(3);
+                      const e = this.add.circle(petObj.x + (Math.random() * 16 - 8) * scS, yD - 2,
+                        (1.5 + Math.random() * 1.5) * scS, [0xffb066, 0xff5500, 0xffdf9a][i % 3], 0.95).setDepth(3);
                       this.tweens.add({ targets: e, alpha: 0,
-                        x: e.x + (Math.random() * 44 - 22), y: e.y - 14 - Math.random() * 26,
+                        x: e.x + (Math.random() * 44 - 22) * scS, y: e.y - (14 + Math.random() * 26) * scS,
                         duration: 520 + Math.random() * 300, ease: 'Quad.easeOut',
                         onComplete: this._trackPetFx(petObj, e) });
+                    }
+                    for (let i = 0; i < 7; i++) {       // BLACK SMOKE blast rolling off the impact
+                      const s = this.add.image(petObj.x + (Math.random() * 20 - 10) * scS, yD - 3,
+                        `smoke_puff_${i % 3}`)
+                        .setTint(0x2c2630).setAlpha(0.7).setScale(0.24 * scS)
+                        .setAngle(Math.random() * 360).setDepth(3);
+                      this.tweens.add({ targets: s, alpha: 0, scale: (1 + Math.random() * 0.5) * scS,
+                        x: s.x + (Math.random() * 50 - 25) * scS, y: s.y - (8 + Math.random() * 16) * scS,
+                        angle: s.angle + (Math.random() * 40 - 20),
+                        duration: 900 + Math.random() * 400, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
                     }
                   } },
                 { scaleX: bsD, scaleY: bsD, duration: 340, ease: 'Back.easeOut' },
@@ -13378,29 +13421,36 @@
           if (flying && !seated) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
             const movingFly = dist > gap + 1;
-            // SWOOP LANDING (storyboard #3, violet first): on arrival she
-            // dips toward the floor in an arc, flares wings up to brake, and
-            // kicks a little dust ring where she settles.
-            const isViolet = petObj._petId === 'pet_dragon';
-            if (isViolet) {
+            // SWOOP LANDING (storyboard #3) — per-dragon personality:
+            //   Violet   graceful wide arc, soft landing, neat dust ring
+            //   Crimson  steeper faster dive, harder brake, camera bump
+            //   Obsidian drops near-vertical, lands with a THUD + rumble
+            const fxT = {
+              pet_dragon:          { swoopMs: 560, dive: 0.85, ring: 2.6, shake: 0,      dust: 0xcfc0a8, dustMul: 1 },
+              pet_dragon_crimson:  { swoopMs: 400, dive: 0.95, ring: 2.9, shake: 0.0016, dust: 0xd9a37e, dustMul: 1.15 },
+              pet_dragon_obsidian: { swoopMs: 340, dive: 1.0,  ring: 3.4, shake: 0.0032, dust: 0x8f8880, dustMul: 1.4 },
+            }[petObj._petId];
+            if (fxT) {
               if (petObj._wasFlyMove && !movingFly && !petObj._swoopUntil)
-                { petObj._swoopUntil = nowF + 560; petObj._swoopDusted = false; }
+                { petObj._swoopUntil = nowF + fxT.swoopMs; petObj._swoopDusted = false; }
               petObj._wasFlyMove = movingFly;
               if (movingFly) petObj._swoopUntil = 0;    // took off again mid-swoop
             }
             let hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
             let swooping = false;
-            if (petObj._swoopUntil) {
+            if (petObj._swoopUntil && fxT) {
               if (nowF >= petObj._swoopUntil) petObj._swoopUntil = 0;
               else {
                 swooping = true;
-                const p = 1 - (petObj._swoopUntil - nowF) / 560;     // 0 → 1
-                hov *= 1 - Math.sin(p * Math.PI) * 0.85;             // arc: dive low, rise back
+                const p = 1 - (petObj._swoopUntil - nowF) / fxT.swoopMs;   // 0 → 1
+                hov *= 1 - Math.sin(p * Math.PI) * fxT.dive;               // arc: dive low, rise back
                 if (p > 0.35 && !petObj._swoopDusted && petObj.visible) {
                   petObj._swoopDusted = true;                        // dust ring at the low point
-                  const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, 0xcfc0a8, 0)
-                    .setStrokeStyle(1.5, 0xd8ccb4, 0.55).setDepth(1.1);
-                  this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                  if (fxT.shake) this.cameras.main.shake(140, fxT.shake);  // THUD
+                  const rr = fxT.ring * fxT.dustMul;
+                  const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, fxT.dust, 0)
+                    .setStrokeStyle(1.5, fxT.dust, 0.6).setDepth(1.1);
+                  this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
                     duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
                 }
               }
@@ -13422,35 +13472,58 @@
               if (swooping) fr = petObj._animSet.walk[0];  // flare wings UP to brake
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
               // WING-GUST DUST (storyboard #1): each downstroke pushes a
-              // little dust puff + swirl off the floor under her.
-              if (isViolet && petObj.visible) {
-                const scF = Math.max(1, petObj.displayWidth / 64);   // effects scale with her size
+              // little dust puff off the floor — Violet neat, Crimson
+              // scattery, Obsidian chunky (she's HEAVY).
+              if (fxT && petObj.visible) {
+                const scF = Math.max(1, petObj.displayWidth / 64) * fxT.dustMul;
                 const onDown = fr === petObj._animSet.walk[2];
                 if (onDown && !petObj._gustDown && nowF >= (petObj._gustAt || 0)) {
                   petObj._gustAt = nowF + 260;
                   const d = this.add.image(petObj.x + (Math.random() * 12 - 6) * scF, petObj.y - 1,
                     `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
-                    .setTint(0xcfc0a8).setAlpha(0.32).setScale(0.16 * scF)
+                    .setTint(fxT.dust).setAlpha(0.32).setScale(0.16 * scF)
                     .setAngle(Math.random() * 360).setDepth(1.1);
                   this.tweens.add({ targets: d, alpha: 0, scale: 0.45 * scF,
                     x: d.x + (Math.random() * 18 - 9) * scF, angle: d.angle + 40,
                     duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
                 }
                 petObj._gustDown = onDown;
-                // WINGTIP TRAILS (storyboard #5): violet sparkles streaming
-                // off both wingtips while she's traveling fast.
+                // WINGTIP TRAILS (storyboard #5) — per-dragon flavor.
                 if (movingFly && nowF >= (petObj._trailTipAt || 0)) {
                   petObj._trailTipAt = nowF + 90;
                   const back = petObj.flipX ? 1 : -1;
+                  const scT = Math.max(1, petObj.displayWidth / 64);
                   const wy = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
-                  for (const oy of [-3 * scF, 3 * scF]) {
-                    const s = this.add.star(petObj.x + back * petObj.displayWidth * 0.34,
-                      wy + oy + (Math.random() * 4 - 2), 4, 0.9 * scF, 2.4 * scF,
-                      [0xd7a6ff, 0xf0b6ff, 0xb46bff][Math.floor(Math.random() * 3)], 0.9).setDepth(2.9);
-                    this.tweens.add({ targets: s, alpha: 0, scale: 0.3, angle: 120,
-                      x: s.x + back * (12 + Math.random() * 10) * scF, y: s.y + (Math.random() * 6 - 3),
-                      duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
-                      onComplete: this._trackPetFx(petObj, s) });
+                  for (const oy of [-3 * scT, 3 * scT]) {
+                    const tx = petObj.x + back * petObj.displayWidth * 0.34;
+                    const tyT = wy + oy + (Math.random() * 4 - 2);
+                    if (petObj._petId === 'pet_dragon_crimson') {
+                      // falling embers: orange sparks that flicker and DROP
+                      const e = this.add.circle(tx, tyT, (1 + Math.random()) * scT,
+                        [0xffd76a, 0xff9a3d, 0xff632d][Math.floor(Math.random() * 3)], 0.95).setDepth(2.9);
+                      this.tweens.add({ targets: e, alpha: 0, scale: 0.4,
+                        x: e.x + back * (8 + Math.random() * 8) * scT,
+                        y: e.y + (8 + Math.random() * 12),          // embers fall
+                        duration: 520 + Math.random() * 260, ease: 'Quad.easeIn',
+                        onComplete: this._trackPetFx(petObj, e) });
+                    } else if (petObj._petId === 'pet_dragon_obsidian') {
+                      // gray-black smoke that LINGERS longest
+                      const s = this.add.image(tx, tyT, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0x3a343c).setAlpha(0.5).setScale(0.14 * scT)
+                        .setAngle(Math.random() * 360).setDepth(2.9);
+                      this.tweens.add({ targets: s, alpha: 0, scale: 0.5 * scT,
+                        x: s.x + back * (6 + Math.random() * 6) * scT, y: s.y - 4 - Math.random() * 6,
+                        angle: s.angle + 30, duration: 1100 + Math.random() * 500,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                    } else {
+                      // violet: sparkles that twinkle as they fade
+                      const s = this.add.star(tx, tyT, 4, 0.9 * scT, 2.4 * scT,
+                        [0xd7a6ff, 0xf0b6ff, 0xb46bff][Math.floor(Math.random() * 3)], 0.9).setDepth(2.9);
+                      this.tweens.add({ targets: s, alpha: 0, scale: 0.3, angle: 120,
+                        x: s.x + back * (12 + Math.random() * 10) * scT, y: s.y + (Math.random() * 6 - 3),
+                        duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
                   }
                 }
               }
