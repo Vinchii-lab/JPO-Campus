@@ -3371,7 +3371,10 @@
     let _myPetNames = {};   // per-pet custom names ("pet_dog" → "Brownie")
     const PET_EVOLVE_XP = [30, 70];
     function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
-    function _myPetStage(pet) { return _petStageOfXp((_myPetXp || {})[pet] || 0); }
+    // Mythical gift pets have ONE form — always final. MUST mirror server.js.
+    const PET_SINGLE_FORM = new Set(['pet_unicorn', 'pet_phoenix']);
+    function _petStageFor(pet, xp) { return PET_SINGLE_FORM.has(pet) ? 3 : _petStageOfXp(xp); }
+    function _myPetStage(pet) { return _petStageFor(pet, (_myPetXp || {})[pet] || 0); }
     let _evoPreview = 0;   // owner-only stage override (0 = off): 🧬 test button
 
     // Pet accessories: cosmetic add-ons drawn ON the active pet (one slot,
@@ -4447,14 +4450,16 @@
     let _petPanelOpen = false;
     function _petStageArt(pet, stage) {
       // Prefer real stage art if it shipped for this pet (dog lines so far).
+      // Single-form mythicals only ever have their base art.
+      if (PET_SINGLE_FORM.has(pet)) return `/assets/pets/${pet}.png`;
       return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
     }
     function renderPetPanel() {
       const pet = _equippedPet;
       if (!pet) return;
       const xp = (_myPetXp || {})[pet] || 0;
-      const stage = _petStageOfXp(xp);
-      const next = PET_EVOLVE_XP.find((t) => t > xp) ?? null;
+      const stage = _petStageFor(pet, xp);
+      const next = PET_SINGLE_FORM.has(pet) ? null : (PET_EVOLVE_XP.find((t) => t > xp) ?? null);
       const def = PETS.find((c) => c.id === pet);
       const custom = (_myPetNames || {})[pet] || '';
       document.getElementById('pet-panel-name').textContent = custom || (def ? def.name : 'Your pet');
@@ -14437,7 +14442,7 @@
         const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite);
         const wings = madeW ? madeW.obj : null;
         const wingsDef = madeW ? madeW.def : null;
-        const petStage = _petStageOfXp(((data.petXp || {})[data.pet]) || 0);
+        const petStage = _petStageFor(data.pet, ((data.petXp || {})[data.pet]) || 0);
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
 
         this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
