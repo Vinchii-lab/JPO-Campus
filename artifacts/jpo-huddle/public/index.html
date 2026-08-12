@@ -11654,6 +11654,9 @@
             obj._baseScale *= 1.7;
             obj._gapMult = 1.9;
           }
+          // Boss note: the unicorn is a MAJESTIC being — slow stately trot,
+          // not a scamper. Longer frame time = smooth gliding walk cycle.
+          if (pet === 'pet_unicorn') obj._gaitFrameMs = 210;
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the
