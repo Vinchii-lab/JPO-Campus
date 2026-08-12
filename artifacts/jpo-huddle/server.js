@@ -1337,6 +1337,29 @@ function petStageOfPet(pet, xp) {
 }
 function petStageFor(p) { return petStageOfPet(p.pet, ((p.petXp || {})[p.pet]) || 0); }
 
+// ── Pet XP travels WITH the pet on ownership change (trade / market sale) ────
+// The receiver keeps the better of the two histories (their own old feedings
+// for that species vs the incoming pet's), and the giver's history for that
+// pet is wiped — so an evolved pet arrives evolved, and the seller can't
+// re-buy the species later and get a free pre-evolved one.
+// Must run inside the same transaction as the ownership swap.
+async function transferPetXpTx(client, fromEmail, toEmail, pet) {
+  const { rows } = await client.query(
+    `SELECT (pet_xp->>$2)::int AS xp FROM jpo_players WHERE email = $1`, [fromEmail, pet]);
+  const xp = (rows.length && rows[0].xp) || 0;
+  await client.query(
+    `UPDATE jpo_players SET pet_xp = coalesce(pet_xp, '{}'::jsonb) - $2::text WHERE email = $1`,
+    [fromEmail, pet]);
+  const { rows: r2 } = await client.query(
+    `UPDATE jpo_players
+        SET pet_xp = jsonb_set(coalesce(pet_xp, '{}'::jsonb), ARRAY[$2::text],
+                     to_jsonb(GREATEST(coalesce((pet_xp->>$2)::int, 0), $3::int)))
+      WHERE email = $1
+      RETURNING (pet_xp->>$2)::int AS xp`,
+    [toEmail, pet, xp]);
+  return (r2.length && r2[0].xp) || xp;   // receiver's final xp for this pet
+}
+
 // Shared feed path for BOTH the cafeteria pet-treat menu item and the
 // click-your-pet "Feed" button. Coins out + XP in commit in ONE statement
 // for account players, so a crash can't charge without feeding (or vice
@@ -7334,8 +7357,14 @@ io.on("connection", (socket) => {
         [to.email, t.askPet, t.offerPet, t.coins],
       );
       if (r1.rowCount === 1 && r2.rowCount === 1) {
+        // Evolution travels with each pet, both directions of the swap.
+        const xpOfferTo = await transferPetXpTx(client, from.email, to.email, t.offerPet);
+        const xpAskTo   = await transferPetXpTx(client, to.email, from.email, t.askPet);
         await client.query("COMMIT");
         ok = true; fromRow = r1.rows[0]; toRow = r2.rows[0];
+        from.petXp = from.petXp || {}; to.petXp = to.petXp || {};
+        delete from.petXp[t.offerPet]; from.petXp[t.askPet] = xpAskTo;
+        delete to.petXp[t.askPet];     to.petXp[t.offerPet] = xpOfferTo;
       } else {
         await client.query("ROLLBACK");
       }
@@ -7611,8 +7640,13 @@ io.on("connection", (socket) => {
       for (const b of losers)
         await client.query(`UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`, [b.amount, b.bidder_email]);
       await client.query(`DELETE FROM jpo_store_listings WHERE id = $1`, [listingId]);   // bids cascade
+      // Pets sell WITH their evolution — move the feeding history to the buyer.
+      let winnerPetXp = null;
+      if (Object.prototype.hasOwnProperty.call(PETS, item) || RARE_PETS.has(item)) {
+        winnerPetXp = await transferPetXpTx(client, p.email, win.bidder_email, item);
+      }
       await client.query("COMMIT");
-      done = { item, win, losers, sellerRow: sold[0] };
+      done = { item, win, losers, sellerRow: sold[0], winnerPetXp };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       console.error("storeAccept failed:", err); storeFail("The sale fell through — nothing changed.");
@@ -7629,6 +7663,7 @@ io.on("connection", (socket) => {
       p.wings = done.sellerRow.equipped_wings || "";
       p.pet = done.sellerRow.equipped_pet || "";
       p.petAcc = done.sellerRow.equipped_pet_acc || "";
+      if (done.winnerPetXp != null) { p.petXp = p.petXp || {}; delete p.petXp[done.item]; }
       socket.emit("coinUpdate", { coins: p.coins });
       if (hadCos !== p.equipped || hadWings !== p.wings) io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings });
       if (hadPet !== p.pet || hadAcc !== p.petAcc) io.emit("playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc, petStage: petStageFor(p) });
@@ -7638,6 +7673,10 @@ io.on("connection", (socket) => {
     const winSock = socketIdByEmail(done.win.bidder_email);
     if (winSock && players[winSock]) {
       players[winSock].cosmetics = [...(players[winSock].cosmetics || []), done.item];
+      if (done.winnerPetXp != null) {
+        players[winSock].petXp = players[winSock].petXp || {};
+        players[winSock].petXp[done.item] = done.winnerPetXp;
+      }
       io.to(winSock).emit("storeOk", { message: `You won the ${label} for ${done.win.amount.toLocaleString()} coins — it's in your collection!` });
       io.to(winSock).emit("collectionUpdate", { cosmetics: players[winSock].cosmetics });
     } else {
