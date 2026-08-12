@@ -12658,16 +12658,55 @@
             return;
           }
           if (st === 2) {
-            // Shell SPIN: tuck in and whirl two quick turns before popping out.
+            // Shell SPIN, BEYBLADE style: tuck into the shell and whirl
+            // UPRIGHT around the vertical axis (scaleX sweeps + to - like a
+            // top seen edge-on) with a wobble like a real spinning top,
+            // dust kicked up at the rim, then pop out with a wobble-stop.
             petObj._trickBusy = true;
+            const flip0 = petObj.flipX, x0 = petObj.x;
+            const spin = { t: 0 };
+            let lastDust = 0;
             this.tweens.chain({
               targets: petObj,
               tweens: [
                 { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 180, ease: 'Sine.easeIn' },
-                { angle: 360 * 2, duration: 950, ease: 'Cubic.easeInOut' },
-                { scaleX: bs, scaleY: bs, angle: 0, duration: 240, ease: 'Back.easeOut' },
               ],
-              onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+              onComplete: () => {
+                if (!petObj.active) { return; }
+                this.tweens.add({
+                  targets: spin, t: 1, duration: 1500, ease: 'Sine.easeInOut',
+                  onUpdate: () => {
+                    if (!petObj.active) return;
+                    // Revs: slow → FAST → slow, like a launched beyblade.
+                    const revs = spin.t * spin.t * (3 - 2 * spin.t) * 9;      // smoothstep * total revs
+                    petObj.scaleX = bs * 0.72 * Math.cos(revs * Math.PI * 2); // vertical-axis whirl
+                    petObj.angle = Math.sin(spin.t * Math.PI * 5) * 7 * (1 - spin.t * 0.5); // top wobble
+                    petObj.x = x0 + Math.sin(spin.t * Math.PI * 7) * 2;       // tiny precession drift
+                    if (petObj.visible && spin.t > 0.12 && spin.t - lastDust > 0.13) {
+                      lastDust = spin.t;
+                      const side = Math.random() < 0.5 ? -1 : 1;
+                      const d = this.add.circle(petObj.x + side * 9, y0 - 1,
+                        1.5 + Math.random() * 1.5, 0xcfc9b8, 0.7).setDepth(3);
+                      this.tweens.add({ targets: d, alpha: 0, x: d.x + side * (10 + Math.random() * 8),
+                        y: d.y - 3 - Math.random() * 4, scale: 1.8, duration: 380,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                    }
+                  },
+                  onComplete: () => {
+                    if (!petObj.active) return;
+                    petObj.x = x0; petObj.setFlipX(flip0);
+                    this.tweens.add({
+                      targets: petObj, scaleX: bs, scaleY: bs, angle: 0,
+                      duration: 300, ease: 'Back.easeOut',
+                      onComplete: () => {
+                        if (!petObj.active) return;
+                        petObj.setScale(bs); petObj.angle = 0; petObj.x = x0;
+                        petObj.setFlipX(flip0); petObj._trickBusy = false;
+                      },
+                    });
+                  },
+                });
+              },
             });
             return;
           }
