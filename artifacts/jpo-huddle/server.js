@@ -876,7 +876,7 @@ function giftRecord(key, amount) {
 // strand prod history for zero benefit.
 const BUDDY_NPC             = "__huddles__";
 const BUDDY_EARN_MULT       = 1.25;
-const BUDDY_BUFF_DAILY_MIN  = 120;   // boosted minutes per player per UTC day
+const BUDDY_BUFF_DAILY_MIN  = 1440;  // boosted minutes per player per UTC day (boss call: 1.25× runs 24/7, no cap)
 const BUDDY_GAME_BONUS      = 50;    // coins EACH when the pair finishes a duel
 const BUDDY_GAME_DAILY_CAP  = 5;     // duel bonuses per pair per UTC day
 const BUDDY_QUIZ_PAY        = 100;   // coins per correct guess (3 questions)
@@ -1327,7 +1327,7 @@ const FRIDGE_COOLDOWN_MS = 45_000;   // "you're full" window between free snacks
 // No daily cap on purpose (owner: rich players may speedrun it).
 // The client mirrors these thresholds for its stage rendering.
 const PET_EVOLVE_XP = [30, 70];
-const PET_TREAT_PRICE = 250;   // one price everywhere: cafeteria menu AND the click-your-pet panel
+const PET_TREAT_PRICE = 150;   // one price everywhere: cafeteria menu AND the click-your-pet panel
 function petStageOf(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
 // Mythical gift pets (unicorn, phoenix): TWO forms only — baby, then straight
 // to FINAL FORM (stage 3) at the FIRST treat threshold. No middle stage.
@@ -1408,7 +1408,7 @@ const FOOD_MENUS = {
     { id: "spaghetti", name: "Spaghetti",            icon: "🍝", price: 11 },
     { id: "burger",    name: "Office burger",        icon: "🍔", price: 12 },
     { id: "curry",     name: "Curry plate",          icon: "🍛", price: 12 },
-    { id: "pet_treat", name: "Pet Treat (+1 pet XP — evolve your pet!)", icon: "🦴", price: 250 },
+    { id: "pet_treat", name: "Pet Treat (+1 pet XP — evolve your pet!)", icon: "🦴", price: PET_TREAT_PRICE },
   ] },
   grill: { title: "🍳 Kitchen Grill", items: [
     { id: "eggs",      name: "Fried eggs",           icon: "🍳", price: 6 },
