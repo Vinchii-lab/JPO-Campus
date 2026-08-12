@@ -13869,7 +13869,8 @@
           // even while idling, + a soft ground-shadow blob so you can read
           // where they are. They only LAND (sit frame, no shadow) when the
           // owner sits down.
-          const flying = petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon');
+          const flying = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
+            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);   // grown phoenix is AIRBORNE like the dragons
           if (flying && !seated) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
             const movingFly = dist > gap + 1;
@@ -13883,6 +13884,7 @@
               pet_dragon:          { swoopMs: 560, dive: 0.85, ring: 2.6, shake: 0,      dust: 0xcfc0a8, dustMul: 1 },
               pet_dragon_crimson:  { swoopMs: 400, dive: 0.95, ring: 2.9, shake: 0.0016, dust: 0xd9a37e, dustMul: 1.15 },
               pet_dragon_obsidian: { swoopMs: 340, dive: 1.0,  ring: 3.4, shake: 0.0032, dust: 0x8f8880, dustMul: 1.4 },
+              pet_phoenix:         { swoopMs: 480, dive: 0.9,  ring: 2.8, shake: 0,      dust: 0xffb45e, dustMul: 1.05 },
             }[petObj._petId] : null;
             if (fxT) {
               if (petObj._wasFlyMove && !movingFly && !petObj._swoopUntil)
@@ -13960,6 +13962,19 @@
                         y: e.y + (8 + Math.random() * 12),          // embers fall
                         duration: 520 + Math.random() * 260, ease: 'Quad.easeIn',
                         onComplete: this._trackPetFx(petObj, e) });
+                    } else if (petObj._petId === 'pet_phoenix') {
+                      // FIERY LIGHT (boss ask): bright white-gold light motes
+                      // that flare, drift back and RISE like sparks off a fire.
+                      const c = [0xfff6c8, 0xffd75e, 0xff9a3d][Math.floor(Math.random() * 3)];
+                      const glow = this.add.circle(tx, tyT, (2.2 + Math.random() * 1.6) * scT, c, 0.30).setDepth(2.85);
+                      const mote = this.add.circle(tx, tyT, (0.9 + Math.random() * 0.8) * scT, c, 0.95).setDepth(2.9);
+                      for (const m of [glow, mote]) {
+                        this.tweens.add({ targets: m, alpha: 0, scale: 0.3,
+                          x: m.x + back * (10 + Math.random() * 10) * scT,
+                          y: m.y - 6 - Math.random() * 10,               // sparks RISE
+                          duration: 600 + Math.random() * 300, ease: 'Sine.easeOut',
+                          onComplete: this._trackPetFx(petObj, m) });
+                      }
                     } else if (petObj._petId === 'pet_dragon_obsidian') {
                       // gray-black smoke that LINGERS longest
                       const s = this.add.image(tx, tyT, `smoke_puff_${Math.floor(Math.random() * 3)}`)
