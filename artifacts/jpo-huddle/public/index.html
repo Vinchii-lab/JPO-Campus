@@ -13540,30 +13540,49 @@
               .setScale(1 + (hov - 11) * -0.02);   // shadow breathes opposite the bob
           } else {
             if (flying) {
-              // SWOOP LANDING on sit-down (boss rule): when the owner takes a
-              // seat, the dragon drops out of the air with its personality —
-              // dust ring (Violet neat / Crimson kicky / Obsidian THUD+rumble).
-              if (petObj.originY > 1.01 && petObj.visible) {   // was airborne this frame
-                const lfx = {
-                  pet_dragon:          { ring: 2.6, shake: 0,      dust: 0xcfc0a8, mul: 1 },
-                  pet_dragon_crimson:  { ring: 2.9, shake: 0.0016, dust: 0xd9a37e, mul: 1.15 },
-                  pet_dragon_obsidian: { ring: 3.4, shake: 0.0032, dust: 0x8f8880, mul: 1.4 },
-                }[petObj._petId];
-                if (lfx) {
-                  if (lfx.shake) this.cameras.main.shake(140, lfx.shake);
-                  const rr = lfx.ring * lfx.mul;
-                  const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, lfx.dust, 0)
-                    .setStrokeStyle(1.5, lfx.dust, 0.6).setDepth(1.1);
-                  this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
-                    duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
-                  const d = this.add.image(petObj.x, petObj.y - 1, 'smoke_puff_0')
-                    .setTint(lfx.dust).setAlpha(0.35).setScale(0.18 * lfx.mul)
-                    .setAngle(Math.random() * 360).setDepth(1.1);
-                  this.tweens.add({ targets: d, alpha: 0, scale: 0.5 * lfx.mul,
-                    duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
-                }
+              // SWOOP LANDING on sit-down (boss rule): the dragon doesn't
+              // teleport into its seat — it visibly DESCENDS over ~half a
+              // second, wings flared to brake, then the dust hits on touchdown.
+              const nowL = Date.now();
+              if (petObj.originY > 1.01 && !petObj._landT0) {   // just left the air
+                petObj._landT0 = nowL;
+                petObj._landH0 = (petObj.originY - 1) * Math.max(petObj.displayHeight, 1);
               }
-              petObj.setOrigin(0.5, 1);  // seated dragons land
+              if (petObj._landT0) {
+                const p = Math.min(1, (nowL - petObj._landT0) / 480);
+                const h = petObj._landH0 * (1 - p * p);          // accelerating drop
+                petObj.setOrigin(0.5, 1 + h / Math.max(petObj.displayHeight, 1));
+                if (p < 1) {
+                  // wings flared UP while dropping (overrides the sit frame
+                  // the idle branch already set this tick — last write wins)
+                  if (petObj._animSet) {
+                    const fr = petObj._animSet.walk[0];
+                    if (petObj.texture.key !== fr) petObj.setTexture(fr);
+                  }
+                } else {
+                  petObj._landT0 = 0;                            // touchdown!
+                  if (petObj.visible) {
+                    const lfx = {
+                      pet_dragon:          { ring: 2.6, shake: 0,      dust: 0xcfc0a8, mul: 1 },
+                      pet_dragon_crimson:  { ring: 2.9, shake: 0.0016, dust: 0xd9a37e, mul: 1.15 },
+                      pet_dragon_obsidian: { ring: 3.4, shake: 0.0032, dust: 0x8f8880, mul: 1.4 },
+                    }[petObj._petId];
+                    if (lfx) {
+                      if (lfx.shake) this.cameras.main.shake(140, lfx.shake);
+                      const rr = lfx.ring * lfx.mul;
+                      const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, lfx.dust, 0)
+                        .setStrokeStyle(1.5, lfx.dust, 0.6).setDepth(1.1);
+                      this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
+                        duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                      const d = this.add.image(petObj.x, petObj.y - 1, 'smoke_puff_0')
+                        .setTint(lfx.dust).setAlpha(0.35).setScale(0.18 * lfx.mul)
+                        .setAngle(Math.random() * 360).setDepth(1.1);
+                      this.tweens.add({ targets: d, alpha: 0, scale: 0.5 * lfx.mul,
+                        duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                    }
+                  }
+                }
+              } else petObj.setOrigin(0.5, 1);                   // already landed
             }
             if (petObj._flyShadow && petObj._flyShadow.active) petObj._flyShadow.setVisible(false);
           }
