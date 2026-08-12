@@ -12242,12 +12242,13 @@
                       angle: b.angle + (Math.random() * 24 - 12),
                       duration: 380 + Math.random() * 140, ease: 'Sine.easeOut',
                       onComplete: this._trackPetFx(petObj, b) });
-                    // white-hot core streak down the middle
+                    // hot pink-white core — small soft blobs riding inside the
+                    // beam, not a solid white bar (looked like a laser glitch)
                     if (i % 2 === 0) {
-                      const c = this.add.ellipse(mxQ + fwdQ * 8 * scQ, myQ + spread,
-                        10 * scQ, 3 * scQ, 0xffffff, 0.9).setDepth(3.3);
-                      this.tweens.add({ targets: c, alpha: 0, scaleX: 2.2, scaleY: 0.7,
-                        x: c.x + fwdQ * reach * 0.9, y: c.y + spread * 3,
+                      const c = this.add.circle(mxQ + fwdQ * 8 * scQ, myQ + spread * 1.5,
+                        2.2 * scQ, 0xffe6ff, 0.7).setDepth(3.3);
+                      this.tweens.add({ targets: c, alpha: 0, scale: 1.8,
+                        x: c.x + fwdQ * reach * 0.85, y: c.y + spread * 3,
                         duration: 300 + Math.random() * 100, ease: 'Sine.easeOut',
                         onComplete: this._trackPetFx(petObj, c) });
                     }
