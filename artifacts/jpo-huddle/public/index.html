@@ -13428,11 +13428,13 @@
             //   Violet   graceful wide arc, soft landing, neat dust ring
             //   Crimson  steeper faster dive, harder brake, camera bump
             //   Obsidian drops near-vertical, lands with a THUD + rumble
-            const fxT = {
+            // FINAL FORM ONLY (boss catch): stage 2 flies plain; the whole
+            // personality package (swoop/dust/trails) is a stage-3 flex.
+            const fxT = petObj._petStage >= 3 ? {
               pet_dragon:          { swoopMs: 560, dive: 0.85, ring: 2.6, shake: 0,      dust: 0xcfc0a8, dustMul: 1 },
               pet_dragon_crimson:  { swoopMs: 400, dive: 0.95, ring: 2.9, shake: 0.0016, dust: 0xd9a37e, dustMul: 1.15 },
               pet_dragon_obsidian: { swoopMs: 340, dive: 1.0,  ring: 3.4, shake: 0.0032, dust: 0x8f8880, dustMul: 1.4 },
-            }[petObj._petId];
+            }[petObj._petId] : null;
             if (fxT) {
               if (petObj._wasFlyMove && !movingFly && !petObj._swoopUntil)
                 { petObj._swoopUntil = nowF + fxT.swoopMs; petObj._swoopDusted = false; }
@@ -13544,7 +13546,7 @@
               // teleport into its seat — it visibly DESCENDS over ~half a
               // second, wings flared to brake, then the dust hits on touchdown.
               const nowL = Date.now();
-              if (petObj.originY > 1.01 && !petObj._landT0) {   // just left the air
+              if (petObj.originY > 1.01 && !petObj._landT0 && petObj._petStage >= 3) {   // just left the air (final form only)
                 petObj._landT0 = nowL;
                 petObj._landH0 = (petObj.originY - 1) * Math.max(petObj.displayHeight, 1);
               }
