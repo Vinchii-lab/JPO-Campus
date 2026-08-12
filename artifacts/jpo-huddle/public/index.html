@@ -11641,6 +11641,7 @@
           // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
           if (pet.startsWith('pet_dragon') && (stage || 1) >= 2)
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
+            obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
           obj.setScale(obj._baseScale);
         }
         // Evolution stages (fed with cafeteria treats). With real stage art the
@@ -13090,7 +13091,9 @@
       // emoji ON the seated body (pets render above players at depth 2). A pet
       // sitting exactly underfoot settles straight DOWN (in front of the chair).
       _stepPet(petObj, px, py, delta, seated) {
-        const gap = seated ? PET_SIT_GAP : PET_GAP;
+        // Big evolved dragons keep a wider ring so their bulk (and wingspan)
+        // doesn't park on top of the owner.
+        const gap = (seated ? PET_SIT_GAP : PET_GAP) * (petObj._gapMult || 1);
         const ty = py + 10;                       // anchor beside the feet
         let dx = petObj.x - px, dy = petObj.y - ty;
         let dist = Math.hypot(dx, dy) || 1;
