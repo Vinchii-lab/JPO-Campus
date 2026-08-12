@@ -12288,16 +12288,34 @@
               ],
               onComplete: () => { petObj.setScale(bsD); petObj.angle = 0; petObj._trickBusy = false; },
             });
-            // FIRE strobe: short hot flashes (same treatment as Violet's neon
-            // strobe, in furnace colors) — reads as heat rippling over him.
-            for (const t of [250, 620, 990, 1360]) {
-              this.time.delayedCall(t, () => { if (petObj.active) petObj.setTint(0xffc98a); });
-              this.time.delayedCall(t + 140, () => { if (petObj.active) petObj.clearTint(); });
-            }
             if (petObj.visible) {
               const scC = Math.max(1, petObj.displayWidth / 64);
-              const mx = petObj.x + fwdD * petObj.displayWidth * 0.30;
-              const my = yD - petObj.displayHeight * 0.55;
+              // Mouth sits LOW on the snout (not the eyes): far forward, ~40% up.
+              const mx = petObj.x + fwdD * petObj.displayWidth * 0.38;
+              const my = yD - petObj.displayHeight * 0.40;
+              // AURA: ember glow hugging the actual body (bounds-anchored).
+              const bdC = petObj.getBounds();
+              const auraC = this.add.ellipse(bdC.centerX, bdC.centerY,
+                bdC.width * 1.08, bdC.height * 1.08, 0xff7a2d, 0.10)
+                .setStrokeStyle(1.2 * scC, 0xffb35c, 0.55).setDepth(1.9);
+              this.tweens.add({ targets: auraC, scaleX: 1.08, scaleY: 1.08,
+                duration: 380, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
+              this.tweens.add({ targets: auraC, alpha: 0, delay: 1500, duration: 350,
+                onComplete: this._trackPetFx(petObj, auraC) });
+              // NEON MARKINGS: molten runes glowing along his spine ridge — not
+              // a whole-body blink. Dots pulse hot while he charges & roars.
+              for (let m = 0; m < 5; m++) {
+                const px = petObj.x + fwdD * petObj.displayWidth * (-0.34 + m * 0.15);
+                const py = yD - petObj.displayHeight * (0.58 + Math.sin((m / 4) * Math.PI) * 0.16);
+                const glow = this.add.circle(px, py, 3.2 * scC, 0xff7a2d, 0.30).setDepth(3.05);
+                const dot = this.add.circle(px, py, 1.5 * scC, 0xffd76a, 0).setDepth(3.1);
+                this.tweens.add({ targets: dot, alpha: 0.95, delay: m * 90,
+                  duration: 300, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, dot) });
+                this.tweens.add({ targets: glow, alpha: 0.05, scale: 1.6, delay: m * 90,
+                  duration: 340, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, glow) });
+              }
               // CHARGE-UP: orb burns yellow-white at the mouth while he rears
               // back, then the torrent ROARS out.
               const orbC = this.add.circle(mx, my, 2 * scC, 0xfff3c9, 0.95).setDepth(3.2);
