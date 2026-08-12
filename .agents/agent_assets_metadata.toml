@@ -412,3 +412,10 @@ uri = "file://attached_assets/generated_images/phoenix_fx_storyboard.png"
 type = "image"
 title = "Phoenix flight FX options — pick one (or mix)"
 description = "A: Ember Wake · B: Radiant Sun · C: Comet Burn · D: Firestorm Wingbeat — all buildable as-is"
+
+[[outputs]]
+id = "RDLJoEeeXFuehD1zGg_Wa"
+uri = "file://attached_assets/pet_evolution_chart.png"
+type = "image"
+title = "JPO Huddle — Pet Evolution Chart"
+description = "Every pet's evolution line, straight from the in-game sprites — 15 standard pets (3 stages) plus the two rare gift pets (baby → final form)."
