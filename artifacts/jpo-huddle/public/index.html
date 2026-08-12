@@ -12597,36 +12597,72 @@
           const st = petObj._petStage || 1;
           const bs = petObj._baseScale || 1, y0 = petObj.y;
           if (st >= 3 && petObj._petId === 'pet_turtle_sapphire') {
-            // CRYSTAL SPIN: tucks into the gem-shell and whirls like a
-            // beyblade, flinging cyan facets, then pops out with a prism ring.
+            // CRYSTAL SPIN v2: the guardian vanishes INTO the gem-shell (real
+            // shell art, no sprite cartwheel), the shell whirls upright like a
+            // beyblade and ricochets around flinging cyan facets, then snaps
+            // home and the turtle pops out through an expanding prism ring.
             petObj._trickBusy = true;
-            const spin = { t: 0 };
-            this.tweens.chain({
-              targets: petObj,
-              tweens: [
-                { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 180, ease: 'Sine.easeIn' },
-                { angle: 360 * 3, duration: 1300, ease: 'Cubic.easeInOut',
+            const flip0 = petObj.flipX, x0 = petObj.x;
+            this.tweens.add({
+              targets: petObj, scaleX: bs * 0.55, scaleY: bs * 0.4, duration: 200, ease: 'Sine.easeIn',
+              onComplete: () => {
+                if (!petObj.active) { petObj._trickBusy = false; return; }
+                const wasVisible = petObj.visible;
+                const shW = petObj.displayWidth;
+                petObj.setVisible(false).setScale(bs);
+                const shell = this.add.image(x0, y0, this.textures.exists('shell_sapphire') ? 'shell_sapphire' : 'shell_green')
+                  .setOrigin(0.5, 1).setDepth(petObj.depth).setVisible(wasVisible)
+                  .setScale(Math.max(shW * 0.8, 20) / 56);
+                const killShellFx = this._trackPetFx(petObj, shell);
+                const spinTw = this.tweens.addCounter({
+                  from: 0, to: 1, duration: 120, repeat: -1,
+                  onUpdate: (tw) => {
+                    if (!shell.active) { spinTw.stop(); return; }
+                    shell.scaleX = shell.scaleY * Math.cos(tw.getValue() * Math.PI * 2);
+                    shell.angle = Math.sin(tw.getValue() * Math.PI * 2) * 6;
+                  },
+                });
+                const pts = [];
+                for (let i = 0; i < 5; i++)
+                  pts.push({ x: x0 + (Math.random() * 84 - 42), y: y0 + (Math.random() * 32 - 21) });
+                pts.push({ x: x0, y: y0 });
+                const dashes = pts.map((p) => ({
+                  x: p.x, y: p.y, duration: 200 + Math.random() * 70, ease: 'Sine.easeInOut',
                   onStart: () => {
-                    for (let i = 0; i < 8; i++) {
-                      this.time.delayedCall(120 + i * 140, () => {
-                        if (!petObj.active) return;
-                        const a = Math.random() * Math.PI * 2;
-                        const g = this.add.star(petObj.x, petObj.y - 8, 4, 1.5, 4, 0x7fe0ff, 0.9).setDepth(3);
-                        this.tweens.add({ targets: g, alpha: 0, angle: 140,
-                          x: g.x + Math.cos(a) * 26, y: g.y + Math.sin(a) * 14,
-                          duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
-                      });
+                    if (!shell.active || !shell.visible) return;
+                    for (let i = 0; i < 2; i++) {          // cyan facets fly off every dash
+                      const a = Math.random() * Math.PI * 2;
+                      const g = this.add.star(shell.x, shell.y - 8, 4, 1.5, 4, 0x7fe0ff, 0.9).setDepth(3);
+                      this.tweens.add({ targets: g, alpha: 0, angle: 140,
+                        x: g.x + Math.cos(a) * 26, y: g.y + Math.sin(a) * 14,
+                        duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
                     }
-                  } },
-                { scaleX: bs, scaleY: bs, angle: 0, duration: 260, ease: 'Back.easeOut',
-                  onStart: () => {
-                    const ring = this.add.circle(petObj.x, petObj.y - 8, 10, 0x7fe0ff, 0)
-                      .setStrokeStyle(2, 0x7fe0ff, 0.85).setDepth(3);
-                    this.tweens.add({ targets: ring, scale: 3.4, alpha: 0, duration: 700,
-                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
-                  } },
-              ],
-              onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+                  },
+                }));
+                this.tweens.chain({
+                  targets: shell, tweens: dashes,
+                  onComplete: () => {
+                    spinTw.stop();
+                    if (shell.active) killShellFx();
+                    if (!petObj.active) return;
+                    if (petObj.visible || wasVisible) {
+                      const ring = this.add.circle(x0, y0 - 8, 10, 0x7fe0ff, 0)
+                        .setStrokeStyle(2, 0x7fe0ff, 0.85).setDepth(3).setVisible(wasVisible);
+                      this.tweens.add({ targets: ring, scale: 3.4, alpha: 0, duration: 700,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    }
+                    petObj.setVisible(wasVisible).setScale(bs * 0.55, bs * 0.4);
+                    petObj.x = x0; petObj.setFlipX(flip0);
+                    this.tweens.add({
+                      targets: petObj, scaleX: bs, scaleY: bs, duration: 280, ease: 'Back.easeOut',
+                      onComplete: () => {
+                        if (!petObj.active) return;
+                        petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false;
+                      },
+                    });
+                  },
+                });
+              },
             });
             return;
           }
