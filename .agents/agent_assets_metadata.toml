@@ -417,5 +417,5 @@ description = "A: Ember Wake · B: Radiant Sun · C: Comet Burn · D: Firestorm 
 id = "RDLJoEeeXFuehD1zGg_Wa"
 uri = "file://attached_assets/pet_evolution_chart.png"
 type = "image"
-title = "JPO Huddle — Pet Evolution Chart"
-description = "Every pet's evolution line, straight from the in-game sprites — 15 standard pets (3 stages) plus the two rare gift pets (baby → final form)."
+title = "JPO Huddle — Pet Evolution Chart (v2)"
+description = "Baby → Stage 2 → Final Form in ascending sizes, every pet line plus the two rare gift pets."
