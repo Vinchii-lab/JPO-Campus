@@ -11708,6 +11708,15 @@
         // location — no tricks while concealed.
         if (!petObj.visible) return;
         const sp = petSpeciesId(petObj._petId || '');
+        // Owner sprite (local player or the remote sprite this pet follows) —
+        // several signature tricks play out AROUND the owner.
+        const ownerOf = () => {
+          if (petObj === this.localPet) return this.player;
+          for (const oid in this.otherPlayers) {
+            if (this.otherPlayers[oid].pet === petObj) return this.otherPlayers[oid].sprite;
+          }
+          return null;
+        };
         // Animated frames: swap to the action pose for the trick's duration.
         // No explicit restore needed — once the trick's tween clears
         // _trickBusy, the next _stepPet frame reasserts walk/idle/sit.
@@ -12034,9 +12043,131 @@
           return;
         }
         if (sp === 'pet_cat') {
-          // Big lazy stretch (long and low), then a little tail-flick shake.
+          const st = petObj._petStage || 1;
+          const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+          if (st >= 3 && petObj._petId === 'pet_cat_black') {
+            // VOID BLINK: the mystic cat dissolves into violet mist and
+            // reappears on the other side of her owner, leaving a trail of
+            // afterimages and floating stars. Spooky. Elegant. Cat.
+            petObj._trickBusy = true;
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0 + 60, cy = owner ? owner.y : y0;
+            const toX = cx + (x0 >= cx ? -1 : 1) * 34;
+            const puff = (x, y) => {
+              for (let i = 0; i < 5; i++) {
+                const p = this.add.circle(x + (Math.random() * 18 - 9), y - 6 - Math.random() * 14,
+                  2 + Math.random() * 2, 0x9b59ff, 0.8).setDepth(3);
+                this.tweens.add({ targets: p, alpha: 0, y: p.y - 12, scale: 2.2,
+                  duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
+              }
+              const s = this.add.text(x, y - 22, Math.random() < 0.5 ? '✦' : '⭐',
+                { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0.9).setDepth(3);
+              this.tweens.add({ targets: s, alpha: 0, y: s.y - 16, angle: 50,
+                duration: 700, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+            };
+            const ghost = () => {
+              const g = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                .setOrigin(petObj.originX, petObj.originY).setScale(petObj.scaleX, petObj.scaleY)
+                .setFlipX(petObj.flipX).setTint(0x9b59ff).setAlpha(0.45).setDepth(petObj.depth - 0.1);
+              this.tweens.add({ targets: g, alpha: 0, duration: 500, ease: 'Sine.easeIn',
+                onComplete: this._trackPetFx(petObj, g) });
+            };
+            this.tweens.add({ targets: petObj, alpha: 0.2, duration: 110, yoyo: true, repeat: 2 });
+            const hops = [{ x: (x0 + cx) / 2, y: cy + 22 }, { x: toX, y: y0 }];
+            hops.forEach((p, i) => {
+              this.time.delayedCall(480 + i * 300, () => {
+                if (!petObj.active) return;
+                ghost(); puff(petObj.x, petObj.y);
+                petObj.setPosition(p.x, p.y); petObj.flipX = p.x > cx;
+                petObj.setAlpha(1); this._placePetAcc(petObj); puff(p.x, p.y);
+              });
+            });
+            this.time.delayedCall(1500, () => {
+              if (!petObj.active) return;
+              petObj.setAlpha(1); petObj._trickBusy = false;
+            });
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_cat_snow') {
+            // ROYAL GROOM: the persian queen sits, grooms with slow regal
+            // sways, and a spiral of silver sparkles crowns her. Applause.
+            petObj._trickBusy = true;
+            const sitTex = petObj._animSet && petObj._animSet.sit;
+            if (sitTex) petObj.setTexture(sitTex);
+            this.tweens.add({
+              targets: petObj, angle: { from: -7, to: 7 }, duration: 420, yoyo: true, repeat: 3,
+              ease: 'Sine.easeInOut',
+              onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            for (let i = 0; i < 8; i++) {
+              const a0 = i * 0.9;
+              const s = this.add.star(petObj.x + Math.cos(a0) * 14, petObj.y - 10, 4, 1.5, 4, 0xe8f4ff, 0)
+                .setDepth(3);
+              this.tweens.add({ targets: s, alpha: { from: 0.9, to: 0 },
+                y: s.y - 26 - i * 3, x: s.x + Math.cos(a0 + 1.8) * 12, angle: 120,
+                delay: 150 + i * 170, duration: 900, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, s) });
+            }
+            return;
+          }
+          if (st >= 3) {
+            // BOSS SLAM (amber tabby): rears up tall... and SLAMS down with a
+            // real thud — camera shake, dust ring, amber sparks. Respect.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 1.28, scaleX: bs * 0.86, angle: petObj.flipX ? 10 : -10,
+                  duration: 380, ease: 'Sine.easeOut', hold: 220 },                       // rear up
+                { scaleY: bs * 0.66, scaleX: bs * 1.32, angle: 0, y: y0 + 2,
+                  duration: 120, ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    this.cameras.main.shake(170, 0.004);
+                    const ring = this.add.ellipse(petObj.x, y0, 22, 8, 0xffb347, 0)
+                      .setStrokeStyle(2, 0xffb347, 0.8).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    for (let i = 0; i < 6; i++) {
+                      const g = this.add.star(petObj.x + (Math.random() * 30 - 15), y0 - 2,
+                        4, 1.5, 4, 0xffb347, 0.9).setDepth(3);
+                      this.tweens.add({ targets: g, alpha: 0, y: g.y - 14 - Math.random() * 12,
+                        x: g.x + (Math.random() * 16 - 8), angle: 90, duration: 600,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                    }
+                  } },
+                { scaleY: bs, scaleX: bs, y: y0, duration: 240, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st === 2) {
+            // POUNCE: butt-wiggle wind-up (the little hip shimmy cats do),
+            // then a lunge forward and a trot back to the start.
+            petObj._trickBusy = true;
+            const fwd = petObj.flipX ? -1 : 1;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 0.82, scaleX: bs * 1.1, angle: { from: -4, to: 4 },
+                  duration: 90, yoyo: true, repeat: 4 },                                    // wiggle...
+                { x: x0 + fwd * 34, y: y0 - 14, scaleY: bs * 1.12, scaleX: bs * 0.9,
+                  angle: 0, duration: 200, ease: 'Sine.easeOut' },                          // POUNCE
+                { y: y0, scaleY: bs * 0.85, scaleX: bs * 1.15, duration: 110, ease: 'Sine.easeIn' },
+                { scaleY: bs, scaleX: bs, duration: 140, ease: 'Back.easeOut', hold: 200 },
+                { x: x0, duration: 320, ease: 'Sine.easeInOut',
+                  onStart: () => { petObj.flipX = !petObj.flipX; },
+                  onComplete: () => { petObj.flipX = fwd < 0; } },
+              ],
+              onComplete: () => {
+                petObj.setScale(bs); petObj.setPosition(x0, y0); petObj.angle = 0;
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          // Baby: big lazy stretch (long and low), then a little tail-flick shake.
           petObj._trickBusy = true;
-          const bs = petObj._baseScale || 1;
           this.tweens.chain({
             targets: petObj,
             tweens: [
@@ -12048,7 +12179,77 @@
           return;
         }
         if (sp === 'pet_duck') {
-          // Flap-flap: fast wing-beat wobble + two stubby hops and a 💦 shake.
+          const st = petObj._petStage || 1;
+          if (st >= 2) {
+            // SPLASH DIVE (the boss's idea): the duck dives INTO the floor
+            // like it's water, swims under the surface (a moving ripple
+            // trail), and bursts back up on the other side of its owner.
+            // Themed per form: mallard = blue splash, golden drake = golden
+            // geyser, swan = frosty mist plume.
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const theme = {
+              pet_duck:      { c: 0x8fd4ff, drop: '💦', big: false },
+              pet_duck_snow: { c: 0xeaf6ff, drop: '❄',  big: true },
+            }[petObj._petId] || { c: 0xffd75e, drop: '✨', big: true };   // golden drake
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0 + 60;
+            const riseX = cx + (x0 >= cx ? -1 : 1) * 36;   // pop up PAST the owner
+            const splash = (x, big) => {
+              const r = this.add.ellipse(x, y0, big ? 26 : 18, big ? 9 : 6, theme.c, 0)
+                .setStrokeStyle(2, theme.c, 0.85).setDepth(3);
+              this.tweens.add({ targets: r, scaleX: big ? 2.6 : 2, scaleY: big ? 2.6 : 2, alpha: 0,
+                duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              for (let i = 0; i < (big ? 6 : 4); i++) {
+                const d = this.add.text(x + (Math.random() * 24 - 12), y0 - 2, theme.drop,
+                  { fontSize: '10px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0.9).setDepth(3);
+                this.tweens.add({ targets: d, alpha: 0, y: d.y - 16 - Math.random() * 14,
+                  x: d.x + (Math.random() * 12 - 6), duration: 520 + Math.random() * 200,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+              }
+            };
+            const fwd = riseX >= x0 ? 1 : -1;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 22, scaleY: bs * 1.15, scaleX: bs * 0.9, duration: 200, ease: 'Sine.easeOut' }, // hop up
+                { y: y0 + 4, angle: 55 * fwd, scaleY: bs * 1.2, scaleX: bs * 0.8,                          // nose-down DIVE
+                  duration: 190, ease: 'Sine.easeIn',
+                  onComplete: () => { splash(x0, false); petObj.setAlpha(0); petObj.angle = 0; } },
+              ],
+            });
+            // Underwater: a ripple trail "swims" from the dive point to the rise point.
+            for (let i = 1; i <= 3; i++) {
+              this.time.delayedCall(520 + i * 220, () => {
+                if (!petObj.active) return;
+                const rx = x0 + (riseX - x0) * (i / 4);
+                const r = this.add.ellipse(rx, y0, 14, 5, theme.c, 0)
+                  .setStrokeStyle(1, theme.c, 0.6).setDepth(1);
+                this.tweens.add({ targets: r, scaleX: 1.9, scaleY: 1.9, alpha: 0,
+                  duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              });
+            }
+            this.time.delayedCall(1450, () => {     // SURFACE! burst up + shake dry
+              if (!petObj.active) return;
+              petObj.x = riseX; petObj.flipX = riseX > cx;
+              splash(riseX, theme.big);
+              petObj.setAlpha(1);
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  { y: y0 - (theme.big ? 34 : 24), scaleY: bs * 1.2, scaleX: bs * 0.85,
+                    duration: 240, ease: 'Sine.easeOut' },
+                  { y: y0, scaleY: bs, scaleX: bs, duration: 260, ease: 'Bounce.easeOut' },
+                  { angle: { from: -14, to: 14 }, duration: 70, yoyo: true, repeat: 4 },  // shake dry
+                ],
+                onComplete: () => {
+                  petObj.y = y0; petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false;
+                },
+              });
+            });
+            return;
+          }
+          // Baby: flap-flap — fast wing-beat wobble + two stubby hops and a 💦 shake.
           petObj._trickBusy = true;
           const bs = petObj._baseScale || 1, y0 = petObj.y;
           this.tweens.add({
@@ -12072,9 +12273,88 @@
           return;
         }
         if (sp === 'pet_turtle') {
-          // Shell tuck: shrink down into the shell, pause... pop back out.
+          const st = petObj._petStage || 1;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          if (st >= 3 && petObj._petId === 'pet_turtle_sapphire') {
+            // CRYSTAL SPIN: tucks into the gem-shell and whirls like a
+            // beyblade, flinging cyan facets, then pops out with a prism ring.
+            petObj._trickBusy = true;
+            const spin = { t: 0 };
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 180, ease: 'Sine.easeIn' },
+                { angle: 360 * 3, duration: 1300, ease: 'Cubic.easeInOut',
+                  onStart: () => {
+                    for (let i = 0; i < 8; i++) {
+                      this.time.delayedCall(120 + i * 140, () => {
+                        if (!petObj.active) return;
+                        const a = Math.random() * Math.PI * 2;
+                        const g = this.add.star(petObj.x, petObj.y - 8, 4, 1.5, 4, 0x7fe0ff, 0.9).setDepth(3);
+                        this.tweens.add({ targets: g, alpha: 0, angle: 140,
+                          x: g.x + Math.cos(a) * 26, y: g.y + Math.sin(a) * 14,
+                          duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                      });
+                    }
+                  } },
+                { scaleX: bs, scaleY: bs, angle: 0, duration: 260, ease: 'Back.easeOut',
+                  onStart: () => {
+                    const ring = this.add.circle(petObj.x, petObj.y - 8, 10, 0x7fe0ff, 0)
+                      .setStrokeStyle(2, 0x7fe0ff, 0.85).setDepth(3);
+                    this.tweens.add({ targets: ring, scale: 3.4, alpha: 0, duration: 700,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  } },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st >= 3) {
+            // ANCIENT BLESSING (elder tortoise): tucks in, the ground RUMBLES,
+            // and a spiral of leaves rises around the old one. Nature answers.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bs * 0.74, scaleY: bs * 0.64, duration: 260, ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    this.cameras.main.shake(300, 0.003);
+                    const ring = this.add.ellipse(petObj.x, y0, 24, 9, 0x9dbf7a, 0)
+                      .setStrokeStyle(2, 0x9dbf7a, 0.8).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+                      duration: 800, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    for (let i = 0; i < 7; i++) {
+                      const a0 = i * 0.95;
+                      const leaf = this.add.text(petObj.x + Math.cos(a0) * 16, y0 - 4, '🍃',
+                        { fontSize: '10px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                      this.tweens.add({ targets: leaf, alpha: { from: 0.9, to: 0 },
+                        y: leaf.y - 30 - i * 4, x: leaf.x + Math.cos(a0 + 1.8) * 14,
+                        angle: Math.random() * 120 - 60, delay: 200 + i * 160, duration: 1100,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, leaf) });
+                    }
+                  }, hold: 1400 },
+                { scaleX: bs, scaleY: bs, duration: 300, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st === 2) {
+            // Shell SPIN: tuck in and whirl two quick turns before popping out.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 180, ease: 'Sine.easeIn' },
+                { angle: 360 * 2, duration: 950, ease: 'Cubic.easeInOut' },
+                { scaleX: bs, scaleY: bs, angle: 0, duration: 240, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          // Baby: shell tuck — shrink down into the shell, pause... pop back out.
           petObj._trickBusy = true;
-          const bs = petObj._baseScale || 1;
           this.tweens.chain({
             targets: petObj,
             tweens: [
