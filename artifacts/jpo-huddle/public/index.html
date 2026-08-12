@@ -12089,91 +12089,112 @@
             return;
           }
           if (st >= 3 && petObj._petId === 'pet_cat_snow') {
-            // CELESTIAL ASCENSION (the boss chose it from the concept sheet):
-            // the queen levitates slowly upward wrapped in a rising SPIRAL of
-            // silver light, hangs mid-air glowing like a deity, then descends
-            // softly while sparkles rain down around her. Peak majesty.
+            // FROST CORONATION (throne + crown combo the boss picked): an ice
+            // throne crystallizes out of the floor, the queen LEAPS onto it,
+            // a crown of light materializes above her with silver rays while
+            // frost rings pulse outward and sparkle confetti falls — then the
+            // throne shatters into glitter and she hops down like it's normal.
             petObj._trickBusy = true;
             const sitTex = petObj._animSet && petObj._animSet.sit;
-            if (sitTex) petObj.setTexture(sitTex);   // composed, paws tucked
-            const HOVER = 38;
-            // Rising spiral: each mote orbits the queen's CURRENT position
-            // (so the spiral rides up and down with her) while climbing.
-            for (let i = 0; i < 10; i++) {
-              this.time.delayedCall(i * 170, () => {
-                if (!petObj.active || !petObj._trickBusy) return;
-                const a0 = i * 1.1, sp = { t: 0 };
-                const s = this.add.star(petObj.x, petObj.y, 4, 1.6, 4.2,
-                  i % 3 ? 0xe8f4ff : 0xffffff, 0.95).setDepth(3);
-                this.tweens.add({ targets: sp, t: 1, duration: 1500, ease: 'Sine.easeOut',
-                  onUpdate: () => {
-                    const a = a0 + sp.t * Math.PI * 3;
-                    s.x = petObj.x + Math.cos(a) * (16 - sp.t * 4);
-                    s.y = petObj.y - 4 - sp.t * 34;
-                    s.setAlpha(0.95 * (1 - sp.t)); s.angle = sp.t * 180;
-                  },
-                  onComplete: this._trackPetFx(petObj, s) });
-              });
-            }
-            // Halo glow that breathes beneath her while she floats.
-            const halo = this.add.ellipse(petObj.x, petObj.y - 2, 30, 10, 0xe8f4ff, 0.22).setDepth(1);
-            const haloTw = this.tweens.add({ targets: halo, alpha: 0.38, scaleX: 1.3, scaleY: 1.3,
-              duration: 600, yoyo: true, repeat: 5, ease: 'Sine.easeInOut' });
-            const haloTrack = this.time.addEvent({ delay: 50, repeat: 70,
-              callback: () => { if (halo.active) { halo.x = petObj.x; halo.y = petObj.y - 2; } } });
+            const actTex = petObj._animSet && petObj._animSet.action;
             const y0c = petObj.y, x0c = petObj.x, flip0 = petObj.flipX;
-            // SPIRAL ASCENT: no flat card-flips — she RIDES the helix of
-            // light, circling as she climbs (real circular motion, facing
-            // the way she's moving, standing tall), then tucks into the
-            // seated deity pose at the apex.
-            // Arms spread from liftoff: the rearing action pose rides the
-            // whole spiral up — she ascends like the sketch, not standing.
-            if (petObj._animSet && petObj._animSet.action) petObj.setTexture(petObj._animSet.action);
-            const asc = { t: 0 };
-            const ascTw = this.tweens.add({
-              targets: asc, t: 1, duration: 1700, ease: 'Sine.easeInOut',
-              onUpdate: () => {
-                const a = asc.t * Math.PI * 3;                       // 1.5 orbits on the way up
-                petObj.x = x0c + Math.sin(a) * 13 * (1 - asc.t * 0.5);
-                petObj.y = y0c - asc.t * HOVER;
-                petObj.angle = Math.sin(a) * 5;                      // gentle banking lean
-                if (Math.abs(Math.cos(a)) > 0.25) petObj.flipX = Math.cos(a) < 0;  // face travel dir
-              },
-              onComplete: () => {
-                petObj.x = x0c; petObj.angle = 0; petObj.flipX = flip0;
-                // Apex: ARMS SPREAD to the heavens (the rearing action pose
-                // from the sketch), held through the divine hover + rain.
-                if (petObj._animSet && petObj._animSet.action) petObj.setTexture(petObj._animSet.action);
-              },
-            });
+            const fwd = flip0 ? -1 : 1;
+            const tx = x0c + fwd * 26;                 // throne spot, just ahead of her
+            const SEAT = 26;                           // how high the seat lifts her
+            // ── The throne: a cluster of ice spikes + a seat slab, grown from 0.
+            const throne = [];
+            const mk = (dx, w, h, col, alpha) => {
+              const t = this.add.triangle(tx + dx, y0c + 4, 0, 0, w, 0, w / 2, -h, col, alpha)
+                .setOrigin(0.5, 1).setDepth(1).setScale(1, 0);
+              throne.push(t); this._trackPetFx(petObj, t); return t;
+            };
+            mk(-fwd * 12, 10, 34, 0x9fd8ff, 0.9);      // tall backrest spike
+            mk(-fwd * 5, 9, 44, 0xdff2ff, 0.95);       // tallest backrest spike
+            mk(fwd * 3, 8, 26, 0xbfe8ff, 0.9);
+            mk(-fwd * 18, 7, 20, 0x9fd8ff, 0.8);
+            mk(fwd * 10, 7, 16, 0xbfe8ff, 0.85);
+            const slab = this.add.ellipse(tx, y0c - SEAT + 8, 30, 9, 0xdff2ff, 0.9)
+              .setDepth(1).setScale(0);
+            throne.push(slab); this._trackPetFx(petObj, slab);
+            for (const t of throne)
+              this.tweens.add({ targets: t, scaleY: 1, scaleX: 1, duration: 460,
+                delay: 120 + Math.random() * 200, ease: 'Back.easeOut' });
+            // frost burst as it erupts
+            const ring0 = this.add.ellipse(tx, y0c + 2, 20, 7, 0x9fd8ff, 0.5).setDepth(1);
+            this.tweens.add({ targets: ring0, alpha: 0, scaleX: 3, scaleY: 3, duration: 700,
+              ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring0) });
             this.tweens.chain({
               targets: petObj,
               tweens: [
-                { alpha: 1, duration: 1700 },                                          // (spiral owns x/y here)
-                { y: y0c - HOVER - 4, duration: 500, yoyo: true, repeat: 1,             // divine hover-bob
-                  ease: 'Sine.easeInOut',
+                // crouch while the throne grows
+                { scaleY: bs * 0.82, scaleX: bs * 1.1, duration: 620, ease: 'Sine.easeOut' },
+                // regal LEAP up onto the seat
+                { x: tx, y: y0c - SEAT - 14, scaleY: bs * 1.06, scaleX: bs * 0.96,
+                  angle: fwd * 8, duration: 330, ease: 'Sine.easeOut',
+                  onStart: () => { if (actTex) petObj.setTexture(actTex); } },
+                // settle onto the throne, composed
+                { y: y0c - SEAT, angle: 0, scaleX: bs, scaleY: bs, duration: 160,
+                  ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    if (sitTex) petObj.setTexture(sitTex);
+                    petObj.setFlipX(flip0);
+                    // ── CORONATION: crown of light + silver rays + frost rings.
+                    const cr = this.add.text(tx, petObj.y - 34, '\u2655', {
+                      fontSize: '16px', color: '#ffe9a8', resolution: 2 })
+                      .setOrigin(0.5, 1).setAlpha(0).setDepth(3).setScale(0.4);
+                    this.tweens.add({ targets: cr, alpha: 0.95, scale: 1, y: cr.y - 4,
+                      duration: 500, ease: 'Back.easeOut' });
+                    this.tweens.add({ targets: cr, alpha: 0, y: cr.y - 14, delay: 1500,
+                      duration: 500, onComplete: this._trackPetFx(petObj, cr) });
+                    for (let i = 0; i < 8; i++) {                       // silver ray burst
+                      const a = -Math.PI / 2 + (i - 3.5) * 0.42;
+                      const ray = this.add.rectangle(tx, petObj.y - 26, 2, 16, 0xffffff, 0.9)
+                        .setAngle(a * 180 / Math.PI + 90).setDepth(3).setScale(1, 0.2);
+                      this.tweens.add({ targets: ray, scaleY: 1.6, alpha: 0,
+                        x: tx + Math.cos(a) * 26, y: petObj.y - 26 + Math.sin(a) * 26,
+                        delay: 250 + i * 45, duration: 620, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, ray) });
+                    }
+                    for (let i = 0; i < 3; i++) {                        // frost shockwave rings
+                      const ring = this.add.ellipse(tx, y0c + 2, 24, 8, 0x9fd8ff, 0.45).setDepth(1);
+                      this.tweens.add({ targets: ring, alpha: 0, scaleX: 3.6, scaleY: 3.6,
+                        delay: 300 + i * 380, duration: 800, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, ring) });
+                    }
+                    for (let i = 0; i < 10; i++) {                       // sparkle confetti rain
+                      const c = this.add.star(tx + (Math.random() * 60 - 30),
+                        petObj.y - 34 - Math.random() * 12, 4, 1.3, 3.6,
+                        i % 2 ? 0xe8f4ff : 0xfff6d8, 0.95).setDepth(3);
+                      this.tweens.add({ targets: c, y: y0c + 2, alpha: 0,
+                        angle: Math.random() * 160 - 80, delay: 350 + i * 120,
+                        duration: 900 + Math.random() * 500, ease: 'Sine.easeIn',
+                        onComplete: this._trackPetFx(petObj, c) });
+                    }
+                    this.cameras.main.shake(180, 0.0022);                // the office FEELS it
+                  } },
+                // hold court on the throne
+                { alpha: 1, duration: 2100 },
+                // hop down as the throne shatters behind her
+                { x: x0c, y: y0c, angle: fwd * -6, duration: 340, ease: 'Sine.easeOut',
                   onStart: () => {
-                    // At the apex: sparkle rain falls from above her, all the way down.
-                    for (let i = 0; i < 9; i++) {
-                      const rx = petObj.x + (Math.random() * 52 - 26);
-                      const r = this.add.star(rx, petObj.y - 26 - Math.random() * 10,
-                        4, 1.3, 3.6, i % 2 ? 0xe8f4ff : 0xfff6d8, 0.95).setDepth(3);
-                      this.tweens.add({ targets: r, y: y0c + 2, alpha: 0,
-                        angle: Math.random() * 160 - 80, delay: i * 130,
-                        duration: 1100 + Math.random() * 500, ease: 'Sine.easeIn',
-                        onComplete: this._trackPetFx(petObj, r) });
+                    if (actTex) petObj.setTexture(actTex);
+                    for (const t of throne) {
+                      this.tweens.add({ targets: t, alpha: 0, y: t.y - 6 - Math.random() * 8,
+                        x: t.x + (Math.random() * 16 - 8), angle: Math.random() * 40 - 20,
+                        scaleX: 0.4, scaleY: 0.4, duration: 480, ease: 'Sine.easeIn' });
+                      const sh = this.add.star(t.x, t.y - 10, 4, 1.2, 3.2, 0xbfe8ff, 0.9).setDepth(3);
+                      this.tweens.add({ targets: sh, alpha: 0, y: sh.y - 14,
+                        x: sh.x + (Math.random() * 20 - 10), angle: 150, duration: 600,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, sh) });
                     }
                   } },
-                { y: y0c, duration: 900, ease: 'Sine.easeInOut' },                      // soft descent
               ],
               onComplete: () => {
-                petObj.y = y0c; petObj.angle = 0; petObj._trickBusy = false;
-                haloTw.stop(); haloTrack.remove();
-                this.tweens.add({ targets: halo, alpha: 0, scaleX: 2.2, scaleY: 2.2,
-                  duration: 500, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, halo) });
+                petObj.x = x0c; petObj.y = y0c; petObj.angle = 0;
+                petObj.setScale(bs); petObj.setFlipX(flip0);
+                petObj._trickBusy = false;
               },
             });
-            this._trackPetFx(petObj, halo);   // registered so hides/destroys purge it mid-trick
             return;
           }
           if (st >= 3) {
