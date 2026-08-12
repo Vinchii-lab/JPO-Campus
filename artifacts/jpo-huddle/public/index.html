@@ -12126,7 +12126,9 @@
             // light, circling as she climbs (real circular motion, facing
             // the way she's moving, standing tall), then tucks into the
             // seated deity pose at the apex.
-            if (petObj._animSet && petObj._animSet.idle) petObj.setTexture(petObj._animSet.idle);
+            // Arms spread from liftoff: the rearing action pose rides the
+            // whole spiral up — she ascends like the sketch, not standing.
+            if (petObj._animSet && petObj._animSet.action) petObj.setTexture(petObj._animSet.action);
             const asc = { t: 0 };
             const ascTw = this.tweens.add({
               targets: asc, t: 1, duration: 1700, ease: 'Sine.easeInOut',
