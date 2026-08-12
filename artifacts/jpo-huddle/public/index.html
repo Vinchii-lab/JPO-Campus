@@ -12658,50 +12658,67 @@
             return;
           }
           if (st === 2) {
-            // Shell SPIN, BEYBLADE style: tuck into the shell and whirl
-            // UPRIGHT around the vertical axis (scaleX sweeps + to - like a
-            // top seen edge-on) with a wobble like a real spinning top,
-            // dust kicked up at the rim, then pop out with a wobble-stop.
+            // Shell SPIN, BEYBLADE style: the turtle SHRINKS INTO ITS SHELL
+            // (sprite vanishes, a drawn shell is left behind), then the shell
+            // whirls edge-on and RICOCHETS all over the place in fast random
+            // dashes with dust at every direction change, zips back home, and
+            // the turtle pops back out like nothing happened. LET IT RIP.
             petObj._trickBusy = true;
             const flip0 = petObj.flipX, x0 = petObj.x;
-            const spin = { t: 0 };
-            let lastDust = 0;
-            this.tweens.chain({
-              targets: petObj,
-              tweens: [
-                { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 180, ease: 'Sine.easeIn' },
-              ],
+            this.tweens.add({
+              targets: petObj, scaleX: bs * 0.55, scaleY: bs * 0.4, duration: 200, ease: 'Sine.easeIn',
               onComplete: () => {
-                if (!petObj.active) { return; }
-                this.tweens.add({
-                  targets: spin, t: 1, duration: 1500, ease: 'Sine.easeInOut',
-                  onUpdate: () => {
-                    if (!petObj.active) return;
-                    // Revs: slow → FAST → slow, like a launched beyblade.
-                    const revs = spin.t * spin.t * (3 - 2 * spin.t) * 9;      // smoothstep * total revs
-                    petObj.scaleX = bs * 0.72 * Math.cos(revs * Math.PI * 2); // vertical-axis whirl
-                    petObj.angle = Math.sin(spin.t * Math.PI * 5) * 7 * (1 - spin.t * 0.5); // top wobble
-                    petObj.x = x0 + Math.sin(spin.t * Math.PI * 7) * 2;       // tiny precession drift
-                    if (petObj.visible && spin.t > 0.12 && spin.t - lastDust > 0.13) {
-                      lastDust = spin.t;
-                      const side = Math.random() < 0.5 ? -1 : 1;
-                      const d = this.add.circle(petObj.x + side * 9, y0 - 1,
+                if (!petObj.active) { petObj._trickBusy = false; return; }
+                const wasVisible = petObj.visible;       // (prop-hunt hidden pets stay hidden)
+                petObj.setVisible(false).setScale(bs);   // tucked in — swap to the drawn shell
+                // Little pixel-style shell: dome + pale rim + plate spots.
+                const shell = this.add.container(x0, y0 - 5, [
+                  this.add.ellipse(0, 0, 18, 13, 0x4f7d38).setStrokeStyle(1.5, 0x2c4a1e, 1),
+                  this.add.ellipse(0, 3.5, 17, 6, 0xcfc79a).setStrokeStyle(1, 0x8f875f, 1),
+                  this.add.ellipse(-3.5, -2, 4.5, 3.5, 0x3b6128),
+                  this.add.ellipse(3, -1, 4, 3, 0x3b6128),
+                  this.add.ellipse(0, -4, 3.5, 2.5, 0x3b6128),
+                ]).setDepth(petObj.depth).setVisible(wasVisible);
+                const killShellFx = this._trackPetFx(petObj, shell);   // pet destroyed → shell goes too
+                const spinTw = this.tweens.addCounter({
+                  from: 0, to: 1, duration: 130, repeat: -1,
+                  onUpdate: (tw) => {
+                    if (!shell.active) { spinTw.stop(); return; }
+                    shell.scaleX = Math.cos(tw.getValue() * Math.PI * 2);  // vertical-axis whirl
+                    shell.angle = Math.sin(tw.getValue() * Math.PI * 2) * 6; // top wobble
+                  },
+                });
+                // Random ricochet path: 5 dashes around home, then back.
+                const pts = [];
+                for (let i = 0; i < 5; i++)
+                  pts.push({ x: x0 + (Math.random() * 76 - 38), y: y0 - 5 + (Math.random() * 30 - 15) });
+                pts.push({ x: x0, y: y0 - 5 });
+                const dashes = pts.map((p) => ({
+                  x: p.x, y: p.y, duration: 210 + Math.random() * 70, ease: 'Sine.easeInOut',
+                  onStart: () => {
+                    if (!shell.active || !shell.visible) return;
+                    for (let i = 0; i < 3; i++) {          // dust burst on every direction change
+                      const d = this.add.circle(shell.x + (Math.random() * 10 - 5), y0 - 1,
                         1.5 + Math.random() * 1.5, 0xcfc9b8, 0.7).setDepth(3);
-                      this.tweens.add({ targets: d, alpha: 0, x: d.x + side * (10 + Math.random() * 8),
-                        y: d.y - 3 - Math.random() * 4, scale: 1.8, duration: 380,
-                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                      this.tweens.add({ targets: d, alpha: 0, scale: 2,
+                        x: d.x + (Math.random() * 16 - 8), y: d.y - 2 - Math.random() * 5,
+                        duration: 340, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
                     }
                   },
+                }));
+                this.tweens.chain({
+                  targets: shell, tweens: dashes,
                   onComplete: () => {
+                    spinTw.stop();
+                    if (shell.active) { killShellFx(); }   // untrack + destroy the shell
                     if (!petObj.active) return;
+                    petObj.setVisible(wasVisible).setScale(bs * 0.55, bs * 0.4);
                     petObj.x = x0; petObj.setFlipX(flip0);
                     this.tweens.add({
-                      targets: petObj, scaleX: bs, scaleY: bs, angle: 0,
-                      duration: 300, ease: 'Back.easeOut',
+                      targets: petObj, scaleX: bs, scaleY: bs, duration: 280, ease: 'Back.easeOut',
                       onComplete: () => {
                         if (!petObj.active) return;
-                        petObj.setScale(bs); petObj.angle = 0; petObj.x = x0;
-                        petObj.setFlipX(flip0); petObj._trickBusy = false;
+                        petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false;
                       },
                     });
                   },
