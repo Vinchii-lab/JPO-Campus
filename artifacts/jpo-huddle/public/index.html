@@ -12233,7 +12233,8 @@
             // of its owner. Golden drake = golden geyser, swan = frost plume.
             petObj._trickBusy = true;
             const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
-            const theme = petObj._petId === 'pet_duck_snow'
+            const snow = petObj._petId === 'pet_duck_snow';
+            const theme = snow
               ? { c: 0xeaf6ff, drop: '❄', big: true }
               : { c: 0xffd75e, drop: '✨', big: true };   // golden drake
             const owner = ownerOf();
@@ -12286,12 +12287,34 @@
                   onStart: () => { if (petObj._animSet) petObj.setTexture(petObj._animSet.action); } },
                 { y: y0 - 46, duration: 420,                                             // wings-out hang
                   onStart: () => {
-                    for (let i = 0; i < 6; i++) {
-                      const g = this.add.star(petObj.x + (Math.random() * 34 - 17),
-                        petObj.y - 40 - Math.random() * 10, 4, 1.5, 4, theme.c, 0.95).setDepth(3);
-                      this.tweens.add({ targets: g, alpha: 0, angle: 120, y: g.y - 14,
-                        x: g.x + (Math.random() * 14 - 7), delay: i * 60, duration: 620,
-                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                    if (snow) {
+                      // SWAN: no gold fireworks — a private FLURRY. Mist
+                      // billows off the wings and snowflakes drift DOWN
+                      // around her, falling all the way to the floor.
+                      for (let i = 0; i < 5; i++) {
+                        const m = this.add.circle(petObj.x + (Math.random() * 30 - 15),
+                          petObj.y - 40 - Math.random() * 8, 3 + Math.random() * 3, 0xeaf6ff, 0.55).setDepth(3);
+                        this.tweens.add({ targets: m, alpha: 0, scale: 2.6,
+                          x: m.x + (Math.random() * 20 - 10), delay: i * 70, duration: 700,
+                          ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, m) });
+                      }
+                      for (let i = 0; i < 8; i++) {
+                        const f = this.add.text(petObj.x + (Math.random() * 44 - 22),
+                          petObj.y - 44 - Math.random() * 8, '❄', { fontSize: (8 + Math.random() * 4) + 'px',
+                          resolution: 2 }).setOrigin(0.5).setAlpha(0.95).setDepth(3);
+                        this.tweens.add({ targets: f, y: y0 - 2, x: f.x + (Math.random() * 18 - 9),
+                          angle: Math.random() * 180 - 90, alpha: 0, delay: i * 110,
+                          duration: 1100 + Math.random() * 500, ease: 'Sine.easeIn',
+                          onComplete: this._trackPetFx(petObj, f) });
+                      }
+                    } else {
+                      for (let i = 0; i < 6; i++) {
+                        const g = this.add.star(petObj.x + (Math.random() * 34 - 17),
+                          petObj.y - 40 - Math.random() * 10, 4, 1.5, 4, theme.c, 0.95).setDepth(3);
+                        this.tweens.add({ targets: g, alpha: 0, angle: 120, y: g.y - 14,
+                          x: g.x + (Math.random() * 14 - 7), delay: i * 60, duration: 620,
+                          ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                      }
                     }
                   } },
                 { y: y0, scaleY: bs, scaleX: bs, duration: 240, ease: 'Sine.easeIn',
