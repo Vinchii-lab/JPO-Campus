@@ -9747,6 +9747,10 @@
     });
     document.getElementById('owner-pwd-input').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
     document.getElementById('owner-pwd-input').addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    // Any input/textarea inside the whole owner panel gets the same treatment —
+    // one delegated listener catches them all so no new field ever breaks typing.
+    document.getElementById('owner-panel').addEventListener('focusin',  e => { if (e.target.matches('input,textarea,select')) _phaserKbd?.disableGlobalCapture(); });
+    document.getElementById('owner-panel').addEventListener('focusout', e => { if (e.target.matches('input,textarea,select')) _phaserKbd?.enableGlobalCapture(); });
 
     // While the panel is open, poll for fresh lists every few seconds (plus
     // once on open) — pushes cover the instant case, but a missed push (blip,
