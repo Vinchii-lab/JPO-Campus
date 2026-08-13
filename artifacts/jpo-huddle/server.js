@@ -5352,7 +5352,7 @@ io.on("connection", (socket) => {
     if (race) { socket.emit('ownerMsg', 'A pet race is already running.'); return; }
     const p = players[socket.id];
     if (!p) return;
-    prize = Math.max(100, Math.min(100_000, Math.round(prize || 2000)));
+    prize = Math.max(0, Math.min(100_000, Math.round(prize || 0)));
     race = {
       state: 'lobby', prize, starterName: p.name,
       entrants: new Map(), heats: [], currentHeat: 0, finalists: [],

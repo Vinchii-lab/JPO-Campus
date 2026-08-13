@@ -2473,8 +2473,8 @@
         <h3>🏁 Pet Race</h3>
         <p style="font-size:12px;color:#888;margin:0 0 10px">45s lobby: players with pets join &amp; everyone bets on a winner. 8 or fewer pets → straight to the Final. 9+ → heats of 8, top 3 per heat advance. The full betting pot splits among players who picked the winner, proportional to their stake. House pays the prize pool. Needs at least 2 pets.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input id="op-race-prize" type="number" min="100" max="100000" step="500" value="3000" placeholder="Prize pot (coins)"
-                 style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <input id="op-race-prize" type="number" min="0" max="100000" step="500" value="0" placeholder="Bonus prize (optional)"
+                 style="width:160px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
           <button class="o-btn o-btn-approve" onclick="ownerStartRace()">🏁 Start the race</button>
           <button class="o-btn o-btn-reject" onclick="ownerRaceCancel()">Cancel race</button>
         </div>
@@ -7381,9 +7381,8 @@
     window.ownerRlglCancel = () => socket.emit('adminRlglCancel');
 
     window.ownerStartRace = () => {
-      const prize = Math.round(Number(document.getElementById('op-race-prize').value));
+      const prize = Math.max(0, Math.round(Number(document.getElementById('op-race-prize').value) || 0));
       const msg   = document.getElementById('op-race-msg');
-      if (!prize || prize < 100) { if (msg) { msg.style.color='#e74c3c'; msg.textContent='Set a valid prize first.'; } return; }
       socket.emit('ownerStartRace', { prize });
     };
     window.ownerRaceCancel = () => socket.emit('ownerRaceCancel');
