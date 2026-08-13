@@ -4155,15 +4155,23 @@ function raceHeatEntrants(ids) {
   }).filter(Boolean);
 }
 
-// Emit to the duel room only (if this is a private challenge race),
-// or to every connected client (if this is a public admin race).
-function raceIO() { return race?.duelRoom ? io.to(race.duelRoom) : io; }
+// Emit only to the two duel participants (private challenge race),
+// or to every connected client (public admin race).
+// Returns an object with .emit() so callers don't need to know which mode.
+function raceIO() {
+  if (race?.duelIds) {
+    const ids = race.duelIds;
+    return { emit: (ev, data) => { for (const id of ids) io.to(id).emit(ev, data); } };
+  }
+  return io;
+}
 
 function raceCancel(reason) {
   if (!race) return;
   const g = race; race = null;
   clearTimeout(g.joinTimer); clearTimeout(g.countdownTimer); clearInterval(g.tickInterval);
-  (g.duelRoom ? io.to(g.duelRoom) : io).emit('raceCancelled', { reason });
+  if (g.duelIds) { for (const id of g.duelIds) io.to(id).emit('raceCancelled', { reason }); }
+  else io.emit('raceCancelled', { reason });
   console.log('Race: cancelled (' + reason + ')');
 }
 
@@ -4319,7 +4327,8 @@ async function raceDoFinish() {
     const e = g.entrants.get(id);
     return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id) || 0 };
   });
-  (g.duelRoom ? io.to(g.duelRoom) : io).emit('raceResult', { results, totalPot });
+  if (g.duelIds) { for (const id of g.duelIds) io.to(id).emit('raceResult', { results, totalPot }); }
+  else io.emit('raceResult', { results, totalPot });
   for (const [sid, amt] of payouts) io.to(sid).emit('racePayout', { amount: amt });
   console.log('Race: done. Winner: ' + winnerId + ', pot: ' + totalPot + ', payouts: ' + payouts.size);
 }
@@ -5425,6 +5434,8 @@ io.on("connection", (socket) => {
 
   socket.on('raceJoin', () => {
     if (!race || race.state !== 'lobby') return;
+    // Duel races are private — only the two challenged players may join.
+    if (race.duelIds && !race.duelIds.includes(socket.id)) return;
     const p = players[socket.id];
     if (!p?.pet) { socket.emit('raceJoinErr', 'You need a pet equipped to race! \uD83D\uDC3E'); return; }
     if (race.entrants.has(socket.id)) return;
@@ -6870,11 +6881,6 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Create a private socket.io room so ALL race events go only to these 2.
-      const duelRoom = 'race-duel-' + m.id;
-      io.sockets.sockets.get(m.challengerId)?.join(duelRoom);
-      io.sockets.sockets.get(m.targetId)?.join(duelRoom);
-
       const DUEL_COUNTDOWN_MS = 6000;
       race = {
         state: 'lobby', prize: 0, starterName: ch.name,
@@ -6882,8 +6888,8 @@ io.on("connection", (socket) => {
         bets: new Map(), positions: new Map(), finishOrder: [],
         tickInterval: null, countdownTimer: null,
         joinDeadline: Date.now() + DUEL_COUNTDOWN_MS,
-        duelRoom,       // ← raceIO() uses this to target only the two players
-        duelWager: m.wager,  // ← settled in raceDoFinish (winner takes coins)
+        duelIds: [m.challengerId, m.targetId],  // ← raceIO() targets only these two
+        duelWager: m.wager,
         duelChallengerId: m.challengerId,
         duelTargetId: m.targetId,
       };
