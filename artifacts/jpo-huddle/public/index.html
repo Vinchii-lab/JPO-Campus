@@ -7631,6 +7631,54 @@
       socket.on('raceFinalStart', ({ entrants, totalHeats }) => _startRaceUI(entrants, 0, totalHeats, true, 0));
       socket.on('raceGo',         () => { /* countdown already handles it */ });
 
+      // Spawn emoji/div particles for a special event. Uses Web Animations API
+      // so no extra keyframes needed.
+      function _spawnParticles(wrap, type) {
+        const cfgs = {
+          fire:     { icons: ['🔥','🔥','💥','🔥','🔥','🔥','💥'], n: 7 },
+          teleport: { icons: ['⚡','⚡','✨','⚡','💜','⚡'],        n: 6 },
+          flop:     { icons: ['💦','💧','💦','💧','💦'],            n: 5 },
+          pounce:   { icons: ['💨','💨','✦','💨','💨'],             n: 5 },
+          hop:      { icons: ['✨','⭐','✨','⭐','✨'],             n: 5 },
+          magic:    { icons: ['✨','🌟','💫','✨','🌈','💜','✨'],   n: 7 },
+          power:    { icons: ['⭐','✨','⭐','💥'],                  n: 4 },
+        };
+        const c = cfgs[type] || cfgs.power;
+        for (let i = 0; i < c.n; i++) {
+          const pt = document.createElement('div');
+          pt.textContent = c.icons[i % c.icons.length];
+          const sz = 12 + Math.random() * 10;
+          pt.style.cssText = 'position:absolute;pointer-events:none;z-index:40;font-size:'+sz+'px;line-height:1;';
+          // Fire: launch from right edge (mouth) of sprite, scatter forward+up/down
+          // Others: scatter from center in all directions
+          let sx, sy, dx, dy;
+          if (type === 'fire') {
+            sx = 80 + Math.random() * 20; sy = 30 + Math.random() * 45;
+            dx = 18 + Math.random() * 44;
+            dy = (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 22);
+          } else if (type === 'teleport') {
+            sx = 10 + Math.random() * 80; sy = 10 + Math.random() * 80;
+            const ang = Math.random() * Math.PI * 2;
+            dx = Math.cos(ang) * (20 + Math.random() * 20);
+            dy = Math.sin(ang) * (20 + Math.random() * 20);
+          } else {
+            sx = 20 + Math.random() * 60; sy = 20 + Math.random() * 60;
+            const ang = Math.random() * Math.PI * 2;
+            dx = Math.cos(ang) * (12 + Math.random() * 18);
+            dy = Math.sin(ang) * (12 + Math.random() * 18);
+          }
+          pt.style.left = sx + '%'; pt.style.top = sy + '%';
+          wrap.appendChild(pt);
+          const dur = 380 + Math.random() * 320;
+          const del = i * 55;
+          pt.animate([
+            { opacity: 1, transform: 'translate(0,0) scale(1)'                },
+            { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(0.25)` }
+          ], { duration: dur, delay: del, fill: 'forwards', easing: 'ease-out' });
+          setTimeout(() => pt.remove(), dur + del + 60);
+        }
+      }
+
       // Special event: type-specific visual + floating label
       // _inAction guards the walk loop so it won't overwrite the action frame mid-play
       socket.on('raceEvent', ({ id, label, type }) => {
@@ -7692,7 +7740,10 @@
           }
         }
 
-        // 3. Floating label
+        // 3. Particles
+        _spawnParticles(wrap, type || 'power');
+
+        // 4. Floating label
         const fl = document.createElement('div');
         fl.textContent = label;
         fl.style.cssText = 'position:absolute;left:50%;transform:translate(-50%,-36px);background:rgba(0,0,0,0.82);color:#ffe066;font-size:11px;font-weight:800;padding:3px 9px;border-radius:10px;white-space:nowrap;pointer-events:none;z-index:30;animation:raceEventPop 1s ease-out forwards;';
