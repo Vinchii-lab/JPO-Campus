@@ -1803,6 +1803,7 @@
         <button class="rps-game" data-game="c4" type="button">🔴<span>Connect Four</span></button>
         <button class="rps-game" data-game="pool" type="button">🎱<span>Billiards</span></button>
         <button class="rps-game" data-game="pong" type="button">🏓<span>Ping Pong</span></button>
+        <button class="rps-game" data-game="race" type="button">🏁<span>Pet Race</span></button>
       </div>
       <div id="rps-wager-fields">
         <label class="rps-wager-label" for="rps-wager-input">Wager (0 = friendly match)</label>
@@ -6987,6 +6988,7 @@
       c4:  { icon: '🔴',     label: 'Connect Four' },
       pool: { icon: '🎱',    label: 'Billiards' },
       pong: { icon: '🏓',    label: 'Ping Pong' },
+      race: { icon: '🏁',    label: 'Pet Race' },
     };
     // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
     const CHALLENGE_RANGE_PX = 480;
@@ -7580,6 +7582,12 @@
       }
 
       // ── Socket events ──────────────────────────────────────────────────────
+      socket.on('raceChallenge', ({ opponentName }) => {
+        // Show a toast so the challenged player knows who they're racing.
+        // The server already auto-joined us and emitted raceLobby + raceJoinOk.
+        _rpsToast('🏁 Race vs ' + opponentName + '! Check the track!');
+      });
+
       socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {
         _myPayout = 0;
         _showPhase('lobby');
@@ -9044,7 +9052,9 @@
     function _rpsSetGame(g) {
       _rpsGamePick = g;
       document.querySelectorAll('.rps-game').forEach((b) => b.classList.toggle('picked', b.dataset.game === g));
-      rpsEl('rps-wager-sub').textContent = GAME_META[g].label;
+      rpsEl('rps-wager-sub').textContent = (GAME_META[g] || GAME_META.rps).label;
+      // Pet Race has no wager — the race itself determines the winner.
+      rpsEl('rps-wager-fields').style.display = g === 'race' ? 'none' : '';
     }
     document.querySelectorAll('.rps-game').forEach((b) => {
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSetGame(b.dataset.game); });

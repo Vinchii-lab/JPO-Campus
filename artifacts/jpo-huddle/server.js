@@ -2758,8 +2758,8 @@ const RPS_RANGE_PX  = 480;     // "walk up to someone": ~10 tiles at render scal
 // mid-match spend block apply to new games automatically. The `rps*` event
 // names are kept for the shared lifecycle events (they predate the roster);
 // payloads carry a `game` field.
-const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "pool", "pong"]);
-const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race", trivia: "Trivia Duel", c4: "Connect Four", pool: "Billiards", pong: "Ping Pong" };
+const GAMES      = new Set(["rps", "ttt", "qd", "ib", "wr", "trivia", "c4", "pool", "pong", "race"]);
+const GAME_NAMES = { rps: "Rock-Paper-Scissors", ttt: "Tic-Tac-Toe", qd: "Quick Draw", ib: "Icebreakers", wr: "Word Race", trivia: "Trivia Duel", c4: "Connect Four", pool: "Billiards", pong: "Ping Pong", race: "Pet Race" };
 const TTT_MOVE_MS   = 20_000;  // per-move clock — the slow side forfeits
 const TTT_LINES     = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const QD_ARM_MIN_MS = 2_000;   // random wait before the DRAW! signal…
@@ -6829,6 +6829,62 @@ io.on("connection", (socket) => {
       io.to(m.challengerId).emit("rpsStart", { ...base(m.targetId, tg.name),     side: "left",  court, target: PONG_TARGET, maxMs: PONG_MAX_MS });
       io.to(m.targetId).emit("rpsStart",     { ...base(m.challengerId, ch.name), side: "right", court, target: PONG_TARGET, maxMs: PONG_MAX_MS });
       m.pongInterval = setInterval(() => pongTick(m), PONG_TICK_MS);
+      return;
+    }
+
+    if (m.game === "race") {
+      // Clean up the rps match slot without sending a cancellation message.
+      clearTimeout(m.acceptTimer);
+      rpsBySocket.delete(m.challengerId);
+      rpsBySocket.delete(m.targetId);
+
+      // Open a fresh race lobby if none is currently running.
+      if (!race) {
+        race = {
+          state: 'lobby', prize: 0, starterName: ch.name,
+          entrants: new Map(), heats: [], currentHeat: 0, finalists: [],
+          bets: new Map(), positions: new Map(), finishOrder: [],
+          tickInterval: null, countdownTimer: null,
+          joinDeadline: Date.now() + RACE_JOIN_MS,
+        };
+        io.emit('raceLobby', { prize: 0, joinDeadline: race.joinDeadline, entrants: [] });
+        race.joinTimer = setTimeout(() => {
+          if (!race || race.state !== 'lobby') return;
+          if (race.entrants.size < 2) { raceCancel('Not enough pets joined — need at least 2. 🐾'); return; }
+          const all = [...race.entrants.keys()];
+          for (let i = all.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [all[i], all[j]] = [all[j], all[i]];
+          }
+          if (all.length <= RACE_HEAT_SIZE) {
+            race.finalists = all; race.heats = [];
+            raceBeginFinal();
+          } else {
+            const heats = [];
+            for (let i = 0; i < all.length; i += RACE_HEAT_SIZE) heats.push(all.slice(i, i + RACE_HEAT_SIZE));
+            race.heats = heats;
+            raceBeginHeat();
+          }
+        }, RACE_JOIN_MS);
+      }
+
+      // Auto-join both players to the lobby (if it's open and they have a pet).
+      if (race.state === 'lobby') {
+        const autoJoin = (pid, player) => {
+          if (!player?.pet || race.entrants.has(pid)) return;
+          const stage = petStageFor(player);
+          race.entrants.set(pid, { name: player.name, petId: player.pet, petStage: stage, speed: racePetSpeed(player.pet, stage) });
+          io.to(pid).emit('raceJoinOk', {});
+        };
+        autoJoin(m.challengerId, ch);
+        autoJoin(m.targetId, tg);
+        io.emit('raceEntrantUpdate', { entrants: raceEntrantList() });
+      }
+
+      // Tell both players who they're racing against.
+      io.to(m.challengerId).emit('raceChallenge', { opponentName: tg.name });
+      io.to(m.targetId).emit('raceChallenge', { opponentName: ch.name });
+      console.log(`Race challenge: ${ch.name} vs ${tg.name}`);
       return;
     }
 
