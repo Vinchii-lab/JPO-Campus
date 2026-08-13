@@ -7461,35 +7461,32 @@
         const laneDivs = _ro('race-lane-divs');
         if (!layer) return;
         layer.innerHTML = '';
-        if (laneDivs) laneDivs.innerHTML = '';
-        const N = entrants.length || 1;
+        if (laneDivs) laneDivs.innerHTML = '';   // no lane lines — pets can clump
         const dirtEl = _ro('race-dirt');
         const trackH = dirtEl ? dirtEl.offsetHeight : 240;
-        const laneH  = trackH / N;
-        if (laneDivs) {
-          for (let i = 1; i < N; i++) {
-            const d = document.createElement('div');
-            d.style.cssText = 'position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.1);top:'+Math.round(i*laneH)+'px;';
-            laneDivs.appendChild(d);
-          }
-        }
+        const SPR_H  = 80;   // fixed big sprite — no lane-based scaling
+        const N      = entrants.length || 1;
+        // Spread pets evenly across the vertical centre so they don't perfectly stack,
+        // but keep the band tight (40% of track height) so it looks like a pack.
+        const bandH  = Math.min(trackH * 0.55, N * (SPR_H + 8));
+        const step   = N > 1 ? bandH / (N - 1) : 0;
+        const top0   = trackH / 2 - bandH / 2;
         entrants.forEach((e, i) => {
-          const cy = Math.round(i * laneH + laneH / 2);
-          const sprH = Math.max(24, Math.min(46, Math.round(laneH * 0.78)));
+          const cy  = Math.round(N > 1 ? top0 + i * step : trackH / 2);
           const wrap = document.createElement('div');
           wrap.id = 'rpet-'+e.id;
-          wrap.style.cssText = 'position:absolute;left:'+TRACK_L+'%;top:'+cy+'px;transform:translate(0,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;transition:left 0.14s linear;z-index:5;';
+          wrap.style.cssText = 'position:absolute;left:'+TRACK_L+'%;top:'+cy+'px;transform:translate(0,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left 0.14s linear;z-index:5;';
           const lbl = document.createElement('div');
-          lbl.style.cssText = 'font-size:9px;font-weight:700;background:rgba(10,8,20,0.75);color:#fff;border-radius:5px;padding:1px 5px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;';
+          lbl.style.cssText = 'font-size:10px;font-weight:700;background:rgba(10,8,20,0.82);color:#fff;border-radius:5px;padding:1px 6px;white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis;';
           lbl.textContent = e.name;
           const img = document.createElement('img');
           img.src = '/assets/pets/anim/'+e.stem+'_walk1.png';
           img.onerror = function() { this.src = '/assets/pets/anim/'+e.stem.replace(/_s[23]$/,'')+'_walk1.png'; };
-          img.style.cssText = 'image-rendering:pixelated;height:'+sprH+'px;width:auto;filter:drop-shadow(1px 2px 3px rgba(0,0,0,0.6));';
+          img.style.cssText = 'image-rendering:pixelated;height:'+SPR_H+'px;width:auto;filter:drop-shadow(2px 3px 5px rgba(0,0,0,0.7));';
           img.dataset.stem = e.stem;
           const placeTag = document.createElement('div');
           placeTag.id = 'rplace-'+e.id;
-          placeTag.style.cssText = 'display:none;font-size:14px;margin-top:1px;';
+          placeTag.style.cssText = 'display:none;font-size:18px;margin-top:2px;';
           wrap.append(lbl, img, placeTag);
           layer.appendChild(wrap);
         });
