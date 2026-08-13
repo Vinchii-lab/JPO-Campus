@@ -426,3 +426,10 @@ uri = "file://attached_assets/race_mockup.png"
 type = "image"
 title = "Pet Race — Heat UI Mockup"
 description = "What the race screen would look like during Heat 1. Real pet sprites, lane layout, betting panel, odds, and gate timer."
+
+[[outputs]]
+id = "wjHbrlVcgaaKaiTBAmULq"
+uri = "file://attached_assets/race_mockup_v2.jpg"
+type = "image"
+title = "Pet Race — Heat UI Mockup"
+description = "What the race screen would look like. Real pet sprites, heat bracket, betting panel, odds, and countdown timer."
