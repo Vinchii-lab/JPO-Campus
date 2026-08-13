@@ -7635,45 +7635,50 @@
       // so no extra keyframes needed.
       function _spawnParticles(wrap, type) {
         const cfgs = {
-          fire:     { icons: ['🔥','🔥','💥','🔥','🔥','🔥','💥'], n: 7 },
-          teleport: { icons: ['⚡','⚡','✨','⚡','💜','⚡'],        n: 6 },
-          flop:     { icons: ['💦','💧','💦','💧','💦'],            n: 5 },
-          pounce:   { icons: ['💨','💨','✦','💨','💨'],             n: 5 },
-          hop:      { icons: ['✨','⭐','✨','⭐','✨'],             n: 5 },
-          magic:    { icons: ['✨','🌟','💫','✨','🌈','💜','✨'],   n: 7 },
-          power:    { icons: ['⭐','✨','⭐','💥'],                  n: 4 },
+          fire:     { icons: ['🔥','💥','🔥','🔥','💥','🔥','🔥','💥','🔥'], n: 14 },
+          teleport: { icons: ['⚡','💜','⚡','✨','⚡','💜','⚡','✨'],         n: 12 },
+          flop:     { icons: ['💦','💧','💦','💧','💦','💧','🌊'],            n: 12 },
+          pounce:   { icons: ['💨','💨','🐾','💨','💨','🐾','💨'],            n: 10 },
+          hop:      { icons: ['✨','⭐','✨','🌟','✨','⭐','✨'],              n: 12 },
+          magic:    { icons: ['✨','🌟','💫','🌈','💜','✨','🌟','💫'],        n: 14 },
+          power:    { icons: ['⭐','✨','💥','⭐','✨'],                        n: 8  },
         };
         const c = cfgs[type] || cfgs.power;
         for (let i = 0; i < c.n; i++) {
           const pt = document.createElement('div');
           pt.textContent = c.icons[i % c.icons.length];
-          const sz = 12 + Math.random() * 10;
+          const sz = 16 + Math.random() * 18;
           pt.style.cssText = 'position:absolute;pointer-events:none;z-index:40;font-size:'+sz+'px;line-height:1;';
-          // Fire: launch from right edge (mouth) of sprite, scatter forward+up/down
-          // Others: scatter from center in all directions
           let sx, sy, dx, dy;
           if (type === 'fire') {
-            sx = 80 + Math.random() * 20; sy = 30 + Math.random() * 45;
-            dx = 18 + Math.random() * 44;
-            dy = (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 22);
+            // Blast forward from the mouth in a wide cone
+            sx = 75 + Math.random() * 25; sy = 20 + Math.random() * 60;
+            dx =  40 + Math.random() * 80;
+            dy = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 38);
           } else if (type === 'teleport') {
-            sx = 10 + Math.random() * 80; sy = 10 + Math.random() * 80;
-            const ang = Math.random() * Math.PI * 2;
-            dx = Math.cos(ang) * (20 + Math.random() * 20);
-            dy = Math.sin(ang) * (20 + Math.random() * 20);
-          } else {
+            // Explode outward in all directions from centre
             sx = 20 + Math.random() * 60; sy = 20 + Math.random() * 60;
             const ang = Math.random() * Math.PI * 2;
-            dx = Math.cos(ang) * (12 + Math.random() * 18);
-            dy = Math.sin(ang) * (12 + Math.random() * 18);
+            const r   = 40 + Math.random() * 50;
+            dx = Math.cos(ang) * r; dy = Math.sin(ang) * r;
+          } else if (type === 'hop') {
+            // Shoot upward + sideways
+            sx = 20 + Math.random() * 60; sy = 40 + Math.random() * 40;
+            dx = (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 30);
+            dy = -(20 + Math.random() * 50);
+          } else {
+            sx = 15 + Math.random() * 70; sy = 15 + Math.random() * 70;
+            const ang = Math.random() * Math.PI * 2;
+            const r   = 22 + Math.random() * 32;
+            dx = Math.cos(ang) * r; dy = Math.sin(ang) * r;
           }
           pt.style.left = sx + '%'; pt.style.top = sy + '%';
           wrap.appendChild(pt);
-          const dur = 380 + Math.random() * 320;
-          const del = i * 55;
+          const dur = 500 + Math.random() * 450;
+          const del = i * 35;
           pt.animate([
-            { opacity: 1, transform: 'translate(0,0) scale(1)'                },
-            { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(0.25)` }
+            { opacity: 1, transform: 'translate(0,0) scale(1.2)'               },
+            { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(0.1)`   }
           ], { duration: dur, delay: del, fill: 'forwards', easing: 'ease-out' });
           setTimeout(() => pt.remove(), dur + del + 60);
         }
@@ -7701,54 +7706,77 @@
 
         // 2. Type-specific CSS effect
         if (type === 'teleport') {
-          // Dog: position snaps instantly (no CSS transition), then fades back in
+          // Dog: vanish → reappear with lightning scale pop
           wrap.style.transition = 'none';
-          if (img) { img.style.opacity = '0'; setTimeout(() => { img.style.opacity = '1'; }, 100); }
-          setTimeout(() => { wrap.style.transition = 'left 0.14s linear'; }, 350);
-        } else if (type === 'fire') {
-          // Dragon / phoenix: bright orange fire glow
           if (img) {
-            img.style.filter = 'drop-shadow(0 0 6px #ff4400) drop-shadow(0 0 14px #ff8800) brightness(1.5)';
+            img.style.opacity = '0';
+            img.style.filter  = 'brightness(3) drop-shadow(0 0 18px #aa88ff)';
+            setTimeout(() => {
+              img.style.opacity = '1';
+              img.style.transform = 'scale(1.5)';
+              setTimeout(() => { img.style.transform = 'scale(1)'; }, 180);
+            }, 110);
             setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; }, ACTION_MS);
           }
-        } else if (type === 'pounce') {
-          // Cat: leap up then land
-          wrap.style.transform = 'translate(0,-80%) scale(1.25)';
-          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; }, 260);
-          setTimeout(() => { wrap.style.transform = 'translate(0,-35%) scaleY(0.8)'; }, 480);
-          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; }, 640);
-        } else if (type === 'flop') {
-          // Duck: spin-tumble
+          setTimeout(() => { wrap.style.transition = 'left 0.14s linear'; }, 380);
+        } else if (type === 'fire') {
+          // Dragon / phoenix: blinding fire glow + brief screen flash
           if (img) {
-            img.style.transition = 'transform 0.25s ease-in';
-            img.style.transform  = 'rotate(-50deg) scaleX(-1)';
-            setTimeout(() => { img.style.transform = 'rotate(0deg) scaleX(1)'; img.style.transition = ''; }, 480);
+            img.style.filter = 'drop-shadow(0 0 10px #ff2200) drop-shadow(0 0 28px #ff6600) brightness(2)';
+            img.style.transform = 'scale(1.3)';
+            setTimeout(() => { img.style.transform = 'scale(1)'; }, 250);
+            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; }, ACTION_MS);
+          }
+          // Brief orange screen-edge flash
+          const flash = document.createElement('div');
+          flash.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:35;border-radius:0;background:radial-gradient(ellipse at 50% 50%,rgba(255,80,0,0.22) 0%,transparent 70%);';
+          const dirtEl2 = document.getElementById('race-dirt');
+          if (dirtEl2) { dirtEl2.appendChild(flash); setTimeout(() => flash.remove(), 420); }
+        } else if (type === 'pounce') {
+          // Cat: high leap with spin, lands with squash
+          wrap.style.transition = 'transform 0.18s cubic-bezier(0.2,2,0.4,1)';
+          wrap.style.transform  = 'translate(0,-110%) scale(1.35) rotate(-15deg)';
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = 'transform 0.12s ease-in'; }, 300);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-38%) scaleY(0.7) scaleX(1.2)'; }, 440);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = ''; }, 580);
+        } else if (type === 'flop') {
+          // Duck: full barrel roll
+          if (img) {
+            img.style.transition = 'transform 0.32s ease-in-out';
+            img.style.transform  = 'rotate(-180deg) scaleX(-1) scale(1.2)';
+            setTimeout(() => { img.style.transform = 'rotate(-360deg) scaleX(1) scale(1)'; }, 360);
+            setTimeout(() => { img.style.transform = ''; img.style.transition = ''; }, 700);
           }
         } else if (type === 'hop') {
-          // Bunny: double bounce
-          wrap.style.transform = 'translate(0,-80%)';
-          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; }, 190);
-          setTimeout(() => { wrap.style.transform = 'translate(0,-74%)'; }, 350);
-          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; }, 540);
+          // Bunny: triple bounce, getting higher each time
+          wrap.style.transition = 'transform 0.16s ease-out';
+          wrap.style.transform  = 'translate(0,-90%)';
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%) scaleY(0.75) scaleX(1.2)'; }, 180);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-120%)'; wrap.style.transition = 'transform 0.14s ease-out'; }, 310);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%) scaleY(0.8)'; }, 460);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-80%)'; wrap.style.transition = 'transform 0.12s ease-out'; }, 560);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = ''; }, 700);
         } else if (type === 'magic') {
-          // Unicorn: rainbow hue sweep
+          // Unicorn: full rainbow spin + scale surge
           if (img) {
-            img.style.transition = 'filter 0.2s';
-            img.style.filter = 'hue-rotate(120deg) brightness(1.6) drop-shadow(0 0 10px #cc88ff)';
-            setTimeout(() => { img.style.filter = 'hue-rotate(240deg) brightness(1.3)'; }, 220);
-            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; img.style.transition = ''; }, ACTION_MS);
+            img.style.transition = 'filter 0.15s, transform 0.2s';
+            img.style.transform  = 'scale(1.4) rotate(20deg)';
+            img.style.filter     = 'hue-rotate(0deg)   brightness(2)   drop-shadow(0 0 14px #ff88ff)';
+            setTimeout(() => { img.style.filter = 'hue-rotate(120deg) brightness(1.8) drop-shadow(0 0 12px #88ffcc)'; }, 200);
+            setTimeout(() => { img.style.filter = 'hue-rotate(240deg) brightness(1.5) drop-shadow(0 0 10px #88aaff)'; img.style.transform = 'scale(1) rotate(-10deg)'; }, 400);
+            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; img.style.transform = 'scale(1)'; img.style.transition = ''; }, ACTION_MS);
           }
         }
 
         // 3. Particles
         _spawnParticles(wrap, type || 'power');
 
-        // 4. Floating label
+        // 4. Floating label — bigger and bolder
         const fl = document.createElement('div');
         fl.textContent = label;
-        fl.style.cssText = 'position:absolute;left:50%;transform:translate(-50%,-36px);background:rgba(0,0,0,0.82);color:#ffe066;font-size:11px;font-weight:800;padding:3px 9px;border-radius:10px;white-space:nowrap;pointer-events:none;z-index:30;animation:raceEventPop 1s ease-out forwards;';
+        fl.style.cssText = 'position:absolute;left:50%;transform:translate(-50%,-44px);background:rgba(0,0,0,0.88);color:#ffe066;font-size:13px;font-weight:900;padding:4px 12px;border-radius:12px;white-space:nowrap;pointer-events:none;z-index:50;border:1px solid rgba(255,220,80,0.35);animation:raceEventPop 1.1s ease-out forwards;';
         wrap.appendChild(fl);
-        setTimeout(() => fl.remove(), 1100);
+        setTimeout(() => fl.remove(), 1200);
       });
 
       socket.on('racePositions', posData => {

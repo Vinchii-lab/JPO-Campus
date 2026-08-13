@@ -4164,9 +4164,15 @@ function raceCancel(reason) {
 }
 
 function raceBeginRace(ids) {
-  race.positions   = new Map();
-  race.finishOrder = [];
-  for (const id of ids) race.positions.set(id, { pos: 0, vel: 0, finished: false, place: null });
+  race.positions      = new Map();
+  race.finishOrder    = [];
+  race.specialCooldowns = new Map();
+  const now = Date.now();
+  // Pre-stagger each pet's first special so they never all fire at once
+  for (const id of ids) {
+    race.positions.set(id, { pos: 0, vel: 0, finished: false, place: null });
+    race.specialCooldowns.set(id, now + 2000 + Math.random() * 6000);
+  }
   io.emit('raceGo', { entrants: raceHeatEntrants(ids) });
   race.tickInterval = setInterval(raceTick, RACE_TICK_MS);
 }
@@ -4207,7 +4213,7 @@ function raceTick() {
       const ev = raceSpecialEvent(e ? e.petId : '');
       p.pos = Math.min(100, p.pos + ev.boost);
       race.specialCooldowns.set(id, now + 5000 + Math.random() * 4000);
-      events.push({ id, label: ev.label });
+      events.push({ id, label: ev.label, type: ev.type });
     }
     if (p.pos >= 100 && !p.finished) {
       p.finished = true;
