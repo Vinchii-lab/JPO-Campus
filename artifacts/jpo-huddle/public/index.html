@@ -12630,6 +12630,59 @@
           }
           return;
         }
+        if (sp === 'pet_dragon' || sp === 'pet_phoenix') {
+          // FIRE BREATH — the one trick every dragon deserves.
+          // Head lunges forward, a blinding mouth-flash fires, then a stream
+          // of fire particles blast out. Sprite glows orange for the duration.
+          petObj._trickBusy = true;
+          const bs   = petObj._baseScale || 1;
+          const fwd  = petObj.flipX ? -1 : 1;
+          const x0   = petObj.x, y0 = petObj.y;
+          const scU  = Math.max(1, petObj.displayWidth / 48);
+          const isPx = sp === 'pet_phoenix';
+          // Mouth position: right side of the sprite, vertically centred on the head
+          const mouthX = x0 + fwd * petObj.displayWidth  * 0.46;
+          const mouthY = y0 - petObj.displayHeight * 0.48;
+          const fireCol  = isPx ? 0xff8800 : 0xff3300;
+          const glowCol  = isPx ? 0xffbb44 : 0xff6633;
+          const emojis   = isPx ? ['🔥','✨','🔥','💥','🔥'] : ['🔥','💥','🔥','🔥','💥'];
+
+          // 1. Head lunge + orange glow on the sprite
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { angle: 14 * fwd, scaleX: bs * 1.1, duration: 200, ease: 'Sine.easeOut', hold: 440 },
+              { angle: 0, scaleX: bs, duration: 300, ease: 'Sine.easeOut' },
+            ],
+            onComplete: () => { petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false; },
+          });
+          petObj.setTint(glowCol);
+          this.time.delayedCall(740, () => { if (petObj.active) petObj.clearTint(); });
+
+          // 2. Mouth flash — bright circle that blooms forward
+          const flash = this.add.circle(mouthX, mouthY, 5.5 * scU, fireCol, 1).setDepth(3.8);
+          this.tweens.add({ targets: flash, alpha: 0, scale: 4, x: flash.x + fwd * 14 * scU,
+            duration: 300, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, flash) });
+
+          // 3. Fire stream — staggered particles burst forward from the mouth
+          for (let i = 0; i < 11; i++) {
+            this.time.delayedCall(200 + i * 48, () => {
+              if (!petObj.active || !petObj.visible) return;
+              const spread = (Math.random() - 0.5) * 26 * scU;
+              const range  = (30 + Math.random() * 42) * scU;
+              const sz     = Math.round(10 + Math.random() * 9);
+              const p = this.add.text(mouthX, mouthY + spread * 0.35,
+                emojis[i % emojis.length], { fontSize: sz + 'px', resolution: 2 })
+                .setOrigin(0.5).setAlpha(1).setDepth(3.6);
+              this.tweens.add({ targets: p,
+                x: p.x + fwd * range, y: p.y + spread,
+                alpha: 0, scale: 1.3 + Math.random() * 0.5,
+                duration: 420 + Math.random() * 220, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, p) });
+            });
+          }
+          return;
+        }
         if (sp === 'pet_dog') {
           // Body language evolves with the dog: baby = giddy wiggle-hop,
           // evolved = athletic play-bow into a leaping spin, final form =
