@@ -4155,11 +4155,15 @@ function raceHeatEntrants(ids) {
   }).filter(Boolean);
 }
 
+// Emit to the duel room only (if this is a private challenge race),
+// or to every connected client (if this is a public admin race).
+function raceIO() { return race?.duelRoom ? io.to(race.duelRoom) : io; }
+
 function raceCancel(reason) {
   if (!race) return;
   const g = race; race = null;
   clearTimeout(g.joinTimer); clearTimeout(g.countdownTimer); clearInterval(g.tickInterval);
-  io.emit('raceCancelled', { reason });
+  (g.duelRoom ? io.to(g.duelRoom) : io).emit('raceCancelled', { reason });
   console.log('Race: cancelled (' + reason + ')');
 }
 
@@ -4173,7 +4177,7 @@ function raceBeginRace(ids) {
     race.positions.set(id, { pos: 0, vel: 0, finished: false, place: null });
     race.specialCooldowns.set(id, now + 2000 + Math.random() * 6000);
   }
-  io.emit('raceGo', { entrants: raceHeatEntrants(ids) });
+  raceIO().emit('raceGo', { entrants: raceHeatEntrants(ids) });
   race.tickInterval = setInterval(raceTick, RACE_TICK_MS);
 }
 
@@ -4222,8 +4226,8 @@ function raceTick() {
     }
     posData[id] = { pos: p.pos, finished: p.finished, place: p.place };
   }
-  io.emit('racePositions', posData);
-  for (const ev of events) io.emit('raceEvent', ev);
+  raceIO().emit('racePositions', posData);
+  for (const ev of events) raceIO().emit('raceEvent', ev);
   const isHeat  = race.state === 'heat';
   const advN    = Math.min(RACE_ADVANCE_N, race.positions.size);
   const allDone = isHeat
@@ -4241,7 +4245,7 @@ function raceTick() {
       results.push({ id, name: e ? e.name : '?', place: null, petId: e ? e.petId : '', petStage: e ? e.petStage : 1, stem: e ? petStemForRace(e.petId, e.petStage) : '' });
     }
   }
-  io.emit('raceHeatEnd', { heat: race.currentHeat + 1, totalHeats: race.heats.length, isFinal: !isHeat, results });
+  raceIO().emit('raceHeatEnd', { heat: race.currentHeat + 1, totalHeats: race.heats.length, isFinal: !isHeat, results });
   if (isHeat) {
     const advance   = race.finishOrder.slice(0, advN);
     race.finalists  = [...(race.finalists || []), ...advance];
@@ -4257,7 +4261,7 @@ function raceBeginHeat() {
   if (!race) return;
   const ids = race.heats[race.currentHeat];
   race.state = 'heat';
-  io.emit('raceHeatStart', {
+  raceIO().emit('raceHeatStart', {
     heat: race.currentHeat + 1, totalHeats: race.heats.length,
     entrants: raceHeatEntrants(ids), advanceN: RACE_ADVANCE_N,
   });
@@ -4267,7 +4271,7 @@ function raceBeginHeat() {
 function raceBeginFinal() {
   if (!race) return;
   race.state = 'final';
-  io.emit('raceFinalStart', { entrants: raceHeatEntrants(race.finalists), totalHeats: race.heats.length });
+  raceIO().emit('raceFinalStart', { entrants: raceHeatEntrants(race.finalists), totalHeats: race.heats.length });
   race.countdownTimer = setTimeout(() => raceBeginRace(race.finalists), 4000);
 }
 
@@ -4302,7 +4306,7 @@ async function raceDoFinish() {
     const e = g.entrants.get(id);
     return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id) || 0 };
   });
-  io.emit('raceResult', { results, totalPot });
+  (g.duelRoom ? io.to(g.duelRoom) : io).emit('raceResult', { results, totalPot });
   for (const [sid, amt] of payouts) io.to(sid).emit('racePayout', { amount: amt });
   console.log('Race: done. Winner: ' + winnerId + ', pot: ' + totalPot + ', payouts: ' + payouts.size);
 }
@@ -5414,7 +5418,7 @@ io.on("connection", (socket) => {
     if (!takeToken(interactBucket)) return;
     const stage = petStageFor(p);
     race.entrants.set(socket.id, { name: p.name, petId: p.pet, petStage: stage, speed: racePetSpeed(p.pet, stage) });
-    io.emit('raceEntrantUpdate', { entrants: raceEntrantList() });
+    raceIO().emit('raceEntrantUpdate', { entrants: raceEntrantList() });
     socket.emit('raceJoinOk', {});
     console.log('Race join: ' + p.name + ' with ' + p.pet + ' s' + stage);
   });
@@ -5435,7 +5439,7 @@ io.on("connection", (socket) => {
     socket.emit('raceBetAck', { onId, amount, coins: p.coins });
     socket.emit('coinUpdate', { coins: p.coins });
     const pot = [...race.bets.values()].reduce((s, b) => s + b.amount, 0);
-    io.emit('racePotUpdate', { pot });
+    raceIO().emit('racePotUpdate', { pot });
   });
 
   socket.on("rlglJoin", () => {
@@ -6838,53 +6842,62 @@ io.on("connection", (socket) => {
       rpsBySocket.delete(m.challengerId);
       rpsBySocket.delete(m.targetId);
 
-      // Open a fresh race lobby if none is currently running.
-      if (!race) {
-        race = {
-          state: 'lobby', prize: 0, starterName: ch.name,
-          entrants: new Map(), heats: [], currentHeat: 0, finalists: [],
-          bets: new Map(), positions: new Map(), finishOrder: [],
-          tickInterval: null, countdownTimer: null,
-          joinDeadline: Date.now() + RACE_JOIN_MS,
-        };
-        io.emit('raceLobby', { prize: 0, joinDeadline: race.joinDeadline, entrants: [] });
-        race.joinTimer = setTimeout(() => {
-          if (!race || race.state !== 'lobby') return;
-          if (race.entrants.size < 2) { raceCancel('Not enough pets joined — need at least 2. 🐾'); return; }
-          const all = [...race.entrants.keys()];
-          for (let i = all.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [all[i], all[j]] = [all[j], all[i]];
-          }
-          if (all.length <= RACE_HEAT_SIZE) {
-            race.finalists = all; race.heats = [];
-            raceBeginFinal();
-          } else {
-            const heats = [];
-            for (let i = 0; i < all.length; i += RACE_HEAT_SIZE) heats.push(all.slice(i, i + RACE_HEAT_SIZE));
-            race.heats = heats;
-            raceBeginHeat();
-          }
-        }, RACE_JOIN_MS);
+      // Block if a race is already running — don't hijack the public event.
+      if (race) {
+        io.to(m.challengerId).emit('raceChallengeFail', { message: 'A race is already running — try again when it ends.' });
+        io.to(m.targetId).emit('raceChallengeFail',   { message: 'A race is already running — try again when it ends.' });
+        return;
       }
 
-      // Auto-join both players to the lobby (if it's open and they have a pet).
-      if (race.state === 'lobby') {
-        const autoJoin = (pid, player) => {
-          if (!player?.pet || race.entrants.has(pid)) return;
-          const stage = petStageFor(player);
-          race.entrants.set(pid, { name: player.name, petId: player.pet, petStage: stage, speed: racePetSpeed(player.pet, stage) });
-          io.to(pid).emit('raceJoinOk', {});
-        };
-        autoJoin(m.challengerId, ch);
-        autoJoin(m.targetId, tg);
-        io.emit('raceEntrantUpdate', { entrants: raceEntrantList() });
+      // Both players need a pet.
+      if (!ch?.pet || !tg?.pet) {
+        const msg = 'Both players need a pet equipped to race. 🐾';
+        io.to(m.challengerId).emit('raceChallengeFail', { message: msg });
+        io.to(m.targetId).emit('raceChallengeFail',   { message: msg });
+        return;
       }
 
-      // Tell both players who they're racing against.
+      // Create a private socket.io room so ALL race events go only to these 2.
+      const duelRoom = 'race-duel-' + m.id;
+      io.sockets.sockets.get(m.challengerId)?.join(duelRoom);
+      io.sockets.sockets.get(m.targetId)?.join(duelRoom);
+
+      const DUEL_COUNTDOWN_MS = 6000;
+      race = {
+        state: 'lobby', prize: 0, starterName: ch.name,
+        entrants: new Map(), heats: [], currentHeat: 0, finalists: [],
+        bets: new Map(), positions: new Map(), finishOrder: [],
+        tickInterval: null, countdownTimer: null,
+        joinDeadline: Date.now() + DUEL_COUNTDOWN_MS,
+        duelRoom,   // ← raceIO() uses this to target only the two players
+      };
+
+      // Auto-join both players immediately.
+      const autoJoin = (pid, player) => {
+        const stage = petStageFor(player);
+        race.entrants.set(pid, { name: player.name, petId: player.pet, petStage: stage, speed: racePetSpeed(player.pet, stage) });
+        io.to(pid).emit('raceJoinOk', {});
+      };
+      autoJoin(m.challengerId, ch);
+      autoJoin(m.targetId, tg);
+
+      // Show the lobby only to these two (via the duel room).
+      raceIO().emit('raceLobby', { prize: 0, joinDeadline: race.joinDeadline, entrants: [] });
+      raceIO().emit('raceEntrantUpdate', { entrants: raceEntrantList() });
+
+      // Toast so each player knows who they're racing.
       io.to(m.challengerId).emit('raceChallenge', { opponentName: tg.name });
-      io.to(m.targetId).emit('raceChallenge', { opponentName: ch.name });
-      console.log(`Race challenge: ${ch.name} vs ${tg.name}`);
+      io.to(m.targetId).emit('raceChallenge',   { opponentName: ch.name });
+
+      // Skip the public join window — start the duel after a short countdown.
+      race.joinTimer = setTimeout(() => {
+        if (!race || race.state !== 'lobby') return;
+        race.finalists = [...race.entrants.keys()];
+        race.heats = [];
+        raceBeginFinal();
+      }, DUEL_COUNTDOWN_MS);
+
+      console.log(`Race duel: ${ch.name} vs ${tg.name} (room: ${duelRoom})`);
       return;
     }
 
