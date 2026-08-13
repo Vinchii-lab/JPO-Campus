@@ -12008,7 +12008,7 @@
                 { angle: 0, scaleY: bs, duration: 180, ease: 'Back.easeOut',
                   onStart: () => {
                     if (!petObj.active || !petObj.visible) return;
-                    this.cameras.main.shake(80, 0.0012);
+
                     for (let i = 0; i < 9; i++) {                                    // glitter burst
                       const g = this.add.circle(petObj.x + (Math.random() * 14 - 7) * scU,
                         petObj.y - 2, 1.6 * scU, RAINBOW[i % 6], 0.95).setDepth(3.1);
@@ -12077,7 +12077,7 @@
               const perchX = owner.x, perchY = owner.y - 10;   // standing atop the flattened owner
               const knocked = () => {                          // the RLGL-style knockdown
                 this.tweens.add({ targets: owner, angle: 90 * tipDir, duration: 190, ease: 'Back.easeIn' });
-                this.cameras.main.shake(160, 0.004);           // THUD.
+                           // THUD.
               };
               const getUp = () => {
                 this.tweens.add({ targets: owner, angle: ownAngle0, duration: 260, ease: 'Sine.easeOut' });
@@ -12347,7 +12347,7 @@
                   onStart: () => { flakes(); },
                   onComplete: () => {
                     if (!petObj.active) return;
-                    powder(); this.cameras.main.shake(120, 0.002);
+                    powder();
                     if (sitTex) petObj.setTexture(sitTex);
                   } },
               ],
@@ -12499,7 +12499,7 @@
                 this.tweens.add({ targets: [orb, orbHalo], scale: 8, alpha: 0, duration: 180,
                   ease: 'Quad.easeOut', onComplete: pop });
                 if (!petObj.visible) return;
-                this.cameras.main.shake(160, 0.0025);
+
                 // THE TORRENT (per the storyboard): a dense CONTINUOUS beam,
                 // not scattered flakes — for ~700ms, tightly-packed magenta
                 // puffs pour out every 28ms, overlapping into a solid cone
@@ -12602,7 +12602,7 @@
                 if (!petObj.active) { f1(); f2(); return; }
                 this.tweens.add({ targets: [orbC, haloC], scale: 8, alpha: 0, duration: 160,
                   ease: 'Quad.easeOut', onComplete: () => { f1(); f2(); } });
-                this.cameras.main.shake(150, 0.0022);
+
               });
               // THE TORRENT — same dense continuous beam as Violet's, in
               // furnace colors: packed fire puffs widening into a solid cone,
@@ -12700,7 +12700,7 @@
                 if (!petObj.active || !petObj.visible) return;
                 const mxO = petObj.x + fwdD * petObj.displayWidth * 0.38;
                 const myO = yD - petObj.displayHeight * 0.40;
-                this.cameras.main.shake(120, 0.0018);
+
                 for (let i = 0; i < 16; i++) {
                   this.time.delayedCall(i * 30, () => {
                     if (!petObj.active || !petObj.visible) return;
@@ -12754,7 +12754,7 @@
                   onComplete: () => {
                     if (!petObj.active) return;
                     petObj.clearTint();
-                    this.cameras.main.shake(300, 0.006);
+
                     if (!petObj.visible) return;
                     const wave = this.add.ellipse(petObj.x, yD, 26, 9, 0x1a0a1e, 0)
                       .setStrokeStyle(3, 0xff5500, 0.85).setDepth(3);
@@ -12985,7 +12985,7 @@
                         duration: 900 + Math.random() * 500, ease: 'Sine.easeIn',
                         onComplete: this._trackPetFx(petObj, c) });
                     }
-                    this.cameras.main.shake(180, 0.0022);                // the office FEELS it
+                                    // the office FEELS it
                   } },
                 // hold court on the throne
                 { alpha: 1, duration: 2100 },
@@ -13026,7 +13026,7 @@
                 { scaleY: bs * 0.66, scaleX: bs * 1.32, angle: 0, y: y0 + 2,
                   duration: 120, ease: 'Sine.easeIn',
                   onComplete: () => {
-                    this.cameras.main.shake(170, 0.004);
+
                     const ring = this.add.ellipse(petObj.x, y0, 22, 8, 0xffb347, 0)
                       .setStrokeStyle(2, 0xffb347, 0.8).setDepth(3);
                     this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
@@ -13305,7 +13305,7 @@
                 { scaleY: bs * 0.82, scaleX: bs * 1.14, y: y0, duration: 110, ease: 'Quad.easeIn',
                   onComplete: () => {
                     if (!petObj.active) return;
-                    this.cameras.main.shake(220, 0.004);
+
                     if (petObj.visible) {
                       const ring = this.add.ellipse(petObj.x, y0, 22, 8, 0xbfeaff, 0)
                         .setStrokeStyle(2, 0xbfeaff, 0.9).setDepth(3);
@@ -13387,7 +13387,7 @@
                 { scaleY: bs * 0.8, scaleX: bs * 1.16, y: y0, duration: 120, ease: 'Quad.easeIn',
                   onComplete: () => {
                     if (!petObj.active) return;
-                    this.cameras.main.shake(280, 0.004);
+
                     if (!petObj.visible) return;
                     const ring = this.add.ellipse(petObj.x, y0, 24, 9, 0x9dbf7a, 0)
                       .setStrokeStyle(2, 0x9dbf7a, 0.85).setDepth(3);
@@ -13535,7 +13535,7 @@
               this.tweens.add({ targets: ring, scaleX: 3.4, scaleY: 3.4, alpha: 0,
                 delay: 280, duration: 750, ease: 'Sine.easeOut',
                 onComplete: this._trackPetFx(petObj, ring) });
-              this.time.delayedCall(300, () => { this.cameras.main.shake(120, 0.002); });
+              this.time.delayedCall(300, () => {  });
               for (let i = 0; i < 12; i++) {           // radial embers
                 this.time.delayedCall(300 + (i % 4) * 60, () => {
                   if (!petObj.active || !petObj.visible) return;
@@ -13569,7 +13569,7 @@
                 { angle: 0, duration: 200, ease: 'Back.easeOut',
                   onStart: () => {
                     if (!petObj.active) return;
-                    this.cameras.main.shake(140, 0.0028);
+
                     if (!petObj.visible) return;
                     for (let i = 0; i < 10; i++) {                                // flame burst
                       const f = this.add.circle(petObj.x + (Math.random() * 12 - 6) * scP,
