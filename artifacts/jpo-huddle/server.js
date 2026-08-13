@@ -5449,6 +5449,8 @@ io.on("connection", (socket) => {
 
   socket.on('raceBet', ({ onId, amount }) => {
     if (!race || race.state !== 'lobby') return;
+    // Duel races are private — only the two players can bet.
+    if (race.duelIds && !race.duelIds.includes(socket.id)) return;
     const p = players[socket.id];
     if (!p?.email) return;
     if (!takeToken(interactBucket)) return;
@@ -6919,7 +6921,7 @@ io.on("connection", (socket) => {
         raceBeginFinal();
       }, DUEL_COUNTDOWN_MS);
 
-      console.log(`Race duel: ${ch.name} vs ${tg.name} (room: ${duelRoom})`);
+      console.log(`Race duel: ${ch.name} vs ${tg.name}`);
       return;
     }
 
