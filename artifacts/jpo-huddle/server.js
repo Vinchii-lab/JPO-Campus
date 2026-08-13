@@ -4302,6 +4302,19 @@ async function raceDoFinish() {
     await cl.query('COMMIT');
   } catch (err) { await cl.query('ROLLBACK'); console.error('Race payout failed:', err); }
   finally { cl.release(); }
+  // Duel wager settlement: winner takes coins from the loser.
+  if (g.duelRoom && g.duelWager > 0 && winnerId) {
+    const loserId = g.duelChallengerId === winnerId ? g.duelTargetId : g.duelChallengerId;
+    try {
+      const transferred = await rpsSettle(winnerId, loserId, g.duelWager);
+      if (transferred > 0) {
+        const wp = players[winnerId], lp = players[loserId];
+        if (wp) io.to(winnerId).emit('rpsResult', { game: 'race', outcome: 'win',  wager: g.duelWager, coinsDelta:  transferred, coins: wp.coins });
+        if (lp) io.to(loserId).emit('rpsResult',  { game: 'race', outcome: 'loss', wager: g.duelWager, coinsDelta: -transferred, coins: lp.coins });
+      }
+    } catch (err) { console.error('Race duel wager settle failed:', err); }
+  }
+
   const results = g.finishOrder.map((id, i) => {
     const e = g.entrants.get(id);
     return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id) || 0 };
@@ -6869,7 +6882,10 @@ io.on("connection", (socket) => {
         bets: new Map(), positions: new Map(), finishOrder: [],
         tickInterval: null, countdownTimer: null,
         joinDeadline: Date.now() + DUEL_COUNTDOWN_MS,
-        duelRoom,   // ← raceIO() uses this to target only the two players
+        duelRoom,       // ← raceIO() uses this to target only the two players
+        duelWager: m.wager,  // ← settled in raceDoFinish (winner takes coins)
+        duelChallengerId: m.challengerId,
+        duelTargetId: m.targetId,
       };
 
       // Auto-join both players immediately.

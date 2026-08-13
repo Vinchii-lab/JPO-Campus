@@ -9053,8 +9053,6 @@
       _rpsGamePick = g;
       document.querySelectorAll('.rps-game').forEach((b) => b.classList.toggle('picked', b.dataset.game === g));
       rpsEl('rps-wager-sub').textContent = (GAME_META[g] || GAME_META.rps).label;
-      // Pet Race has no wager — the race itself determines the winner.
-      rpsEl('rps-wager-fields').style.display = g === 'race' ? 'none' : '';
     }
     document.querySelectorAll('.rps-game').forEach((b) => {
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSetGame(b.dataset.game); });
