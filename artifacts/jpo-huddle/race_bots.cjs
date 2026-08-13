@@ -1,0 +1,63 @@
+// Pet Race test bots — auto-join any race lobby and place a small random bet.
+// Run via the "Pet Race Bots" workflow (or: node race_bots.cjs).
+const { io } = require("socket.io-client");
+const URL = "http://localhost:" + (process.env.JPO_PORT || 20158);
+const PW  = "rlglbotpw123";
+const rnd = (a, b) => Math.floor(a + Math.random() * (b - a));
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+
+const BOTS = [
+  { name: "Jepoy Bot",   email: "botjepoy@test.local"   },
+  { name: "Marites Bot", email: "botmarites@test.local" },
+  { name: "Dodong Bot",  email: "botdodong@test.local"  },
+  { name: "Inday Bot",   email: "botinday@test.local"   },
+];
+
+function mkBot(cfg) {
+  const s = io(URL, { transports: ["websocket"], reconnection: true, reconnectionDelay: 2000 });
+  let entrantIds = [];
+
+  s.on("buildStamp",  () => s.emit("clientBuild"));
+  s.on("connect",     () => s.emit("login", { email: cfg.email, password: PW }));
+  s.on("approved",    () => log(cfg.name, "in the office 🏢"));
+  s.on("loginFail",   d  => log(cfg.name, "login failed:", JSON.stringify(d)));
+
+  s.on("raceLobby", ({ entrants }) => {
+    entrantIds = (entrants || []).map(e => e.petId);
+    // Join after a short random delay so they don't all pile in at once
+    setTimeout(() => {
+      log(cfg.name, "joining race 🐾");
+      s.emit("raceJoin");
+    }, rnd(600, 3000));
+
+    // Place a random bet a couple seconds later
+    setTimeout(() => {
+      if (!entrantIds.length) return;
+      // Bet on a random entrant (might be yourself — that's fine)
+      const target = entrantIds[rnd(0, entrantIds.length)];
+      const coins  = rnd(50, 250);
+      log(cfg.name, `betting ${coins} on ${target}`);
+      s.emit("raceBet", { onId: target, amount: coins });
+    }, rnd(3000, 8000));
+  });
+
+  // When new entrants arrive, update the local list so late bets pick the right IDs
+  s.on("raceEntrantUpdate", ({ entrants }) => {
+    entrantIds = (entrants || []).map(e => e.petId);
+  });
+
+  s.on("raceJoinOk",  ()  => log(cfg.name, "joined! 🏁"));
+  s.on("raceJoinErr", msg => log(cfg.name, "join err:", msg));
+  s.on("raceBetAck",  d   => log(cfg.name, `bet locked ✅ (${d.amount} on ${d.onId})`));
+  s.on("raceBetErr",  msg => log(cfg.name, "bet err:", msg));
+  s.on("raceHeatStart", d => log(cfg.name, `heat ${d.heatNum} starting 🔥`));
+  s.on("raceFinalStart",()  => log(cfg.name, "FINAL! 🏆"));
+  s.on("raceResult",  d   => log(cfg.name, `race over — winner: ${d.winnerId} | pot: ${d.pot}`));
+  s.on("racePayout",  d   => log(cfg.name, `💰 payout: +${d.amount} coins`));
+  s.on("raceCancelled", () => log(cfg.name, "race cancelled 😢"));
+
+  return s;
+}
+
+BOTS.forEach((c, i) => setTimeout(() => mkBot(c), i * 800));
+log("Race bots connecting to", URL);
