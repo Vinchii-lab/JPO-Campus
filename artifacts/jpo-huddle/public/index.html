@@ -7583,7 +7583,7 @@
         const pl = _ro('race-lobby-prize-lbl');
         if (pl) pl.textContent = '🏆 House prize pool: '+prize.toLocaleString()+' coins';
         _joinDeadline = joinDeadline;
-        const hasPet = !!(window._myPet);
+        const hasPet = !!(_equippedPet);
         const jb = _ro('race-join-btn');
         const ms = _ro('race-my-pet-status');
         if (hasPet) {
