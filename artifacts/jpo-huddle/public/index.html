@@ -2176,6 +2176,26 @@
       </div>
     </div>
 
+    <!-- DUEL "VS" COUNTDOWN (shown instead of the lobby for 1v1 challenges) -->
+    <div id="race-duel-screen" style="display:none;position:absolute;inset:0;background:linear-gradient(160deg,#0f0d20,#0a0816);align-items:center;justify-content:center;">
+      <div style="text-align:center;padding:24px;">
+        <div style="font-size:18px;font-weight:800;color:#f5c518;letter-spacing:2px;margin-bottom:28px;text-transform:uppercase;">🏁 Race Challenge</div>
+        <div style="display:flex;align-items:center;gap:40px;justify-content:center;margin-bottom:32px;">
+          <div style="text-align:center;">
+            <img id="race-duel-my-pet" src="" style="height:72px;image-rendering:pixelated;display:block;margin:0 auto 10px;">
+            <div style="font-size:13px;font-weight:700;color:#7add60;">YOU</div>
+          </div>
+          <div style="font-size:40px;font-weight:900;color:#e74c3c;line-height:1;">VS</div>
+          <div style="text-align:center;">
+            <img id="race-duel-opp-pet" src="" style="height:72px;image-rendering:pixelated;display:block;margin:0 auto 10px;">
+            <div id="race-duel-opp-name" style="font-size:13px;font-weight:700;color:#aaa;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+          </div>
+        </div>
+        <div style="font-size:11px;letter-spacing:1.5px;color:#5550a0;text-transform:uppercase;margin-bottom:6px;">Race starts in</div>
+        <div id="race-duel-timer" style="font-size:56px;font-weight:700;color:#7add60;font-variant-numeric:tabular-nums;line-height:1;">6</div>
+      </div>
+    </div>
+
     <!-- RACE TRACK -->
     <div id="race-scene" style="display:none;position:absolute;inset:0;overflow:hidden;">
       <!-- Sky -->
@@ -7404,7 +7424,7 @@
       let _phase = 'idle';
       let _entrants = [];
       let _positions = {};
-      let _animIv = null, _lobbyIv = null;
+      let _animIv = null, _lobbyIv = null, _duelCountdownIv = null;
       let _frameIdx = {};
       let _inAction = new Set();   // pets currently playing their special-event sprite
       let _joinDeadline = 0;
@@ -7419,12 +7439,14 @@
         if (!ov) return;
         const on = ph !== 'idle';
         ov.style.display = on ? 'block' : 'none';
-        ['race-lobby-screen','race-scene','race-results-screen'].forEach(id => {
+        ['race-lobby-screen','race-duel-screen','race-scene','race-results-screen'].forEach(id => {
           const el = _ro(id); if (!el) return;
-          const vis = (id === 'race-lobby-screen' && ph === 'lobby') ||
-                      (id === 'race-scene'         && (ph === 'heat' || ph === 'final')) ||
+          const vis = (id === 'race-lobby-screen'  && ph === 'lobby')  ||
+                      (id === 'race-duel-screen'    && ph === 'duel')   ||
+                      (id === 'race-scene'          && (ph === 'heat' || ph === 'final')) ||
                       (id === 'race-results-screen' && ph === 'results');
-          el.style.display = vis ? (id === 'race-results-screen' ? 'flex' : 'block') : 'none';
+          const flex = id === 'race-results-screen' || id === 'race-duel-screen';
+          el.style.display = vis ? (flex ? 'flex' : 'block') : 'none';
         });
         const cd = _ro('race-countdown'); if (cd) cd.style.display = 'none';
       }
@@ -7582,10 +7604,25 @@
       }
 
       // ── Socket events ──────────────────────────────────────────────────────
-      socket.on('raceChallenge', ({ opponentName }) => {
-        // Show a toast so the challenged player knows who they're racing.
-        // The server already auto-joined us and emitted raceLobby + raceJoinOk.
-        _rpsToast('🏁 Race vs ' + opponentName + '! Check the track!');
+      socket.on('raceChallenge', ({ opponentName, isDuel, myStem, opponentStem, countdownMs }) => {
+        if (!isDuel) { _rpsToast('🏁 Race vs ' + opponentName + '! Check the track!'); return; }
+        // Duel: show the "VS" countdown screen instead of the lobby.
+        const myPetEl  = _ro('race-duel-my-pet');
+        const oppPetEl = _ro('race-duel-opp-pet');
+        const oppNmEl  = _ro('race-duel-opp-name');
+        const timerEl  = _ro('race-duel-timer');
+        if (myPetEl  && myStem)       myPetEl.src  = '/assets/pets/anim/' + myStem       + '_walk1.png';
+        if (oppPetEl && opponentStem) oppPetEl.src = '/assets/pets/anim/' + opponentStem + '_walk1.png';
+        if (oppNmEl)  oppNmEl.textContent  = opponentName;
+        _showPhase('duel');
+        clearInterval(_duelCountdownIv);
+        let sec = Math.ceil((countdownMs || 6000) / 1000);
+        if (timerEl) timerEl.textContent = sec;
+        _duelCountdownIv = setInterval(() => {
+          sec--;
+          if (timerEl) timerEl.textContent = Math.max(0, sec);
+          if (sec <= 0) clearInterval(_duelCountdownIv);
+        }, 1000);
       });
 
       socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {

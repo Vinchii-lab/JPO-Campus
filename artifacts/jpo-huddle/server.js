@@ -6896,22 +6896,20 @@ io.on("connection", (socket) => {
         duelTargetId: m.targetId,
       };
 
-      // Auto-join both players immediately.
-      const autoJoin = (pid, player) => {
-        const stage = petStageFor(player);
-        race.entrants.set(pid, { name: player.name, petId: player.pet, petStage: stage, speed: racePetSpeed(player.pet, stage) });
-        io.to(pid).emit('raceJoinOk', {});
-      };
-      autoJoin(m.challengerId, ch);
-      autoJoin(m.targetId, tg);
+      // Auto-join both players immediately (no lobby needed).
+      const chStage = petStageFor(ch), tgStage = petStageFor(tg);
+      race.entrants.set(m.challengerId, { name: ch.name, petId: ch.pet, petStage: chStage, speed: racePetSpeed(ch.pet, chStage) });
+      race.entrants.set(m.targetId,     { name: tg.name, petId: tg.pet, petStage: tgStage, speed: racePetSpeed(tg.pet, tgStage) });
 
-      // Show the lobby only to these two (via the duel room).
-      raceIO().emit('raceLobby', { prize: 0, joinDeadline: race.joinDeadline, entrants: [] });
-      raceIO().emit('raceEntrantUpdate', { entrants: raceEntrantList() });
-
-      // Toast so each player knows who they're racing.
-      io.to(m.challengerId).emit('raceChallenge', { opponentName: tg.name });
-      io.to(m.targetId).emit('raceChallenge',   { opponentName: ch.name });
+      // Send a rich "VS" event — client shows a countdown screen, no lobby.
+      io.to(m.challengerId).emit('raceChallenge', {
+        isDuel: true, opponentName: tg.name, countdownMs: DUEL_COUNTDOWN_MS,
+        myStem: petStemForRace(ch.pet, chStage), opponentStem: petStemForRace(tg.pet, tgStage),
+      });
+      io.to(m.targetId).emit('raceChallenge', {
+        isDuel: true, opponentName: ch.name, countdownMs: DUEL_COUNTDOWN_MS,
+        myStem: petStemForRace(tg.pet, tgStage), opponentStem: petStemForRace(ch.pet, chStage),
+      });
 
       // Skip the public join window — start the duel after a short countdown.
       race.joinTimer = setTimeout(() => {
