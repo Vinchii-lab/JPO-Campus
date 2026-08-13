@@ -7464,15 +7464,15 @@
         if (laneDivs) laneDivs.innerHTML = '';   // no lane lines — pets can clump
         const dirtEl = _ro('race-dirt');
         const trackH = dirtEl ? dirtEl.offsetHeight : 240;
-        const SPR_H  = 80;   // fixed big sprite — no lane-based scaling
-        const N      = entrants.length || 1;
-        // Spread pets evenly across the vertical centre so they don't perfectly stack,
-        // but keep the band tight (40% of track height) so it looks like a pack.
-        const bandH  = Math.min(trackH * 0.55, N * (SPR_H + 8));
-        const step   = N > 1 ? bandH / (N - 1) : 0;
-        const top0   = trackH / 2 - bandH / 2;
+        const SPR_H  = 72;   // big but not so tall they cover each other
+        // All pets race as a pack — same horizontal progress, small random Y stagger
+        // around the centre so you can tell them apart. No lane lines needed.
+        const cx = trackH / 2;
+        const JITTER = 36;   // ±px from centre
         entrants.forEach((e, i) => {
-          const cy  = Math.round(N > 1 ? top0 + i * step : trackH / 2);
+          // Spread evenly in the jitter band so no two overlap exactly
+          const N = entrants.length || 1;
+          const cy = Math.round(cx + (N === 1 ? 0 : (i / (N - 1) - 0.5) * JITTER * 2));
           const wrap = document.createElement('div');
           wrap.id = 'rpet-'+e.id;
           wrap.style.cssText = 'position:absolute;left:'+TRACK_L+'%;top:'+cy+'px;transform:translate(0,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left 0.14s linear;z-index:5;';
