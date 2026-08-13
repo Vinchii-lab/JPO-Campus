@@ -55,6 +55,14 @@ function mkBot(cfg) {
     }
   });
 
+  // Auto-accept incoming pet race challenges
+  s.on("rpsChallengeIncoming", ({ challengeId, game, challengerName }) => {
+    if (game !== "race") return;
+    const delay = rnd(600, 1800);
+    log(cfg.name, `race challenge from ${challengerName} — accepting in ${delay}ms 🏁`);
+    setTimeout(() => s.emit("rpsRespond", { challengeId, accept: true }), delay);
+  });
+
   s.on("raceJoinOk",  ()  => log(cfg.name, "joined! 🏁"));
   s.on("raceJoinErr", msg => log(cfg.name, "join err:", msg));
   s.on("raceBetAck",  d   => log(cfg.name, `bet locked ✅ (${d.amount} on ${d.onId})`));
