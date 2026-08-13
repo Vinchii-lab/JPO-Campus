@@ -4115,39 +4115,22 @@ const RACE_HEAT_SIZE = 8;
 const RACE_ADVANCE_N = 3;
 
 function racePetSpeed(petId, stage) {
+  // Speeds are intentionally tight — stages add a SMALL bonus so the race is
+  // determined mostly by noise + special events, not by who has the highest stage.
   const s = (petId || '').replace(/^pet_/, '');
-  if (stage >= 3) {
-    if (s === 'dog_husky' || s === 'dog_choco') return 4.0;
-    if (s === 'dog')      return 3.8;
-    if (s === 'phoenix')  return 3.9;
-    if (s === 'unicorn')  return 3.7;
-    if (s.startsWith('dragon')) return 3.6;
-    if (s.startsWith('cat'))    return 3.3;
-    if (s.startsWith('duck'))   return 3.1;
-    if (s.startsWith('bunny'))  return 3.0;
-    if (s.startsWith('turtle')) return 2.0;
-    return 3.0;
-  }
-  if (stage >= 2) {
-    if (s.startsWith('dog'))    return 3.0;
-    if (s.startsWith('dragon')) return 3.1;
-    if (s === 'phoenix')        return 3.0;
-    if (s === 'unicorn')        return 2.9;
-    if (s.startsWith('cat'))    return 2.8;
-    if (s.startsWith('duck'))   return 2.6;
-    if (s.startsWith('bunny'))  return 2.5;
-    if (s.startsWith('turtle')) return 1.7;
-    return 2.6;
-  }
-  if (s.startsWith('turtle')) return 1.4;
-  if (s.startsWith('bunny'))  return 2.1;
-  if (s.startsWith('duck'))   return 2.2;
-  if (s.startsWith('cat'))    return 2.3;
-  if (s.startsWith('dog'))    return 2.5;
-  if (s === 'phoenix')        return 2.4;
-  if (s === 'unicorn')        return 2.4;
-  if (s.startsWith('dragon')) return 2.5;
-  return 2.0;
+  // Base speed (stage 1): 2.0–2.3 band — everyone is competitive
+  let base = 2.15;
+  if (s.startsWith('turtle')) base = 1.6;
+  else if (s.startsWith('bunny'))  base = 2.1;
+  else if (s.startsWith('duck'))   base = 2.1;
+  else if (s.startsWith('cat'))    base = 2.2;
+  else if (s.startsWith('dog'))    base = 2.2;
+  else if (s.startsWith('dragon')) base = 2.2;
+  else if (s === 'phoenix')        base = 2.2;
+  else if (s === 'unicorn')        base = 2.1;
+  // Stage bonus: +0.25 per stage above 1 (was +0.7–1.5 before)
+  const bonus = Math.max(0, stage - 1) * 0.25;
+  return base + bonus;
 }
 
 function petStemForRace(petId, stage) {
@@ -4188,17 +4171,18 @@ function raceBeginRace(ids) {
   race.tickInterval = setInterval(raceTick, RACE_TICK_MS);
 }
 
-// Returns { boost (% position jump), label (display text) } for a pet's special move.
+// Returns { boost (% position jump), label, type } for a pet's special move.
+// type is used by the client to pick the right visual effect.
 function raceSpecialEvent(petId) {
   const s = (petId || '').replace(/^pet_/, '');
-  if (s.startsWith('dragon'))  return { boost: 3 + Math.random() * 5, label: '🔥 Fire Breath!' };
-  if (s.startsWith('phoenix')) return { boost: 3 + Math.random() * 5, label: '🔥 Flame Burst!' };
-  if (s.startsWith('unicorn')) return { boost: 3 + Math.random() * 4, label: '✨ Magic Dash!' };
-  if (s.startsWith('dog'))     return { boost: 5 + Math.random() * 6, label: '⚡ Teleport!' };
-  if (s.startsWith('duck'))    return { boost: 2 + Math.random() * 4, label: '💨 Belly Flop!' };
-  if (s.startsWith('cat'))     return { boost: 2 + Math.random() * 5, label: '🐾 Ninja Pounce!' };
-  if (s.startsWith('bunny'))   return { boost: 3 + Math.random() * 4, label: '🌀 Super Hop!' };
-  return                              { boost: 2 + Math.random() * 3, label: '⭐ Power Up!' };
+  if (s.startsWith('dragon'))  return { boost: 4 + Math.random() * 5, label: '🔥 Fire Breath!', type: 'fire'      };
+  if (s.startsWith('phoenix')) return { boost: 4 + Math.random() * 5, label: '🔥 Flame Burst!', type: 'fire'      };
+  if (s.startsWith('unicorn')) return { boost: 3 + Math.random() * 5, label: '✨ Magic Dash!',  type: 'magic'     };
+  if (s.startsWith('dog'))     return { boost: 6 + Math.random() * 7, label: '⚡ Teleport!',    type: 'teleport'  };
+  if (s.startsWith('duck'))    return { boost: 3 + Math.random() * 5, label: '💨 Belly Flop!',  type: 'flop'      };
+  if (s.startsWith('cat'))     return { boost: 3 + Math.random() * 6, label: '🐾 Ninja Pounce!',type: 'pounce'    };
+  if (s.startsWith('bunny'))   return { boost: 4 + Math.random() * 5, label: '🌀 Super Hop!',   type: 'hop'       };
+  return                              { boost: 3 + Math.random() * 4, label: '⭐ Power Up!',    type: 'power'     };
 }
 
 function raceTick() {
@@ -4211,11 +4195,11 @@ function raceTick() {
     if (p.finished) { posData[id] = { pos: p.pos, finished: true, place: p.place }; continue; }
     const e       = race.entrants.get(id);
     const base    = e ? e.speed : 2.0;
-    const isFlyer = e && (e.petId.includes('dragon') || e.petId.includes('phoenix') || e.petId.includes('unicorn'));
-    const noise   = (Math.random() - 0.45) * 0.5;
-    const burst   = Math.random() < 0.018 ? 0.6 + Math.random() * 1.2 : 0;
-    const stumble = (!isFlyer && Math.random() < 0.012) ? -(0.4 + Math.random() * 0.7) : 0;
-    p.vel = Math.max(0.3, base + noise + burst + stumble);
+    // Noise is wide so any pet can surge or stumble — keeps races chaotic
+    const noise   = (Math.random() - 0.48) * 1.2;
+    const burst   = Math.random() < 0.02  ?  0.8 + Math.random() * 1.0 : 0;
+    const stumble = Math.random() < 0.015 ? -(0.5 + Math.random() * 0.8) : 0;
+    p.vel = Math.max(0.2, base + noise + burst + stumble);
     p.pos = Math.min(100, p.pos + p.vel * (RACE_TICK_MS / 1000));
     // Special event: each pet has a cooldown; ~1 per 5-9 seconds
     const cd = race.specialCooldowns.get(id) || 0;
