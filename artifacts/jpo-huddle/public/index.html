@@ -901,7 +901,7 @@
        Top-left corner: the only unclaimed HUD corner (coin HUD/chips/DM feed
        are top-right, emote/item bars bottom-left, touch controls right). */
     #chatlog-btn {
-      display: none; position: fixed; top: 14px; left: 14px; z-index: 300;
+      display: none; position: fixed; top: 14px; left: 14px; z-index: 9300;
       width: 42px; height: 42px; border-radius: 10px; cursor: pointer;
       align-items: center; justify-content: center; font-size: 19px;
       background: rgba(0,0,0,0.72); border: 1px solid rgba(255,255,255,0.16);
@@ -920,7 +920,7 @@
     }
     #chatlog-badge.on { display: block; }
     #chatlog-panel {
-      display: none; position: fixed; top: 64px; left: 14px; z-index: 299;
+      display: none; position: fixed; top: 64px; left: 14px; z-index: 9299;
       width: 330px; max-width: calc(100vw - 28px);
       flex-direction: column; overflow: hidden;
       background: rgba(18,18,32,0.92); border: 1px solid rgba(255,255,255,0.14);
