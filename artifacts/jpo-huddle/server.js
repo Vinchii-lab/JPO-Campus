@@ -4105,6 +4105,192 @@ function rlglHandleLeave(id) {
   rlglCheckAttemptEnd();
 }
 
+
+// ─── PET RACE ──────────────────────────────────────────────────────────────
+let race = null;
+const RACE_JOIN_MS   = 45_000;
+const RACE_TICK_MS   = 150;
+const RACE_HEAT_SIZE = 8;
+const RACE_ADVANCE_N = 3;
+
+function racePetSpeed(petId, stage) {
+  const s = (petId || '').replace(/^pet_/, '');
+  if (stage >= 3) {
+    if (s === 'dog_husky' || s === 'dog_choco') return 4.0;
+    if (s === 'dog')      return 3.8;
+    if (s === 'phoenix')  return 3.9;
+    if (s === 'unicorn')  return 3.7;
+    if (s.startsWith('dragon')) return 3.6;
+    if (s.startsWith('cat'))    return 3.3;
+    if (s.startsWith('duck'))   return 3.1;
+    if (s.startsWith('bunny'))  return 3.0;
+    if (s.startsWith('turtle')) return 2.0;
+    return 3.0;
+  }
+  if (stage >= 2) {
+    if (s.startsWith('dog'))    return 3.0;
+    if (s.startsWith('dragon')) return 3.1;
+    if (s === 'phoenix')        return 3.0;
+    if (s === 'unicorn')        return 2.9;
+    if (s.startsWith('cat'))    return 2.8;
+    if (s.startsWith('duck'))   return 2.6;
+    if (s.startsWith('bunny'))  return 2.5;
+    if (s.startsWith('turtle')) return 1.7;
+    return 2.6;
+  }
+  if (s.startsWith('turtle')) return 1.4;
+  if (s.startsWith('bunny'))  return 2.1;
+  if (s.startsWith('duck'))   return 2.2;
+  if (s.startsWith('cat'))    return 2.3;
+  if (s.startsWith('dog'))    return 2.5;
+  if (s === 'phoenix')        return 2.4;
+  if (s === 'unicorn')        return 2.4;
+  if (s.startsWith('dragon')) return 2.5;
+  return 2.0;
+}
+
+function petStemForRace(petId, stage) {
+  const base = (petId || '').replace(/^pet_/, '');
+  if (stage >= 3) return base + '_s3';
+  if (stage >= 2) return base + '_s2';
+  return base;
+}
+
+function raceEntrantList() {
+  return [...race.entrants.entries()].map(([id, e]) => ({
+    id, name: e.name, petId: e.petId, petStage: e.petStage,
+    stem: petStemForRace(e.petId, e.petStage),
+  }));
+}
+
+function raceHeatEntrants(ids) {
+  return ids.map(id => {
+    const e = race.entrants.get(id);
+    if (!e) return null;
+    return { id, name: e.name, petId: e.petId, petStage: e.petStage, stem: petStemForRace(e.petId, e.petStage) };
+  }).filter(Boolean);
+}
+
+function raceCancel(reason) {
+  if (!race) return;
+  const g = race; race = null;
+  clearTimeout(g.joinTimer); clearTimeout(g.countdownTimer); clearInterval(g.tickInterval);
+  io.emit('raceCancelled', { reason });
+  console.log('Race: cancelled (' + reason + ')');
+}
+
+function raceBeginRace(ids) {
+  race.positions   = new Map();
+  race.finishOrder = [];
+  for (const id of ids) race.positions.set(id, { pos: 0, vel: 0, finished: false, place: null });
+  io.emit('raceGo', { entrants: raceHeatEntrants(ids) });
+  race.tickInterval = setInterval(raceTick, RACE_TICK_MS);
+}
+
+function raceTick() {
+  if (!race || (race.state !== 'heat' && race.state !== 'final')) return;
+  const posData = {};
+  for (const [id, p] of race.positions) {
+    if (p.finished) { posData[id] = { pos: p.pos, finished: true, place: p.place }; continue; }
+    const e       = race.entrants.get(id);
+    const base    = e ? e.speed : 2.0;
+    const isFlyer = e && (e.petId.includes('dragon') || e.petId.includes('phoenix') || e.petId.includes('unicorn'));
+    const noise   = (Math.random() - 0.45) * 0.5;
+    const burst   = Math.random() < 0.018 ? 0.6 + Math.random() * 1.2 : 0;
+    const stumble = (!isFlyer && Math.random() < 0.012) ? -(0.4 + Math.random() * 0.7) : 0;
+    p.vel = Math.max(0.3, base + noise + burst + stumble);
+    p.pos = Math.min(100, p.pos + p.vel * (RACE_TICK_MS / 1000));
+    if (p.pos >= 100 && !p.finished) {
+      p.finished = true;
+      p.place    = race.finishOrder.length + 1;
+      race.finishOrder.push(id);
+    }
+    posData[id] = { pos: p.pos, finished: p.finished, place: p.place };
+  }
+  io.emit('racePositions', posData);
+  const isHeat  = race.state === 'heat';
+  const advN    = Math.min(RACE_ADVANCE_N, race.positions.size);
+  const allDone = isHeat
+    ? race.finishOrder.length >= advN
+    : race.finishOrder.length === race.positions.size;
+  if (!allDone) return;
+  clearInterval(race.tickInterval); race.tickInterval = null;
+  const results = race.finishOrder.map((id, i) => {
+    const e = race.entrants.get(id);
+    return { id, name: e ? e.name : '?', place: i + 1, petId: e ? e.petId : '', petStage: e ? e.petStage : 1, stem: e ? petStemForRace(e.petId, e.petStage) : '' };
+  });
+  for (const [id, p] of race.positions) {
+    if (!p.finished) {
+      const e = race.entrants.get(id);
+      results.push({ id, name: e ? e.name : '?', place: null, petId: e ? e.petId : '', petStage: e ? e.petStage : 1, stem: e ? petStemForRace(e.petId, e.petStage) : '' });
+    }
+  }
+  io.emit('raceHeatEnd', { heat: race.currentHeat + 1, totalHeats: race.heats.length, isFinal: !isHeat, results });
+  if (isHeat) {
+    const advance   = race.finishOrder.slice(0, advN);
+    race.finalists  = [...(race.finalists || []), ...advance];
+    race.currentHeat++;
+    if (race.currentHeat < race.heats.length) setTimeout(raceBeginHeat, 5000);
+    else setTimeout(raceBeginFinal, 5000);
+  } else {
+    setTimeout(raceDoFinish, 5000);
+  }
+}
+
+function raceBeginHeat() {
+  if (!race) return;
+  const ids = race.heats[race.currentHeat];
+  race.state = 'heat';
+  io.emit('raceHeatStart', {
+    heat: race.currentHeat + 1, totalHeats: race.heats.length,
+    entrants: raceHeatEntrants(ids), advanceN: RACE_ADVANCE_N,
+  });
+  race.countdownTimer = setTimeout(() => raceBeginRace(ids), 4000);
+}
+
+function raceBeginFinal() {
+  if (!race) return;
+  race.state = 'final';
+  io.emit('raceFinalStart', { entrants: raceHeatEntrants(race.finalists), totalHeats: race.heats.length });
+  race.countdownTimer = setTimeout(() => raceBeginRace(race.finalists), 4000);
+}
+
+async function raceDoFinish() {
+  if (!race) return;
+  const g = race; race = null;
+  const winnerId      = g.finishOrder[0];
+  const totalPot      = [...g.bets.values()].reduce((s, b) => s + b.amount, 0);
+  const winnerBets    = [...g.bets.entries()].filter(([, b]) => b.onId === winnerId);
+  const winnerBetTot  = winnerBets.reduce((s, [, b]) => s + b.amount, 0);
+  const payouts       = new Map();
+  if (winnerBetTot > 0) {
+    for (const [sid, b] of winnerBets)
+      payouts.set(sid, Math.round(totalPot * b.amount / winnerBetTot));
+  }
+  const cl = await pool.connect();
+  try {
+    await cl.query('BEGIN');
+    for (const [sid, amt] of payouts) {
+      const p = players[sid];
+      if (p?.email) {
+        const { rows } = await cl.query(
+          'UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins',
+          [p.email, amt]);
+        if (rows[0]) { p.coins = rows[0].coins; io.to(sid).emit('coinUpdate', { coins: p.coins }); }
+      }
+    }
+    await cl.query('COMMIT');
+  } catch (err) { await cl.query('ROLLBACK'); console.error('Race payout failed:', err); }
+  finally { cl.release(); }
+  const results = g.finishOrder.map((id, i) => {
+    const e = g.entrants.get(id);
+    return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id) || 0 };
+  });
+  io.emit('raceResult', { results, totalPot });
+  for (const [sid, amt] of payouts) io.to(sid).emit('racePayout', { amount: amt });
+  console.log('Race: done. Winner: ' + winnerId + ', pot: ' + totalPot + ', payouts: ' + payouts.size);
+}
+
 // Post-move hook, called from playerMove AFTER a move passes anti-cheat.
 // Red-light detection rides the validated pipeline: a modified client that
 // skips sending moves also never moves server-side, so there is nothing to
@@ -5157,6 +5343,83 @@ io.on("connection", (socket) => {
     rlglCancel("The office called the game off.");
     logAdmin(socket, "Red Light Green Light cancelled", "");
     socket.emit("adminRlglResult", { ok: true, message: "Doll game cancelled." });
+  });
+
+
+  // ─── PET RACE ──────────────────────────────────────────────────────────────
+  socket.on('ownerStartRace', ({ prize }) => {
+    if (!admins.has(socket.id)) return;
+    if (race) { socket.emit('ownerMsg', 'A pet race is already running.'); return; }
+    const p = players[socket.id];
+    if (!p) return;
+    prize = Math.max(100, Math.min(100_000, Math.round(prize || 2000)));
+    race = {
+      state: 'lobby', prize, starterName: p.name,
+      entrants: new Map(), heats: [], currentHeat: 0, finalists: [],
+      bets: new Map(), positions: new Map(), finishOrder: [],
+      tickInterval: null, countdownTimer: null,
+      joinDeadline: Date.now() + RACE_JOIN_MS,
+    };
+    io.emit('raceLobby', { prize, joinDeadline: race.joinDeadline, entrants: [] });
+    race.joinTimer = setTimeout(() => {
+      if (!race || race.state !== 'lobby') return;
+      if (race.entrants.size < 2) { raceCancel('Not enough pets joined — need at least 2. \uD83D\uDC3E'); return; }
+      const all = [...race.entrants.keys()];
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+      }
+      if (all.length <= RACE_HEAT_SIZE) {
+        race.finalists = all; race.heats = [];
+        raceBeginFinal();
+      } else {
+        const heats = [];
+        for (let i = 0; i < all.length; i += RACE_HEAT_SIZE) heats.push(all.slice(i, i + RACE_HEAT_SIZE));
+        race.heats = heats;
+        raceBeginHeat();
+      }
+    }, RACE_JOIN_MS);
+    logAdmin(socket, 'Pet Race started', 'prize=' + prize);
+    socket.emit('ownerMsg', '\uD83C\uDFC1 Race lobby is open for ' + (RACE_JOIN_MS/1000) + 's!');
+    console.log('Race: lobby opened by ' + p.name + ', prize ' + prize);
+  });
+
+  socket.on('ownerRaceCancel', () => {
+    if (!admins.has(socket.id)) return;
+    raceCancel('Cancelled by admin.');
+    logAdmin(socket, 'Pet Race cancelled', '');
+  });
+
+  socket.on('raceJoin', () => {
+    if (!race || race.state !== 'lobby') return;
+    const p = players[socket.id];
+    if (!p?.pet) { socket.emit('raceJoinErr', 'You need a pet equipped to race! \uD83D\uDC3E'); return; }
+    if (race.entrants.has(socket.id)) return;
+    if (!takeToken(interactBucket)) return;
+    const stage = petStageFor(p);
+    race.entrants.set(socket.id, { name: p.name, petId: p.pet, petStage: stage, speed: racePetSpeed(p.pet, stage) });
+    io.emit('raceEntrantUpdate', { entrants: raceEntrantList() });
+    socket.emit('raceJoinOk', {});
+    console.log('Race join: ' + p.name + ' with ' + p.pet + ' s' + stage);
+  });
+
+  socket.on('raceBet', ({ onId, amount }) => {
+    if (!race || race.state !== 'lobby') return;
+    const p = players[socket.id];
+    if (!p?.email) return;
+    if (!takeToken(interactBucket)) return;
+    if (!race.entrants.has(onId)) { socket.emit('raceBetErr', 'That pet is not in the race.'); return; }
+    amount = Math.max(50, Math.min(p.coins, Math.round(amount || 0)));
+    if (p.coins < amount || amount < 50) { socket.emit('raceBetErr', 'Not enough coins (min 50).'); return; }
+    const prev = race.bets.get(socket.id);
+    if (prev) p.coins += prev.amount;
+    p.coins -= amount;
+    race.bets.set(socket.id, { onId, amount });
+    pool.query('UPDATE jpo_players SET coins=$1 WHERE email=$2', [p.coins, p.email]).catch(console.error);
+    socket.emit('raceBetAck', { onId, amount, coins: p.coins });
+    socket.emit('coinUpdate', { coins: p.coins });
+    const pot = [...race.bets.values()].reduce((s, b) => s + b.amount, 0);
+    io.emit('racePotUpdate', { pot });
   });
 
   socket.on("rlglJoin", () => {

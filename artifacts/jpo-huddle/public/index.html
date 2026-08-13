@@ -2123,6 +2123,109 @@
     </div>
   </div>
 
+
+  <!-- ── Pet Race overlay ── -->
+  <div id="race-overlay" style="display:none;position:fixed;inset:0;z-index:9200;overflow:hidden;font-family:inherit;">
+
+    <!-- LOBBY -->
+    <div id="race-lobby-screen" style="display:none;position:absolute;inset:0;background:linear-gradient(160deg,#0f0d20,#0a0816);overflow-y:auto;">
+      <div style="max-width:700px;margin:0 auto;padding:24px 20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div style="font-size:24px;font-weight:800;color:#fff;">🏁 Pet Race Lobby</div>
+            <div id="race-lobby-prize-lbl" style="font-size:13px;color:#5550a0;margin-top:2px;"></div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;letter-spacing:1.5px;color:#3a3870;text-transform:uppercase;">Gate opens in</div>
+            <div id="race-lobby-timer" style="font-size:36px;font-weight:700;color:#7add60;line-height:1;font-variant-numeric:tabular-nums;">0:45</div>
+          </div>
+        </div>
+
+        <div style="background:#13112a;border:1px solid #2a2550;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+          <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:8px;">🐾 Your pet</div>
+          <div id="race-my-pet-status" style="font-size:12px;color:#5550a0;margin-bottom:10px;">No pet equipped.</div>
+          <button id="race-join-btn" style="display:none;background:linear-gradient(135deg,#2a6a18,#1a4a0a);border:1px solid #3a8a28;border-radius:8px;padding:9px 22px;color:#7add60;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">🐾 Enter my pet in the race</button>
+          <span id="race-joined-badge" style="display:none;background:#1a4a10;border:1px solid #3a8a28;border-radius:8px;padding:7px 14px;color:#7add60;font-size:13px;font-weight:700;">✓ Your pet is in!</span>
+        </div>
+
+        <div style="background:#13112a;border:1px solid #2a2550;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+          <div style="font-size:13px;font-weight:700;color:#f5c518;margin-bottom:8px;">💰 Place a bet <span style="font-size:11px;font-weight:400;color:#4a4880;">(anyone can bet)</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <select id="race-bet-select" style="background:#0d0b1e;border:1px solid #2a2550;border-radius:7px;padding:8px 10px;color:#aaa;font-size:12px;flex:1;min-width:160px;font-family:inherit;">
+              <option value="">Pick a pet to bet on...</option>
+            </select>
+            <input id="race-bet-amount" type="number" min="50" step="50" placeholder="Coins (min 50)"
+              style="background:#0d0b1e;border:1px solid #2a2550;border-radius:7px;padding:8px 10px;color:#fff;font-size:12px;width:130px;">
+            <button id="race-bet-btn" style="background:linear-gradient(135deg,#5540c0,#4433aa);border:none;border-radius:8px;padding:9px 18px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Lock Bet</button>
+          </div>
+          <div id="race-bet-msg" style="font-size:11px;margin-top:6px;color:#5550a0;min-height:16px;"></div>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:#3a3870;text-transform:uppercase;letter-spacing:1px;">Total pot:</span>
+            <span id="race-pot-lbl" style="font-size:18px;font-weight:700;color:#fff;">0 🪙</span>
+          </div>
+        </div>
+
+        <div style="background:#13112a;border:1px solid #2a2550;border-radius:12px;padding:14px 16px;">
+          <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:10px;">🐾 Racers <span id="race-entrant-count" style="background:#2a2550;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:400;">0</span></div>
+          <div id="race-entrant-list" style="display:flex;flex-wrap:wrap;gap:8px;">
+            <div style="font-size:12px;color:#3a3870;font-style:italic;">Waiting for pets to enter...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RACE TRACK -->
+    <div id="race-scene" style="display:none;position:absolute;inset:0;overflow:hidden;">
+      <!-- Sky -->
+      <div style="position:absolute;top:0;left:0;right:0;height:22%;background:linear-gradient(180deg,#3a8ac8 0%,#87ceeb 55%,#b8e4ff 100%);"></div>
+      <!-- Tree silhouette -->
+      <div style="position:absolute;top:14%;left:0;right:0;height:10%;background:linear-gradient(180deg,transparent 0%,#1e5c10 60%,#2d7a1b 100%);"></div>
+      <!-- Back grass strip -->
+      <div style="position:absolute;top:23%;left:0;right:0;height:18px;background:#2d7a1b;border-bottom:3px solid rgba(255,255,255,0.6);"></div>
+      <!-- Dirt track -->
+      <div id="race-dirt" style="position:absolute;top:calc(23% + 18px);left:0;right:0;bottom:14%;background:linear-gradient(180deg,#b0916a 0%,#c9a87c 30%,#d4b48a 65%,#c9a87c 85%,#b0916a 100%);">
+        <div id="race-lane-divs"></div>
+        <div style="position:absolute;left:9%;top:0;bottom:0;width:3px;background:rgba(120,255,80,0.35);box-shadow:0 0 8px rgba(80,255,80,0.4);"></div>
+        <div style="position:absolute;left:7%;top:4px;background:#1a4a10;color:#7add60;font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;letter-spacing:1px;z-index:2;">START</div>
+        <div style="position:absolute;right:5%;top:0;bottom:0;width:20px;background:repeating-linear-gradient(180deg,#fff 0px,#fff 14px,#000 14px,#000 28px);opacity:0.85;z-index:2;"></div>
+        <div style="position:absolute;right:5.5%;top:2px;font-size:16px;z-index:3;">🏁</div>
+        <div id="race-pets-layer" style="position:absolute;inset:0;"></div>
+      </div>
+      <!-- Front fence -->
+      <div style="position:absolute;bottom:14%;left:0;right:0;height:12px;background:#fff;box-shadow:0 3px 8px rgba(0,0,0,0.35);"></div>
+      <!-- Front grass -->
+      <div style="position:absolute;bottom:0;left:0;right:0;height:14%;background:linear-gradient(180deg,#2d7020,#1a4a10);"></div>
+
+      <!-- HUD: heat label -->
+      <div id="race-hud" style="position:absolute;top:10px;left:12px;background:rgba(10,8,20,0.85);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;backdrop-filter:blur(4px);">
+        <div id="race-hud-title" style="font-size:16px;font-weight:700;color:#fff;"></div>
+        <div id="race-hud-sub" style="font-size:10px;color:#5a8850;margin-top:2px;"></div>
+        <div id="race-bracket-pills" style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;"></div>
+      </div>
+
+      <!-- HUD: leaderboard -->
+      <div style="position:absolute;top:10px;right:12px;background:rgba(10,8,20,0.85);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 14px;min-width:150px;backdrop-filter:blur(4px);">
+        <div style="font-size:9px;color:#888;letter-spacing:1.5px;margin-bottom:6px;">LEADERBOARD</div>
+        <div id="race-lb-rows" style="font-size:11px;"></div>
+      </div>
+
+      <!-- Countdown overlay -->
+      <div id="race-countdown" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
+        <div id="race-countdown-num" style="font-size:120px;font-weight:900;color:#fff;text-shadow:0 0 40px rgba(255,255,255,0.5);line-height:1;"></div>
+      </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div id="race-results-screen" style="display:none;position:absolute;inset:0;background:linear-gradient(160deg,#0f0d20,#0a0816);align-items:center;justify-content:center;flex-direction:column;">
+      <div style="max-width:600px;width:100%;padding:24px 20px;text-align:center;">
+        <div style="font-size:32px;font-weight:800;color:#fff;margin-bottom:6px;">🏆 Race Results</div>
+        <div id="race-payout-banner" style="font-size:15px;color:#f5c518;margin-bottom:18px;min-height:22px;"></div>
+        <div id="race-results-list" style="background:#13112a;border:1px solid #2a2550;border-radius:12px;padding:14px 16px;margin-bottom:18px;text-align:left;max-height:60vh;overflow-y:auto;"></div>
+        <button id="race-close-btn" style="background:#2a2550;border:none;border-radius:10px;padding:11px 28px;color:#aaa;font-size:14px;cursor:pointer;font-family:inherit;">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Deal or No Deal join card ── -->
   <div id="deal-lobby" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8300;background:#161d2e;color:#eaf0ff;border:1px solid #d4af37;border-radius:14px;padding:14px 18px;box-shadow:0 8px 28px rgba(0,0,0,.5);text-align:center;">
     <div style="font-size:16px;font-weight:700;">💼 DEAL OR NO DEAL!</div>
@@ -2366,6 +2469,17 @@
           <button class="o-btn o-btn-approve" style="font-size:15px;padding:10px 16px;" onclick="ownerDealOffer()">☎️ Banker's offer</button>
         </div>
         <div id="op-deal-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      <div class="owner-section" data-otab="events">
+        <h3>🏁 Pet Race</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 10px">45s lobby: players with pets join &amp; everyone bets on a winner. 8 or fewer pets → straight to the Final. 9+ → heats of 8, top 3 per heat advance. The full betting pot splits among players who picked the winner, proportional to their stake. House pays the prize pool. Needs at least 2 pets.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="op-race-prize" type="number" min="100" max="100000" step="500" value="3000" placeholder="Prize pot (coins)"
+                 style="width:140px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+          <button class="o-btn o-btn-approve" onclick="ownerStartRace()">🏁 Start the race</button>
+          <button class="o-btn o-btn-reject" onclick="ownerRaceCancel()">Cancel race</button>
+        </div>
+        <div id="op-race-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+      </div>
       </div>
       <div class="owner-section" data-otab="log">
         <h3>🕒 Admin Activity Log</h3>
@@ -7265,6 +7379,341 @@
       socket.emit('adminRlglStart', { prize });
     };
     window.ownerRlglCancel = () => socket.emit('adminRlglCancel');
+
+    window.ownerStartRace = () => {
+      const prize = Math.round(Number(document.getElementById('op-race-prize').value));
+      const msg   = document.getElementById('op-race-msg');
+      if (!prize || prize < 100) { if (msg) { msg.style.color='#e74c3c'; msg.textContent='Set a valid prize first.'; } return; }
+      socket.emit('ownerStartRace', { prize });
+    };
+    window.ownerRaceCancel = () => socket.emit('ownerRaceCancel');
+    socket.on('ownerMsg', (payload) => {
+      const el = document.getElementById('op-race-msg');
+      if (el) { el.style.color = '#27ae60'; el.textContent = typeof payload === 'string' ? payload : (payload.message || ''); }
+    });
+
+    // ── Pet Race client ────────────────────────────────────────────────────
+    (function () {
+      const MEDAL = ['🥇','🥈','🥉'];
+      const TRACK_L = 10, TRACK_R = 87;
+      let _phase = 'idle';
+      let _entrants = [];
+      let _positions = {};
+      let _animIv = null, _lobbyIv = null;
+      let _frameIdx = {};
+      let _joinDeadline = 0;
+      let _myPayout = 0;
+      let _totalHeats = 0;
+
+      function _ro(id) { return document.getElementById(id); }
+
+      function _showPhase(ph) {
+        _phase = ph;
+        const ov = _ro('race-overlay');
+        if (!ov) return;
+        const on = ph !== 'idle';
+        ov.style.display = on ? 'block' : 'none';
+        ['race-lobby-screen','race-scene','race-results-screen'].forEach(id => {
+          const el = _ro(id); if (!el) return;
+          const vis = (id === 'race-lobby-screen' && ph === 'lobby') ||
+                      (id === 'race-scene'         && (ph === 'heat' || ph === 'final')) ||
+                      (id === 'race-results-screen' && ph === 'results');
+          el.style.display = vis ? (id === 'race-results-screen' ? 'flex' : 'block') : 'none';
+        });
+        const cd = _ro('race-countdown'); if (cd) cd.style.display = 'none';
+      }
+
+      function _frames(stem) {
+        return [
+          '/assets/pets/anim/'+stem+'_walk1.png',
+          '/assets/pets/anim/'+stem+'_walk2.png',
+          '/assets/pets/anim/'+stem+'_walk3.png',
+          '/assets/pets/anim/'+stem+'_walk2.png',
+        ];
+      }
+
+      function _renderLobbyList(entrants) {
+        _entrants = entrants;
+        const list = _ro('race-entrant-list');
+        const sel  = _ro('race-bet-select');
+        const cnt  = _ro('race-entrant-count');
+        if (cnt) cnt.textContent = entrants.length;
+        if (list) {
+          if (!entrants.length) {
+            list.innerHTML = '<div style="font-size:12px;color:#3a3870;font-style:italic;">Waiting for pets to enter...</div>';
+          } else {
+            list.innerHTML = entrants.map(e =>
+              '<div style="display:flex;align-items:center;gap:6px;background:#0d0b1e;border:1px solid #1e1b3a;border-radius:8px;padding:6px 10px;">' +
+              '<img src="/assets/pets/anim/'+e.stem+'_walk1.png" style="height:32px;image-rendering:pixelated;">' +
+              '<div><div style="font-size:12px;font-weight:700;color:#fff;">'+e.name+'</div></div></div>'
+            ).join('');
+          }
+        }
+        if (sel) {
+          sel.innerHTML = '<option value="">Pick a pet to bet on...</option>' +
+            entrants.map(e => '<option value="'+e.id+'">'+e.name+'</option>').join('');
+        }
+      }
+
+      function _buildTrack(entrants) {
+        const layer = _ro('race-pets-layer');
+        const laneDivs = _ro('race-lane-divs');
+        if (!layer) return;
+        layer.innerHTML = '';
+        if (laneDivs) laneDivs.innerHTML = '';
+        const N = entrants.length || 1;
+        const dirtEl = _ro('race-dirt');
+        const trackH = dirtEl ? dirtEl.offsetHeight : 240;
+        const laneH  = trackH / N;
+        if (laneDivs) {
+          for (let i = 1; i < N; i++) {
+            const d = document.createElement('div');
+            d.style.cssText = 'position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,0.1);top:'+Math.round(i*laneH)+'px;';
+            laneDivs.appendChild(d);
+          }
+        }
+        entrants.forEach((e, i) => {
+          const cy = Math.round(i * laneH + laneH / 2);
+          const sprH = Math.max(24, Math.min(46, Math.round(laneH * 0.78)));
+          const wrap = document.createElement('div');
+          wrap.id = 'rpet-'+e.id;
+          wrap.style.cssText = 'position:absolute;left:'+TRACK_L+'%;top:'+cy+'px;transform:translate(0,-50%);display:flex;flex-direction:column;align-items:center;gap:1px;transition:left 0.14s linear;z-index:5;';
+          const lbl = document.createElement('div');
+          lbl.style.cssText = 'font-size:9px;font-weight:700;background:rgba(10,8,20,0.75);color:#fff;border-radius:5px;padding:1px 5px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;';
+          lbl.textContent = e.name;
+          const img = document.createElement('img');
+          img.src = '/assets/pets/anim/'+e.stem+'_walk1.png';
+          img.onerror = function() { this.src = '/assets/pets/anim/'+e.stem.replace(/_s[23]$/,'')+'_walk1.png'; };
+          img.style.cssText = 'image-rendering:pixelated;height:'+sprH+'px;width:auto;filter:drop-shadow(1px 2px 3px rgba(0,0,0,0.6));';
+          img.dataset.stem = e.stem;
+          const placeTag = document.createElement('div');
+          placeTag.id = 'rplace-'+e.id;
+          placeTag.style.cssText = 'display:none;font-size:14px;margin-top:1px;';
+          wrap.append(lbl, img, placeTag);
+          layer.appendChild(wrap);
+        });
+        _frameIdx = {};
+        entrants.forEach(e => { _frameIdx[e.id] = 0; });
+      }
+
+      function _startAnim() {
+        clearInterval(_animIv);
+        _animIv = setInterval(() => {
+          for (const e of _entrants) {
+            const wrap = document.getElementById('rpet-'+e.id);
+            if (!wrap) continue;
+            const img = wrap.querySelector('img');
+            if (!img) continue;
+            const p = _positions[e.id] || {};
+            if (p.finished) continue;
+            const stem = img.dataset.stem || e.stem;
+            _frameIdx[e.id] = ((_frameIdx[e.id]||0)+1) % 4;
+            img.src = _frames(stem)[_frameIdx[e.id]];
+            const pct = TRACK_L + (p.pos||0) / 100 * (TRACK_R - TRACK_L);
+            wrap.style.left = pct+'%';
+          }
+        }, 130);
+      }
+
+      function _stopAnim() { clearInterval(_animIv); _animIv = null; }
+
+      function _updateLB() {
+        const lb = _ro('race-lb-rows');
+        if (!lb) return;
+        const sorted = [..._entrants].sort((a,b) => ((_positions[b.id]||{}).pos||0) - ((_positions[a.id]||{}).pos||0));
+        lb.innerHTML = sorted.slice(0,6).map((e,i) => {
+          const p = _positions[e.id] || {};
+          const col = p.finished ? '#f5c518' : '#fff';
+          return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">' +
+            '<span style="color:#888;width:12px;font-size:10px;">'+(i+1)+'</span>' +
+            '<span style="color:'+col+';font-weight:'+(p.finished?'700':'400')+';flex:1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;">'+e.name+'</span>' +
+            '<span style="color:#3a6a28;font-size:10px;">'+Math.round(p.pos||0)+'%</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      function _countdown(onDone) {
+        const el = _ro('race-countdown');
+        const num = _ro('race-countdown-num');
+        if (!el || !num) { onDone && onDone(); return; }
+        el.style.display = 'flex';
+        let n = 3;
+        num.textContent = n;
+        num.style.color = '#fff';
+        const iv = setInterval(() => {
+          n--;
+          if (n > 0) { num.textContent = n; }
+          else if (n === 0) { num.textContent = 'GO!'; num.style.color = '#7add60'; }
+          else { clearInterval(iv); el.style.display = 'none'; num.style.color = '#fff'; onDone && onDone(); }
+        }, 900);
+      }
+
+      function _bracketPills(heat, total, isFinal) {
+        const el = _ro('race-bracket-pills');
+        if (!el) return;
+        let html = '';
+        for (let h = 1; h <= total; h++) {
+          const active = !isFinal && h === heat;
+          const done   = !isFinal && h < heat;
+          const col = active ? '#7add60' : (done ? '#3a8a28' : '#2a4a20');
+          html += '<span style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid '+col+';color:'+col+';font-weight:'+(active?'700':'400')+'">Heat '+h+'</span>';
+        }
+        html += '<span style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid '+(isFinal?'#f5c518':'#2a4a20')+';color:'+(isFinal?'#f5c518':'#2a4a20')+';font-weight:'+(isFinal?'700':'400')+'">🏆 Final</span>';
+        el.innerHTML = html;
+      }
+
+      function _startRaceUI(entrants, heat, total, isFinal, advN) {
+        clearInterval(_lobbyIv);
+        _entrants = entrants;
+        _positions = {};
+        _totalHeats = total;
+        _showPhase(isFinal ? 'final' : 'heat');
+        const title = isFinal ? (total > 0 ? '🏆 THE FINAL' : '🏁 PET RACE') : '🏁 HEAT '+heat+' / '+total;
+        const sub   = isFinal ? 'Last race — winner takes all!' : 'Top '+(advN||3)+' advance to the Final';
+        const ht = _ro('race-hud-title'); if (ht) ht.textContent = title;
+        const hs = _ro('race-hud-sub');   if (hs) hs.textContent = sub;
+        _bracketPills(heat, total, isFinal);
+        _buildTrack(entrants);
+        _countdown(() => _startAnim());
+      }
+
+      // ── Socket events ──────────────────────────────────────────────────────
+      socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {
+        _myPayout = 0;
+        _showPhase('lobby');
+        const pl = _ro('race-lobby-prize-lbl');
+        if (pl) pl.textContent = '🏆 House prize pool: '+prize.toLocaleString()+' coins';
+        _joinDeadline = joinDeadline;
+        const hasPet = !!(window._myPet);
+        const jb = _ro('race-join-btn');
+        const ms = _ro('race-my-pet-status');
+        if (hasPet) {
+          if (ms) ms.textContent = 'You have a pet ready to race!';
+          if (jb) jb.style.display = 'inline-block';
+        } else {
+          if (ms) ms.textContent = 'No pet equipped — visit the shop first.';
+          if (jb) jb.style.display = 'none';
+        }
+        const jb2 = _ro('race-joined-badge'); if (jb2) jb2.style.display = 'none';
+        if (jb) jb.style.display = hasPet ? 'inline-block' : 'none';
+        const bm = _ro('race-bet-msg'); if (bm) bm.textContent = '';
+        const pl2 = _ro('race-pot-lbl'); if (pl2) pl2.textContent = '0 🪙';
+        _renderLobbyList(entrants || []);
+        clearInterval(_lobbyIv);
+        _lobbyIv = setInterval(() => {
+          const left = Math.max(0, _joinDeadline - Date.now());
+          const s = Math.ceil(left / 1000);
+          const t = _ro('race-lobby-timer');
+          if (t) t.textContent = Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+          if (left <= 0) clearInterval(_lobbyIv);
+        }, 500);
+      });
+
+      socket.on('raceEntrantUpdate', ({ entrants }) => _renderLobbyList(entrants));
+      socket.on('racePotUpdate',     ({ pot })      => { const el = _ro('race-pot-lbl'); if (el) el.textContent = pot.toLocaleString()+' 🪙'; });
+
+      socket.on('raceJoinOk', () => {
+        const jb = _ro('race-join-btn');     if (jb)   jb.style.display = 'none';
+        const bd = _ro('race-joined-badge'); if (bd) bd.style.display = 'inline-block';
+      });
+      socket.on('raceJoinErr', msg => { const el = _ro('race-my-pet-status'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
+
+      socket.on('raceBetAck', ({ onId, amount }) => {
+        const e   = _entrants.find(x => x.id === onId);
+        const msg = _ro('race-bet-msg');
+        if (msg) { msg.style.color='#7add60'; msg.textContent = '✓ Bet locked: '+amount.toLocaleString()+' coins on '+(e?e.name:'?'); }
+      });
+      socket.on('raceBetErr', msg => { const el = _ro('race-bet-msg'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
+
+      socket.on('raceHeatStart',  ({ heat, totalHeats, entrants, advanceN }) => _startRaceUI(entrants, heat, totalHeats, false, advanceN));
+      socket.on('raceFinalStart', ({ entrants, totalHeats }) => _startRaceUI(entrants, 0, totalHeats, true, 0));
+      socket.on('raceGo',         () => { /* countdown already handles it */ });
+
+      socket.on('racePositions', posData => {
+        _positions = posData;
+        for (const [id, p] of Object.entries(posData)) {
+          if (!p.finished) continue;
+          const pl = document.getElementById('rplace-'+id);
+          if (pl && p.place) { pl.style.display='block'; pl.textContent = MEDAL[p.place-1]||'#'+p.place; }
+          const wrap = document.getElementById('rpet-'+id);
+          if (wrap) wrap.style.left = TRACK_R+'%';
+        }
+        _updateLB();
+      });
+
+      socket.on('raceHeatEnd', ({ heat, totalHeats, isFinal, results }) => {
+        _stopAnim();
+        if (isFinal) return;
+        const ht = _ro('race-hud-title'); if (ht) ht.textContent = '🏁 Heat '+heat+' done!';
+        const hs = _ro('race-hud-sub');
+        if (hs) {
+          const adv = results.filter(r => r.place && r.place <= 3).map(r => r.name).join(', ');
+          hs.textContent = 'Advancing: '+(adv||'—');
+        }
+      });
+
+      socket.on('racePayout', ({ amount }) => { _myPayout = amount; });
+
+      socket.on('raceResult', ({ results, totalPot }) => {
+        _stopAnim();
+        _showPhase('results');
+        const list = _ro('race-results-list');
+        if (list) {
+          list.innerHTML = results.map((r, i) => {
+            const medal = MEDAL[i] || '#'+(i+1);
+            const pStr  = r.payout ? ' <span style="color:#f5c518;font-weight:700;">+'+r.payout.toLocaleString()+' 🪙</span>' : '';
+            return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1b3a;">' +
+              '<span style="font-size:20px;width:28px;">'+medal+'</span>' +
+              '<div style="font-size:14px;color:#fff;font-weight:'+(i===0?'700':'400')+';">'+r.name+pStr+'</div></div>';
+          }).join('');
+        }
+        const banner = _ro('race-payout-banner');
+        if (banner) {
+          if (_myPayout > 0) {
+            banner.style.color = '#f5c518';
+            banner.textContent = '🎉 Your bet won! +'+_myPayout.toLocaleString()+' coins!';
+          } else {
+            banner.style.color = '#8880bb';
+            banner.textContent = 'Total pot: '+totalPot.toLocaleString()+' coins';
+          }
+        }
+        const cb = _ro('race-close-btn');
+        if (cb) cb.onclick = () => { _stopAnim(); _showPhase('idle'); };
+      });
+
+      socket.on('raceCancelled', () => {
+        _stopAnim();
+        clearInterval(_lobbyIv);
+        _showPhase('idle');
+      });
+
+      // ── Button wiring (on DOM ready or immediately if already loaded) ──────
+      function _wireButtons() {
+        const jb = _ro('race-join-btn');
+        const bb = _ro('race-bet-btn');
+        const sel = _ro('race-bet-select');
+        const amt = _ro('race-bet-amount');
+        if (jb && !jb._wired) { jb._wired=true; jb.addEventListener('click', () => socket.emit('raceJoin')); }
+        if (bb && !bb._wired) { bb._wired=true; bb.addEventListener('click', () => {
+          const onId  = sel ? sel.value : '';
+          const coins = amt ? Math.round(Number(amt.value)) : 0;
+          const bm = _ro('race-bet-msg');
+          if (!onId) { if(bm){bm.style.color='#e74c3c';bm.textContent='Pick a pet first.';} return; }
+          if (!coins || coins < 50) { if(bm){bm.style.color='#e74c3c';bm.textContent='Min bet is 50 coins.';} return; }
+          socket.emit('raceBet', { onId, amount: coins });
+        }); }
+        [sel, amt].forEach(el => {
+          if (!el || el._kbdGuarded) return;
+          el._kbdGuarded = true;
+          el.addEventListener('focus', () => window._phaserKbd?.disableGlobalCapture());
+          el.addEventListener('blur',  () => window._phaserKbd?.enableGlobalCapture());
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wireButtons);
+      else _wireButtons();
+
+    })();
+
     socket.on('adminRlglResult', ({ ok, message } = {}) => {
       const msg = document.getElementById('op-rlgl-msg');
       msg.style.color = ok ? '#27ae60' : '#e74c3c';
