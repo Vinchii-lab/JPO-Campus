@@ -7,10 +7,16 @@ const rnd = (a, b) => Math.floor(a + Math.random() * (b - a));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 const BOTS = [
-  { name: "Jepoy Bot",   email: "botjepoy@test.local"   },
-  { name: "Marites Bot", email: "botmarites@test.local" },
-  { name: "Dodong Bot",  email: "botdodong@test.local"  },
-  { name: "Inday Bot",   email: "botinday@test.local"   },
+  { name: "Jepoy Bot",   email: "botjepoy@test.local"    },
+  { name: "Marites Bot", email: "botmarites@test.local"  },
+  { name: "Dodong Bot",  email: "botdodong@test.local"   },
+  { name: "Inday Bot",   email: "botinday@test.local"    },
+  { name: "Bunny Bot",   email: "botbunny@test.local"    },
+  { name: "CatSnow Bot", email: "botcatsnow@test.local"  },
+  { name: "Choco Bot",   email: "botdogchoco@test.local" },
+  { name: "Duck Bot",    email: "botduck@test.local"     },
+  { name: "Turtle Bot",  email: "botturtle@test.local"   },
+  { name: "Dragon Bot",  email: "botdragon2@test.local"  },
 ];
 
 function mkBot(cfg) {
