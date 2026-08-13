@@ -15,35 +15,38 @@ const BOTS = [
 
 function mkBot(cfg) {
   const s = io(URL, { transports: ["websocket"], reconnection: true, reconnectionDelay: 2000 });
-  let entrantIds = [];
+  let _entrants = [];  // full entrant objects {id (socket), name, petId, ...}
+  let _betPlaced = false;
 
   s.on("buildStamp",  () => s.emit("clientBuild"));
-  s.on("connect",     () => s.emit("login", { email: cfg.email, password: PW }));
+  s.on("connect",     () => { _entrants = []; _betPlaced = false; s.emit("login", { email: cfg.email, password: PW }); });
   s.on("approved",    () => log(cfg.name, "in the office 🏢"));
   s.on("loginFail",   d  => log(cfg.name, "login failed:", JSON.stringify(d)));
 
   s.on("raceLobby", ({ entrants }) => {
-    entrantIds = (entrants || []).map(e => e.petId);
+    _entrants = entrants || [];
+    _betPlaced = false;
     // Join after a short random delay so they don't all pile in at once
     setTimeout(() => {
       log(cfg.name, "joining race 🐾");
       s.emit("raceJoin");
     }, rnd(600, 3000));
-
-    // Place a random bet a couple seconds later
-    setTimeout(() => {
-      if (!entrantIds.length) return;
-      // Bet on a random entrant (might be yourself — that's fine)
-      const target = entrantIds[rnd(0, entrantIds.length)];
-      const coins  = rnd(50, 250);
-      log(cfg.name, `betting ${coins} on ${target}`);
-      s.emit("raceBet", { onId: target, amount: coins });
-    }, rnd(3000, 8000));
   });
 
   // When new entrants arrive, update the local list so late bets pick the right IDs
   s.on("raceEntrantUpdate", ({ entrants }) => {
-    entrantIds = (entrants || []).map(e => e.petId);
+    _entrants = entrants || [];
+    // Place a bet once we see at least 2 racers and haven't bet yet
+    if (!_betPlaced && _entrants.length >= 2) {
+      _betPlaced = true;
+      setTimeout(() => {
+        if (!_entrants.length) return;
+        const target = _entrants[rnd(0, _entrants.length)];
+        const coins  = rnd(50, 250);
+        log(cfg.name, `betting ${coins} on ${target.name} (${target.petId})`);
+        s.emit("raceBet", { onId: target.id, amount: coins });
+      }, rnd(500, 3000));
+    }
   });
 
   s.on("raceJoinOk",  ()  => log(cfg.name, "joined! 🏁"));

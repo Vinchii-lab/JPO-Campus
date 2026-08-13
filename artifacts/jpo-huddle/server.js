@@ -4012,6 +4012,7 @@ function rlglCheckAttemptEnd() {
       return;
     }
     rlgl.lastFinishers = setNow;
+    rlgl.wipes = 0;  // survivors in this round reset the wipe counter
     // Cut the field: everyone who didn't cross is OUT of the tournament.
     for (const [id, m] of [...rlgl.members]) if (!(m.alive && m.finished)) rlgl.members.delete(id);
     rlgl.attempt++;
@@ -4187,9 +4188,25 @@ function raceBeginRace(ids) {
   race.tickInterval = setInterval(raceTick, RACE_TICK_MS);
 }
 
+// Returns { boost (% position jump), label (display text) } for a pet's special move.
+function raceSpecialEvent(petId) {
+  const s = (petId || '').replace(/^pet_/, '');
+  if (s.startsWith('dragon'))  return { boost: 3 + Math.random() * 5, label: '🔥 Fire Breath!' };
+  if (s.startsWith('phoenix')) return { boost: 3 + Math.random() * 5, label: '🔥 Flame Burst!' };
+  if (s.startsWith('unicorn')) return { boost: 3 + Math.random() * 4, label: '✨ Magic Dash!' };
+  if (s.startsWith('dog'))     return { boost: 5 + Math.random() * 6, label: '⚡ Teleport!' };
+  if (s.startsWith('duck'))    return { boost: 2 + Math.random() * 4, label: '💨 Belly Flop!' };
+  if (s.startsWith('cat'))     return { boost: 2 + Math.random() * 5, label: '🐾 Ninja Pounce!' };
+  if (s.startsWith('bunny'))   return { boost: 3 + Math.random() * 4, label: '🌀 Super Hop!' };
+  return                              { boost: 2 + Math.random() * 3, label: '⭐ Power Up!' };
+}
+
 function raceTick() {
   if (!race || (race.state !== 'heat' && race.state !== 'final')) return;
+  if (!race.specialCooldowns) race.specialCooldowns = new Map();
+  const now = Date.now();
   const posData = {};
+  const events  = [];
   for (const [id, p] of race.positions) {
     if (p.finished) { posData[id] = { pos: p.pos, finished: true, place: p.place }; continue; }
     const e       = race.entrants.get(id);
@@ -4200,6 +4217,14 @@ function raceTick() {
     const stumble = (!isFlyer && Math.random() < 0.012) ? -(0.4 + Math.random() * 0.7) : 0;
     p.vel = Math.max(0.3, base + noise + burst + stumble);
     p.pos = Math.min(100, p.pos + p.vel * (RACE_TICK_MS / 1000));
+    // Special event: each pet has a cooldown; ~1 per 5-9 seconds
+    const cd = race.specialCooldowns.get(id) || 0;
+    if (now >= cd && Math.random() < 0.028 && p.pos < 95) {
+      const ev = raceSpecialEvent(e ? e.petId : '');
+      p.pos = Math.min(100, p.pos + ev.boost);
+      race.specialCooldowns.set(id, now + 5000 + Math.random() * 4000);
+      events.push({ id, label: ev.label });
+    }
     if (p.pos >= 100 && !p.finished) {
       p.finished = true;
       p.place    = race.finishOrder.length + 1;
@@ -4208,6 +4233,7 @@ function raceTick() {
     posData[id] = { pos: p.pos, finished: p.finished, place: p.place };
   }
   io.emit('racePositions', posData);
+  for (const ev of events) io.emit('raceEvent', ev);
   const isHeat  = race.state === 'heat';
   const advN    = Math.min(RACE_ADVANCE_N, race.positions.size);
   const allDone = isHeat

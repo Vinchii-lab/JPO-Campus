@@ -191,6 +191,7 @@
       border-radius: 50%; animation: spin 0.9s linear infinite; margin: 22px auto 18px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes raceEventPop { 0% { opacity:1; transform:translate(-50%,-36px) scale(1.15); } 60% { opacity:1; transform:translate(-50%,-44px) scale(1); } 100% { opacity:0; transform:translate(-50%,-52px) scale(0.9); } }
 
     /* ── Chat bar ── */
     #chat-bar {
@@ -7627,6 +7628,26 @@
       socket.on('raceHeatStart',  ({ heat, totalHeats, entrants, advanceN }) => _startRaceUI(entrants, heat, totalHeats, false, advanceN));
       socket.on('raceFinalStart', ({ entrants, totalHeats }) => _startRaceUI(entrants, 0, totalHeats, true, 0));
       socket.on('raceGo',         () => { /* countdown already handles it */ });
+
+      // Special event: flash action frame + floating label
+      socket.on('raceEvent', ({ id, label }) => {
+        const wrap = document.getElementById('rpet-' + id);
+        if (!wrap) return;
+        const img = wrap.querySelector('img');
+        if (img) {
+          const stem = img.dataset.stem || '';
+          const actionSrc = '/assets/pets/anim/' + stem + '_action.png';
+          const prevSrc   = img.src;
+          img.src = actionSrc;
+          img.onerror = function() { this.src = prevSrc; this.onerror = null; };
+          setTimeout(() => { if (img.src !== prevSrc) { img.src = prevSrc; } }, 850);
+        }
+        const fl = document.createElement('div');
+        fl.textContent = label;
+        fl.style.cssText = 'position:absolute;left:50%;transform:translate(-50%,-36px);background:rgba(0,0,0,0.82);color:#ffe066;font-size:11px;font-weight:800;padding:3px 9px;border-radius:10px;white-space:nowrap;pointer-events:none;z-index:30;animation:raceEventPop 1s ease-out forwards;';
+        wrap.appendChild(fl);
+        setTimeout(() => fl.remove(), 1050);
+      });
 
       socket.on('racePositions', posData => {
         _positions = posData;
