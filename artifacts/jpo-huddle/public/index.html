@@ -2903,7 +2903,13 @@
     // on 2600), 5016/5017/5032 (studio armchair tiles — the centered sit always
     // derives to the RIGHT seat tile 5033). Server set = {2231,
     // 2628, 2600, 5033} (+ WALL_WORK_SEAT_GIDS).
-    const WORK_CHAIR_GIDS = new Set([2231, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033]);
+    const WORK_CHAIR_GIDS = new Set([
+      2231, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033,  // original work chairs
+      2605, 2589, 2621,   // L&D trainer's desk chair (all 3 stack tiles; also COO + Accounting)
+      3320, 3304, 3336,   // L&D tan armchair (all 3 stack tiles; also QA tan armchair)
+      7645, 7629, 7661,   // L&D green high-back reading chair (all 3 stack tiles)
+      7715, 7699,         // L&D classroom desk chair (seat + chair-back alias)
+    ]);
     // Jail-tileset computer-desk chairs live on the WALL layer (the Furniture layer
     // holds the desk itself: 5489-5492 top strips over 5505-5508 bodies — those top
     // strips are NOT seats; they were once mislabeled "lavender couch cushions").

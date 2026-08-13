@@ -1548,7 +1548,12 @@ const GID_MASK = 0x1FFFFFFF;
 // 5016/5017/5032) for chip display; never add those here.
 // (2763/2764 were removed July 2026: on this map every instance is the pedestal
 // row of the 2-wide white lectern/front-desk unit 2731/2747/2763 — not chairs.)
-const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033]);
+const WORK_SEAT_GIDS = new Set([2231, 2628, 2600, 5033,
+  2605,  // L&D trainer's desk chair (also COO + Accounting desk chairs — same GID family)
+  3320,  // L&D tan armchair seat (also QA tan armchair)
+  7645,  // L&D green high-back reading chair seat
+  7715,  // L&D classroom desk chair seat
+]);
 // Jail-tileset computer-desk chairs live on the WALL layer (their cells hold no
 // Furniture gid at all) — the work-seat mask below ORs these in from the Wall
 // layer. MUST stay in lockstep with the client's WALL_SEATS table.
