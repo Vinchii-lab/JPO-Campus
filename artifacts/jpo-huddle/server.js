@@ -4328,26 +4328,61 @@ async function raceDoFinish() {
   const totalPot      = [...g.bets.values()].reduce((s, b) => s + b.amount, 0);
   const winnerBets    = [...g.bets.entries()].filter(([, b]) => b.onId === winnerId);
   const winnerBetTot  = winnerBets.reduce((s, [, b]) => s + b.amount, 0);
-  const payouts       = new Map();
+  const payouts       = new Map();   // bettor sid → { amount, email }
   if (winnerBetTot > 0) {
     for (const [sid, b] of winnerBets)
-      payouts.set(sid, Math.round(totalPot * b.amount / winnerBetTot));
+      payouts.set(sid, { amount: Math.round(totalPot * b.amount / winnerBetTot),
+                         email:  b.email || players[sid]?.email || null });
   }
-  const cl = await pool.connect();
-  try {
-    await cl.query('BEGIN');
-    for (const [sid, amt] of payouts) {
-      const p = players[sid];
-      if (p?.email) {
-        const { rows } = await cl.query(
-          'UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1 RETURNING coins',
-          [p.email, amt]);
-        if (rows[0]) { p.coins = rows[0].coins; io.to(sid).emit('coinUpdate', { coins: p.coins }); }
+  // Settle by EMAIL, not by live socket: a bettor who refreshed mid-race has a
+  // new socket id (or none), but their coins must still land. Retry the whole
+  // transaction a few times — production has transient DB connection blips,
+  // and a single silent ROLLBACK used to eat every winner's payout.
+  // Idempotency: each credit first claims a (settle_id, email) row in
+  // jpo_race_settlements inside the SAME transaction. If a COMMIT succeeded
+  // but its ack was lost (ambiguous outcome), the retry's INSERT conflicts and
+  // the credit is skipped — retries can never double-pay.
+  const settleId = globalThis.crypto.randomUUID();
+  let betsSettled = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let cl;
+    try {
+      cl = await pool.connect();
+      await cl.query('BEGIN');
+      for (const [, pay] of payouts) {
+        if (!pay.email) continue;   // guest/unknown bettor — nothing to credit
+        const claim = await cl.query(
+          'INSERT INTO jpo_race_settlements (settle_id, email, amount) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING 1',
+          [settleId, pay.email, pay.amount]);
+        if (!claim.rows[0]) continue;   // already paid by a previously-committed attempt
+        await cl.query(
+          'UPDATE jpo_players SET coins = coins + $2, updated_at = now() WHERE email = $1',
+          [pay.email, pay.amount]);
       }
-    }
-    await cl.query('COMMIT');
-  } catch (err) { await cl.query('ROLLBACK'); console.error('Race payout failed:', err); }
-  finally { cl.release(); }
+      await cl.query('COMMIT');
+      betsSettled = true;
+      break;
+    } catch (err) {
+      try { await cl?.query('ROLLBACK'); } catch {}
+      console.error(`Race payout attempt ${attempt}/3 failed:`, err.message || err);
+      if (attempt === 3) console.error('Race payout GAVE UP — winners not credited:',
+        [...payouts.values()].map(p => `${p.email}:+${p.amount}`).join(' '));
+      else await new Promise(r => setTimeout(r, 1500 * attempt));
+    } finally { cl?.release(); }
+  }
+  // Only after a CONFIRMED commit: sync in-memory balances from the DB and
+  // notify whichever socket each bettor is on now. Never before — a rollback
+  // must not leave clients holding spendable coins that were never committed.
+  if (betsSettled && payouts.size) {
+    try {
+      const emails = [...new Set([...payouts.values()].map(p => p.email).filter(Boolean))];
+      const { rows } = await pool.query('SELECT email, coins FROM jpo_players WHERE email = ANY($1)', [emails]);
+      for (const r of rows) {
+        const liveSid = Object.keys(players).find(k => players[k].email === r.email);
+        if (liveSid) { players[liveSid].coins = r.coins; io.to(liveSid).emit('coinUpdate', { coins: r.coins }); }
+      }
+    } catch (err) { console.error('Race payout balance sync failed:', err.message || err); }
+  }
   // Duel wager settlement: winner takes coins from the loser.
   if (g.duelRoom && g.duelWager > 0 && winnerId) {
     const loserId = g.duelChallengerId === winnerId ? g.duelTargetId : g.duelChallengerId;
@@ -4363,11 +4398,17 @@ async function raceDoFinish() {
 
   const results = g.finishOrder.map((id, i) => {
     const e = g.entrants.get(id);
-    return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id) || 0 };
+    return { id, name: e?.name || '?', place: i + 1, petId: e?.petId || '', stem: e ? petStemForRace(e.petId, e.petStage) : '', payout: payouts.get(id)?.amount || 0 };
   });
   if (g.duelIds) { for (const id of g.duelIds) io.to(id).emit('raceResult', { results, totalPot }); }
   else io.emit('raceResult', { results, totalPot });
-  for (const [sid, amt] of payouts) io.to(sid).emit('racePayout', { amount: amt });
+  if (betsSettled) {
+    for (const [sid, pay] of payouts) {
+      const liveSid = players[sid]?.email === pay.email ? sid
+        : Object.keys(players).find(k => players[k].email === pay.email);
+      if (liveSid) io.to(liveSid).emit('racePayout', { amount: pay.amount });
+    }
+  }
   console.log('Race: done. Winner: ' + winnerId + ', pot: ' + totalPot + ', payouts: ' + payouts.size);
 }
 
@@ -5498,7 +5539,9 @@ io.on("connection", (socket) => {
     const prev = race.bets.get(socket.id);
     if (prev) p.coins += prev.amount;
     p.coins -= amount;
-    race.bets.set(socket.id, { onId, amount });
+    // Store the bettor's email too: a refresh/disconnect mid-race kills the
+    // socket id, and a payout keyed only by socket id would silently vanish.
+    race.bets.set(socket.id, { onId, amount, email: p.email });
     pool.query('UPDATE jpo_players SET coins=$1 WHERE email=$2', [p.coins, p.email]).catch(console.error);
     socket.emit('raceBetAck', { onId, amount, coins: p.coins });
     socket.emit('coinUpdate', { coins: p.coins });
@@ -8870,6 +8913,16 @@ function _playerList() {
 // never migrated by drizzle push) self-healing on the first boot after a
 // publish — same policy as the column nudges below.
 try {
+  // Idempotency ledger for race bet payouts: one row per (race settlement, bettor).
+  // The credit only happens when the INSERT wins, so retrying a payout
+  // transaction after an ambiguous COMMIT can never double-credit.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_race_settlements (
+    settle_id  TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    amount     INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (settle_id, email)
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_buddy_caps (
     day text NOT NULL,
     key text NOT NULL,

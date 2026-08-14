@@ -7518,6 +7518,7 @@
           layer.appendChild(wrap);
         });
         _frameIdx = {};
+        _lastPct  = {};   // fresh race — no stale streaks from a prior track
         entrants.forEach(e => { _frameIdx[e.id] = 0; });
         // Preload every racer's walk + action frames ONCE so the 130ms frame
         // swap always hits browser cache instead of the network. Over the
@@ -7557,6 +7558,26 @@
       }
 
       function _stopAnim() { clearInterval(_animIv); _animIv = null; _inAction.clear(); }
+
+      // Visible dash trail for a power-up jump: a bright streak from the old
+      // position to the new one, fading out fast. Purely cosmetic — position
+      // itself is server-authoritative.
+      let _lastPct = {};
+      function _boostStreak(wrap, fromPct, toPct) {
+        try {
+          const layer = wrap.parentElement;
+          if (!layer) return;
+          const streak = document.createElement('div');
+          streak.style.cssText = 'position:absolute;left:'+fromPct+'%;top:'+wrap.style.top+
+            ';width:'+Math.max(2,(toPct-fromPct))+'%;height:10px;transform:translate(0,-50%);'+
+            'background:linear-gradient(90deg,transparent,rgba(255,235,130,0.95));'+
+            'border-radius:5px;z-index:4;pointer-events:none;opacity:1;transition:opacity 0.45s ease-out;'+
+            'filter:drop-shadow(0 0 6px rgba(255,220,90,0.8));';
+          layer.appendChild(streak);
+          requestAnimationFrame(() => { streak.style.opacity = '0'; });
+          setTimeout(() => streak.remove(), 500);
+        } catch (e) { /* cosmetic only — never break the race */ }
+      }
 
       function _updateLB() {
         const lb = _ro('race-lb-rows');
@@ -7853,6 +7874,12 @@
             wrap.style.left = TRACK_R+'%';
           } else {
             const pct = TRACK_L + (p.pos||0) / 100 * (TRACK_R - TRACK_L);
+            // Power-up boosts arrive as one big position jump. The CSS slide
+            // (0.14s) made them nearly invisible — draw a motion streak from
+            // the old spot so the dash reads as a dash.
+            const lp = _lastPct[id];
+            if (lp !== undefined && pct - lp > 1.0) _boostStreak(wrap, lp, pct);
+            _lastPct[id] = pct;
             wrap.style.left = pct+'%';
           }
         }

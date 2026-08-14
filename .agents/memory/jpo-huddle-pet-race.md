@@ -53,6 +53,36 @@ track build.
 server log should point here first — check response cache headers before
 touching the game loop.
 
+## Power-up boosts are real but visually illegible without help
+
+Special-move boosts land as one multi-point jump inside a single position tick
+(verified: +3 to +10 pts vs a ~0.4 pt normal crawl). With the 0.14s left
+transition — and the teleport effect hiding the sprite during exactly that
+window — the jump reads as "nothing happened". Fix: the position handler draws
+a fading motion streak from old→new position whenever a single-tick jump
+exceeds ~1 pt. Cosmetic only, wrapped in try/catch.
+
+**Measurement trap:** the server emits racePositions BEFORE raceEvent in the
+same tick, so "position at event time" already contains the boost. To measure a
+boost from the wire, diff successive position ticks — don't anchor on the event.
+
+## Bet payouts: settle by email, idempotent ledger, notify only after commit
+
+Race bets are keyed by the bettor's socket id; a mid-race refresh kills that id,
+so payouts must credit by the EMAIL captured at bet time, not `players[sid]`.
+Retrying a failed payout transaction is mandatory (prod has transient DB blips)
+but naive retries double-pay on an ambiguous COMMIT — each credit must first
+claim a (settlement-id, email) row in an idempotency ledger table inside the
+same transaction (`ON CONFLICT DO NOTHING`; skip credit when the claim loses).
+Cache updates and coin/payout notifications must happen only AFTER a confirmed
+commit, never inside the transaction. NB: the server is ESM — no `require()`;
+use `globalThis.crypto.randomUUID()`.
+
+**Test recipe:** isolated instance on a spare PORT (no bots), two seeded racers
++ one bettor who bets on a pet then disconnects; a win must restore the
+bettor's DB balance exactly. Lobby entrants arrive via `raceEntrantUpdate`
+(not `raceLobby`, which fires once with an empty list); races need ≥2 pets.
+
 ## Duel forfeit on disconnect
 
 Settle the duel *before* removing the leaver from the players map — the shared
