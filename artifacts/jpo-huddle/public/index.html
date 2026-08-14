@@ -7524,19 +7524,23 @@
       function _startAnim() {
         clearInterval(_animIv);
         _animIv = setInterval(() => {
+          // Sprite frames ONLY. Position is driven by the racePositions handler
+          // so a bad sprite (missing asset, action lock) can never freeze a pet
+          // on the start line. Each pet is isolated: one throw must not stop the
+          // rest of the field from animating.
           for (const e of _entrants) {
-            if (_inAction.has(e.id)) continue;   // don't clobber a special-event frame
-            const wrap = document.getElementById('rpet-'+e.id);
-            if (!wrap) continue;
-            const img = wrap.querySelector('img');
-            if (!img) continue;
-            const p = _positions[e.id] || {};
-            if (p.finished) continue;
-            const stem = img.dataset.stem || e.stem;
-            _frameIdx[e.id] = ((_frameIdx[e.id]||0)+1) % 4;
-            img.src = _frames(stem)[_frameIdx[e.id]];
-            const pct = TRACK_L + (p.pos||0) / 100 * (TRACK_R - TRACK_L);
-            wrap.style.left = pct+'%';
+            try {
+              if (_inAction.has(e.id)) continue;   // don't clobber a special-event frame
+              const wrap = document.getElementById('rpet-'+e.id);
+              if (!wrap) continue;
+              const img = wrap.querySelector('img');
+              if (!img) continue;
+              const p = _positions[e.id] || {};
+              if (p.finished) continue;
+              const stem = img.dataset.stem || e.stem;
+              _frameIdx[e.id] = ((_frameIdx[e.id]||0)+1) % 4;
+              img.src = _frames(stem)[_frameIdx[e.id]];
+            } catch (err) { /* one bad pet must not stall the whole race */ }
           }
         }, 130);
       }
