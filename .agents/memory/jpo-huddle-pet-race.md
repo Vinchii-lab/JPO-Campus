@@ -39,6 +39,20 @@ a scrypt hash matching the server's stored format, and delete it afterwards.
 provably correct; only the client rendering was at fault. Cheap to check, and it
 stops a plausible-but-false theory from shaping the fix.
 
+## Sprite frame swaps must be cache-backed
+
+The 130ms sprite loop swaps `img.src` between frame URLs. Without an explicit
+`Cache-Control` on static art, browsers heuristic-cache (10% of file age) — right
+after a deploy that's ~seconds, so every swap refetched over the internet:
+frozen sprites + a request flood that lagged the whole prod page, while dev
+(localhost) looked perfect. Fix is two-sided: serve art with
+`public, max-age=86400` and preload each racer's walk/action frames once at
+track build.
+
+**How to apply:** any prod-only "lag + frozen animation" report with a healthy
+server log should point here first — check response cache headers before
+touching the game loop.
+
 ## Duel forfeit on disconnect
 
 Settle the duel *before* removing the leaver from the players map — the shared

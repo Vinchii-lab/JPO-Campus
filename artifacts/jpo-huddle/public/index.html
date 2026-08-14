@@ -7519,6 +7519,17 @@
         });
         _frameIdx = {};
         entrants.forEach(e => { _frameIdx[e.id] = 0; });
+        // Preload every racer's walk + action frames ONCE so the 130ms frame
+        // swap always hits browser cache instead of the network. Over the
+        // internet a cold fetch per swap is slower than the swap interval —
+        // sprites looked frozen and the request flood lagged the whole page.
+        const seen = new Set();
+        entrants.forEach(e => {
+          if (seen.has(e.stem)) return;
+          seen.add(e.stem);
+          _frames(e.stem).concat('/assets/pets/anim/'+e.stem+'_action.png')
+            .forEach(src => { const im = new Image(); im.src = src; });
+        });
       }
 
       function _startAnim() {

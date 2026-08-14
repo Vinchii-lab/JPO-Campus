@@ -252,7 +252,19 @@ app.post("/admin/purge", express.json(), async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+// Static assets get a real cache policy. Without one, browsers fall back to
+// heuristic caching (10% of file age) — right after a deploy that's ~seconds,
+// so the race sprite loop (img.src swap every 130ms × N pets) turned into a
+// request flood over the internet: frozen sprites + hard lag on production,
+// invisible in dev where localhost round-trips are ~1ms. Art files are stable;
+// when one truly changes, players pick it up within a day.
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    if (/\.(png|jpe?g|gif|webp|svg|mp3|ogg|wav)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    }
+  },
+}));
 
 // ── Live-connection cache (ephemeral, per server process) ────────────────────
 const pending = {};   // socketId → { firstName, lastName, email, character, name, hairIdx, skinIdx, shirtIdx, pantsIdx }
