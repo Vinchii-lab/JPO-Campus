@@ -446,8 +446,42 @@ function dealPickPhase() {
   deal.phaseTimer = setTimeout(dealResolvePick, deal.voteMs);
   io.emit("dealPhase", dealSnap());
 }
+// Two-strikes rule: every vote window (team-case pick, case votes, DEAL /
+// NO DEAL offers) counts. Sit out two of them total and the Banker cuts your
+// line — you're out of the show and out of every payout from then on.
+// Called when a vote window closes, with the map of who actually voted.
+function dealTrackMisses(voted) {
+  if (!deal) return;
+  const booted = [];
+  for (const [em, p] of deal.players) {
+    if (voted.has(em)) continue;
+    const n = (deal.misses.get(em) || 0) + 1;
+    deal.misses.set(em, n);
+    if (n >= 2) booted.push({ em, name: p.name });
+  }
+  if (!booted.length) return;
+  for (const { em, name } of booted) {
+    deal.players.delete(em);
+    deal.misses.delete(em);
+    const sid = liveSocketIdByEmail(em);
+    if (sid) io.to(sid).emit("dealKicked", { gameId: deal.id, message: "📵 You sat out two votes — the Banker cut your line. You're out of the show (and out of the payout)." });
+    console.log(`DEAL kicked ${em} (${name}) — missed 2 votes`);
+  }
+  const names = [...deal.players.values()].map((p) => p.name);
+  io.emit("dealBooted", { gameId: deal.id, kicked: booted.map((b) => b.name), names });
+  io.emit("dealNames", { gameId: deal.id, names });
+  if (deal.players.size === 0) {
+    // Everybody stopped voting — there's no one left to pay. End the show.
+    const gameId = deal.id;
+    dealStop();
+    io.emit("dealOver", { gameId, mode: "cancelled", per: 0, message: "📺 The whole office stopped voting — the Banker hung up. Show over, nobody gets paid." });
+    console.log("DEAL cancelled: every entrant kicked for not voting");
+  }
+}
 function dealResolvePick() {
   if (!deal || deal.state !== "pickcase") return;
+  dealTrackMisses(deal.votes);
+  if (!deal) return;   // everyone kicked → show already cancelled
   const tally = new Map();
   for (const i of deal.votes.values()) tally.set(i, (tally.get(i) || 0) + 1);
   let best = [], bestN = 0;
@@ -498,6 +532,8 @@ function dealBankerPhase() {
 }
 function dealResolveVote() {
   if (!deal || deal.state !== "voting") return;
+  dealTrackMisses(deal.votes);
+  if (!deal) return;   // everyone kicked → show already cancelled
   // Most-voted unopened case; no votes at all → random (the show must go on).
   const tally = new Map();
   for (const i of deal.votes.values()) tally.set(i, (tally.get(i) || 0) + 1);
@@ -539,6 +575,9 @@ function dealResolveVote() {
 }
 function dealResolveOffer() {
   if (!deal || deal.state !== "offer") return;
+  // Strikes first, so the majority below is measured against who's still in.
+  dealTrackMisses(deal.dealVotes);
+  if (!deal) return;   // everyone kicked → show already cancelled
   const votes = [...deal.dealVotes.values()];
   const yes = votes.filter(Boolean).length, no = votes.length - yes;
   // A DEAL needs a true majority of ALL entrants — abstaining is a quiet NO.
@@ -5764,7 +5803,7 @@ io.on("connection", (socket) => {
       id: ++dealGameSeq, state: "joining", jackpot, round: 0, voteMs: voteSec * 1000,
       blockIdx: 0, blockLeft: 0, blockSize: 0, teamCase: null,
       cases: values.map((v) => ({ v, opened: false })),
-      players: new Map(), votes: new Map(), dealVotes: new Map(), offer: 0,
+      players: new Map(), votes: new Map(), dealVotes: new Map(), misses: new Map(), offer: 0,
       joinDeadline: Date.now() + DEAL_JOIN_MS,
       joinTimer: setTimeout(dealBegin, DEAL_JOIN_MS), phaseTimer: null, phaseDeadline: 0,
     };

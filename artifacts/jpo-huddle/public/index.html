@@ -8886,6 +8886,16 @@
       _rpsToast(skipped ? `☎️ No offer this round — the cases keep opening!`
                         : `🙅 NO DEAL! (${yes}–${no}) The Banker hangs up… the cases keep opening!`);
     });
+    // Two-strikes rule: miss two votes and the Banker cuts your line.
+    socket.on('dealKicked', ({ gameId, message } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId !== _dealGameId) return;
+      _dealHideAll();
+      _rpsToast(message || '📵 You sat out two votes — the Banker cut your line. You\'re out of the show.');
+    });
+    socket.on('dealBooted', ({ gameId, kicked } = {}) => {
+      if (gameId !== _dealGameId) return;
+      if (kicked && kicked.length) _rpsToast(`📵 Cut by the Banker for not voting: ${kicked.join(', ')}`);
+    });
     socket.on('dealNames', ({ gameId, names } = {}) => {
       if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;
       _dealDropStale(gameId);
