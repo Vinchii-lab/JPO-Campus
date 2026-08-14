@@ -7827,12 +7827,19 @@
 
       socket.on('racePositions', posData => {
         _positions = posData;
+        // Apply ALL positions directly — running and finished — so movement
+        // works even if _startAnim's interval isn't ticking yet.
         for (const [id, p] of Object.entries(posData)) {
-          if (!p.finished) continue;
-          const pl = document.getElementById('rplace-'+id);
-          if (pl && p.place) { pl.style.display='block'; pl.textContent = MEDAL[p.place-1]||'#'+p.place; }
           const wrap = document.getElementById('rpet-'+id);
-          if (wrap) wrap.style.left = TRACK_R+'%';
+          if (!wrap) continue;
+          if (p.finished) {
+            const pl = document.getElementById('rplace-'+id);
+            if (pl && p.place) { pl.style.display='block'; pl.textContent = MEDAL[p.place-1]||'#'+p.place; }
+            wrap.style.left = TRACK_R+'%';
+          } else {
+            const pct = TRACK_L + (p.pos||0) / 100 * (TRACK_R - TRACK_L);
+            wrap.style.left = pct+'%';
+          }
         }
         _updateLB();
       });
