@@ -2141,6 +2141,7 @@
             <div style="font-size:10px;letter-spacing:1.5px;color:#3a3870;text-transform:uppercase;">Gate opens in</div>
             <div id="race-lobby-timer" style="font-size:36px;font-weight:700;color:#7add60;line-height:1;font-variant-numeric:tabular-nums;">0:45</div>
           </div>
+          <button id="race-lobby-close" style="background:#2a2550;border:none;border-radius:9px;padding:8px 14px;color:#aaa;font-size:13px;cursor:pointer;font-family:inherit;">✕ Back to office</button>
         </div>
 
         <div style="background:#13112a;border:1px solid #2a2550;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
@@ -2198,6 +2199,7 @@
 
     <!-- RACE TRACK -->
     <div id="race-scene" style="display:none;position:absolute;inset:0;overflow:hidden;">
+      <button id="race-scene-leave" style="position:absolute;top:12px;right:14px;z-index:60;background:rgba(42,37,80,0.85);border:none;border-radius:9px;padding:8px 14px;color:#aaa;font-size:13px;cursor:pointer;font-family:inherit;">✕ Back to office</button>
       <!-- Sky -->
       <div style="position:absolute;top:0;left:0;right:0;height:22%;background:linear-gradient(180deg,#3a8ac8 0%,#87ceeb 55%,#b8e4ff 100%);"></div>
       <!-- Tree silhouette -->
@@ -7430,6 +7432,11 @@
       let _joinDeadline = 0;
       let _myPayout = 0;
       let _totalHeats = 0;
+      // Opt-in gating: nobody gets dragged into the fullscreen race UI unless
+      // they joined, bet, are in a duel, or clicked the corner invite card.
+      let _raceOptIn = false;
+      let _pendingRace = null;   // latest heat/final payload for a late "Watch"
+      let _lastPrize = 0;
 
       function _ro(id) { return document.getElementById(id); }
 
@@ -7661,10 +7668,55 @@
         }, 1000);
       });
 
+      // ── Corner invite card (RLGL-style): announce the race without hijacking
+      //    the screen. Fullscreen race UI only opens for opt-ins. ─────────────
+      function _raceCardEl() {
+        let c = _ro('race-invite-card');
+        if (!c) {
+          c = document.createElement('div');
+          c.id = 'race-invite-card';
+          c.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9100;background:#13112a;'+
+            'border:1px solid #5540c0;border-radius:14px;padding:14px 16px;color:#fff;max-width:270px;'+
+            'box-shadow:0 8px 30px rgba(0,0,0,0.55);font-family:inherit;';
+          document.body.appendChild(c);
+        }
+        return c;
+      }
+      function _raceCardHide() { const c = _ro('race-invite-card'); if (c) c.remove(); }
+      function _showRaceInvite() {
+        const c = _raceCardEl();
+        c.innerHTML =
+          '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">🏁 PET RACE</div>'+
+          '<div style="font-size:12px;color:#aab;margin-bottom:9px;line-height:1.5;">Lobby open! Prize pool: <b style="color:#f5c518;">'+
+            (_lastPrize||0).toLocaleString()+'</b> coins · <span id="race-card-count">0</span> pets in · <span id="race-card-left">--</span>s</div>'+
+          '<div style="display:flex;gap:8px;">'+
+          '<button id="race-card-open" style="flex:1;padding:9px 0;border:none;border-radius:9px;background:linear-gradient(135deg,#5540c0,#4433aa);color:#fff;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;">JOIN / BET</button>'+
+          '<button id="race-card-dismiss" style="padding:9px 13px;border:none;border-radius:9px;background:#2a2550;color:#888;cursor:pointer;font-family:inherit;">✕</button></div>';
+        _ro('race-card-open').onclick    = () => { _raceCardHide(); _showPhase('lobby'); };
+        _ro('race-card-dismiss').onclick = () => _raceCardHide();
+      }
+      function _showRaceOngoing() {
+        const c = _raceCardEl();
+        c.innerHTML =
+          '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">🏁 PET RACE — ON!</div>'+
+          '<div style="font-size:12px;color:#aab;margin-bottom:9px;">The race is running right now.</div>'+
+          '<div style="display:flex;gap:8px;">'+
+          '<button id="race-card-watch" style="flex:1;padding:9px 0;border:none;border-radius:9px;background:linear-gradient(135deg,#5540c0,#4433aa);color:#fff;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;">WATCH</button>'+
+          '<button id="race-card-dismiss" style="padding:9px 13px;border:none;border-radius:9px;background:#2a2550;color:#888;cursor:pointer;font-family:inherit;">✕</button></div>';
+        _ro('race-card-watch').onclick = () => {
+          _raceOptIn = true; _raceCardHide();
+          if (_pendingRace) _startRaceUI(_pendingRace.entrants, _pendingRace.heat, _pendingRace.totalHeats, _pendingRace.isFinal, _pendingRace.advanceN);
+        };
+        _ro('race-card-dismiss').onclick = () => _raceCardHide();
+      }
+
       socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {
         if (_phase === 'duel') return;   // duel VS screen wins — ignore stray lobby events
         _myPayout = 0;
-        _showPhase('lobby');
+        _raceOptIn = false;
+        _pendingRace = null;
+        _lastPrize = prize || 0;
+        _showRaceInvite();
         const pl = _ro('race-lobby-prize-lbl');
         if (pl) pl.textContent = '🏆 House prize pool: '+prize.toLocaleString()+' coins';
         _joinDeadline = joinDeadline;
@@ -7683,34 +7735,58 @@
         const bm = _ro('race-bet-msg'); if (bm) bm.textContent = '';
         const pl2 = _ro('race-pot-lbl'); if (pl2) pl2.textContent = '0 🪙';
         _renderLobbyList(entrants || []);
+        const xb = _ro('race-lobby-close');
+        if (xb) xb.onclick = () => { _showPhase('idle'); if (!_raceOptIn) _showRaceInvite(); };
         clearInterval(_lobbyIv);
         _lobbyIv = setInterval(() => {
           const left = Math.max(0, _joinDeadline - Date.now());
           const s = Math.ceil(left / 1000);
           const t = _ro('race-lobby-timer');
           if (t) t.textContent = Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+          const cl = _ro('race-card-left'); if (cl) cl.textContent = s;
           if (left <= 0) clearInterval(_lobbyIv);
         }, 500);
       });
 
-      socket.on('raceEntrantUpdate', ({ entrants }) => _renderLobbyList(entrants));
+      socket.on('raceEntrantUpdate', ({ entrants }) => {
+        _renderLobbyList(entrants);
+        const cc = _ro('race-card-count'); if (cc) cc.textContent = (entrants || []).length;
+      });
       socket.on('racePotUpdate',     ({ pot })      => { const el = _ro('race-pot-lbl'); if (el) el.textContent = pot.toLocaleString()+' 🪙'; });
 
       socket.on('raceJoinOk', () => {
+        _raceOptIn = true;   // entered a pet — they're a participant now
         const jb = _ro('race-join-btn');     if (jb)   jb.style.display = 'none';
         const bd = _ro('race-joined-badge'); if (bd) bd.style.display = 'inline-block';
       });
       socket.on('raceJoinErr', msg => { const el = _ro('race-my-pet-status'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
 
       socket.on('raceBetAck', ({ onId, amount }) => {
+        _raceOptIn = true;   // they have money on this race — they'll want to see it
         const e   = _entrants.find(x => x.id === onId);
         const msg = _ro('race-bet-msg');
         if (msg) { msg.style.color='#7add60'; msg.textContent = '✓ Bet locked: '+amount.toLocaleString()+' coins on '+(e?e.name:'?'); }
       });
       socket.on('raceBetErr', msg => { const el = _ro('race-bet-msg'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
 
-      socket.on('raceHeatStart',  ({ heat, totalHeats, entrants, advanceN }) => _startRaceUI(entrants, heat, totalHeats, false, advanceN));
-      socket.on('raceFinalStart', ({ entrants, totalHeats }) => _startRaceUI(entrants, 0, totalHeats, true, 0));
+      function _raceStage(payload, isFinal) {
+        _pendingRace = { entrants: payload.entrants, heat: payload.heat || 0,
+                         totalHeats: payload.totalHeats, isFinal, advanceN: payload.advanceN || 0 };
+        // Duel participants and opt-ins get the race screen; everyone else
+        // just gets the small "race is on — watch?" card.
+        if (_raceOptIn || _phase === 'duel' || _phase === 'lobby' || _phase === 'heat' || _phase === 'final') {
+          _raceOptIn = true;
+          _startRaceUI(payload.entrants, payload.heat || 0, payload.totalHeats, isFinal, payload.advanceN || 0);
+        } else {
+          _showRaceOngoing();
+        }
+      }
+      // Spectator escape hatch: leave the live race view any time. Keeps the
+      // anim loop running so "WATCH" can resume instantly from the card.
+      const _lv = _ro('race-scene-leave');
+      if (_lv) _lv.onclick = () => { _raceOptIn = false; _showPhase('idle'); _showRaceOngoing(); };
+      socket.on('raceHeatStart',  d => _raceStage(d, false));
+      socket.on('raceFinalStart', d => _raceStage(d, true));
       socket.on('raceGo',         () => { /* countdown already handles it */ });
 
       // Spawn emoji/div particles for a special event. Uses Web Animations API
@@ -7901,6 +7977,11 @@
 
       socket.on('raceResult', ({ results, totalPot, forfeit, forfeitName }) => {
         _stopAnim();
+        _raceCardHide();
+        _pendingRace = null;
+        // Bystanders who never opted in shouldn't get a fullscreen results
+        // takeover either — unless their bet won (payout deserves a screen).
+        if (!_raceOptIn && _phase !== 'duel' && _myPayout <= 0 && !forfeit) return;
         _showPhase('results');
         const list = _ro('race-results-list');
         if (list) {
@@ -7936,6 +8017,9 @@
       socket.on('raceCancelled', () => {
         _stopAnim();
         clearInterval(_lobbyIv);
+        _raceCardHide();
+        _raceOptIn = false;
+        _pendingRace = null;
         _showPhase('idle');
       });
 
