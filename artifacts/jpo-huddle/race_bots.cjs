@@ -23,15 +23,21 @@ function mkBot(cfg) {
   const s = io(URL, { transports: ["websocket"], reconnection: true, reconnectionDelay: 2000 });
   let _entrants = [];  // full entrant objects {id (socket), name, petId, ...}
   let _betPlaced = false;
+  let _inDuel = false;  // true while in a private 1v1 race challenge — skip raceJoin
 
   s.on("buildStamp",  () => s.emit("clientBuild"));
-  s.on("connect",     () => { _entrants = []; _betPlaced = false; s.emit("login", { email: cfg.email, password: PW }); });
+  s.on("connect",     () => { _entrants = []; _betPlaced = false; _inDuel = false; s.emit("login", { email: cfg.email, password: PW }); });
   s.on("approved",    () => log(cfg.name, "in the office 🏢"));
   s.on("loginFail",   d  => log(cfg.name, "login failed:", JSON.stringify(d)));
+
+  // If we're the challenged player in a private duel the server already
+  // auto-joined us — suppress the manual raceJoin.
+  s.on("raceChallenge", ({ isDuel }) => { if (isDuel) _inDuel = true; });
 
   s.on("raceLobby", ({ entrants }) => {
     _entrants = entrants || [];
     _betPlaced = false;
+    if (_inDuel) return;   // duel: server auto-joined us, no manual join needed
     // Join after a short random delay so they don't all pile in at once
     setTimeout(() => {
       log(cfg.name, "joining race 🐾");
@@ -69,9 +75,9 @@ function mkBot(cfg) {
   s.on("raceBetErr",  msg => log(cfg.name, "bet err:", msg));
   s.on("raceHeatStart", d => log(cfg.name, `heat ${d.heatNum} starting 🔥`));
   s.on("raceFinalStart",()  => log(cfg.name, "FINAL! 🏆"));
-  s.on("raceResult",  d   => log(cfg.name, `race over — winner: ${d.winnerId} | pot: ${d.pot}`));
-  s.on("racePayout",  d   => log(cfg.name, `💰 payout: +${d.amount} coins`));
-  s.on("raceCancelled", () => log(cfg.name, "race cancelled 😢"));
+  s.on("raceResult",    d => { _inDuel = false; log(cfg.name, `race over — winner: ${d.winnerId} | pot: ${d.pot}`); });
+  s.on("racePayout",    d => log(cfg.name, `💰 payout: +${d.amount} coins`));
+  s.on("raceCancelled", () => { _inDuel = false; log(cfg.name, "race cancelled 😢"); });
 
   return s;
 }

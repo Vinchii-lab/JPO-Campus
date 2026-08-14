@@ -7626,6 +7626,7 @@
       });
 
       socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {
+        if (_phase === 'duel') return;   // duel VS screen wins — ignore stray lobby events
         _myPayout = 0;
         _showPhase('lobby');
         const pl = _ro('race-lobby-prize-lbl');
