@@ -7850,22 +7850,29 @@
 
       socket.on('racePayout', ({ amount }) => { _myPayout = amount; });
 
-      socket.on('raceResult', ({ results, totalPot }) => {
+      socket.on('raceResult', ({ results, totalPot, forfeit, forfeitName }) => {
         _stopAnim();
         _showPhase('results');
         const list = _ro('race-results-list');
         if (list) {
-          list.innerHTML = results.map((r, i) => {
-            const medal = MEDAL[i] || '#'+(i+1);
-            const pStr  = r.payout ? ' <span style="color:#f5c518;font-weight:700;">+'+r.payout.toLocaleString()+' 🪙</span>' : '';
-            return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1b3a;">' +
-              '<span style="font-size:20px;width:28px;">'+medal+'</span>' +
-              '<div style="font-size:14px;color:#fff;font-weight:'+(i===0?'700':'400')+';">'+r.name+pStr+'</div></div>';
-          }).join('');
+          if (forfeit) {
+            list.innerHTML = '<div style="text-align:center;padding:18px 0;font-size:15px;color:#e74c3c;">🏃 <b>'+(forfeitName||'Opponent')+'</b> disconnected and forfeited the race.</div>';
+          } else {
+            list.innerHTML = results.map((r, i) => {
+              const medal = MEDAL[i] || '#'+(i+1);
+              const pStr  = r.payout ? ' <span style="color:#f5c518;font-weight:700;">+'+r.payout.toLocaleString()+' 🪙</span>' : '';
+              return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1b3a;">' +
+                '<span style="font-size:20px;width:28px;">'+medal+'</span>' +
+                '<div style="font-size:14px;color:#fff;font-weight:'+(i===0?'700':'400')+';">'+r.name+pStr+'</div></div>';
+            }).join('');
+          }
         }
         const banner = _ro('race-payout-banner');
         if (banner) {
-          if (_myPayout > 0) {
+          if (forfeit) {
+            banner.style.color = '#2ecc71';
+            banner.textContent = '🏆 You win by walkover! Wager collected.';
+          } else if (_myPayout > 0) {
             banner.style.color = '#f5c518';
             banner.textContent = '🎉 Your bet won! +'+_myPayout.toLocaleString()+' coins!';
           } else {

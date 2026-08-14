@@ -4175,6 +4175,32 @@ function raceCancel(reason) {
   console.log('Race: cancelled (' + reason + ')');
 }
 
+// Called from the disconnect handler (before players[id] is deleted) when one
+// side of an active duel race bails out. Survivor is declared the winner and
+// receives the full wager; leaver gets nothing and sees the forfeit screen.
+async function raceDuelForfeit(leaverSocketId) {
+  if (!race?.duelIds?.includes(leaverSocketId)) return;
+  const g = race; race = null;   // claim race immediately — no double-settle
+  clearTimeout(g.joinTimer); clearTimeout(g.countdownTimer); clearInterval(g.tickInterval);
+  const survivorId  = g.duelIds.find(id => id !== leaverSocketId);
+  const leaverName  = players[leaverSocketId]?.name || 'Opponent';
+  console.log(`Race duel forfeit: ${leaverName} disconnected — ${players[survivorId]?.name || survivorId} wins by walkover`);
+  if (g.duelWager > 0 && survivorId) {
+    try {
+      const transferred = await rpsSettle(survivorId, leaverSocketId, g.duelWager);
+      if (transferred > 0) {
+        const wp = players[survivorId], lp = players[leaverSocketId];
+        if (wp) io.to(survivorId).emit('rpsResult', { game: 'race', outcome: 'win',  wager: g.duelWager, coinsDelta:  transferred, coins: wp.coins });
+        if (lp) io.to(leaverSocketId).emit('rpsResult', { game: 'race', outcome: 'loss', wager: g.duelWager, coinsDelta: -transferred, coins: lp.coins });
+      }
+    } catch (err) { console.error('Race duel forfeit settle failed:', err); }
+  }
+  // Send results to both sides — leaver may be mid-disconnect but the event
+  // is harmless if they're already gone; survivor sees the forfeit screen.
+  const forfeitPayload = { results: [], totalPot: 0, forfeit: true, forfeitName: leaverName };
+  for (const id of g.duelIds) io.to(id).emit('raceResult', forfeitPayload);
+}
+
 function raceBeginRace(ids) {
   race.positions      = new Map();
   race.finishOrder    = [];
@@ -8704,6 +8730,7 @@ io.on("connection", (socket) => {
     // is a FORFEIT by the leaver: refreshing while losing used to cancel with
     // no coins moved, which let losers dodge the wager (July 2026 exploit).
     forfeitMatchForLeave(socket.id);
+    await raceDuelForfeit(socket.id);   // duel race: survivor wins by walkover
     // The ROUND now gets the same grace as the player: an email-backed member
     // of the ACTIVE round is marked `gone` and their spot survives until the
     // grace timer below expires (which then applies the leave rules) or a
