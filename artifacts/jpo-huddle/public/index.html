@@ -11779,8 +11779,9 @@
           this._weatherTick = (delta) => {
             const wx = this._wx; if (!wx) return;
             const dt = delta / 1000;
-            wx.far.tilePositionY  += 340 * dt; wx.far.tilePositionX  -= 40 * dt;
-            wx.near.tilePositionY += 520 * dt; wx.near.tilePositionX -= 70 * dt;
+            // Decreasing tilePosition scrolls the sampled texture DOWN on screen = falling rain.
+            wx.far.tilePositionY  -= 340 * dt; wx.far.tilePositionX  += 40 * dt;
+            wx.near.tilePositionY -= 520 * dt; wx.near.tilePositionX += 70 * dt;
             // Synced schedule: ~1 in 4 ten-minute slots opens with a 2.5-min storm.
             const now = Date.now(), slot = Math.floor(now / 600000);
             const storm = (((slot * 2654435761) >>> 0) % 4 === 0) && (now - slot * 600000 < 150000);
