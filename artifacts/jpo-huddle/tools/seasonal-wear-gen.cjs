@@ -1,86 +1,106 @@
 // Rainy-season wearables (Aug 2026) — same style contract as
-// tools/wearable-gen.cjs: flat colors, no outlines, transparent background,
+// tools/wearable-gen.cjs: transparent background,
 // frame 0 = front (facing down), frame 1 = side profile FACING RIGHT.
 // Frame sizes are LOCKSTEP with the preload calls in public/index.html:
 //   wear_raincoat  12x10   wear_rainboots 10x4   wear_umbrella 14x12
+// v2 (Vince: "shit's ugly"): added dark outlines, left-light shading,
+// hood rim + zipper on the coat; domed scalloped canopy, ferrule tip and
+// J-hook handle on the umbrella; shaded wellies.
 const { PNG } = require('pngjs');
 const fs = require('fs');
 const OUT = '/home/runner/workspace/artifacts/jpo-huddle/public/assets';
 
 const SPRITES = {
-  // Classic yellow slicker: covers the torso, darker hem + center zip line.
+  // Classic yellow slicker: outlined, light from the left, center zip, hood rim.
   wear_raincoat: {
-    pal: { Y: [244, 197, 66], D: [214, 160, 38], Z: [176, 126, 24] },
+    pal: {
+      L: [252, 222, 118],   // highlight
+      Y: [244, 197, 66],    // base yellow
+      D: [206, 150, 38],    // shade
+      Z: [140, 96, 20],     // outline / zipper
+    },
     front: [
-      '.YYYYYYYYYY.',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'YYYYYZZYYYYY',
-      'DDDDDDDDDDDD',
+      '.ZDDYYYYDDZ.',
+      'ZLLYYZZYYDDZ',
+      'ZLLYYZZYYDDZ',
+      'ZLLYYZZYYDDZ',
+      'ZLLYYZZYYDDZ',
+      'ZLLYYZZYYDDZ',
+      'ZLDYYZZYYDDZ',
+      'ZYYYYZZYYYYZ',
+      '.ZZZZZZZZZZ.',
       '............',
     ],
     side: [
-      '..YYYYYYYY..',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.YYYYYYYYYY.',
-      '.DDDDDDDDDD.',
+      '..ZDDDDDDZ..',
+      '.ZLYYYYYDDZ.',
+      '.ZLYYYYYDDZ.',
+      '.ZLYYYYYDDZ.',
+      '.ZLYYYYYDDZ.',
+      '.ZLYYYYYDDZ.',
+      '.ZLYYYYYDDZ.',
+      '.ZYYYYYYYDZ.',
+      '..ZZZZZZZZ..',
       '............',
     ],
   },
-  // Yellow wellies with a darker sole.
+  // Yellow wellies: highlight stripe + dark sole.
   wear_rainboots: {
-    pal: { Y: [244, 197, 66], S: [120, 90, 20] },
+    pal: {
+      L: [252, 222, 118],
+      Y: [244, 197, 66],
+      D: [206, 150, 38],
+      S: [92, 70, 28],
+    },
     front: [
-      '.YY....YY.',
-      '.YY....YY.',
-      '.YY....YY.',
-      '.SS....SS.',
+      '.LYD..LYD.',
+      '.LYD..LYD.',
+      '.LYD..LYD.',
+      '.SSS..SSS.',
     ],
     side: [
-      '....YY....',
-      '....YY....',
-      '...YYY....',
-      '...SSS....',
+      '...LYD....',
+      '...LYD....',
+      '..LLYD....',
+      '..SSSS....',
     ],
   },
-  // Red umbrella held overhead: canopy + tip + a hint of handle.
+  // Red umbrella held overhead: domed canopy with highlight + rib shading,
+  // silver ferrule tip, brown pole with a J-hook handle.
   wear_umbrella: {
-    pal: { R: [214, 69, 65], D: [166, 42, 42], H: [110, 80, 50] },
+    pal: {
+      R: [222, 68, 64],     // base red
+      D: [160, 38, 40],     // shaded panel / ribs
+      L: [246, 140, 128],   // highlight
+      S: [212, 212, 218],   // ferrule tip
+      H: [122, 86, 52],     // pole + handle
+    },
     front: [
-      '......H.......',
-      '...RRRRRRR....',
-      '..RRRRRRRRR...',
-      '.RRRRRRRRRRR..',
-      'RRDRRDRRDRRDR.',
-      '......H.......',
-      '......H.......',
-      '......H.......',
+      '......SS......',
+      '....RLLRRR....',
+      '..RRLLRRRRRR..',
+      '.RRLLRRRRRRDD.',
+      'RRLRRRRRRRRDDD',
+      'RDRRDRRDRRDRDD',
       '......H.......',
       '......H.......',
-      '.....HH.......',
+      '......H.......',
+      '....H.H.......',
+      '....HHH.......',
       '..............',
     ],
     side: [
-      '......H.......',
-      '...RRRRRRR....',
-      '..RRRRRRRRR...',
-      '.RRRRRRRRRRR..',
-      'RRDRRDRRDRRDR.',
-      '......H.......',
-      '......H.......',
-      '......H.......',
+      '......SS......',
+      '....RLLRRR....',
+      '..RRLLRRRRRR..',
+      '.RRLLRRRRRRDD.',
+      'RRLRRRRRRRRDDD',
+      'RDRRDRRDRRDRDD',
       '......H.......',
       '......H.......',
-      '.....HH.......',
+      '......H.......',
+      '....H.H.......',
+      '....HHH.......',
       '..............',
     ],
   },

@@ -489,3 +489,10 @@ uri = "file://attached_assets/generated_images/rainy_outfit_ingame.png"
 type = "image"
 title = "🌧️ Rainy outfit in-game"
 description = "Raincoat + rain boots + umbrella worn together (with a cap!) plus the frog tagging along."
+
+[[outputs]]
+id = "8_iSw0mESrjwG1v_GswO_"
+uri = "file://attached_assets/generated_images/rainy_outfit_v2.png"
+type = "image"
+title = "🌧️ Rainy gear v2 — redrawn"
+description = "Raincoat now has a hood rim, zipper and shading; umbrella got a proper domed canopy with highlight, scalloped edge and a J-hook handle."
