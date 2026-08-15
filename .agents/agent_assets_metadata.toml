@@ -517,3 +517,10 @@ uri = "file://attached_assets/generated_images/raincoat_layer_proof.png"
 type = "image"
 title = "🧥 Raincoat v4 — generated from the layers"
 description = "Each row: walking down (6 frames), then back view (3), then side view (3). The coat is auto-derived from each character's own body layers, so it hugs every pose perfectly — no more clipping, boots stay visible, and hair drapes over the hood line. This replaces the old floating-overlay raincoat once you approve."
+
+[[outputs]]
+id = "IWljge7CkUJ0lLyiPxRiL"
+uri = "file://attached_assets/generated_images/adam_upgrade_proof.png"
+type = "image"
+title = "🎨 Adam art upgrade — before (top) vs after (bottom)"
+description = "Same size, same poses. Three changes: sun-lit highlights on hair/face tops, colored outlines (dark green around hair, dark purple around the shirt) instead of flat black, and grounded contact shading at the feet. Applied per body layer, so recolors and all baked wearables stay 100% compatible."
