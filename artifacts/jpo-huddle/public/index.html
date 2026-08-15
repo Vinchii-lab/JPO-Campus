@@ -3882,6 +3882,187 @@
       }
     }
 
+    // ── Layered-character renderer ─────────────────────────────────────
+    // Every character sheet has been split offline (tools/char-layer-split.cjs)
+    // into per-part layer PNGs (skin/hair/shirt/pants; anything in none of them
+    // is un-recolorable body/outline). Recoloring tints ONLY the owning layer's
+    // pixels, which kills the legacy cross-zone bleed (clothes passes repainting
+    // hands, skin pass tinting Amelia's hair highlights) by construction.
+    // _applySwaps above is kept verbatim as the fallback while layers stream in.
+    const LAYER_NAMES = ['skin', 'hair', 'shirt', 'pants'];
+    const LAYER_SUFFIXES = ['run', 'sit', 'sit2', 'sit3'];
+    const _layerImages = {};   // `${char}_${suffix}` → {skin:Image,...}
+    const _layerData   = {};   // `${char}_${suffix}` → {w,h,skin:Uint8ClampedArray,...}
+
+    // Full-sheet layer alpha data, built lazily from the loaded images and
+    // cached. Returns null until ALL four layer images for the sheet are ready
+    // (callers then fall back to _applySwaps for that draw).
+    function _getLayerData(char, suffix) {
+      const key = `${char}_${suffix}`;
+      if (_layerData[key]) return _layerData[key];
+      const imgs = _layerImages[key];
+      if (!imgs) return null;
+      for (const l of LAYER_NAMES) {
+        const im = imgs[l];
+        if (!im || !im.complete || !im.naturalWidth) return null;
+      }
+      const w = imgs.skin.naturalWidth, h = imgs.skin.naturalHeight;
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      const out = { w, h };
+      for (const l of LAYER_NAMES) {
+        cx.clearRect(0, 0, w, h);
+        cx.drawImage(imgs[l], 0, 0);
+        out[l] = cx.getImageData(0, 0, w, h).data;
+      }
+      _layerData[key] = out;
+      return out;
+    }
+
+    // Slice a rect out of the full-sheet layer data so previews (which crop one
+    // frame from the sheet) get layer arrays aligned with their cropped pixels.
+    function _cropLayerData(char, suffix, sx, sy, w, h) {
+      const full = _getLayerData(char, suffix);
+      if (!full) return null;
+      if (sx === 0 && sy === 0 && w === full.w && h === full.h) return full;
+      const out = { w, h };
+      for (const l of LAYER_NAMES) {
+        const dst = new Uint8ClampedArray(w * h * 4);
+        for (let y = 0; y < h; y++) {
+          const srcOff = ((sy + y) * full.w + sx) * 4;
+          dst.set(full[l].subarray(srcOff, srcOff + w * 4), y * w * 4);
+        }
+        out[l] = dst;
+      }
+      return out;
+    }
+
+    // Zone membership test — same geometry/threshold rules as _swapColorsData.
+    function _zoneMatchPx(z, r, g, b, x, y) {
+      if (!z) return false;
+      if (z.yMin !== undefined && y < z.yMin) return false;
+      if (z.yMax !== undefined && y >= z.yMax) return false;
+      if (z.xMin !== undefined && x < z.xMin) return false;
+      if (z.xMax !== undefined && x >= z.xMax) return false;
+      const dr = r - z.r, dg = g - z.g, db = b - z.b;
+      return dr*dr + dg*dg + db*db <= z.t * z.t;
+    }
+
+    // Is a hair-layer pixel outline (gets the darkened tint) or fill? Mirrors
+    // the splitter's classify() hair rules, so the split and the tint agree.
+    function _hairIsOutline(zones, r, g, b, x, y) {
+      const hz = zones.hair;
+      if (!zones.hairOutline || !hz) return false;
+      const capped = hz.shirtYMax != null ? { ...hz, yMax: hz.shirtYMax } : hz;
+      if (_zoneMatchPx(capped, r, g, b, x, y)) return false;
+      if (hz.shirtYMax != null && hz.flowXMax != null &&
+          _zoneMatchPx({ ...hz, yMin: hz.shirtYMax, xMax: hz.flowXMax }, r, g, b, x, y)) return false;
+      if (hz.shirtYMax != null &&
+          _zoneMatchPx({ ...hz, yMin: hz.shirtYMax }, r, g, b, x, y) &&
+          !_zoneMatchPx(zones.shirt, r, g, b, x, y)) return false;
+      return _zoneMatchPx(zones.hairOutline, r, g, b, x, y);
+    }
+
+    // Luminance-preserving tint of one pixel (same math as _swapColorsData).
+    function _tintPx(data, i, sr, sg, sb, tr, tg, tb) {
+      const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
+      const lum = (0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2]) / srcLum;
+      data[i]   = Math.min(255, Math.round(tr * lum));
+      data[i+1] = Math.min(255, Math.round(tg * lum));
+      data[i+2] = Math.min(255, Math.round(tb * lum));
+    }
+
+    // Layer-driven replacement for _applySwaps: tint each selected zone's
+    // pixels using the layer masks as ground truth. `layers` dims must match
+    // `pixels` (use _cropLayerData). zones still supplies the tint SOURCE
+    // colours (for luminance ratios) and the hair outline darkRatio.
+    function _layeredSwaps(pixels, layers, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
+      const hairT  = (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   ? _hexCssToRGB(HAIR_COLORS[hairIdx].css)   : null;
+      const skinT  = (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    ? _hexCssToRGB(SKIN_TONES[skinIdx].css)    : null;
+      const shirtT = (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) ? _hexCssToRGB(CLOTH_COLORS[shirtIdx].css) : null;
+      const pantsT = (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) ? _hexCssToRGB(CLOTH_COLORS[pantsIdx].css) : null;
+      if (!hairT && !skinT && !shirtT && !pantsT) return;
+      const fwX = frameW || fw;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i+3] < 128) continue;
+        if (skinT && layers.skin[i+3] >= 128) {
+          _tintPx(pixels, i, zones.skin.r, zones.skin.g, zones.skin.b, skinT[0], skinT[1], skinT[2]);
+        } else if (hairT && layers.hair[i+3] >= 128) {
+          const x = ((i >> 2) % fw) % fwX, y = Math.floor(i / (fw * 4));
+          if (_hairIsOutline(zones, pixels[i], pixels[i+1], pixels[i+2], x, y)) {
+            const oz = zones.hairOutline, ratio = oz.darkRatio ?? 0.5;
+            _tintPx(pixels, i, oz.r, oz.g, oz.b,
+              Math.round(hairT[0]*ratio), Math.round(hairT[1]*ratio), Math.round(hairT[2]*ratio));
+          } else {
+            _tintPx(pixels, i, zones.hair.r, zones.hair.g, zones.hair.b, hairT[0], hairT[1], hairT[2]);
+          }
+        } else if (shirtT && layers.shirt[i+3] >= 128) {
+          _tintPx(pixels, i, zones.shirt.r, zones.shirt.g, zones.shirt.b, shirtT[0], shirtT[1], shirtT[2]);
+        } else if (pantsT && layers.pants[i+3] >= 128) {
+          _tintPx(pixels, i, zones.pants.r, zones.pants.g, zones.pants.b, pantsT[0], pantsT[1], pantsT[2]);
+        }
+      }
+    }
+
+    // Any Phaser texture built via the legacy fallback (layers not loaded yet)
+    // is recorded here with its build recipe, then repainted IN PLACE (canvas
+    // redraw + texture.refresh — sprites keep their binding) once every layer
+    // image has settled. Without this, a texture cached during the brief
+    // image-load race would keep the legacy bleed until a full reload.
+    const _legacyTexBuilds = new Map();  // texKey → {char, suffix, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW}
+    let _layersSettled = false;
+
+    function _upgradeLegacyTextures() {
+      const scene = window._gameScene;
+      for (const [texKey, b] of Array.from(_legacyTexBuilds)) {
+        const L = _getLayerData(b.char, b.suffix);
+        if (!L) { _legacyTexBuilds.delete(texKey); continue; }  // layer 404 — legacy stays, nothing better available
+        if (!scene || !scene.textures.exists(texKey)) { _legacyTexBuilds.delete(texKey); continue; }
+        const cv = scene.textures.get(texKey).getSourceImage();
+        if (!(cv instanceof HTMLCanvasElement) || cv.width !== L.w || cv.height !== L.h) { _legacyTexBuilds.delete(texKey); continue; }
+        const baseKey = b.suffix === 'run' ? `run_${b.char}` : `${b.char}_${b.suffix}`;
+        if (!scene.textures.exists(baseKey)) { _legacyTexBuilds.delete(texKey); continue; }
+        const cx = cv.getContext('2d');
+        cx.clearRect(0, 0, cv.width, cv.height);
+        cx.drawImage(scene.textures.get(baseKey).source[0].image, 0, 0);
+        const id = cx.getImageData(0, 0, cv.width, cv.height);
+        _layeredSwaps(id.data, L, b.zones, b.hairIdx, b.skinIdx, b.shirtIdx, b.pantsIdx, cv.width, b.frameW);
+        cx.putImageData(id, 0, 0);
+        scene.textures.get(texKey).refresh();
+        _legacyTexBuilds.delete(texKey);
+      }
+    }
+
+    // Kick off layer image loads for every character/sheet up front. When the
+    // LAST image settles (load or error), upgrade any legacy-built textures and
+    // re-run the visible previews so nothing stays on the fallback path.
+    (function _loadLayerImages() {
+      let pending = 0;
+      const settle = () => {
+        if (--pending > 0) return;
+        _layersSettled = true;
+        try { _upgradeLegacyTextures(); } catch (e) { console.warn('layer upgrade failed', e); }
+        try { _redrawPreview(); } catch (e) {}
+        try { if (typeof _redrawWardrobePreview === 'function') _redrawWardrobePreview(); } catch (e) {}
+      };
+      CHARACTERS.forEach(char => {
+        const C = char[0].toUpperCase() + char.slice(1);
+        LAYER_SUFFIXES.forEach(suffix => {
+          const set = {};
+          LAYER_NAMES.forEach(l => {
+            const im = new Image();
+            im.crossOrigin = 'anonymous';
+            pending++;
+            im.onload = im.onerror = settle;
+            im.src = `/assets/layers/${C}_${suffix}_${l}.png`;
+            set[l] = im;
+          });
+          _layerImages[`${char}_${suffix}`] = set;
+        });
+      });
+    })();
+
     // Update the small color-summary strip below the preview canvas.
     function _updateColorSummary() {
       const el = document.getElementById('color-summary');
@@ -3920,7 +4101,9 @@
       const tc = tmp.getContext('2d');
       tc.drawImage(img, 288, 0, 16, 32, 0, 0, 16, 32);
       const id = tc.getImageData(0, 0, 16, 32);
-      _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16);
+      const L = _cropLayerData(_playerChar, 'run', 288, 0, 16, 32);
+      if (L) _layeredSwaps(id.data, L, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16, 16);
+      else   _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16);
       tc.putImageData(id, 0, 0);
       ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
       _updateColorSummary();
@@ -5308,7 +5491,9 @@
       const tc = tmp.getContext('2d');
       tc.drawImage(img, 288, 0, 16, 32, 0, 0, 16, 32);
       const id = tc.getImageData(0, 0, 16, 32);
-      _applySwaps(id.data, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16);
+      const L = _cropLayerData(_wardrobeCharSel, 'run', 288, 0, 16, 32);
+      if (L) _layeredSwaps(id.data, L, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16, 16);
+      else   _applySwaps(id.data, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16);
       tc.putImageData(id, 0, 0);
       ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, cv.width, cv.height);
     }
@@ -12233,7 +12418,12 @@
         const zones = _charZoneColors[char];
         if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
           const id = cx.getImageData(0, 0, sw, sh);
-          _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
+          const L = _cropLayerData(char, 'run', 0, 0, sw, sh);
+          if (L && L.w === sw && L.h === sh) _layeredSwaps(id.data, L, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
+          else {
+            _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
+            if (!_layersSettled) _legacyTexBuilds.set(key, { char, suffix: 'run', zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW: 16 });
+          }
           cx.putImageData(id, 0, 0);
         }
 
@@ -12257,7 +12447,12 @@
             const sitZones = char === 'adam' ? zones : _sitZones(char, dir);
             const frameW = dir === 'down' ? 16 : 32;
             const sid = scx.getImageData(0, 0, sc.width, sc.height);
-            _applySwaps(sid.data, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+            const SL = _cropLayerData(char, suffix, 0, 0, sc.width, sc.height);
+            if (SL && SL.w === sc.width && SL.h === sc.height) _layeredSwaps(sid.data, SL, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+            else {
+              _applySwaps(sid.data, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+              if (!_layersSettled) _legacyTexBuilds.set(sitKey, { char, suffix, zones: sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW });
+            }
             scx.putImageData(sid, 0, 0);
           }
           this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });

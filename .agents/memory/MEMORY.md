@@ -2,6 +2,7 @@
 - [JPO Huddle per-tile seat overrides](jpo-huddle-seat-tile-facing.md) — SEAT_TILE_FACING map ("col,row"→facing) for seats whose GIDs can't go in FURN_SEATS globally (same GID = desk top elsewhere).
 - [JPO Huddle Phaser sprite & collision](jpo-huddle-phaser.md) — 4-dir run + 3-sheet directional sit, insertion-order depth, per-tile conference facing; old-map GIDs historical.
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD via one clustering pass that also drives E-press, "!" badge, and the panel.
+- [JPO Huddle layered characters](jpo-huddle-layered-chars.md) — recolor via per-part layer PNGs (legacy _applySwaps = fallback only); fallback-built textures must be repainted on layer-load settle; Amelia-only diffs are accepted fixes.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded per-character zone colors (auto-detect fails); clothes match the post-hair/skin snapshot.
 - [JPO Huddle wearable geometry](jpo-huddle-wearable-geometry.md) — eyes ≈ +8 (NOT -12), hats perch ≈ -21; seeded sit tests need the dir an E-press would set.
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp.
