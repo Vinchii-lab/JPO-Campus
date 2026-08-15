@@ -587,3 +587,10 @@ uri = "file://attached_assets/generated_images/accounting_hd_v3.png"
 type = "image"
 title = "🏢 Accounting v3 — old sprites OFF, floor under everything"
 description = "Rebuilt the layering: the soft floor now sits beneath the furniture layer and covers the entire suite with no beige patches, every replaced original sprite is switched invisible (nothing old peeks out anymore), and the red floor lamps are HD too."
+
+[[outputs]]
+id = "c_7wBwo862ThVQCdTJ9iv"
+uri = "file://attached_assets/generated_images/adam_3way.png"
+type = "image"
+title = "🧍 Adam character test — 3 options side by side"
+description = "Left: Adam today (current game art). Middle: the safe smooth-upscale — honestly just blurry, I'm ruling it out. Right: full AI redraw in the style-bible look — proper chibi proportions, olive hair over one eye, purple tee with ID badge. This is the real decision."
