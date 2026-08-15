@@ -538,3 +538,10 @@ uri = "file://attached_assets/generated_images/hd_mock_smooth.png"
 type = "image"
 title = "🎈 HD Option B — Smooth cartoon remake"
 description = "Clean vector cartoon style (Among Us / cozy-game look): thick outlines, soft shadows, no pixels at all. The friendliest, most modern look — and the biggest departure from today's game."
+
+[[outputs]]
+id = "QQsiOJ9J5Mj7bPrIII_zl"
+uri = "file://attached_assets/generated_images/hd_corner_pilot.png"
+type = "image"
+title = "☕ HD Corner Pilot — coffee corner, Option A style"
+description = "Every piece here is AI-generated: tiled wooden floor, lit wall, desk, coffee station, plant, and HD Adam — assembled at game-like proportions. A real feasibility check, not a concept painting."
