@@ -11764,6 +11764,7 @@
         this.load.image('hdA_couch',      '/assets/hd/acct/couch.png');
         this.load.image('hdA_sofaside',   '/assets/hd/acct/sofaside.png');
         this.load.image('hdA_lamp',       '/assets/hd/acct/lamp.png');
+        this.load.image('hdA_chair',      '/assets/hd/acct/chair.png');
         // A flaky connection can silently drop an asset download — Phaser has
         // no retry, so a missing tileset renders whole furniture/wall layers
         // blank while everything else looks normal. Track failures so create()
@@ -11892,15 +11893,21 @@
           // hidden across every COVER rect; Wall-layer tiles are ONLY hidden
           // for the workstation desk uppers (GIDs 2078/2079/2094/2095) —
           // structural walls inside cover rects must stay visible.
-          const DESK_UPPERS = [2078, 2079, 2094, 2095];
+          const DESK_UPPERS = [2078, 2079, 2094, 2095, 7999, 8015, 8031]; // desk tops + side PC tower
           for (const [a, b, d, e] of COVER)
             for (let r = b; r <= e; r++) for (let c = a; c <= d; c++) {
               const t = furnitureLayer.getTileAt(c, r);
               if (t) t.setVisible(false);
             }
-          for (const r of [119, 120, 125, 126]) for (let c = 160; c <= 169; c++) {
+          for (const r of [118, 119, 120, 124, 125, 126]) for (let c = 159; c <= 169; c++) {
             const w = wallLayer.getTileAt(c, r);
             if (w && DESK_UPPERS.includes(w.index)) w.setVisible(false);
+          }
+          // Pod seats: hide the old chair/PC sprite (Furniture GID 2231) on the
+          // six workstation seat cells only — meeting-table 2231 chairs stay.
+          for (const r of [119, 125]) for (const c of [160, 164, 168]) {
+            const t = furnitureLayer.getTileAt(c, r);
+            if (t && t.index === 2231) t.setVisible(false);
           }
           const put = (key, c0, r0, c1, r1, grow = 1.12, dy = 6) => {
             const cols = c1 - c0 + 1, rows = r1 - r0 + 1;
@@ -11917,7 +11924,12 @@
           put('hdA_chalkboard', 166, 115, 167, 116, 1.15);
           this.add.image(177.5 * 48, 122.5 * 48, 'hdA_meeting')
             .setOrigin(0.5, 0.5).setDisplaySize(3 * 48 * 1.05, 2.2 * 48);
-          // Six workstation desk pods (desk+monitor tiles live on the Wall layer)
+          // Six workstation desk pods (desk+monitor tiles live on the Wall layer).
+          // HD office chairs first, then desks, so the desk front tucks over
+          // the chair base — players sit on the chair cell facing the screen.
+          for (const r of [119, 125]) for (const c of [160, 164, 168])
+            this.add.image((c + 0.5) * 48, (r + 0.62) * 48, 'hdA_chair')
+              .setOrigin(0.5, 1).setDisplaySize(52, 66);
           for (const r of [119, 125]) for (const c of [160, 164, 168])
             put('hdA_desk', c, r, c + 1, r + 1, 1.08, 2);
           put('hdA_mailshelf', 178, 104, 185, 106, 1.0, 0);
@@ -12864,6 +12876,13 @@
             if (dc === col && dr === row) continue; // chair cell stays behind the body
             cells.push({ layer: this.furnitureLayer, c: dc, r: dr });
           }
+        } else if ((row === 119 || row === 125) && [160, 164, 168].includes(col)
+                   && this._isWorkstation(col, row) && this.textures.exists('hdA_desk')) {
+          // HD Accounting pods: the original monitor/desk tiles are hidden, so
+          // occlude the seated body with the HD desk art itself — same geometry
+          // as the base placement (put('hdA_desk', c, r, c+1, r+1, 1.08, 2)).
+          out.push(this.add.image((col + 1) * 48, (row + 2) * 48 + 2, 'hdA_desk')
+            .setOrigin(0.5, 1).setDisplaySize(2 * 48 * 1.08, 2 * 48 * 1.08).setDepth(900));
         } else if (this._isWorkstation(col, row)) {
           // Workstation: a monitor (Wall 2078) shares the chair cell and a desk-front
           // (Wall 2094) sits directly BELOW it — fixed geometry in JPO_HQ.tmj, so both
