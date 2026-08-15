@@ -524,3 +524,17 @@ uri = "file://attached_assets/generated_images/adam_upgrade_proof.png"
 type = "image"
 title = "🎨 Adam art upgrade — before (top) vs after (bottom)"
 description = "Same size, same poses. Three changes: sun-lit highlights on hair/face tops, colored outlines (dark green around hair, dark purple around the shirt) instead of flat black, and grounded contact shading at the feet. Applied per body layer, so recolors and all baked wearables stay 100% compatible."
+
+[[outputs]]
+id = "rGMBHlOz9e_5XohO3WIVJ"
+uri = "file://attached_assets/generated_images/hd_mock_hibit.png"
+type = "image"
+title = "🕹️ HD Option A — Hi-bit pixel remake"
+description = "Detailed HD pixel art (Eastward/CrossCode style): still pixel-based but far richer — real lighting, detailed furniture, more expressive characters. Keeps the retro charm, big glow-up."
+
+[[outputs]]
+id = "von-PkWdM8qjdNTyHbnaj"
+uri = "file://attached_assets/generated_images/hd_mock_smooth.png"
+type = "image"
+title = "🎈 HD Option B — Smooth cartoon remake"
+description = "Clean vector cartoon style (Among Us / cozy-game look): thick outlines, soft shadows, no pixels at all. The friendliest, most modern look — and the biggest departure from today's game."
