@@ -552,3 +552,10 @@ uri = "file://attached_assets/generated_images/style_bible_corner.png"
 type = "image"
 title = "☕ Style-bible corner — locked to YOUR reference"
 description = "All-new assets generated to match the reference image's palette and view: charcoal coffee counter with COFFEE sign, vending machine, palm, warm plank floor, spot-lit wall, and HD Adam. This is the quality bar every room of the remake will follow."
+
+[[outputs]]
+id = "Ea3P_72sdw6t3QhWymd-x"
+uri = "file://attached_assets/generated_images/style_bible_corner_v2.png"
+type = "image"
+title = "☕ Corner v2 — soft grade, wide zoom, contact shadows"
+description = "Same assets, re-graded to the reference's soft muted palette, composed zoomed-out with fine floor planks, and given soft shadow pools so everything sits in the room instead of floating on it."
