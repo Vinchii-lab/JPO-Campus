@@ -11,4 +11,8 @@ description: Client-only calendar-gated weather overlays; wall-clock-hashed stor
 
 **Owner's season calendar (authoritative, Aug 2026):** rainy Aug 1–Oct 10 · Halloween Oct 10–Nov 4 · Christmas Nov 5–Dec 26 · New Years Dec 27–Jan 15 · Valentine's Jan 16–Feb 16. Only rainy is built; date gate + calendar comment live at the weather init in create().
 
+**Approved concept lineup (Aug 2026, owner 👍):** rainy = frog (Tadpole→Frog→King Frog) + raincoat/umbrella/boots · Halloween = BAT (not cat — owner swapped) · Christmas = reindeer→golden · New Years = spark→celestial dragon · Valentine's = chick→cupid bird. Sheets in attached_assets/generated_images/season_*_concepts.png.
+
+**Wearable slots requirement (owner rule):** head / neck / top / bottom wearables must ALL be equippable at the same time. Today there is only ONE equipped_cosmetic slot (+ separate equipped_wings, equipped_pet, petAcc) — the seasonal-items build must split equipped_cosmetic into per-slot columns (with migration keeping current equips).
+
 **Backlog owner asked for (not built):** themed visuals for the other four seasons, plus seasonal RARE store pets with baby→final-form evolution stages + own animations (frog for rainy season was his example).

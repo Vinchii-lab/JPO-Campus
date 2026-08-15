@@ -468,3 +468,10 @@ uri = "file://attached_assets/generated_images/season_valentines_concepts.png"
 type = "image"
 title = "💘 Valentine's (Jan 16–Feb 16)"
 description = "Lovebird pet: Chick → Lovebird → Cupid Bird · Items: heart glasses, rose, cupid wings"
+
+[[outputs]]
+id = "Ij4TgavGzvkFmQExdVgij"
+uri = "file://attached_assets/generated_images/season_halloween_bat_concepts.png"
+type = "image"
+title = "🦇 Halloween (Oct 10–Nov 4) — bat version"
+description = "Bat pet: Baby Bat → Bat → Vampire Bat · Items: witch hat, pumpkin head, vampire cape"
