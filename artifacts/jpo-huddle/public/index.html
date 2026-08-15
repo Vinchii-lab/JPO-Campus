@@ -11763,6 +11763,7 @@
         this.load.image('hdA_tv',         '/assets/hd/acct/tv.png');
         this.load.image('hdA_couch',      '/assets/hd/acct/couch.png');
         this.load.image('hdA_sofaside',   '/assets/hd/acct/sofaside.png');
+        this.load.image('hdA_lamp',       '/assets/hd/acct/lamp.png');
         // A flaky connection can silently drop an asset download — Phaser has
         // no retry, so a missing tileset renders whole furniture/wall layers
         // blank while everything else looks normal. Track failures so create()
@@ -11851,9 +11852,11 @@
         // insertion-order depth keeps it above tiles and below characters.
         {
           const AZ = { c0: 144, c1: 190, r0: 96, r1: 127 };
-          // Footprints of furniture replaced by HD art (floor shows beneath).
-          // Seats (stools 2878.., chairs 2231, sofa/desk-chair columns) are
-          // NOT covered — players still sit on the original tiles.
+          // Footprints of furniture replaced by HD art. The ORIGINAL tiles in
+          // these rects are switched invisible (not merely covered) so nothing
+          // old ever peeks out from under the HD sprites.
+          // Seats (stools, chairs 2231, sofa/desk-chair columns) NOT listed
+          // keep their tiles — players still sit on them.
           const COVER = [
             [150,105,153,107], [150,109,153,111],          // cabinet pairs, west wall
             [167,105,171,108], [150,116,154,119],          // binder bookshelves
@@ -11865,8 +11868,12 @@
             [188,112,190,113],                             // gray couch
             [184,117,190,118],                             // manager-office counters
             [185,122,186,124],                             // tan side sofa (seat art replaced 1:1)
+            [150,121,150,123], [171,125,171,127],          // red floor lamps
           ];
-          const inCover = (c, r) => COVER.some(([a,b,d,e]) => c >= a && r >= b && c <= d && r <= e);
+          // New floor: masked to the suite's interior floor GIDs (35-52 — the
+          // corridor and neighbouring rooms use other GIDs), then slotted
+          // BELOW the Furniture layer so remaining original furniture, seats
+          // and characters draw naturally on top of it.
           const hdFloor = this.add.tileSprite(
             AZ.c0 * 48, AZ.r0 * 48,
             (AZ.c1 - AZ.c0 + 1) * 48, (AZ.r1 - AZ.r0 + 1) * 48,
@@ -11876,14 +11883,25 @@
           mg.fillStyle(0xffffff);
           for (let r = AZ.r0; r <= AZ.r1; r++) for (let c = AZ.c0; c <= AZ.c1; c++) {
             const ft = floorLayer.getTileAt(c, r);
-            // Interior floor of the Accounting suite uses GIDs 35-52 exclusively;
-            // corridor (103-120) and neighbouring rooms (403+) must NOT be painted.
             if (!ft || ft.index < 35 || ft.index > 52) continue;
-            if (wallLayer.getTileAt(c, r) && !inCover(c, r)) continue; // walls + unreplaced desk uppers stay
-            if (furnitureLayer.getTileAt(c, r) && !inCover(c, r)) continue; // unreplaced furniture stays
             mg.fillRect(c * 48, r * 48, 48, 48);
           }
           hdFloor.setMask(mg.createGeometryMask());
+          this.children.moveBelow(hdFloor, furnitureLayer);
+          // Switch off the original tiles we replace. Furniture-layer tiles are
+          // hidden across every COVER rect; Wall-layer tiles are ONLY hidden
+          // for the workstation desk uppers (GIDs 2078/2079/2094/2095) —
+          // structural walls inside cover rects must stay visible.
+          const DESK_UPPERS = [2078, 2079, 2094, 2095];
+          for (const [a, b, d, e] of COVER)
+            for (let r = b; r <= e; r++) for (let c = a; c <= d; c++) {
+              const t = furnitureLayer.getTileAt(c, r);
+              if (t) t.setVisible(false);
+            }
+          for (const r of [119, 120, 125, 126]) for (let c = 160; c <= 169; c++) {
+            const w = wallLayer.getTileAt(c, r);
+            if (w && DESK_UPPERS.includes(w.index)) w.setVisible(false);
+          }
           const put = (key, c0, r0, c1, r1, grow = 1.12, dy = 6) => {
             const cols = c1 - c0 + 1, rows = r1 - r0 + 1;
             return this.add.image((c0 + cols / 2) * 48, (r1 + 1) * 48 + dy, key)
@@ -11910,6 +11928,8 @@
           put('hdA_sideboard', 184, 117, 186, 118, 1.0, 0);
           put('hdA_sideboard', 187, 117, 190, 118, 1.0, 0);
           put('hdA_sofaside',  185, 122, 186, 124, 1.02, 2);
+          put('hdA_lamp',      150, 121, 150, 123, 1.0, 2);
+          put('hdA_lamp',      171, 125, 171, 127, 1.0, 2);
         }
         // === end HD Accounting ==============================================
         // The dark wall band at the bottom of the L&D classroom (row 97,
