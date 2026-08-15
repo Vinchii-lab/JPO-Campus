@@ -11745,6 +11745,57 @@
           cam.setZoom(Phaser.Math.Clamp(cam.zoom+(dy<0?0.1:-0.1),0.5,4));
         });
 
+        // ── Seasonal weather (client-only, calendar-gated) ──
+        // Aug–Oct = rainy season: subtle drizzle all day plus a synced "full
+        // storm" burst every so often. The storm schedule derives from wall-
+        // clock time (10-minute slots, hashed), so every player sees the same
+        // weather at the same moment with zero server involvement. Overlays
+        // are screen-space (scrollFactor 0) sized 2x the viewport so they
+        // still cover the screen at the minimum zoom (0.5).
+        this._wx = null;
+        const wxMonth = new Date().getMonth();   // 0-based: 7=Aug … 9=Oct
+        if (wxMonth >= 7 && wxMonth <= 9) {
+          if (!this.textures.exists('rainTex')) {
+            const c = this.textures.createCanvas('rainTex', 128, 128);
+            const ctx = c.context; let s = 42;
+            const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+            ctx.strokeStyle = 'rgba(190,210,235,0.85)'; ctx.lineWidth = 1;
+            for (let i = 0; i < 26; i++) {   // streaks kept off tile edges so the wrap seam stays clean
+              const x = 10 + rnd() * 104, y = 6 + rnd() * 104, len = 7 + rnd() * 11;
+              ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 3, y + len); ctx.stroke();
+            }
+            c.refresh();
+          }
+          const W = this.scale.width, H = this.scale.height;
+          const wxTint  = this.add.rectangle(W/2, H/2, W*2, H*2, 0x33415c).setScrollFactor(0).setDepth(99988).setAlpha(0);
+          const wxFar   = this.add.tileSprite(W/2, H/2, W*2, H*2, 'rainTex').setScrollFactor(0).setDepth(99989).setAlpha(0);
+          const wxNear  = this.add.tileSprite(W/2, H/2, W*2, H*2, 'rainTex').setScrollFactor(0).setDepth(99990).setAlpha(0).setTileScale(1.6);
+          const wxFlash = this.add.rectangle(W/2, H/2, W*2, H*2, 0xf3f6ff).setScrollFactor(0).setDepth(99991).setAlpha(0);
+          this._wx = { far: wxFar, near: wxNear, tint: wxTint, flash: wxFlash, boltAt: 0 };
+          this._weatherTick = (delta) => {
+            const wx = this._wx; if (!wx) return;
+            const dt = delta / 1000;
+            wx.far.tilePositionY  += 340 * dt; wx.far.tilePositionX  -= 40 * dt;
+            wx.near.tilePositionY += 520 * dt; wx.near.tilePositionX -= 70 * dt;
+            // Synced schedule: ~1 in 4 ten-minute slots opens with a 2.5-min storm.
+            const now = Date.now(), slot = Math.floor(now / 600000);
+            const storm = (((slot * 2654435761) >>> 0) % 4 === 0) && (now - slot * 600000 < 150000);
+            const t = storm ? { far: 0.34, near: 0.46, tint: 0.16 }    // full storm
+                            : { far: 0.10, near: 0.16, tint: 0.03 };   // light drizzle
+            const k = Math.min(1, dt * 1.2);   // ease between the two over ~a second
+            wx.far.alpha  += (t.far  - wx.far.alpha)  * k;
+            wx.near.alpha += (t.near - wx.near.alpha) * k;
+            wx.tint.alpha += (t.tint - wx.tint.alpha) * k;
+            // Lightning: storm-only, a couple of flashes a minute, sometimes a double-strike.
+            if (storm && now > wx.boltAt && Math.random() < dt * 0.06) {
+              wx.boltAt = now + 6000;
+              wx.flash.alpha = 0.55;
+              this.tweens.add({ targets: wx.flash, alpha: 0, duration: 420, ease: 'Cubic.easeOut' });
+              if (Math.random() < 0.5) this.time.delayedCall(140, () => { if (this._wx) wx.flash.alpha = Math.max(wx.flash.alpha, 0.35); });
+            }
+          };
+        }
+
         // ── Prop Hunt scene handlers ──
         // Prop cleanup hook for _phReset (which also runs on socket disconnect
         // — a server restart mid-round must not leave a ghost prop, a frozen
@@ -15621,6 +15672,7 @@
 
       update(time, delta) {
         if (!this.player) return;
+        if (this._wx) this._weatherTick(delta);   // seasonal rain overlay (Aug–Oct)
 
         // Office After Dark darkness overlay follows the player every frame
         // (transform-only; no-op unless a round is active for us).

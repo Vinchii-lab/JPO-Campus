@@ -18,4 +18,5 @@
 - [JPO Huddle Red Light Green Light](jpo-huddle-rlgl.md) — red-light detection rides validated playerMove; replay-until-survivor limbo flag; finishers survive refresh (email-keyed payout).
 - [JPO Huddle pet sprite pipeline](jpo-huddle-pet-sprites.md) — one-sheet gen → bbox slicing → flood-erase opaque white checkerboard; art faces RIGHT; present options before building.
 - [JPO Huddle pet race](jpo-huddle-pet-race.md) — position must come from the server position event, never the sprite loop (action-lock/missing asset froze the whole field); settle duel forfeits before deleting the leaver.
+- [JPO Huddle seasonal weather](jpo-huddle-seasonal.md) — client-only Aug–Oct rain; wall-clock-hashed storm slots sync all clients with zero server code; Halloween + evolving seasonal pets on owner's backlog.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.
