@@ -503,3 +503,10 @@ uri = "file://attached_assets/generated_images/rainy_outfit_v3.png"
 type = "image"
 title = "🌧️ Rainy gear v3 — drawn in the character style"
 description = "Front / side / back views. Navy outlines matching the character sprites, zipper + pocket flaps on the coat, hood visible from behind, and the umbrella tilts forward while walking sideways."
+
+[[outputs]]
+id = "YxMPa405yh5VVQDXuVC5L"
+uri = "file://attached_assets/generated_images/layer_split_proof.png"
+type = "image"
+title = "🧩 Proof: characters rebuilt in layers"
+description = "Adam (top) and Amelia (bottom, the tricky one). Each row: original → re-stacked from layers (identical) → the separated Body / Skin / Hair / Shirt / Trousers layers → a recolor done layer-by-layer. The walk strips show the layered recolor staying aligned across every animation frame."
