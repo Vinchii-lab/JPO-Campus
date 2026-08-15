@@ -2555,6 +2555,17 @@
           </div>
           <div id="op-rare-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
         </div>
+        <div id="op-owner-whisper" style="display:none;margin-top:22px;border-top:1px solid #2a2a40;padding-top:16px;">
+          <h3>🕵️ Whisper Log <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
+          <p style="font-size:12px;color:#888;margin:0 0 10px">Every whisper sent in the office — text and pictures, newest first. Nobody else can see this and nobody gets notified. Filter by an email to see one person's conversations.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <input id="op-whisper-filter" type="email" placeholder="filter: person@company.com (optional)" maxlength="80"
+                   style="flex:1;min-width:180px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;" />
+            <button class="o-btn o-btn-approve" onclick="ownerWhisperRefresh()">Load / Refresh</button>
+          </div>
+          <div id="op-whisper-list" style="max-height:340px;overflow:auto;font-size:12px;"></div>
+          <div id="op-whisper-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
+        </div>
         <div style="margin-top:22px;border-top:1px solid #2a2a40;padding-top:16px;">
           <h3>🙈 Hide &amp; Seek (Prop Hunt)</h3>
           <p style="font-size:12px;color:#888;margin:0 0 10px">Stand where everyone should gather (that's YOUR current spot), pick a disguise, then start. Joiners teleport to your spot and freeze while you hide; when the timer ends they hunt you at normal zoom. First one to press E on the right object wins.</p>
@@ -10644,6 +10655,7 @@
       document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-deal').style.display = (d && d.owner) ? '' : 'none';
+      document.getElementById('op-owner-whisper').style.display = (d && d.owner) ? '' : 'none';
       window._ownerAuthed = !!(d && d.owner);
       // Plain admin key: no price tools at all, and game pots are locked to
       // a fixed 500 coins (the server enforces both regardless of the UI).
@@ -10665,6 +10677,42 @@
       if (_adminPwdPending) { _adminPwd = _adminPwdPending; _adminPwdPending = ''; }
       _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose();
       if (manualUnlock) { closeOwnerPwd(); openOwnerPanel(); }
+    });
+    // ── Owner-only: whisper log viewer ───────────────────────────────────
+    window.ownerWhisperRefresh = function () {
+      const msg = document.getElementById('op-whisper-msg');
+      msg.textContent = 'Loading…';
+      socket.emit('ownerWhisperLog', { email: document.getElementById('op-whisper-filter').value.trim() });
+    };
+    socket.on('ownerWhisperLog', ({ ok, rows, message } = {}) => {
+      const list = document.getElementById('op-whisper-list');
+      const msg = document.getElementById('op-whisper-msg');
+      if (!ok) { msg.textContent = message || 'Failed to load.'; return; }
+      msg.textContent = rows.length ? `${rows.length} whisper${rows.length === 1 ? '' : 's'} (newest first, last 200).` : 'No whispers recorded yet.';
+      list.innerHTML = '';
+      for (const r of rows) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:7px 8px;border-bottom:1px solid #23233a;line-height:1.5;';
+        const when = new Date(r.sent_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const head = document.createElement('div');
+        head.style.cssText = 'color:#9aa;';
+        head.textContent = `${when} — ${r.from_name} (${r.from_email}) → ${r.to_name} (${r.to_email})`;
+        row.appendChild(head);
+        if (r.message) {
+          const body = document.createElement('div');
+          body.style.cssText = 'color:#e9d5ff;';
+          body.textContent = `“${r.message}”`;
+          row.appendChild(body);
+        }
+        if (r.img) {
+          const im = document.createElement('img');
+          im.src = r.img; im.alt = 'whispered image';
+          im.style.cssText = 'max-width:180px;max-height:120px;border-radius:6px;margin-top:4px;display:block;cursor:pointer;';
+          im.onclick = () => window.open(r.img, '_blank');
+          row.appendChild(im);
+        }
+        list.appendChild(row);
+      }
     });
     // ── Owner-only: HARD red price-change alerts ─────────────────────────
     // Every price change made with the plain admin password lands here, live

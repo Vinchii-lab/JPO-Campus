@@ -5934,6 +5934,28 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Owner-only: whisper log ───────────────────────────────────────────
+  // Full whisper history (text + images), newest first. OWNER key only —
+  // plain admins never see this, and there is deliberately no broadcast.
+  socket.on("ownerWhisperLog", async (payload) => {
+    if (!owners.has(socket.id)) return;
+    const filter = String(payload?.email || "").trim().toLowerCase().slice(0, 80);
+    try {
+      const { rows } = await pool.query(
+        filter
+          ? `SELECT id, sent_at, from_email, from_name, to_email, to_name, message, img
+               FROM jpo_whispers WHERE from_email = $1 OR to_email = $1 ORDER BY id DESC LIMIT 200`
+          : `SELECT id, sent_at, from_email, from_name, to_email, to_name, message, img
+               FROM jpo_whispers ORDER BY id DESC LIMIT 200`,
+        filter ? [filter] : [],
+      );
+      socket.emit("ownerWhisperLog", { ok: true, rows });
+    } catch (err) {
+      console.error("ownerWhisperLog failed:", err);
+      socket.emit("ownerWhisperLog", { ok: false, message: "Couldn't load the whisper log — try again." });
+    }
+  });
+
   // ── Owner-only: gift a rare pet (unicorn / phoenix) ───────────────────
   // Same OWNER_PASSWORD tier as coin adjustments — plain admins can't.
   // Email-based like adminAdjustCoins so the person doesn't have to be
@@ -6417,6 +6439,22 @@ io.on("connection", (socket) => {
   // roster (autocomplete), so name collisions are settled in the UI; the server
   // just validates the id is a live player. Shares chatBucket with public chat
   // so the combined message rate is what's limited. In-session only (no DB).
+  // Owner-requested surveillance log: every delivered whisper (text or image)
+  // is recorded for the owner-key F8 panel. Fire-and-forget — a DB blip must
+  // never block or break the whisper itself. Occasional prune keeps the
+  // table from growing without bound (images are base64 and chunky).
+  let _whisperLogN = 0;
+  function logWhisper(sender, target, text, img) {
+    pool.query(
+      `INSERT INTO jpo_whispers (from_email, from_name, to_email, to_name, message, img)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [sender.email || "", sender.name || "?", target.email || "", target.name || "?", text || null, img || null],
+    ).catch((err) => console.error("whisper log failed:", err.message));
+    if (++_whisperLogN % 200 === 0) {
+      pool.query(`DELETE FROM jpo_whispers WHERE id < (SELECT COALESCE(MAX(id),0) - 5000 FROM jpo_whispers)`)
+        .catch((err) => console.error("whisper log prune failed:", err.message));
+    }
+  }
   socket.on("whisper", (payload) => {
     const { targetId, message } = payload || {};
     const sender = players[socket.id];
@@ -6441,7 +6479,8 @@ io.on("connection", (socket) => {
     }
     io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, message: text });
     socket.emit("whisperSent", { toId: targetId, toName: target.name, message: text });
-    // Mission fact only — the COUNT of an exchange, never the content.
+    logWhisper(sender, target, text, null);
+    // Mission fact — the COUNT of an exchange (separate from the owner log).
     coachWhisperExchanged(socket.id, targetId);
   });
 
@@ -6463,6 +6502,7 @@ io.on("connection", (socket) => {
     }
     io.to(targetId).emit("whisper", { fromId: socket.id, fromName: sender.name, img });
     socket.emit("whisperSent", { toId: targetId, toName: target.name, img });
+    logWhisper(sender, target, null, img);
     coachWhisperExchanged(socket.id, targetId);
     console.log(`${sender.name} whispered an image to ${target.name} (${Math.round(img.length / 1024)} KB b64)`);
   });
@@ -8963,6 +9003,19 @@ try {
   // Idempotency ledger for race bet payouts: one row per (race settlement, bettor).
   // The credit only happens when the INSERT wins, so retrying a payout
   // transaction after an ambiguous COMMIT can never double-credit.
+  // Whisper log — OWNER's eyes only, read via the owner-gated F8 panel.
+  // Records every whisper (text + images) by the owner's explicit decision;
+  // players are NOT notified. Pruned to the newest ~5,000 rows on write.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_whispers (
+    id         BIGSERIAL PRIMARY KEY,
+    sent_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    from_email TEXT NOT NULL,
+    from_name  TEXT NOT NULL,
+    to_email   TEXT NOT NULL,
+    to_name    TEXT NOT NULL,
+    message    TEXT,
+    img        TEXT
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS jpo_race_settlements (
     settle_id  TEXT NOT NULL,
     email      TEXT NOT NULL,
