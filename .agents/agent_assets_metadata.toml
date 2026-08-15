@@ -475,3 +475,17 @@ uri = "file://attached_assets/generated_images/season_halloween_bat_concepts.png
 type = "image"
 title = "🦇 Halloween (Oct 10–Nov 4) — bat version"
 description = "Bat pet: Baby Bat → Bat → Vampire Bat · Items: witch hat, pumpkin head, vampire cape"
+
+[[outputs]]
+id = "6Yov2qwq7tI7xd2Kp-aYr"
+uri = "file://attached_assets/generated_images/frog_sliced_review.png"
+type = "image"
+title = "🐸 Frog pet — all 3 stages, sliced"
+description = "Tadpole → Frog → King Frog. Each row: stand, 3 walk frames, sit, action. King Frog was flipped to face the right way."
+
+[[outputs]]
+id = "Os5MOQ8etyvRmiq_JqT9x"
+uri = "file://attached_assets/generated_images/rainy_outfit_ingame.png"
+type = "image"
+title = "🌧️ Rainy outfit in-game"
+description = "Raincoat + rain boots + umbrella worn together (with a cap!) plus the frog tagging along."

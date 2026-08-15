@@ -3415,6 +3415,25 @@
     let _ownedItems     = [];
     let _equippedCosmetic = '';   // which owned cosmetic is worn ('' = none); server-authoritative
     let _equippedWings    = '';   // wings are their OWN slot — worn alongside a wearable
+    // Outfit slots (Aug 2026): the boss's rule — head/neck/top/bottom must all
+    // be wearable AT ONCE. Legacy single slot keeps hats/eyewear/extras; NEW
+    // body wearables live here. Keep WEAR_SLOT in lockstep with server.js.
+    let _equippedSlots = { top: '', bottom: '', neckwear: '', held: '' };
+    const WEAR_SLOT = { raincoat: 'top', rainboots: 'bottom', umbrella: 'held' };
+    const SLOT_KEYS = ['top', 'bottom', 'neckwear', 'held'];
+    // Seasonal calendar — mirror of server seasonNow() (server is the real
+    // gate; this only hides off-season shop rows).
+    function seasonNow(d = new Date()) {
+      const m = d.getMonth(), day = d.getDate();
+      if (m === 7 || m === 8 || (m === 9 && day <= 10)) return 'rainy';
+      if ((m === 9 && day >= 11) || (m === 10 && day <= 4)) return 'halloween';
+      if ((m === 10 && day >= 5) || (m === 11 && day <= 26)) return 'christmas';
+      if ((m === 11 && day >= 27) || (m === 0 && day <= 15)) return 'newyears';
+      if ((m === 0 && day >= 16) || (m === 1 && day <= 16)) return 'valentines';
+      return null;
+    }
+    // Owned seasonal gear stays wearable forever — only the BUY rows hide.
+    const _seasonRowOk = (c) => !c.season || c.season === seasonNow() || _ownedItems.includes(c.id);
 
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the
@@ -3445,6 +3464,12 @@
       { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 4000, cat: '💎 Extras', desc: 'strapped around your neck' },
       { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 6000, cat: '💎 Extras', desc: 'bright gold V with a medallion' },
       { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 7500, cat: '💎 Extras', desc: 'sunburst, slung across your body' },
+      // Rainy-season limited drop (Aug 1 – Oct 10): hidden off-season via
+      // _seasonRowOk; the server buy handlers reject off-season anyway. These
+      // use the NEW outfit slots (WEAR_SLOT) so they stack with a hat + wings.
+      { id: 'rainboots',    emoji: '🥾', name: 'Rain Boots',    cost: 3500, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'yellow wellies, puddle-proof' },
+      { id: 'umbrella',     emoji: '☂️', name: 'Umbrella',      cost: 4000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'stay dry in style' },
+      { id: 'raincoat',     emoji: '🧥', name: 'Raincoat',      cost: 6000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'classic yellow slicker' },
       // Wings: 8k–30k ladder, cheapest first (fairy tops the list). Costs
       // display-only — server SHOP is authoritative, keep in lockstep.
       { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 8000, wings: true, desc: 'shimmering wings on your back' },
@@ -3515,6 +3540,12 @@
       rangerhat:    { tex: 'wear_rangerhat',    dy: -22, side: 3, sideDy: -18 },
       catears:      { tex: 'wear_catears',      dy: -9,  side: 0 },
       scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
+      // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
+      // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
+      raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2 },
+      rainboots: { tex: 'wear_rainboots', dy: 25,  side: 2 },
+      // Umbrella: held above the head, still visible from the back.
+      umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, showUp: true },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -3559,6 +3590,8 @@
       { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
       { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
       { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
+      // Rainy-season limited pet (Aug 1 – Oct 10): Tadpole → Frog → King Frog.
+      { id: 'pet_frog',            species: 'Frog',        emoji: '🐸', name: 'Tadpole',        cost: 12000, season: 'rainy', desc: 'rainy-season only — grows into a king' },
       // Rare tier: shop-visible so everyone can drool, but NOT buyable at any
       // price — the only way in is a personal gift from the boss. (cost 0 is
       // display-only anyway; the server hard-blocks buyPet on rare ids.)
@@ -4153,6 +4186,7 @@
       _ownedItems     = data.cosmetics || [];
       _equippedCosmetic = data.equipped || '';
       _equippedWings  = data.wings || '';
+      _equippedSlots  = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, data.slots || {});
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
       _myPetXp = data.petXp || {};
@@ -4542,25 +4576,29 @@
       document.querySelector('canvas')?.focus();
     }
 
-    socket.on('shopSuccess', ({ item, equipped, wings }) => {
+    socket.on('shopSuccess', ({ item, equipped, wings, slots }) => {
       if (!_ownedItems.includes(item)) _ownedItems.push(item);
       _equippedCosmetic = equipped ?? item;   // buying auto-equips
       if (wings !== undefined) _equippedWings = wings || '';
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, slots);
       _refreshShopUI();
       const meta = COSMETICS.find(c => c.id === item);
       document.getElementById('shop-msg').style.color = '#27ae60';
       document.getElementById('shop-msg').textContent = `${meta ? meta.name : item} equipped!`;
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
       window._gameScene?._setLocalWings(_equippedWings);
+      window._gameScene?._setLocalSlots(_equippedSlots);
     });
 
     // Free wear/take-off confirmation (no purchase involved).
-    socket.on('equipUpdate', ({ equipped, wings }) => {
+    socket.on('equipUpdate', ({ equipped, wings, slots }) => {
       _equippedCosmetic = equipped || '';
       _equippedWings = wings || '';
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, slots);
       _refreshShopUI();
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
       window._gameScene?._setLocalWings(_equippedWings);
+      window._gameScene?._setLocalSlots(_equippedSlots);
     });
 
     // Wardrobe purchase confirmed: the server already took the coins
@@ -4600,8 +4638,8 @@
       document.getElementById('shop-msg').textContent = msg;
     });
 
-    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped, wings }) => {
-      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped, wings);
+    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped, wings, slots }) => {
+      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped, wings, slots);
     });
 
     // ── Pets ──────────────────────────────────────────────────────────
@@ -5055,10 +5093,10 @@
 
       // Page window for the active (paged) tab; clamp so a shrinking catalog
       // or stale page index can never show an empty page.
-      const catalog = _shopTab === 'wear' ? COSMETICS.filter(c => !c.wings)
+      const catalog = _shopTab === 'wear' ? COSMETICS.filter(c => !c.wings && _seasonRowOk(c))
                     : _shopTab === 'wings' ? COSMETICS.filter(c => c.wings)
                     : _shopTab === 'items' ? USABLES
-                    : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES) : null;
+                    : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES).filter(_seasonRowOk) : null;
       let pages = 1;
       if (catalog) {
         pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
@@ -5098,9 +5136,9 @@
               if (_playerCoins < c.cost) btn.classList.add('poor');
               btn.onclick = () => buyItem(c.id);
             }
-          } else if ((c.wings ? _equippedWings : _equippedCosmetic) === c.id) {
+          } else if ((c.wings ? _equippedWings : WEAR_SLOT[c.id] ? _equippedSlots[WEAR_SLOT[c.id]] : _equippedCosmetic) === c.id) {
             btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
-            btn.onclick = () => equipItem('', c.wings ? 'wings' : 'wear');   // take it off
+            btn.onclick = () => equipItem('', c.wings ? 'wings' : (WEAR_SLOT[c.id] || 'wear'));   // take it off (its own slot)
           } else {
             btn.textContent = 'Wear'; btn.classList.add('wear');
             btn.onclick = () => equipItem(c.id);     // switch, free
@@ -11377,7 +11415,7 @@
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
                           'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
                           'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire',
-                          'pet_bunny', 'pet_bunny_cocoa',
+                          'pet_bunny', 'pet_bunny_cocoa', 'pet_frog',
                           'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian'])
           for (const s of [2, 3]) {
             this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png`);
@@ -11423,6 +11461,10 @@
         for (const w of ['beewings', 'batwings', 'butterflywings', 'angelwings', 'devilwings', 'jetpackwings', 'goldenwings', 'phoenixwings'])
           this.load.spritesheet('wear_' + w, `/assets/wear_${w}.png`, { frameWidth: 32, frameHeight: 20 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
+        // Rainy-season outfit-slot wearables (Aug 2026).
+        this.load.spritesheet('wear_raincoat',  '/assets/wear_raincoat.png',  { frameWidth: 12, frameHeight: 10 });
+        this.load.spritesheet('wear_rainboots', '/assets/wear_rainboots.png', { frameWidth: 10, frameHeight: 4 });
+        this.load.spritesheet('wear_umbrella',  '/assets/wear_umbrella.png',  { frameWidth: 14, frameHeight: 12 });
         this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
         this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_crown',        '/assets/wear_crown.png',        { frameWidth: 10, frameHeight: 6 });
@@ -11962,6 +12004,10 @@
             else entry.cosmetic.setPosition(data.x, data.y-68);
           }
           if (entry.wings && entry.wingsDef) this._placeWearable(entry.wings, entry.wingsDef, data.x, data.y, rdir);
+          for (const k in (entry.slotObjs || {})) {
+            const s = entry.slotObjs[k];
+            if (s && s.obj && s.def) this._placeWearable(s.obj, s.def, data.x, data.y, rdir);
+          }
           if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
           const vb = window._voiceBadges && window._voiceBadges[data.id];
           if (vb) vb.txt.setPosition(data.x, data.y-56);
@@ -12292,6 +12338,7 @@
         this.cameras.main.startFollow(this.player);
         this._setLocalCosmetic(_equippedCosmetic);   // restore the worn cosmetic on (re)join
         this._setLocalWings(_equippedWings);         // wings slot rides alongside
+        this._setLocalSlots(_equippedSlots);         // outfit slots (top/bottom/neckwear/held)
         this._setLocalPet(_equippedPet);             // restore the active pet on (re)join
 
         if (this._pendingPlayers) {
@@ -12616,7 +12663,27 @@
         if (window._phSelfHiddenNow && this.localWings && this.localWings.setVisible) this.localWings.setVisible(false);
       }
 
-      _updatePlayerCosmetics(id, cosmetics, equipped, wings) {
+      // Outfit slots (Aug 2026): up to four MORE independent cosmetic objects
+      // (top / bottom / neckwear / held) rendered alongside the legacy
+      // wearable + wings — the boss's "wear the whole outfit at once" rule.
+      // localSlotObjs: slot → { obj, def }.
+      _setLocalSlots(slots) {
+        for (const k in (this.localSlotObjs || {})) {
+          const s = this.localSlotObjs[k];
+          if (s && s.obj) { this.tweens.killTweensOf(s.obj); s.obj.destroy(); }
+        }
+        this.localSlotObjs = {};
+        if (!this.player) return;
+        for (const [slot, item] of Object.entries(slots || {})) {
+          if (!item) continue;
+          const made = this._makeCosmetic(item, this.player.x, this.player.y, this.lastDir, this.player);
+          if (!made) continue;
+          if (window._phSelfHiddenNow && made.obj.setVisible) made.obj.setVisible(false);
+          this.localSlotObjs[slot] = made;
+        }
+      }
+
+      _updatePlayerCosmetics(id, cosmetics, equipped, wings, slots) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
         if (entry.cosmetic) { this.tweens.killTweensOf(entry.cosmetic); entry.cosmetic.destroy(); entry.cosmetic = null; }
@@ -12627,6 +12694,17 @@
         entry.wingsDef = null;
         const madeW = this._makeCosmetic(wings || '', entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
         if (madeW) { entry.wings = madeW.obj; entry.wingsDef = madeW.def; }
+        // Outfit slots: rebuild the per-slot overlay set (slot → {obj, def}).
+        for (const k in (entry.slotObjs || {})) {
+          const s = entry.slotObjs[k];
+          if (s && s.obj) { this.tweens.killTweensOf(s.obj); s.obj.destroy(); }
+        }
+        entry.slotObjs = {};
+        for (const [slot, item] of Object.entries(slots || {})) {
+          if (!item) continue;
+          const m = this._makeCosmetic(item, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
+          if (m) entry.slotObjs[slot] = m;
+        }
         // Freshly made sprites start visible — a hidden round ghost or prop
         // hunt hider must stay hidden through a cosmetic change.
         if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
@@ -15639,10 +15717,17 @@
         const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite);
         const wings = madeW ? madeW.obj : null;
         const wingsDef = madeW ? madeW.def : null;
+        // Outfit slots: build one overlay per worn slot (top/bottom/neckwear/held).
+        const slotObjs = {};
+        for (const [slot, item] of Object.entries(data.slots || {})) {
+          if (!item) continue;
+          const m = this._makeCosmetic(item, data.x, data.y, data.dir, sprite);
+          if (m) slotObjs[slot] = m;
+        }
         const petStage = _petStageFor(data.pet, ((data.petXp || {})[data.pet]) || 0);
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.
@@ -15710,6 +15795,10 @@
           else this.localCosmetic.setPosition(player.x, player.y-68);
         }
         if (this.localWings && this.localWingsDef) this._placeWearable(this.localWings, this.localWingsDef, player.x, player.y, this.lastDir);
+        for (const k in (this.localSlotObjs || {})) {
+          const s = this.localSlotObjs[k];
+          if (s && s.obj && s.def) this._placeWearable(s.obj, s.def, player.x, player.y, this.lastDir);
+        }
         // Sprite wearables sit ON the body, so they don't raise the bubble —
         // only a floating emoji cosmetic does.
         if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
