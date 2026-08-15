@@ -433,3 +433,38 @@ uri = "file://attached_assets/race_mockup_v2.jpg"
 type = "image"
 title = "Pet Race — Heat UI Mockup"
 description = "What the race screen would look like. Real pet sprites, heat bracket, betting panel, odds, and countdown timer."
+
+[[outputs]]
+id = "QrAhlrhobLE-t9zpiKNrq"
+uri = "file://attached_assets/generated_images/season_rainy_concepts.png"
+type = "image"
+title = "🌧️ Rainy Season (Aug 1–Oct 10)"
+description = "Frog pet: Tadpole → Frog → King Frog · Items: yellow raincoat, red umbrella, rain boots"
+
+[[outputs]]
+id = "3t3mv7l1BQa1V2o8wLJBh"
+uri = "file://attached_assets/generated_images/season_halloween_concepts.png"
+type = "image"
+title = "🎃 Halloween (Oct 10–Nov 4)"
+description = "Black cat pet: Kitten → Cat → Shadow Panther · Items: witch hat, pumpkin head, vampire cape"
+
+[[outputs]]
+id = "gr--zWhwQ8tIz70_ZyIpe"
+uri = "file://attached_assets/generated_images/season_christmas_concepts.png"
+type = "image"
+title = "🎄 Christmas (Nov 5–Dec 26)"
+description = "Reindeer pet: Fawn → Reindeer → Golden Reindeer · Items: Santa hat, striped scarf, elf outfit"
+
+[[outputs]]
+id = "spP_bEqpkAP7n3TsqvIAQ"
+uri = "file://attached_assets/generated_images/season_newyears_concepts.png"
+type = "image"
+title = "🎆 New Years (Dec 27–Jan 15)"
+description = "Dragon pet: Spark → Dragon → Celestial Dragon · Items: party hat, gold suit, confetti popper"
+
+[[outputs]]
+id = "RUrsRGygukA_zwDym4doh"
+uri = "file://attached_assets/generated_images/season_valentines_concepts.png"
+type = "image"
+title = "💘 Valentine's (Jan 16–Feb 16)"
+description = "Lovebird pet: Chick → Lovebird → Cupid Bird · Items: heart glasses, rose, cupid wings"
