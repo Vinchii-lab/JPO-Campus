@@ -615,3 +615,10 @@ uri = "file://attached_assets/generated_images/adam_walk_preview.png"
 type = "image"
 title = "🚶 Adam's walk cycle — all 3 directions, first pass"
 description = "Down (facing you), sideways (mirrored for left), and up (from behind). Same guy in every frame — spiky olive hair, purple tee, badge. Next step once you approve: slice these into game-ready frames and wire them into Adam's walking animation."
+
+[[outputs]]
+id = "yICxFt9ezXM0BYfaOlX3R"
+uri = "file://attached_assets/generated_images/hd_adam_closeup.png"
+type = "image"
+title = "🚶 HD Adam is IN THE GAME — all 4 directions"
+description = "Live in-game shots: walking down, right, up and left. Sliced the approved strips into a 24-frame sheet matching the classic layout, and any default-look Adam now renders in HD automatically — sitting and other poses swap back to classic art for now."
