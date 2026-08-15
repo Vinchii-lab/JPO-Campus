@@ -608,3 +608,10 @@ uri = "file://attached_assets/generated_images/adam_hd_redraw2.png"
 type = "image"
 title = "🧍 Adam v2 — spiky hair, both eyes, zero emo"
 description = "Redrawn to match your reference: short spiky olive hair swept up off the forehead, both eyes visible, friendly face. Same purple tee and badge."
+
+[[outputs]]
+id = "Xn-0YFfqB137A8lfJKDCi"
+uri = "file://attached_assets/generated_images/adam_walk_preview.png"
+type = "image"
+title = "🚶 Adam's walk cycle — all 3 directions, first pass"
+description = "Down (facing you), sideways (mirrored for left), and up (from behind). Same guy in every frame — spiky olive hair, purple tee, badge. Next step once you approve: slice these into game-ready frames and wire them into Adam's walking animation."
