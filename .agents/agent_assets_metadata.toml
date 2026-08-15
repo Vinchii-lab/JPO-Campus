@@ -559,3 +559,10 @@ uri = "file://attached_assets/generated_images/style_bible_corner_v2.png"
 type = "image"
 title = "☕ Corner v2 — soft grade, wide zoom, contact shadows"
 description = "Same assets, re-graded to the reference's soft muted palette, composed zoomed-out with fine floor planks, and given soft shadow pools so everything sits in the room instead of floating on it."
+
+[[outputs]]
+id = "a0KNeQ4g_I-9nUextSrdm"
+uri = "file://attached_assets/generated_images/acct_kit_sheet.png"
+type = "image"
+title = "📊 Accounting kit — first 9 pieces, graded & ready for your 👍"
+description = "Storage cabinet, binder bookshelf, chalkboard, accountant's desk (spreadsheet + calculator + receipt printer!), office chair, TV sideboard, meeting table with chairs, floor lamp, and the soft beige tile floor. All run through the softening grade from the style bible."
