@@ -510,3 +510,10 @@ uri = "file://attached_assets/generated_images/layer_split_proof.png"
 type = "image"
 title = "🧩 Proof: characters rebuilt in layers"
 description = "Adam (top) and Amelia (bottom, the tricky one). Each row: original → re-stacked from layers (identical) → the separated Body / Skin / Hair / Shirt / Trousers layers → a recolor done layer-by-layer. The walk strips show the layered recolor staying aligned across every animation frame."
+
+[[outputs]]
+id = "qeGs7_D9FBpxN5Qhe-Jlc"
+uri = "file://attached_assets/generated_images/raincoat_layer_proof.png"
+type = "image"
+title = "🧥 Raincoat v4 — generated from the layers"
+description = "Each row: walking down (6 frames), then back view (3), then side view (3). The coat is auto-derived from each character's own body layers, so it hugs every pose perfectly — no more clipping, boots stay visible, and hair drapes over the hood line. This replaces the old floating-overlay raincoat once you approve."
