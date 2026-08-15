@@ -54,7 +54,7 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 
 ## User preferences
 
-- _None recorded yet._
+- **The game is a company leadership/integrity assessment.** Some known exploits (e.g. refreshing mid-wager-game) are deliberately left unfixed so Vince can see who abuses them via the owner logs. Do NOT fix known exploits without Vince's explicit go-ahead — the Message Records / Activity Log exist for reprimands and bans, not just moderation.
 
 ## Gotchas
 
