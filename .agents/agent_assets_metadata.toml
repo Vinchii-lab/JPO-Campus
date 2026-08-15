@@ -545,3 +545,10 @@ uri = "file://attached_assets/generated_images/hd_corner_pilot.png"
 type = "image"
 title = "☕ HD Corner Pilot — coffee corner, Option A style"
 description = "Every piece here is AI-generated: tiled wooden floor, lit wall, desk, coffee station, plant, and HD Adam — assembled at game-like proportions. A real feasibility check, not a concept painting."
+
+[[outputs]]
+id = "qYCaPWLZrMYYGDD3iQypr"
+uri = "file://attached_assets/generated_images/style_bible_corner.png"
+type = "image"
+title = "☕ Style-bible corner — locked to YOUR reference"
+description = "All-new assets generated to match the reference image's palette and view: charcoal coffee counter with COFFEE sign, vending machine, palm, warm plank floor, spot-lit wall, and HD Adam. This is the quality bar every room of the remake will follow."
