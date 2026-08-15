@@ -3542,10 +3542,10 @@
       scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
       // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
       // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
-      raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2 },
-      rainboots: { tex: 'wear_rainboots', dy: 25,  side: 2 },
+      raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2, frames: 3, backFrame: 2, showUp: true },
+      rainboots: { tex: 'wear_rainboots', dy: 25,  side: 2, frames: 3, backFrame: 2, showUp: true },
       // Umbrella: held above the head, still visible from the back.
-      umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, showUp: true },
+      umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, frames: 3, backFrame: 2, showUp: true },
     };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
@@ -5036,7 +5036,7 @@
         cv.style.cssText = 'width:38px;height:38px;image-rendering:pixelated;';
         const im = new Image();
         im.onload = () => {
-          const fw = im.width / 2, fh = im.height;          // frame 0 = left half
+          const fw = im.width / (WEARABLE_DEFS[c.id].frames || 2), fh = im.height;  // frame 0 = leftmost
           const s = Math.min(34 / fw, 34 / fh);
           const dw = fw * s, dh = fh * s;
           const g = cv.getContext('2d');
@@ -12606,7 +12606,8 @@
           else this.children.moveBelow(img, img._under);
         }
         const sideways = dir === 'left' || dir === 'right';
-        img.setFrame(sideways ? 1 : 0);                        // frame 1 = side profile
+        // frame 1 = side profile; frame `backFrame` (3-frame sets) = back view
+        img.setFrame(sideways ? 1 : (dir === 'up' && def.backFrame !== undefined ? def.backFrame : 0));
         img.setFlipX(dir === 'left');
         const dx = dir === 'left' ? -def.side : dir === 'right' ? def.side : 0;
         const dy = sideways && def.sideDy !== undefined ? def.sideDy : def.dy;

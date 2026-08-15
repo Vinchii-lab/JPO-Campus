@@ -496,3 +496,10 @@ uri = "file://attached_assets/generated_images/rainy_outfit_v2.png"
 type = "image"
 title = "🌧️ Rainy gear v2 — redrawn"
 description = "Raincoat now has a hood rim, zipper and shading; umbrella got a proper domed canopy with highlight, scalloped edge and a J-hook handle."
+
+[[outputs]]
+id = "m1kfmIQMMbiis4vbuHXwl"
+uri = "file://attached_assets/generated_images/rainy_outfit_v3.png"
+type = "image"
+title = "🌧️ Rainy gear v3 — drawn in the character style"
+description = "Front / side / back views. Navy outlines matching the character sprites, zipper + pocket flaps on the coat, hood visible from behind, and the umbrella tilts forward while walking sideways."
