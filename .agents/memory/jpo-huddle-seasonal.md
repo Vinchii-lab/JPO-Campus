@@ -9,4 +9,6 @@ description: Client-only calendar-gated weather overlays; wall-clock-hashed stor
 
 **Why:** owner wanted "subtle drizzle + full storm every now and then" shared by all players; server-driven weather would add restart-sensitive state for a purely cosmetic effect.
 
-**Backlog owner asked for (not built):** Halloween theme after Oct, seasonal RARE store pets with baby→final-form evolution stages + own animations (frog for rainy season was his example).
+**Owner's season calendar (authoritative, Aug 2026):** rainy Aug 1–Oct 10 · Halloween Oct 10–Nov 4 · Christmas Nov 5–Dec 26 · New Years Dec 27–Jan 15 · Valentine's Jan 16–Feb 16. Only rainy is built; date gate + calendar comment live at the weather init in create().
+
+**Backlog owner asked for (not built):** themed visuals for the other four seasons, plus seasonal RARE store pets with baby→final-form evolution stages + own animations (frog for rainy season was his example).

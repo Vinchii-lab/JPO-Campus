@@ -11753,8 +11753,12 @@
         // are screen-space (scrollFactor 0) sized 2x the viewport so they
         // still cover the screen at the minimum zoom (0.5).
         this._wx = null;
-        const wxMonth = new Date().getMonth();   // 0-based: 7=Aug … 9=Oct
-        if (wxMonth >= 7 && wxMonth <= 9) {
+        // Owner's season calendar: rainy Aug 1–Oct 10 · halloween Oct 10–Nov 4 ·
+        // christmas Nov 5–Dec 26 · new years Dec 27–Jan 15 · valentine's Jan 16–Feb 16.
+        // Only the rainy theme is built so far; the others get their own visuals later.
+        const _wxD = new Date(), _wxM = _wxD.getMonth(), _wxDay = _wxD.getDate();  // month 0-based
+        const wxRainy = (_wxM === 7) || (_wxM === 8) || (_wxM === 9 && _wxDay <= 10);
+        if (wxRainy) {
           if (!this.textures.exists('rainTex')) {
             const c = this.textures.createCanvas('rainTex', 128, 128);
             const ctx = c.context; let s = 42;
