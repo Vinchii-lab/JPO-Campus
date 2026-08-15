@@ -573,3 +573,10 @@ uri = "file://attached_assets/generated_images/accounting_hd_v1.png"
 type = "image"
 title = "🏢 Accounting room 1 — HD art LIVE in the real game"
 description = "Same room, same map, same seats — new soft floor, HD binder bookshelves, chalkboards, cabinet pairs and the meeting table, all placed at the exact original coordinates. Desk pods, sofas and east-wall media units are still on the old art (next batch)."
+
+[[outputs]]
+id = "Eqg6I_-Z4gJNBa2lJ0HZK"
+uri = "file://attached_assets/generated_images/accounting_hd_v2.png"
+type = "image"
+title = "🏢 Accounting v2 — whole room, floor contained"
+description = "Floor bleed fixed (only the actual Accounting suite is repainted now). All six computer desk pods, the mail-cubby wall, sideboards, both TVs, gray couches, manager counters and the tan side sofa are HD. Chairs and stools stay original for now so sitting stays glued."

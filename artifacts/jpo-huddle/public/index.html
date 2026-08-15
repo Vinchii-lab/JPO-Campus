@@ -11757,6 +11757,12 @@
         this.load.image('hdA_bookshelf',  '/assets/hd/acct/bookshelf.png');
         this.load.image('hdA_chalkboard', '/assets/hd/acct/chalkboard.png');
         this.load.image('hdA_meeting',    '/assets/hd/acct/meetingtable.png');
+        this.load.image('hdA_desk',       '/assets/hd/acct/desk.png');
+        this.load.image('hdA_mailshelf',  '/assets/hd/acct/mailshelf.png');
+        this.load.image('hdA_sideboard',  '/assets/hd/acct/sideboard.png');
+        this.load.image('hdA_tv',         '/assets/hd/acct/tv.png');
+        this.load.image('hdA_couch',      '/assets/hd/acct/couch.png');
+        this.load.image('hdA_sofaside',   '/assets/hd/acct/sofaside.png');
         // A flaky connection can silently drop an asset download — Phaser has
         // no retry, so a missing tileset renders whole furniture/wall layers
         // blank while everything else looks normal. Track failures so create()
@@ -11854,6 +11860,11 @@
             [161,105,162,106], [164,105,165,106],          // chalkboards, north row
             [162,115,163,116], [166,115,167,116],          // chalkboards, mid row
             [176,121,178,123],                             // meeting table (chairs stay)
+            [178,104,189,106],                             // mail cubbies + sideboard, NE wall
+            [183,108,190,110],                             // media sideboard + TV, east wall
+            [188,112,190,113],                             // gray couch
+            [184,117,190,118],                             // manager-office counters
+            [185,122,186,124],                             // tan side sofa (seat art replaced 1:1)
           ];
           const inCover = (c, r) => COVER.some(([a,b,d,e]) => c >= a && r >= b && c <= d && r <= e);
           const hdFloor = this.add.tileSprite(
@@ -11864,8 +11875,11 @@
           const mg = this.make.graphics({ add: false });
           mg.fillStyle(0xffffff);
           for (let r = AZ.r0; r <= AZ.r1; r++) for (let c = AZ.c0; c <= AZ.c1; c++) {
-            if (!floorLayer.getTileAt(c, r)) continue;          // outside / void
-            if (wallLayer.getTileAt(c, r)) continue;            // walls + desk uppers stay
+            const ft = floorLayer.getTileAt(c, r);
+            // Interior floor of the Accounting suite uses GIDs 35-52 exclusively;
+            // corridor (103-120) and neighbouring rooms (403+) must NOT be painted.
+            if (!ft || ft.index < 35 || ft.index > 52) continue;
+            if (wallLayer.getTileAt(c, r) && !inCover(c, r)) continue; // walls + unreplaced desk uppers stay
             if (furnitureLayer.getTileAt(c, r) && !inCover(c, r)) continue; // unreplaced furniture stays
             mg.fillRect(c * 48, r * 48, 48, 48);
           }
@@ -11885,6 +11899,17 @@
           put('hdA_chalkboard', 166, 115, 167, 116, 1.15);
           this.add.image(177.5 * 48, 122.5 * 48, 'hdA_meeting')
             .setOrigin(0.5, 0.5).setDisplaySize(3 * 48 * 1.05, 2.2 * 48);
+          // Six workstation desk pods (desk+monitor tiles live on the Wall layer)
+          for (const r of [119, 125]) for (const c of [160, 164, 168])
+            put('hdA_desk', c, r, c + 1, r + 1, 1.08, 2);
+          put('hdA_mailshelf', 178, 104, 185, 106, 1.0, 0);
+          put('hdA_sideboard', 186, 104, 189, 106, 1.0, 0);
+          put('hdA_sideboard', 183, 108, 186, 110, 1.0, 0);
+          put('hdA_tv',        187, 108, 190, 110, 1.0, 0);
+          put('hdA_couch',     188, 112, 190, 113, 1.05, 2);
+          put('hdA_sideboard', 184, 117, 186, 118, 1.0, 0);
+          put('hdA_sideboard', 187, 117, 190, 118, 1.0, 0);
+          put('hdA_sofaside',  185, 122, 186, 124, 1.02, 2);
         }
         // === end HD Accounting ==============================================
         // The dark wall band at the bottom of the L&D classroom (row 97,
