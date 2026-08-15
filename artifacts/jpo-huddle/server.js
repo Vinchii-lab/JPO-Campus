@@ -271,6 +271,7 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
 const owners  = new Set();   // subset of admins who entered OWNER_PASSWORD — unlocks owner-only tools
+let _whisperLogN = 0;        // module-scope so the whisper-log prune counts ALL traffic, not per-connection
 
 // ── Admin activity log ───────────────────────────────────────────────────────
 // Every mutation made from the F8 panel is written to jpo_admin_log with WHO
@@ -6443,7 +6444,6 @@ io.on("connection", (socket) => {
   // is recorded for the owner-key F8 panel. Fire-and-forget — a DB blip must
   // never block or break the whisper itself. Occasional prune keeps the
   // table from growing without bound (images are base64 and chunky).
-  let _whisperLogN = 0;
   function logWhisper(sender, target, text, img) {
     pool.query(
       `INSERT INTO jpo_whispers (from_email, from_name, to_email, to_name, message, img)

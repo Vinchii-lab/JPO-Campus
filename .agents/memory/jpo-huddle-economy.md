@@ -54,3 +54,5 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - Global "X% off for N min" lives in server memory + single-row `jpo_flash_sale` (re-armed at boot). Buy handlers charge `salePrice(catalog[item])` at request time.
 - **Rule:** `priceList`/`priceUpdate` always broadcast BASE prices; clients apply the sale % locally from `saleState`. **Why:** sale-adjusted broadcasts corrupted the F8 editor — the owner could save a discounted number as the permanent override.
 - salePrice() must pass through falsy costs untouched (rare/unknown items rely on `!cost` gates).
+
+**Whisper surveillance log:** whispers (text+img) are logged owner-only to jpo_whispers. Prune counter must live at MODULE scope (per-connection counter never fires under distributed traffic). Keep the F8 viewer copy NEUTRAL ("Message Records") — anything in public/index.html is readable via View Source, so never put "every whisper is logged" wording in the client bundle.
