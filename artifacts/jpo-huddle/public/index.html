@@ -3547,6 +3547,23 @@
       // Umbrella: held above the head, still visible from the back.
       umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, frames: 3, backFrame: 2, showUp: true },
     };
+    // Phase-3 baked wearables: items flagged here are BAKED into the player
+    // texture per frame (anchor-tracked via assets/layers/anchors.json) instead
+    // of floating as an overlay sprite — perfect alignment in every pose,
+    // including seated. 'head' anchors follow the head-top, 'feet' the ground.
+    // NOT baked: wings (they keep their live flap tween + behind-body
+    // ordering) and scifihelmet (non-integer 4.4 scale can't map to texels).
+    const _WEAR_BAKE_ANCHOR = {
+      shades:'head', cap:'head', chain:'head', sunglasses:'head', crown:'head',
+      headphones:'head', beret:'head', chefhat:'head', camera:'head',
+      gamerheadset:'head', book:'head', guitar:'head', spectacles:'head',
+      beanie:'head', flatcap:'head', rangerhat:'head', catears:'head',
+      umbrella:'head', rainboots:'feet',
+    };
+    for (const [wid, anc] of Object.entries(_WEAR_BAKE_ANCHOR)) WEARABLE_DEFS[wid].bake = anc;
+    // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
+    // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
+    WEARABLE_DEFS.raincoat.bakeLayer = true;
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
     // USABLE_ITEMS map in server.js (the server is authoritative on price and
@@ -4029,9 +4046,76 @@
         const id = cx.getImageData(0, 0, cv.width, cv.height);
         _layeredSwaps(id.data, L, b.zones, b.hairIdx, b.skinIdx, b.shirtIdx, b.pantsIdx, cv.width, b.frameW);
         cx.putImageData(id, 0, 0);
+        // A legacy-built texture may also carry BAKED wearables — the repaint
+        // above wiped them with the recolour, so re-bake before refreshing.
+        if (b.wearIds && b.wearIds.length) {
+          try { scene._bakeWearOnCanvas(cx, b.char, b.suffix, b.frameW, b.wearIds); }
+          catch (e) { console.warn('re-bake failed', e); }
+        }
         scene.textures.get(texKey).refresh();
         _legacyTexBuilds.delete(texKey);
       }
+    }
+
+    // ── Baked wearables (Phase 3) ──────────────────────────────────────
+    // Per-frame body anchors extracted offline from the split layers
+    // (tools/wearable-anchors.cjs). Until the fetch resolves, wearables fall
+    // back to the classic overlay sprites — no visual gap either way.
+    let _wearAnchors = null;
+    // Readiness race: sprites built BEFORE these assets settle were baked
+    // without wearables and got fallback overlays — nothing would ever fix
+    // them up without a later outfit event (stationary/seated remotes could
+    // stay on overlays forever). So each settle path re-dresses everyone.
+    function _rewearAll() {
+      const sc = window._gameScene;
+      if (!sc) return;   // pre-login: every later build sees the ready state
+      try {
+        if (sc.player) {
+          sc._setLocalCosmetic(_equippedCosmetic);   // recreates/suppresses + rebuilds texture
+          sc._setLocalSlots(_equippedSlots);
+        }
+        for (const [pid, e] of Object.entries(sc.otherPlayers || {}))
+          if (e && e.wear) sc._updatePlayerCosmetics(pid, null, e.wear.equipped, e.wear.wings, e.wear.slots);
+      } catch (err) { console.warn('rewear failed', err); }
+    }
+    fetch('/assets/layers/anchors.json')
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (j) { _wearAnchors = j; _rewearAll(); } })
+      .catch(() => {});
+    // Layer-replacement cosmetic sheets (raincoat): `${char}_${suffix}_${id}` →
+    // loaded HTMLImageElement. Absent key = not loaded yet (or 404) → overlay.
+    const _wearLayerImgs = {};
+    (function _loadWearLayerSheets() {
+      const CAPC = c => c[0].toUpperCase() + c.slice(1);
+      let pending = 0;
+      const settle = () => { if (--pending === 0) _rewearAll(); };
+      for (const [wid, def] of Object.entries(WEARABLE_DEFS)) {
+        if (!def.bakeLayer) continue;
+        for (const char of CHARACTERS) {
+          for (const suffix of LAYER_SUFFIXES) {
+            pending++;
+            const im = new Image();
+            im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
+            im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png`;
+          }
+        }
+      }
+    })();
+    function _wearBakeReady(id, char) {
+      const def = WEARABLE_DEFS[id];
+      if (!def || !char) return false;
+      if (def.bakeLayer)
+        return LAYER_SUFFIXES.every(sfx => _wearLayerImgs[`${char}_${sfx}_${id}`]);
+      return !!(def.bake && _wearAnchors && _wearAnchors[char]);
+    }
+    // Which worn ids get BAKED into the texture (sorted → stable tex keys).
+    // Wings are never baked: they keep their flap tween + behind-body order.
+    function _bakedWearIds(char, equipped, wings, slots) {
+      const ids = [];
+      for (const id of [equipped, ...Object.values(slots || {})])
+        if (id && _wearBakeReady(id, char) && !ids.includes(id)) ids.push(id);
+      return ids.sort();
     }
 
     // Kick off layer image loads for every character/sheet up front. When the
@@ -12404,8 +12488,61 @@
 
       // Build (or retrieve cached) palette-swapped sprite sheet texture for a player.
       // Returns texture key string.
-      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx) {
-        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+      // Bake worn items into a (recoloured) sheet canvas. Draw order: layer
+      // replacements (raincoat) under everything, feet gear next, head gear
+      // last — so a hat draws over the coat's collar, not under it.
+      _bakeWearOnCanvas(cx, char, suffix, frameW, wearIds) {
+        if (!wearIds || !wearIds.length) return;
+        const A = _wearAnchors && _wearAnchors[char];
+        const RUN = A && A.run;
+        const prio = id => WEARABLE_DEFS[id].bakeLayer ? 0 : WEARABLE_DEFS[id].bake === 'feet' ? 1 : 2;
+        const order = [...wearIds].sort((a, b) => prio(a) - prio(b) || (a < b ? -1 : 1));
+        const SHEET_FACING = { sit: 'right', sit2: 'up', sit3: 'down' };
+        for (const id of order) {
+          const def = WEARABLE_DEFS[id];
+          if (def.bakeLayer) {
+            const im = _wearLayerImgs[`${char}_${suffix}_${id}`];
+            if (im) cx.drawImage(im, 0, 0);
+            continue;
+          }
+          if (!A || !A[suffix] || !RUN) continue;
+          const tex = this.textures.get(def.tex);
+          const img = tex && tex.source[0] && tex.source[0].image;
+          if (!img) continue;
+          const afw = img.width / (def.frames || 2), afh = img.height;
+          const F = A[suffix];
+          for (let f = 0; f < F.length; f++) {
+            const facing = suffix === 'run' ? ['right','up','left','down'][Math.floor(f / 6)] : SHEET_FACING[suffix];
+            if (facing === 'up' && !def.showUp) continue;   // face gear hides from the back, same as the overlay path
+            const sideways = facing === 'left' || facing === 'right';
+            const artF = sideways ? 1 : (facing === 'up' && def.backFrame !== undefined ? def.backFrame : 0);
+            const a = F[f], ref = RUN[DIR_START[facing]];
+            if (!a || !ref || a.hy < 0 || ref.hy < 0) continue;
+            // Keep the item's APPROVED offset on the reference standing frame
+            // (defs are world-px at scale 3 → /3 = texels), then shift by this
+            // frame's anchor delta so it tracks the pose.
+            const dyF = (sideways && def.sideDy !== undefined ? def.sideDy : def.dy) / 3;
+            const dxF = facing === 'left' ? -def.side / 3 : facing === 'right' ? def.side / 3 : 0;
+            const aY = def.bake === 'feet' ? a.fy : a.hy;
+            const rY = def.bake === 'feet' ? ref.fy : ref.hy;
+            const artCx = a.hx + (8 + dxF - ref.hx);        // frame-local art centre
+            const artCy = aY + (16 + dyF - rY);
+            cx.save();
+            cx.beginPath(); cx.rect(f * frameW, 0, frameW, 32); cx.clip();   // wide art must not bleed into the next frame
+            if (facing === 'left') {                        // art frame 1 faces RIGHT — mirror it
+              cx.translate(f * frameW + artCx, 0); cx.scale(-1, 1);
+              cx.drawImage(img, artF * afw, 0, afw, afh, Math.round(-afw / 2), Math.round(artCy - afh / 2), afw, afh);
+            } else {
+              cx.drawImage(img, artF * afw, 0, afw, afh, f * frameW + Math.round(artCx - afw / 2), Math.round(artCy - afh / 2), afw, afh);
+            }
+            cx.restore();
+          }
+        }
+      }
+
+      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx, wearIds) {
+        const wsig = wearIds && wearIds.length ? `_W${wearIds.join('.')}` : '';
+        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
         if (this.textures.exists(key)) return key;
 
         const srcImg = this.textures.get(`run_${char}`).source[0].image;
@@ -12422,10 +12559,11 @@
           if (L && L.w === sw && L.h === sh) _layeredSwaps(id.data, L, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
           else {
             _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
-            if (!_layersSettled) _legacyTexBuilds.set(key, { char, suffix: 'run', zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW: 16 });
+            if (!_layersSettled) _legacyTexBuilds.set(key, { char, suffix: 'run', zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW: 16, wearIds });
           }
           cx.putImageData(id, 0, 0);
         }
+        this._bakeWearOnCanvas(cx, char, 'run', 16, wearIds);
 
         this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
         this._createDirAnims(key);
@@ -12436,7 +12574,7 @@
         // than the standing zones assume — without them, customization would leave patches.
         for (const [dir, suffix] of Object.entries(SIT_SUFFIX)) {
           const sheet = `${char}_${suffix}`;
-          const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}`;
+          const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
           if (this.textures.exists(sitKey)) continue;
           const sitSrc = this.textures.get(sheet).source[0].image;
           const sc = document.createElement('canvas');
@@ -12451,10 +12589,11 @@
             if (SL && SL.w === sc.width && SL.h === sc.height) _layeredSwaps(sid.data, SL, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
             else {
               _applySwaps(sid.data, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
-              if (!_layersSettled) _legacyTexBuilds.set(sitKey, { char, suffix, zones: sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW });
+              if (!_layersSettled) _legacyTexBuilds.set(sitKey, { char, suffix, zones: sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW, wearIds });
             }
             scx.putImageData(sid, 0, 0);
           }
+          this._bakeWearOnCanvas(scx, char, suffix, dir === 'down' ? 16 : 32, wearIds);
           this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
           this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
         }
@@ -12478,7 +12617,8 @@
         const hasPos = Number.isFinite(data.x) && Number.isFinite(data.y);
         const startX = hasPos ? data.x : SPAWN_X, startY = hasPos ? data.y : SPAWN_Y;
 
-        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx,
+          _bakedWearIds(_playerChar, _equippedCosmetic, _equippedWings, _equippedSlots));
         this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
         this.player   = this.physics.add.sprite(startX, startY, texKey);
         this.player.setScale(3).setOrigin(0.5,0.5);
@@ -12814,8 +12954,12 @@
       // them in the display list (equal depth renders in list order), so it
       // sits behind the body but above the floor. Behind-wearables also get a
       // perpetual slow scaleX flap tween (killed with the image on destroy).
-      _makeCosmetic(equipped, x, y, dir, under) {
+      _makeCosmetic(equipped, x, y, dir, under, charFor) {
         const wd = WEARABLE_DEFS[equipped];
+        // Baked wearable: it's IN the wearer's texture (see _bakeWearOnCanvas)
+        // — creating the overlay too would double-draw it. charFor tells us
+        // whose texture; without it we can't know bake readiness, so overlay.
+        if (wd && (wd.bake || wd.bakeLayer) && charFor && _wearBakeReady(equipped, charFor)) return null;
         if (wd) {
           const sc = wd.scale || 3;                 // per-item fit (default 3)
           const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(sc).setDepth(10);
@@ -12841,8 +12985,9 @@
         if (this.localCosmetic) { this.tweens.killTweensOf(this.localCosmetic); this.localCosmetic.destroy(); this.localCosmetic = null; }
         this.localCosmeticDef = null;
         if (!this.player) return;
-        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir, this.player);
+        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir, this.player, _playerChar);
         if (made) { this.localCosmetic = made.obj; this.localCosmeticDef = made.def; }
+        this._applyLocalOutfit();   // baked wearables live in the texture — rebuild it
         // Hidden hider (prop hunt / after-dark): a freshly made sprite starts
         // visible — re-hide it or the disguise sprouts a visible cosmetic.
         if (window._phSelfHiddenNow && this.localCosmetic && this.localCosmetic.setVisible) this.localCosmetic.setVisible(false);
@@ -12872,23 +13017,26 @@
         if (!this.player) return;
         for (const [slot, item] of Object.entries(slots || {})) {
           if (!item) continue;
-          const made = this._makeCosmetic(item, this.player.x, this.player.y, this.lastDir, this.player);
+          const made = this._makeCosmetic(item, this.player.x, this.player.y, this.lastDir, this.player, _playerChar);
           if (!made) continue;
           if (window._phSelfHiddenNow && made.obj.setVisible) made.obj.setVisible(false);
           this.localSlotObjs[slot] = made;
         }
+        this._applyLocalOutfit();   // baked wearables live in the texture — rebuild it
       }
 
       _updatePlayerCosmetics(id, cosmetics, equipped, wings, slots) {
         const entry = this.otherPlayers[id];
         if (!entry) return;
+        // Remember what's worn (drives baked-wearable texture rebuilds).
+        entry.wear = { equipped: equipped || '', wings: wings || '', slots: Object.assign({}, slots || {}) };
         if (entry.cosmetic) { this.tweens.killTweensOf(entry.cosmetic); entry.cosmetic.destroy(); entry.cosmetic = null; }
         entry.cosmeticDef = null;
-        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
+        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
         if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
         if (entry.wings) { this.tweens.killTweensOf(entry.wings); entry.wings.destroy(); entry.wings = null; }
         entry.wingsDef = null;
-        const madeW = this._makeCosmetic(wings || '', entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
+        const madeW = this._makeCosmetic(wings || '', entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
         if (madeW) { entry.wings = madeW.obj; entry.wingsDef = madeW.def; }
         // Outfit slots: rebuild the per-slot overlay set (slot → {obj, def}).
         for (const k in (entry.slotObjs || {})) {
@@ -12898,9 +13046,12 @@
         entry.slotObjs = {};
         for (const [slot, item] of Object.entries(slots || {})) {
           if (!item) continue;
-          const m = this._makeCosmetic(item, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite);
+          const m = this._makeCosmetic(item, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
           if (m) entry.slotObjs[slot] = m;
         }
+        // Rebuild their texture so baked items appear/disappear with the
+        // change (re-poses the current frame too — seated players included).
+        if (entry.appear) this._applyRemoteOutfit(id, entry.appear);
         // Freshly made sprites start visible — a hidden round ghost or prop
         // hunt hider must stay hidden through a cosmetic change.
         if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
@@ -15577,7 +15728,8 @@
       // setTexture here (its setFrame never swaps the texture).
       _applyLocalOutfit() {
         if (!this.player) return;
-        const key = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx);
+        const key = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx,
+          _bakedWearIds(_playerChar, _equippedCosmetic, _equippedWings, _equippedSlots));
         this.playerTexKey = key;
         if (!this.sitting) {
           this.player.setTexture(key);
@@ -15599,7 +15751,10 @@
         if (data.character) entry.character = data.character;
         const shirt = data.shirtIdx ?? data.clothesIdx ?? 0;
         const pants = data.pantsIdx ?? data.clothesIdx ?? 0;
-        entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants);
+        entry.appear = { hairIdx: data.hairIdx ?? 0, skinIdx: data.skinIdx ?? 0, shirtIdx: shirt, pantsIdx: pants };
+        const w = entry.wear || {};
+        entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants,
+          _bakedWearIds(entry.character, w.equipped, w.wings, w.slots));
         // Re-render the CURRENT pose immediately: a stationary/seated player
         // sends no playerMoved packets, so without this their old character
         // would stay on screen until they next move.
@@ -15863,7 +16018,8 @@
         const shirtIdx    = data.shirtIdx ?? data.clothesIdx ?? 0;
         const pantsIdx    = data.pantsIdx ?? data.clothesIdx ?? 0;
 
-        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx);
+        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx,
+          _bakedWearIds(char, data.equipped, data.wings, data.slots));
         const sprite = this.add.sprite(data.x, data.y, texKey);
         sprite.setScale(3).setOrigin(0.5,0.5);
         const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
@@ -15907,23 +16063,25 @@
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
 
-        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir, sprite);
+        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir, sprite, char);
         const cosmetic = made ? made.obj : null;
         const cosmeticDef = made ? made.def : null;
-        const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite);
+        const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite, char);
         const wings = madeW ? madeW.obj : null;
         const wingsDef = madeW ? madeW.def : null;
         // Outfit slots: build one overlay per worn slot (top/bottom/neckwear/held).
         const slotObjs = {};
         for (const [slot, item] of Object.entries(data.slots || {})) {
           if (!item) continue;
-          const m = this._makeCosmetic(item, data.x, data.y, data.dir, sprite);
+          const m = this._makeCosmetic(item, data.x, data.y, data.dir, sprite, char);
           if (m) slotObjs[slot] = m;
         }
         const petStage = _petStageFor(data.pet, ((data.petXp || {})[data.pet]) || 0);
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
 
-        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit' };
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit',
+          appear: { hairIdx, skinIdx, shirtIdx, pantsIdx },
+          wear: { equipped: data.equipped || '', wings: data.wings || '', slots: Object.assign({}, data.slots || {}) } };
         // Eliminated round players stay hidden even across a sprite re-add
         // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
         // re-asserts this, but doing it here avoids a one-frame flash.

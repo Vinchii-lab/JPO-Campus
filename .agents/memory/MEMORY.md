@@ -4,6 +4,7 @@
 - [JPO Huddle per-board boards](jpo-huddle-announcements.md) — announcements per-BOARD via one clustering pass that also drives E-press, "!" badge, and the panel.
 - [JPO Huddle layered characters](jpo-huddle-layered-chars.md) — recolor via per-part layer PNGs (legacy _applySwaps = fallback only); fallback-built textures must be repainted on layer-load settle; Amelia-only diffs are accepted fixes.
 - [JPO Huddle palette swap zones](jpo-huddle-palette.md) — hardcoded per-character zone colors (auto-detect fails); clothes match the post-hair/skin snapshot.
+- [JPO Huddle baked wearables](jpo-huddle-baked-wearables.md) — wearables bake into player textures via per-frame layer anchors (wings/scifihelmet stay overlays); async asset settles must re-dress everyone.
 - [JPO Huddle wearable geometry](jpo-huddle-wearable-geometry.md) — eyes ≈ +8 (NOT -12), hats perch ≈ -21; seeded sit tests need the dir an E-press would set.
 - [JPO Huddle server integration testing](jpo-huddle-server-testing.md) — verify the socket.io server headlessly via throwaway socket.io-client in /tmp.
 - [JPO Huddle in-office (browser) testing](jpo-huddle-testing.md) — seed approved row w/ LOWERCASED email; hop+KeyE to sit; foreground `timeout ≤115` runs.
