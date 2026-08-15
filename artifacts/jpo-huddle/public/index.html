@@ -11751,6 +11751,12 @@
         this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 18, frameHeight: 9 });
         this.load.spritesheet('wear_scifihelmet',  '/assets/wear_scifihelmet.png',  { frameWidth: 12, frameHeight: 12 });
         this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
+        // HD remake room 1: Accounting (style-bible art)
+        this.load.image('hdA_floor',      '/assets/hd/acct/floor.png');
+        this.load.image('hdA_cabinet',    '/assets/hd/acct/cabinet.png');
+        this.load.image('hdA_bookshelf',  '/assets/hd/acct/bookshelf.png');
+        this.load.image('hdA_chalkboard', '/assets/hd/acct/chalkboard.png');
+        this.load.image('hdA_meeting',    '/assets/hd/acct/meetingtable.png');
         // A flaky connection can silently drop an asset download — Phaser has
         // no retry, so a missing tileset renders whole furniture/wall layers
         // blank while everything else looks normal. Track failures so create()
@@ -11830,6 +11836,57 @@
         this.furnitureLayer = furnitureLayer;
         this.wallLayer      = wallLayer;
         this.floorLayer     = floorLayer;
+
+        // === HD remake — room 1: Accounting (c144-190, r96-127) =============
+        // Visual-only reskin: the tilemap, collisions and seats are untouched.
+        // A masked tileSprite lays the new soft floor over every walkable cell
+        // (and over old furniture we replace); HD prop images then sit on top.
+        // Added here (after the 3 layers, before any player spawns) so
+        // insertion-order depth keeps it above tiles and below characters.
+        {
+          const AZ = { c0: 144, c1: 190, r0: 96, r1: 127 };
+          // Footprints of furniture replaced by HD art (floor shows beneath).
+          // Seats (stools 2878.., chairs 2231, sofa/desk-chair columns) are
+          // NOT covered — players still sit on the original tiles.
+          const COVER = [
+            [150,105,153,107], [150,109,153,111],          // cabinet pairs, west wall
+            [167,105,171,108], [150,116,154,119],          // binder bookshelves
+            [161,105,162,106], [164,105,165,106],          // chalkboards, north row
+            [162,115,163,116], [166,115,167,116],          // chalkboards, mid row
+            [176,121,178,123],                             // meeting table (chairs stay)
+          ];
+          const inCover = (c, r) => COVER.some(([a,b,d,e]) => c >= a && r >= b && c <= d && r <= e);
+          const hdFloor = this.add.tileSprite(
+            AZ.c0 * 48, AZ.r0 * 48,
+            (AZ.c1 - AZ.c0 + 1) * 48, (AZ.r1 - AZ.r0 + 1) * 48,
+            'hdA_floor').setOrigin(0, 0);
+          hdFloor.setTileScale(384 / 256); // 8-square swatch spans 8 tiles of 48px
+          const mg = this.make.graphics({ add: false });
+          mg.fillStyle(0xffffff);
+          for (let r = AZ.r0; r <= AZ.r1; r++) for (let c = AZ.c0; c <= AZ.c1; c++) {
+            if (!floorLayer.getTileAt(c, r)) continue;          // outside / void
+            if (wallLayer.getTileAt(c, r)) continue;            // walls + desk uppers stay
+            if (furnitureLayer.getTileAt(c, r) && !inCover(c, r)) continue; // unreplaced furniture stays
+            mg.fillRect(c * 48, r * 48, 48, 48);
+          }
+          hdFloor.setMask(mg.createGeometryMask());
+          const put = (key, c0, r0, c1, r1, grow = 1.12, dy = 6) => {
+            const cols = c1 - c0 + 1, rows = r1 - r0 + 1;
+            return this.add.image((c0 + cols / 2) * 48, (r1 + 1) * 48 + dy, key)
+              .setOrigin(0.5, 1).setDisplaySize(cols * 48 * grow, rows * 48 * grow);
+          };
+          put('hdA_cabinet', 150, 105, 151, 107); put('hdA_cabinet', 152, 105, 153, 107);
+          put('hdA_cabinet', 150, 109, 151, 111); put('hdA_cabinet', 152, 109, 153, 111);
+          put('hdA_bookshelf', 167, 105, 171, 108, 1.05);
+          put('hdA_bookshelf', 150, 116, 154, 119, 1.05);
+          put('hdA_chalkboard', 161, 105, 162, 106, 1.15);
+          put('hdA_chalkboard', 164, 105, 165, 106, 1.15);
+          put('hdA_chalkboard', 162, 115, 163, 116, 1.15);
+          put('hdA_chalkboard', 166, 115, 167, 116, 1.15);
+          this.add.image(177.5 * 48, 122.5 * 48, 'hdA_meeting')
+            .setOrigin(0.5, 0.5).setDisplaySize(3 * 48 * 1.05, 2.2 * 48);
+        }
+        // === end HD Accounting ==============================================
         // The dark wall band at the bottom of the L&D classroom (row 97,
         // c150-c190) is painted on the FLOOR layer (gid 1237) with no Wall-layer
         // tile behind it — without this, players walk straight through it onto

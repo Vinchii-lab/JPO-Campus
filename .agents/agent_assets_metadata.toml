@@ -566,3 +566,10 @@ uri = "file://attached_assets/generated_images/acct_kit_sheet.png"
 type = "image"
 title = "📊 Accounting kit — first 9 pieces, graded & ready for your 👍"
 description = "Storage cabinet, binder bookshelf, chalkboard, accountant's desk (spreadsheet + calculator + receipt printer!), office chair, TV sideboard, meeting table with chairs, floor lamp, and the soft beige tile floor. All run through the softening grade from the style bible."
+
+[[outputs]]
+id = "AtFYaf_BtLiL3BAjpvLkX"
+uri = "file://attached_assets/generated_images/accounting_hd_v1.png"
+type = "image"
+title = "🏢 Accounting room 1 — HD art LIVE in the real game"
+description = "Same room, same map, same seats — new soft floor, HD binder bookshelves, chalkboards, cabinet pairs and the meeting table, all placed at the exact original coordinates. Desk pods, sofas and east-wall media units are still on the old art (next batch)."
