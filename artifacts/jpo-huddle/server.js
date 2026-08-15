@@ -5294,6 +5294,7 @@ io.on("connection", (socket) => {
   // ── Admin: flash sale — "X% off everything for N minutes" ────────────
   socket.on("adminSaleStart", async (payload) => {
     if (!admins.has(socket.id)) return;
+    if (!owners.has(socket.id)) { socket.emit("adminSaleResult", { ok: false, message: "Flash sales need the owner key." }); return; }
     const pct = Math.round(Number(payload?.percent));
     const mins = Math.round(Number(payload?.minutes));
     if (!Number.isInteger(pct) || pct < SALE_PCT_MIN || pct > SALE_PCT_MAX) {
@@ -5323,6 +5324,7 @@ io.on("connection", (socket) => {
   });
   socket.on("adminSaleEnd", async () => {
     if (!admins.has(socket.id)) return;
+    if (!owners.has(socket.id)) { socket.emit("adminSaleResult", { ok: false, message: "Flash sales need the owner key." }); return; }
     if (!saleActive()) { socket.emit("adminSaleResult", { ok: false, message: "No sale is running." }); return; }
     logAdmin(socket, "Flash sale", "Ended the sale early");
     await _endSale("ended by owner");
@@ -5331,6 +5333,8 @@ io.on("connection", (socket) => {
 
   socket.on("adminSetPrice", async (payload) => {
     if (!admins.has(socket.id)) return;
+    // Price overrides are OWNER-key only now (plain admins abused them).
+    if (!owners.has(socket.id)) { socket.emit("adminPriceResult", { ok: false, message: "Price changes need the owner key." }); return; }
     const { item, price } = payload || {};
     if (typeof item !== "string") return;
     const cat = catalogOf(item);
@@ -5475,7 +5479,9 @@ io.on("connection", (socket) => {
     if (round)    { socket.emit("adminRlglResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("adminRlglResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
     if (deal)     { socket.emit("adminRlglResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
-    const prize = Math.round(Number(payload?.prize));
+    // Plain admins can run games, but the pot is FIXED at 500 coins —
+    // only the owner key gets to pick prize amounts.
+    const prize = owners.has(socket.id) ? Math.round(Number(payload?.prize)) : 500;
     if (!Number.isSafeInteger(prize) || prize < RLGL_PRIZE_MIN || prize > RLGL_PRIZE_MAX) {
       socket.emit("adminRlglResult", { ok: false, message: `Prize must be ${RLGL_PRIZE_MIN}–${RLGL_PRIZE_MAX.toLocaleString()} coins.` });
       return;
@@ -5513,6 +5519,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     prize = Math.max(0, Math.min(100_000, Math.round(prize || 0)));
+    if (!owners.has(socket.id)) prize = 500;   // plain admins: fixed 500-coin pot
     race = {
       state: 'lobby', prize, starterName: p.name,
       entrants: new Map(), heats: [], currentHeat: 0, finalists: [],
@@ -5655,7 +5662,8 @@ io.on("connection", (socket) => {
     if (propHunt) { socket.emit("adminBingoResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
     if (deal) { socket.emit("adminBingoResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
     if (rlgl) { socket.emit("adminBingoResult", { ok: false, message: "Red Light Green Light is running — wait for the doll to finish." }); return; }
-    const prize = Math.round(Number(payload?.prize));
+    // Plain admins: prize is FIXED at 500 coins (owner key picks amounts).
+    const prize = owners.has(socket.id) ? Math.round(Number(payload?.prize)) : 500;
     if (!Number.isSafeInteger(prize) || prize < BINGO_PRIZE_MIN || prize > BINGO_PRIZE_MAX) {
       socket.emit("adminBingoResult", { ok: false, message: `Prize must be ${BINGO_PRIZE_MIN}–${BINGO_PRIZE_MAX.toLocaleString()} coins.` });
       return;

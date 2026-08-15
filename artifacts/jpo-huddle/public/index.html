@@ -10645,6 +10645,20 @@
       document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-deal').style.display = (d && d.owner) ? '' : 'none';
       window._ownerAuthed = !!(d && d.owner);
+      // Plain admin key: no price tools at all, and game pots are locked to
+      // a fixed 500 coins (the server enforces both regardless of the UI).
+      const isOwner = window._ownerAuthed;
+      const priceTab = document.querySelector('[data-otab-btn="prices"]');
+      if (priceTab) priceTab.style.display = isOwner ? '' : 'none';
+      const priceSec = document.querySelector('.owner-section[data-otab="prices"]');
+      if (priceSec && !isOwner) priceSec.classList.remove('otab-show');
+      for (const id of ['op-bingo-prize', 'op-rlgl-prize', 'op-race-prize']) {
+        const inp = document.getElementById(id);
+        if (!inp) continue;
+        inp.disabled = !isOwner;
+        if (!isOwner) { inp.value = 500; inp.title = 'Admin games run with a fixed 500-coin pot'; }
+        else inp.title = '';
+      }
       // Silent path = automatic re-auth after a reconnect (pwd modal not open):
       // refresh the flags but do NOT pop the owner panel open mid-game.
       const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
