@@ -671,3 +671,31 @@ uri = "file://attached_assets/generated_images/hd_recolor_parts.png"
 type = "image"
 title = "🎨 HD character parts fully separated"
 description = "Hair, skin, shirt, pants and shoes are now their own layers on the HD character — every pose (walking + all 3 sitting views). Recolors hit only the right part: no more color bleeding into the face, hands, or the chest strap. This is the clean base the wearables will attach to."
+
+[[outputs]]
+id = "cQpSXn7u0Bik3lqsCYNJE"
+uri = "file://artifacts/jpo-huddle/design/ld-hd-preview.png"
+type = "image"
+title = "L&D Room in HD — library & study wall"
+description = "New HD floor, bookshelf wall, supply shelf, study counters, chalkboards, pinboards, carts and potted tree."
+
+[[outputs]]
+id = "NWXMLvb5yEa3JrA1wzf43"
+uri = "file://artifacts/jpo-huddle/design/ld-hd-preview2.png"
+type = "image"
+title = "L&D Room in HD — round table corner"
+description = "New teal round meeting table and the east board wall in HD."
+
+[[outputs]]
+id = "BWEz2WCdBSPRSsk6HeLv7"
+uri = "file://artifacts/jpo-huddle/design/sit-v2-front.png"
+type = "image"
+title = "Sitting fixed — same size, same face"
+description = "Seated character now matches the standing HD style: same chibi proportions, same face, no shrinking."
+
+[[outputs]]
+id = "JisZ8RziuuQi9D-cLWCzy"
+uri = "file://artifacts/jpo-huddle/design/sit-v2-side.png"
+type = "image"
+title = "Sitting at the trainer desk"
+description = "Side sit pose, matched to the standing look."

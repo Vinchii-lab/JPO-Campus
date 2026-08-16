@@ -11796,6 +11796,10 @@
         this.load.spritesheet('sit_adam_hd',  '/assets/Adam_sit_hd.png',  { frameWidth: 96, frameHeight: 96 });
         this.load.spritesheet('sit2_adam_hd', '/assets/Adam_sit2_hd.png', { frameWidth: 96, frameHeight: 96 });
         this.load.spritesheet('sit3_adam_hd', '/assets/Adam_sit3_hd.png', { frameWidth: 48, frameHeight: 96 });
+        // HD remake room 2 (L&D) props.
+        this.load.image('hdL_floor2', '/assets/hd/ld/floor.png');
+        for (const p of ['roundtable', 'stool', 'trainerdesk', 'trainerchair', 'bookrow', 'supplyshelf', 'counter', 'blackboard', 'poster', 'cart', 'armchair', 'sidechair', 'greenchair', 'studentdesk', 'tree'])
+          this.load.image(`hdL_${p}`, `/assets/hd/ld/${p}.png`);
         // HD per-part layer masks (tools/hd-layer-split.cjs): pixel-exact
         // hair/skin/shirt/pants/shoes ownership for the HD sheets — recoloring
         // tints ONLY the owning part, so clothes never bleed into skin/hair
@@ -11980,6 +11984,96 @@
           put('hdA_lamp',      171, 125, 171, 127, 1.0, 2);
         }
         // === end HD Accounting ==============================================
+        // === HD remake — room 2: L&D (c149-191, r63-97) ======================
+        // Same recipe as Accounting: masked HD floor below the Furniture layer,
+        // originals switched invisible, HD prop images on top. Seats (round-
+        // table stools, armchairs, reading chairs, student desk chairs, the
+        // trainer chair) KEEP their classic tiles this pass so sitting logic
+        // and seat occluders stay untouched — same trajectory Accounting took
+        // (its pods went HD in a later pass).
+        if (this.textures.exists('hdL_floor2')) {
+          const LZ = { c0: 149, c1: 191, r0: 63, r1: 97 };
+          // Furniture-layer footprints replaced by HD art.
+          const COVER = [
+            [171, 64, 176, 66],                    // supply shelf
+            [163, 74, 170, 76],                    // long bookshelf row
+            [168, 69, 174, 71],                    // study counter cluster
+            [163, 69, 164, 71],                    // green cart, mid
+            [189, 74, 190, 76],                    // green cart, east
+            [150, 95, 151, 97], [189, 95, 190, 97],// green carts, south corners
+            [181, 85, 190, 86],                    // south wall media boards
+          ];
+          // Wall-layer pieces replaced by HD art (poster boards, blackboards,
+          // the teal round table, the trainer's desk, small plants). Structural
+          // wall GIDs are NOT in this set. Stool GID 2231 stays visible.
+          const WALL_HIDE = new Set([
+            2043, 2044, 2045, 2059, 2060, 2061, 2075, 2076, 2077,   // round table
+            2113, 2114, 2129, 2130, 2145, 2146,                     // trainer desk
+            2638, 2639, 2654, 2655, 2669, 2670, 2671, 2685, 2686, 2687, // boards
+            2870, 2871, 2886, 2887, 2918, 2919, 2948, 2949,         // plants + counter bits
+            2934, 2935, 2950, 2951,                                 // counter mid unit
+          ]);
+          // Cells whose classic art stays even though the GID is in WALL_HIDE
+          // elsewhere (no HD replacement is placed at these spots).
+          const WALL_KEEP = new Set(['183,64', '183,65']);
+          const hdFloor2 = this.add.tileSprite(
+            LZ.c0 * 48, LZ.r0 * 48,
+            (LZ.c1 - LZ.c0 + 1) * 48, (LZ.r1 - LZ.r0 + 1) * 48,
+            'hdL_floor2').setOrigin(0, 0);
+          hdFloor2.setTileScale(384 / 256);
+          const mg2 = this.make.graphics({ add: false });
+          mg2.fillStyle(0xffffff);
+          const LD_FLOOR = new Set([391, 392, 393, 406, 407, 408]);
+          for (let r = LZ.r0; r <= LZ.r1; r++) for (let c = LZ.c0; c <= LZ.c1; c++) {
+            const ft = floorLayer.getTileAt(c, r);
+            if (!ft || !LD_FLOOR.has(ft.index)) continue;
+            mg2.fillRect(c * 48, r * 48, 48, 48);
+          }
+          hdFloor2.setMask(mg2.createGeometryMask());
+          this.children.moveBelow(hdFloor2, furnitureLayer);
+          for (const [a, b, d, e] of COVER)
+            for (let r = b; r <= e; r++) for (let c = a; c <= d; c++) {
+              const t = furnitureLayer.getTileAt(c, r);
+              if (t) t.setVisible(false);
+            }
+          for (let r = LZ.r0; r <= LZ.r1; r++) for (let c = LZ.c0; c <= LZ.c1; c++) {
+            const w = wallLayer.getTileAt(c, r);
+            if (w && WALL_HIDE.has(w.index) && !WALL_KEEP.has(`${c},${r}`)) w.setVisible(false);
+          }
+          // put2: like Accounting's put(), but preserves the art's own aspect
+          // ratio (tall shelves rise up the wall instead of squashing).
+          const put2 = (key, c0, r0, c1, r1, grow = 1.08, dy = 4) => {
+            const cols = c1 - c0 + 1;
+            const tex = this.textures.get(key).getSourceImage();
+            const w = cols * 48 * grow, h = w * (tex.height / tex.width);
+            return this.add.image((c0 + cols / 2) * 48, (r1 + 1) * 48 + dy, key)
+              .setOrigin(0.5, 1).setDisplaySize(w, h);
+          };
+          put2('hdL_supplyshelf', 171, 64, 176, 66, 1.0, 0);
+          put2('hdL_poster',     177, 64, 178, 65, 1.05, 2);
+          put2('hdL_poster',     180, 64, 181, 65, 1.05, 2);
+          put2('hdL_blackboard', 177, 70, 178, 71, 1.05, 2);
+          put2('hdL_blackboard', 180, 70, 181, 71, 1.05, 2);
+          put2('hdL_counter',    168, 69, 170, 71, 1.0, 2);
+          put2('hdL_counter',    171, 69, 173, 71, 1.0, 2);
+          put2('hdL_tree',       175, 69, 176, 70, 0.72, 2);
+          put2('hdL_cart',       163, 69, 164, 71, 1.0, 2);
+          put2('hdL_cart',       189, 74, 190, 76, 1.0, 2);
+          put2('hdL_cart',       150, 95, 151, 97, 1.0, 2);
+          put2('hdL_cart',       189, 95, 190, 97, 1.0, 2);
+          put2('hdL_bookrow',    163, 74, 170, 76, 1.0, 2);
+          put2('hdL_trainerdesk',158, 72, 159, 74, 1.0, 2);
+          put2('hdL_poster',     182, 74, 183, 75, 1.05, 2);
+          put2('hdL_blackboard', 185, 74, 187, 75, 1.0, 2);
+          put2('hdL_blackboard', 181, 85, 182, 86, 1.05, 2);
+          put2('hdL_poster',     185, 85, 186, 86, 1.05, 2);
+          put2('hdL_blackboard', 189, 85, 190, 86, 1.05, 2);
+          // Round table: centered like Accounting's meeting table (stools stay
+          // classic seats around it).
+          this.add.image(176.5 * 48, 78.5 * 48, 'hdL_roundtable')
+            .setOrigin(0.5, 0.5).setDisplaySize(3 * 48 * 1.1, 3 * 48 * 1.0);
+        }
+        // === end HD L&D ======================================================
         // The dark wall band at the bottom of the L&D classroom (row 97,
         // c150-c190) is painted on the FLOOR layer (gid 1237) with no Wall-layer
         // tile behind it — without this, players walk straight through it onto
@@ -12903,10 +12997,11 @@
                     sx2.putImageData(sid, 0, 0);
                   }
                   if (wearIds && wearIds.length) {
-                    // Classic sit anchors assume the classic head-top row; the HD art's
-                    // head sits at different rows (measured): right/down 11px higher,
-                    // up 7px lower. Shift the whole bake so hats land on the HD head.
-                    const bakeDy = { sit: -11, sit2: 7, sit3: -11 }[suffix] || 0;
+                    // Classic sit anchors assume the classic head-top row; the Aug-2026
+                    // regenerated HD sit art tops out at y22 in every sheet (74px char,
+                    // bottom-anchored). Shift the whole bake so hats land on the HD head:
+                    // classic anchor rows put heads at 27 (right/down) and 9 (up).
+                    const bakeDy = { sit: -5, sit2: 13, sit3: -5 }[suffix] || 0;
                     sx2.save(); sx2.translate(0, bakeDy); sx2.scale(3, 3); sx2.imageSmoothingEnabled = false;
                     this._bakeWearOnCanvas(sx2, char, suffix, dir === 'down' ? 16 : 32, wearIds);
                     sx2.restore();
