@@ -643,3 +643,10 @@ uri = "file://attached_assets/generated_images/chair_final.png"
 type = "image"
 title = "🪑 Chair where it belongs — front of desk, facing the computer"
 description = "Left: someone sitting — back to us, facing the screen, chair back over their legs. Right: empty desk with the chair pulled up in front. Sitting at these desks now parks you in that chair automatically."
+
+[[outputs]]
+id = "6F-zKdF6FJU-DWDZ9GM5X"
+uri = "file://attached_assets/generated_images/sit_scale_fix.png"
+type = "image"
+title = "🪑 Sitting keeps your look now"
+description = "The bug: when sitting, the game swapped to the seated art without re-applying the sprite size, so you shrank to a tiny version of yourself. Now the size re-syncs on every animation — seated shows your full look at proper scale: white hair, crown and all."

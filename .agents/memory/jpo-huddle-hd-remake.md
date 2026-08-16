@@ -20,3 +20,10 @@ Owner-directed hi-bit remake (Eastward-soft look; style bible at `design/style-b
 - Still classic: sit sheets, recolours, baked wearables (anchors are 16px-tuned) — the flagged remaining "boss battle" work.
 
 **Why:** owner saw old sprites "resurrect" on interaction twice; the setVisible + occluder-branch pattern is what finally killed it.
+
+## Scale sync & mixed-scale sitting
+- Phaser `anims.play()` swaps textures WITHOUT calling `setTexture`, so the _hdify wrapper alone leaves an HD (scale-1) sprite tiny when a classic sit anim starts. _hdify must also re-sync scale on `ANIMATION_START`.
+- HD sit poses don't exist yet: sit anims for `*_hd` keys are ALIASES onto the recolored classic sit textures — mixed scales per pose are expected and handled by the sync above.
+- `_buildPlayerTex` early exists-check must FALL THROUGH to the HD block when the classic key was pre-built by a remote player, or the local player gets stranded on classic art.
+- HD pod desks face the viewer (screen south), so pod sitters are snapped 2 rows SOUTH of the map seat tile with a 'standup' pose + chair-back occluder; local snap, `_deskPoseAt`, occluders and static chair must all share that geometry (96px snap < server's 160px allowance).
+- `tryRegister` upsert RESETS look columns to payload defaults — seed custom looks in-page, never via DB pre-seed.

@@ -5564,6 +5564,19 @@
       const img = _charImages[_wardrobeCharSel];
       if (!img) return;
       ctx.imageSmoothingEnabled = false;
+      // HD characters: preview the real HD sprite (recolors applied) instead of
+      // the legacy 16px sheet, so wardrobe choices show exactly what you'll wear.
+      const _sc = window._gameScene;
+      if (_sc && _sc._buildPlayerTex) {
+        try {
+          const hk = _sc._buildPlayerTex(_wardrobeCharSel, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel);
+          if (String(hk).endsWith('_hd') && _sc.textures.exists(hk)) {
+            const src = _sc.textures.get(hk).getSourceImage();
+            ctx.drawImage(src, 18 * 48, 0, 48, 96, 0, 0, cv.width, cv.height);
+            return;
+          }
+        } catch (e) { /* fall back to legacy preview below */ }
+      }
       const zones = _charZoneColors[_wardrobeCharSel];
       const noSwap = !_wardrobeHairSel && !_playerSkinIdx && !_wardrobeShirtSel && !_wardrobePantsSel;
       if (noSwap || !zones) {
@@ -12610,6 +12623,10 @@
         const orig = sp.setTexture.bind(sp);
         const sync = () => sp.setScale(String(sp.texture.key).endsWith('_hd') ? 1 : 3);
         sp.setTexture = (k, f) => { const r = orig(k, f); sync(); return r; };
+        // anims.play() swaps textures WITHOUT going through setTexture (Phaser sets
+        // the frame directly), so an HD sprite playing a classic 16px sit anim stayed
+        // at scale 1 — a tiny "original sprite" while seated. Re-sync on anim start.
+        sp.on(Phaser.Animations.Events.ANIMATION_START, sync);
         sync();
         return sp;
       }
