@@ -3019,14 +3019,14 @@
       '128,124': 'down',  // CFO office: visitor bench, Jail desk south face (c128-130 r124)
       '129,124': 'down',
       '130,124': 'down',
-      // L&D trainer's desk chair (GID 2589/2605/2621 at c160, r72-74): the global
-      // SEAT_FACING[2589]='left' pin is correct for COO/Accounting (desk to the west),
-      // but at the L&D position the trainer's desk + classroom are to the EAST, so
-      // the sitter must face RIGHT. Three rows needed — seatFacingAt is keyed on the
-      // scan tile (whichever row the player pressed E on), not the SEAT_DY-snapped cell.
-      '160,72': 'right',  // L&D trainer's chair top tile
-      '160,73': 'right',  // L&D trainer's chair seat tile
-      '160,74': 'right',  // L&D trainer's chair legs tile
+      // L&D trainer's desk chair (GID 2589/2605/2621 at c160, r72-74): the HD desk
+      // sits to the WEST of this chair (owner screenshot 2026-08-15 — sitter facing
+      // right reads as facing away from the desk), so pin LEFT toward the desk.
+      // Three rows needed — seatFacingAt is keyed on the scan tile (whichever row
+      // the player pressed E on), not the SEAT_DY-snapped cell.
+      '160,72': 'left',  // L&D trainer's chair top tile
+      '160,73': 'left',  // L&D trainer's chair seat tile
+      '160,74': 'left',  // L&D trainer's chair legs tile
       // Green desk chairs (GID 2589/2605/2621) at the Accounting manager east wall
       // (c190,r122-124) and CEO area south desk (c104,r125-127): the global
       // SEAT_FACING[2589]='left' aims the sitter at the panel/divider to the west —
@@ -11796,6 +11796,13 @@
         this.load.spritesheet('sit_adam_hd',  '/assets/Adam_sit_hd.png',  { frameWidth: 96, frameHeight: 96 });
         this.load.spritesheet('sit2_adam_hd', '/assets/Adam_sit2_hd.png', { frameWidth: 96, frameHeight: 96 });
         this.load.spritesheet('sit3_adam_hd', '/assets/Adam_sit3_hd.png', { frameWidth: 48, frameHeight: 96 });
+        // HD per-part layer masks (tools/hd-layer-split.cjs): pixel-exact
+        // hair/skin/shirt/pants/shoes ownership for the HD sheets — recoloring
+        // tints ONLY the owning part, so clothes never bleed into skin/hair
+        // and wearables bake onto a cleanly-dressed character.
+        for (const sfx of ['run', 'sit', 'sit2', 'sit3'])
+          for (const part of ['skin', 'hair', 'shirt', 'pants', 'shoes'])
+            this.load.image(`hdL_${sfx}_${part}`, `/assets/layers/Adam_${sfx}_hd_${part}.png`);
 
         // Seated-sheet pitch is per-sheet, NOT uniform. sit (RIGHT) and sit2 (UP) are 32px per pose
         // (figure centred with padding; sheet is 384px = 12 frames). sit3 (DOWN) is 16px per pose
@@ -12701,11 +12708,62 @@
         }
       }
 
-      // HD zone recolour: classify each HD-sheet pixel against the sheet's own
-      // four zone centroids (hue-ish distance, outlines and shadows excluded by
-      // the luminance floor), then re-tint toward the chosen palette colour
-      // while preserving the pixel's shading relative to the zone base.
-      _hdRecolorData(px, hairIdx, skinIdx, shirtIdx, pantsIdx) {
+      // HD layer masks → per-pixel part ownership (alpha channel of the
+      // hdL_* images). Built lazily per sheet suffix and cached; null until
+      // every part image for that sheet is loaded (callers then fall back to
+      // the centroid classifier below).
+      _hdLayerData(suffix, w, h) {
+        this._hdLD = this._hdLD || {};
+        if (this._hdLD[suffix] !== undefined) return this._hdLD[suffix];
+        const parts = ['skin', 'hair', 'shirt', 'pants', 'shoes'];
+        const out = {};
+        for (const part of parts) {
+          const tk = `hdL_${suffix}_${part}`;
+          if (!this.textures.exists(tk)) return null;   // not loaded (yet) — no cache, retry later
+          const img = this.textures.get(tk).source[0].image;
+          if (img.width !== w || img.height !== h) return null;
+          const c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          const cx = c.getContext('2d');
+          cx.drawImage(img, 0, 0);
+          out[part] = cx.getImageData(0, 0, w, h).data;
+        }
+        return (this._hdLD[suffix] = out);
+      }
+
+      // HD zone recolour. Preferred path: per-part layer masks (pixel-exact —
+      // hair/skin/shirt/pants each tint ONLY their own pixels; shoes follow the
+      // pants pick like the classic zones.shoe pass). Shading is preserved by
+      // scaling the target colour by the pixel's luminance relative to the
+      // part's base colour. Fallback (masks not loaded): classify each pixel
+      // against the sheet's zone centroids (hue-ish distance, outlines and
+      // shadows excluded by the luminance floor).
+      _hdRecolorData(px, hairIdx, skinIdx, shirtIdx, pantsIdx, suffix, w, h) {
+        const L = suffix && w ? this._hdLayerData(suffix, w, h) : null;
+        if (L) {
+          const P = {
+            hair:  { base: [149, 146, 94],  css: hairIdx  ? HAIR_COLORS[hairIdx]?.css   : null },
+            skin:  { base: [250, 211, 180], css: skinIdx  ? SKIN_TONES?.[skinIdx]?.css ?? null : null },
+            shirt: { base: [148, 111, 156], css: shirtIdx ? CLOTH_COLORS[shirtIdx]?.css : null },
+            pants: { base: [56, 62, 84],    css: pantsIdx ? CLOTH_COLORS[pantsIdx]?.css : null },
+            shoes: { base: [47, 47, 69],    css: pantsIdx ? CLOTH_COLORS[pantsIdx]?.css : null },
+          };
+          for (const [part, z] of Object.entries(P)) {
+            if (!z.css) continue;
+            const tgt = _hexCssToRGB(z.css);
+            const baseLum = 0.299 * z.base[0] + 0.587 * z.base[1] + 0.114 * z.base[2];
+            const mask = L[part];
+            for (let i = 0; i < px.length; i += 4) {
+              if (mask[i + 3] < 128 || px[i + 3] < 128) continue;
+              const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+              const sh = Math.max(0.30, Math.min(1.7, lum / baseLum)); // keep shading
+              px[i]     = Math.min(255, tgt[0] * sh);
+              px[i + 1] = Math.min(255, tgt[1] * sh);
+              px[i + 2] = Math.min(255, tgt[2] * sh);
+            }
+          }
+          return;
+        }
         const zones = [
           { base: [139, 138, 94],  t: 60, css: hairIdx  ? HAIR_COLORS[hairIdx]?.css   : null },
           { base: [234, 201, 175], t: 55, css: skinIdx  ? SKIN_TONES?.[skinIdx]?.css ?? null : null },
@@ -12812,7 +12870,7 @@
             hx.drawImage(src, 0, 0);
             if (hairIdx || skinIdx || shirtIdx || pantsIdx) {
               const hid = hx.getImageData(0, 0, hcv.width, hcv.height);
-              this._hdRecolorData(hid.data, hairIdx, skinIdx, shirtIdx, pantsIdx);
+              this._hdRecolorData(hid.data, hairIdx, skinIdx, shirtIdx, pantsIdx, 'run', hcv.width, hcv.height);
               hx.putImageData(hid, 0, 0);
             }
             // Bake wearables with the classic 16px math under a 3x transform —
@@ -12841,7 +12899,7 @@
                   sx2.drawImage(ssrc, 0, 0);
                   if (hairIdx || skinIdx || shirtIdx || pantsIdx) {
                     const sid = sx2.getImageData(0, 0, scv.width, scv.height);
-                    this._hdRecolorData(sid.data, hairIdx, skinIdx, shirtIdx, pantsIdx);
+                    this._hdRecolorData(sid.data, hairIdx, skinIdx, shirtIdx, pantsIdx, suffix, scv.width, scv.height);
                     sx2.putImageData(sid, 0, 0);
                   }
                   if (wearIds && wearIds.length) {

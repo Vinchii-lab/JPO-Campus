@@ -33,3 +33,8 @@ Owner-directed hi-bit remake (Eastward-soft look; style bible at `design/style-b
 - Built HD sit textures must be NAMED ending `_hd` so the _hdify anim-start sync keeps scale 1.
 - Wearable bake on HD sit sheets needs a per-sheet dy BEFORE the 3x scale (classic anchors assume classic head rows; measured: sit -11, sit2 +7, sit3 -11).
 - The owner rejects ANY classic-art fallback on his HD character — seated included; scale-up of classic sheets is not acceptable, generate real HD art instead.
+
+## HD per-part layer masks (recolor detail)
+- HD recolor is mask-driven: tools/hd-layer-split.cjs partitions each HD sheet into skin/hair/shirt/pants/shoes/body layer PNGs (assets/layers/*_hd_*.png); client tints only the owning layer (shoes follow the pants pick, classic zones.shoe semantics). Centroid classifier kept as fallback when masks miss.
+- Splitter gotchas: near-black outline pixels fall inside the dark pants/shoes centroids (need a max(r,g,b)<0x20 body floor), and the chest lanyard strap is the same navy as pants — upper-body pants/shoes hits must be gated to body by a per-sheet waist fraction or the strap recolors with pants.
+- QA recipe: colorize each layer garishly + flatten to spot bleed; verify partition strictly (every opaque px owned by exactly one layer).

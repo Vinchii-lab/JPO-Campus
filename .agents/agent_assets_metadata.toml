@@ -657,3 +657,17 @@ uri = "file://attached_assets/generated_images/hd_sit_check2.png"
 type = "image"
 title = "🪑 Sitting in HD now — no more shrink"
 description = "Brand-new HD sitting poses (side, back and front views) drawn in the same style as the new walking sprite. Your colors and crown carry over onto them, and hats now perch on the HD head correctly."
+
+[[outputs]]
+id = "rlQacd9MmOcW9THp3R__-"
+uri = "file://attached_assets/generated_images/ld_chair_fixed.png"
+type = "image"
+title = "🪑 Chair flipped — facing the desk now"
+description = "The trainer's desk chair had a stale facing pin sending you right, away from the desk. Now you sit facing the desk like you should."
+
+[[outputs]]
+id = "yrFWkeZZj0zKWyg2Uxhfy"
+uri = "file://attached_assets/generated_images/hd_recolor_parts.png"
+type = "image"
+title = "🎨 HD character parts fully separated"
+description = "Hair, skin, shirt, pants and shoes are now their own layers on the HD character — every pose (walking + all 3 sitting views). Recolors hit only the right part: no more color bleeding into the face, hands, or the chest strap. This is the clean base the wearables will attach to."
