@@ -11837,7 +11837,12 @@
 
         // Base animations
         CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
-        if (this.textures.exists('run_adam_hd')) this._createDirAnims('run_adam_hd');
+        if (this.textures.exists('run_adam_hd')) {
+          // The game renders with default LINEAR filtering; HD character art
+          // must stay pixel-crisp, so force nearest-neighbour on HD sheets.
+          this.textures.get('run_adam_hd').setFilter(Phaser.Textures.FilterMode.NEAREST);
+          this._createDirAnims('run_adam_hd');
+        }
         // Seated anims are per-player (palette-swapped) and created in _buildPlayerTex; no base
         // sit anims are needed here.
         this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
@@ -12796,6 +12801,7 @@
               hx.restore();
             }
             this.textures.addSpriteSheet(hdKey, hcv, { frameWidth: 48, frameHeight: 96 });
+            this.textures.get(hdKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
             this._createDirAnims(hdKey);
             for (const dir of Object.keys(SIT_SUFFIX)) {
               const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;

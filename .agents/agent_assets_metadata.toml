@@ -629,3 +629,10 @@ uri = "file://attached_assets/generated_images/hd_vince_and_chair.png"
 type = "image"
 title = "👑 YOUR character in HD + chair fixed"
 description = "Top: white hair + crown now render on the HD body (walking down and right). Bottom: office chairs now sit on the floor behind each desk, facing the computer — backrest peeking out, seat tucked behind the desk."
+
+[[outputs]]
+id = "hiUbtGoiCwMeItV25dJuq"
+uri = "file://attached_assets/generated_images/hd_crisp_before_after.png"
+type = "image"
+title = "🔍 Crisp fix — before (left) vs after (right)"
+description = "Two causes of the blur: the game was smoothing HD textures at render (now forced to sharp pixel sampling), and my frame processing was softening + fading the art (rebuilt with sharpening and restored contrast). Crown, hair and outlines now read crisp like your reference."
