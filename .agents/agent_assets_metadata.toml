@@ -622,3 +622,10 @@ uri = "file://attached_assets/generated_images/hd_adam_closeup.png"
 type = "image"
 title = "🚶 HD Adam is IN THE GAME — all 4 directions"
 description = "Live in-game shots: walking down, right, up and left. Sliced the approved strips into a 24-frame sheet matching the classic layout, and any default-look Adam now renders in HD automatically — sitting and other poses swap back to classic art for now."
+
+[[outputs]]
+id = "XtxD0qiJgAF0pNv6JKY1Y"
+uri = "file://attached_assets/generated_images/hd_vince_and_chair.png"
+type = "image"
+title = "👑 YOUR character in HD + chair fixed"
+description = "Top: white hair + crown now render on the HD body (walking down and right). Bottom: office chairs now sit on the floor behind each desk, facing the computer — backrest peeking out, seat tucked behind the desk."

@@ -11934,8 +11934,8 @@
           // HD office chairs first, then desks, so the desk front tucks over
           // the chair base — players sit on the chair cell facing the screen.
           for (const r of [119, 125]) for (const c of [160, 164, 168])
-            this.add.image((c + 0.5) * 48, (r + 0.62) * 48, 'hdA_chair')
-              .setOrigin(0.5, 1).setDisplaySize(52, 66);
+            this.add.image((c + 0.5) * 48, (r + 0.32) * 48, 'hdA_chair')
+              .setOrigin(0.5, 1).setDisplaySize(46, 58);
           for (const r of [119, 125]) for (const c of [160, 164, 168])
             put('hdA_desk', c, r, c + 1, r + 1, 1.08, 2);
           put('hdA_mailshelf', 178, 104, 185, 106, 1.0, 0);
@@ -12674,18 +12674,47 @@
         }
       }
 
-      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx, wearIds) {
-        // HD remake pilot: default-look Adam (no recolours, no baked wearables)
-        // uses the hi-bit sheet. Recolours/wearables still bake on the classic
-        // 16px sheet until the HD variants exist.
-        if (char === 'adam' && !hairIdx && !skinIdx && !shirtIdx && !pantsIdx
-            && (!wearIds || !wearIds.length)
-            && window.HD_ADAM !== false && this.textures.exists('run_adam_hd')) {
-          return 'run_adam_hd';
+      // HD zone recolour: classify each HD-sheet pixel against the sheet's own
+      // four zone centroids (hue-ish distance, outlines and shadows excluded by
+      // the luminance floor), then re-tint toward the chosen palette colour
+      // while preserving the pixel's shading relative to the zone base.
+      _hdRecolorData(px, hairIdx, skinIdx, shirtIdx, pantsIdx) {
+        const zones = [
+          { base: [139, 138, 94],  t: 60, css: hairIdx  ? HAIR_COLORS[hairIdx]?.css   : null },
+          { base: [234, 201, 175], t: 55, css: skinIdx  ? SKIN_TONES?.[skinIdx]?.css ?? null : null },
+          { base: [138, 105, 150], t: 60, css: shirtIdx ? CLOTH_COLORS[shirtIdx]?.css : null },
+          { base: [57, 62, 81],    t: 45, css: pantsIdx ? CLOTH_COLORS[pantsIdx]?.css : null },
+        ].filter(z => z.css).map(z => ({ ...z, tgt: _hexCssToRGB(z.css),
+          lum: 0.299 * z.base[0] + 0.587 * z.base[1] + 0.114 * z.base[2] }));
+        if (!zones.length) return;
+        for (let i = 0; i < px.length; i += 4) {
+          if (px[i + 3] < 128) continue;
+          const r = px[i], g = px[i + 1], b = px[i + 2];
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (lum < 42) continue;                       // outlines stay dark
+          for (const z of zones) {
+            const d = Math.abs(r - z.base[0]) + Math.abs(g - z.base[1]) + Math.abs(b - z.base[2]);
+            if (d > z.t * 3) continue;
+            const sh = Math.max(0.35, Math.min(1.6, lum / z.lum)); // keep shading
+            px[i]     = Math.min(255, z.tgt[0] * sh);
+            px[i + 1] = Math.min(255, z.tgt[1] * sh);
+            px[i + 2] = Math.min(255, z.tgt[2] * sh);
+            break;
+          }
         }
+      }
+
+      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx, wearIds) {
         const wsig = wearIds && wearIds.length ? `_W${wearIds.join('.')}` : '';
         const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
-        if (this.textures.exists(key)) return key;
+        // HD-eligible builds must fall through to the HD block below even when
+        // the classic texture already exists (a remote player with the same
+        // look may have built it) — returning early here would strand them on
+        // the classic sheet.
+        const hdWanted = char === 'adam' && window.HD_ADAM !== false && this.textures.exists('run_adam_hd');
+        if (this.textures.exists(key)) {
+          if (!hdWanted) return key;
+        } else {
 
         const srcImg = this.textures.get(`run_${char}`).source[0].image;
         const sw = srcImg.width, sh = srcImg.height;
@@ -12738,6 +12767,44 @@
           this._bakeWearOnCanvas(scx, char, suffix, dir === 'down' ? 16 : 32, wearIds);
           this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
           this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
+        }
+        }   // end classic build (skipped when the classic texture already exists)
+
+        // ── HD remake pilot: Adam renders from the hi-bit sheet — including
+        // recolours (hue-zone tint) and baked wearables (classic art drawn at
+        // 3x, nearest-neighbour). Sit poses stay classic: the sit textures
+        // built above are aliased under the HD key so sitting keeps working.
+        if (hdWanted) {
+          const hdKey = `${key}_hd`;
+          if (!this.textures.exists(hdKey)) {
+            const src = this.textures.get('run_adam_hd').source[0].image;
+            const hcv = document.createElement('canvas');
+            hcv.width = src.width; hcv.height = src.height;
+            const hx = hcv.getContext('2d');
+            hx.imageSmoothingEnabled = false;
+            hx.drawImage(src, 0, 0);
+            if (hairIdx || skinIdx || shirtIdx || pantsIdx) {
+              const hid = hx.getImageData(0, 0, hcv.width, hcv.height);
+              this._hdRecolorData(hid.data, hairIdx, skinIdx, shirtIdx, pantsIdx);
+              hx.putImageData(hid, 0, 0);
+            }
+            // Bake wearables with the classic 16px math under a 3x transform —
+            // every anchor/clip coordinate scales with it, art stays crisp.
+            if (wearIds && wearIds.length) {
+              hx.save(); hx.scale(3, 3); hx.imageSmoothingEnabled = false;
+              this._bakeWearOnCanvas(hx, char, 'run', 16, wearIds);
+              hx.restore();
+            }
+            this.textures.addSpriteSheet(hdKey, hcv, { frameWidth: 48, frameHeight: 96 });
+            this._createDirAnims(hdKey);
+            for (const dir of Object.keys(SIT_SUFFIX)) {
+              const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
+              if (this.textures.exists(sitKey) && !this.anims.exists(`sit_${hdKey}_${dir}`)) {
+                this.anims.create({ key: `sit_${hdKey}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey, { start: 0, end: 5 }), frameRate: 8, repeat: -1 });
+              }
+            }
+          }
+          return hdKey;
         }
 
         return key;
