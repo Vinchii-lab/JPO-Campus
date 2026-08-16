@@ -650,3 +650,10 @@ uri = "file://attached_assets/generated_images/sit_scale_fix.png"
 type = "image"
 title = "🪑 Sitting keeps your look now"
 description = "The bug: when sitting, the game swapped to the seated art without re-applying the sprite size, so you shrank to a tiny version of yourself. Now the size re-syncs on every animation — seated shows your full look at proper scale: white hair, crown and all."
+
+[[outputs]]
+id = "1Lz4Kr_D4UJEX8LZtMCO7"
+uri = "file://attached_assets/generated_images/hd_sit_check2.png"
+type = "image"
+title = "🪑 Sitting in HD now — no more shrink"
+description = "Brand-new HD sitting poses (side, back and front views) drawn in the same style as the new walking sprite. Your colors and crown carry over onto them, and hats now perch on the HD head correctly."

@@ -27,3 +27,9 @@ Owner-directed hi-bit remake (Eastward-soft look; style bible at `design/style-b
 - `_buildPlayerTex` early exists-check must FALL THROUGH to the HD block when the classic key was pre-built by a remote player, or the local player gets stranded on classic art.
 - HD pod desks face the viewer (screen south), so pod sitters are snapped 2 rows SOUTH of the map seat tile with a 'standup' pose + chair-back occluder; local snap, `_deskPoseAt`, occluders and static chair must all share that geometry (96px snap < server's 160px allowance).
 - `tryRegister` upsert RESETS look columns to payload defaults — seed custom looks in-page, never via DB pre-seed.
+
+## HD sit poses (no more classic fallback while seated)
+- HD sit sheets exist per classic layout: sit/sit2/sit3 (right/up/down), frames 96x96 (right/up) and 48x96 (down), 6 frames (0-2 normal, 3-5 one px lower bob). Generated as 3 static poses on white → thirds-slice → same grade recipe as the run sheet.
+- Built HD sit textures must be NAMED ending `_hd` so the _hdify anim-start sync keeps scale 1.
+- Wearable bake on HD sit sheets needs a per-sheet dy BEFORE the 3x scale (classic anchors assume classic head rows; measured: sit -11, sit2 +7, sit3 -11).
+- The owner rejects ANY classic-art fallback on his HD character — seated included; scale-up of classic sheets is not acceptable, generate real HD art instead.

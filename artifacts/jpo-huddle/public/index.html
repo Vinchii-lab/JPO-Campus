@@ -11793,6 +11793,9 @@
         // i.e. native size of the classic sheet at scale 3. Sprites showing
         // an *_hd texture render at scale 1 (see _hdify).
         this.load.spritesheet('run_adam_hd', '/assets/Adam_run_hd.png', { frameWidth: 48, frameHeight: 96 });
+        this.load.spritesheet('sit_adam_hd',  '/assets/Adam_sit_hd.png',  { frameWidth: 96, frameHeight: 96 });
+        this.load.spritesheet('sit2_adam_hd', '/assets/Adam_sit2_hd.png', { frameWidth: 96, frameHeight: 96 });
+        this.load.spritesheet('sit3_adam_hd', '/assets/Adam_sit3_hd.png', { frameWidth: 48, frameHeight: 96 });
 
         // Seated-sheet pitch is per-sheet, NOT uniform. sit (RIGHT) and sit2 (UP) are 32px per pose
         // (figure centred with padding; sheet is 384px = 12 frames). sit3 (DOWN) is 16px per pose
@@ -11854,6 +11857,8 @@
           // The game renders with default LINEAR filtering; HD character art
           // must stay pixel-crisp, so force nearest-neighbour on HD sheets.
           this.textures.get('run_adam_hd').setFilter(Phaser.Textures.FilterMode.NEAREST);
+          for (const k of ['sit_adam_hd', 'sit2_adam_hd', 'sit3_adam_hd'])
+            if (this.textures.exists(k)) this.textures.get(k).setFilter(Phaser.Textures.FilterMode.NEAREST);
           this._createDirAnims('run_adam_hd');
         }
         // Seated anims are per-player (palette-swapped) and created in _buildPlayerTex; no base
@@ -12820,9 +12825,43 @@
             this.textures.addSpriteSheet(hdKey, hcv, { frameWidth: 48, frameHeight: 96 });
             this.textures.get(hdKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
             this._createDirAnims(hdKey);
-            for (const dir of Object.keys(SIT_SUFFIX)) {
+            // Real HD sit poses: recolor + bake wearables on the HD sit sheets and
+            // point the sit anims at them (keys end '_hd' so _hdify keeps scale 1).
+            // Falls back to the classic recolored sit sheets if an HD sheet is missing.
+            for (const [dir, suffix] of Object.entries(SIT_SUFFIX)) {
+              if (this.anims.exists(`sit_${hdKey}_${dir}`)) continue;
+              const hdSheet = `${suffix}_adam_hd`;
+              if (this.textures.exists(hdSheet)) {
+                const hsKey = `${hdKey}_sit_${dir}_hd`;
+                if (!this.textures.exists(hsKey)) {
+                  const ssrc = this.textures.get(hdSheet).source[0].image;
+                  const scv = document.createElement('canvas');
+                  scv.width = ssrc.width; scv.height = ssrc.height;
+                  const sx2 = scv.getContext('2d');
+                  sx2.drawImage(ssrc, 0, 0);
+                  if (hairIdx || skinIdx || shirtIdx || pantsIdx) {
+                    const sid = sx2.getImageData(0, 0, scv.width, scv.height);
+                    this._hdRecolorData(sid.data, hairIdx, skinIdx, shirtIdx, pantsIdx);
+                    sx2.putImageData(sid, 0, 0);
+                  }
+                  if (wearIds && wearIds.length) {
+                    // Classic sit anchors assume the classic head-top row; the HD art's
+                    // head sits at different rows (measured): right/down 11px higher,
+                    // up 7px lower. Shift the whole bake so hats land on the HD head.
+                    const bakeDy = { sit: -11, sit2: 7, sit3: -11 }[suffix] || 0;
+                    sx2.save(); sx2.translate(0, bakeDy); sx2.scale(3, 3); sx2.imageSmoothingEnabled = false;
+                    this._bakeWearOnCanvas(sx2, char, suffix, dir === 'down' ? 16 : 32, wearIds);
+                    sx2.restore();
+                  }
+                  const fw = dir === 'down' ? 48 : 96;
+                  this.textures.addSpriteSheet(hsKey, scv, { frameWidth: fw, frameHeight: 96 });
+                  this.textures.get(hsKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
+                }
+                this.anims.create({ key: `sit_${hdKey}_${dir}`, frames: this.anims.generateFrameNumbers(hsKey, { start: 0, end: 5 }), frameRate: 8, repeat: -1 });
+                continue;
+              }
               const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
-              if (this.textures.exists(sitKey) && !this.anims.exists(`sit_${hdKey}_${dir}`)) {
+              if (this.textures.exists(sitKey)) {
                 this.anims.create({ key: `sit_${hdKey}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey, { start: 0, end: 5 }), frameRate: 8, repeat: -1 });
               }
             }
