@@ -11939,7 +11939,7 @@
           // HD office chairs first, then desks, so the desk front tucks over
           // the chair base — players sit on the chair cell facing the screen.
           for (const r of [119, 125]) for (const c of [160, 164, 168])
-            this.add.image((c + 0.5) * 48, (r + 0.32) * 48, 'hdA_chair')
+            this.add.image((c + 0.5) * 48, (r + 2.92) * 48, 'hdA_chair')
               .setOrigin(0.5, 1).setDisplaySize(46, 58);
           for (const r of [119, 125]) for (const c of [160, 164, 168])
             put('hdA_desk', c, r, c + 1, r + 1, 1.08, 2);
@@ -12981,13 +12981,13 @@
             if (dc === col && dr === row) continue; // chair cell stays behind the body
             cells.push({ layer: this.furnitureLayer, c: dc, r: dr });
           }
-        } else if ((row === 119 || row === 125) && [160, 164, 168].includes(col)
-                   && this._isWorkstation(col, row) && this.textures.exists('hdA_desk')) {
-          // HD Accounting pods: the original monitor/desk tiles are hidden, so
-          // occlude the seated body with the HD desk art itself — same geometry
-          // as the base placement (put('hdA_desk', c, r, c+1, r+1, 1.08, 2)).
-          out.push(this.add.image((col + 1) * 48, (row + 2) * 48 + 2, 'hdA_desk')
-            .setOrigin(0.5, 1).setDisplaySize(2 * 48 * 1.08, 2 * 48 * 1.08).setDepth(900));
+        } else if ((row === 121 || row === 127) && [160, 164, 168].includes(col)
+                   && this.textures.exists('hdA_chair')) {
+          // HD Accounting pods: sitter lands SOUTH of the desk facing up, so the
+          // chair back must redraw over the legs — same geometry as the static
+          // chair placed in create().
+          out.push(this.add.image((col + 0.5) * 48, (row + 0.92) * 48, 'hdA_chair')
+            .setOrigin(0.5, 1).setDisplaySize(46, 58).setDepth(900));
         } else if (this._isWorkstation(col, row)) {
           // Workstation: a monitor (Wall 2078) shares the chair cell and a desk-front
           // (Wall 2094) sits directly BELOW it — fixed geometry in JPO_HQ.tmj, so both
@@ -13111,6 +13111,10 @@
       _deskPoseAt(x, y) {
         const col = Math.round((x - 24) / 48);
         const row = Math.round((y - 24 + BODY_DY) / 48);
+        // HD Accounting pod sitters land 2 rows SOUTH of their seat tile (screen
+        // faces the viewer) — back to camera, facing up at the computer.
+        if ((row === 121 || row === 127) && [160, 164, 168].includes(col)
+            && this.textures.exists('hdA_desk')) return { pose: 'standup' };
         if (this._isWorkstation(col, row)) return { pose: 'stand' };
         const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
         // Tall HR-desk top (2609): SEAT_DY (+24) parks the 2593-chair sitter's feet on
@@ -16610,7 +16614,13 @@
             // tile lands the avatar on the piece's horizontal center. The snap
             // stays well inside the server's SEAT_SNAP_ALLOWANCE (160px).
             const seatGid = furnAt(s.col, s.row);
-            player.setPosition(s.col*48+24 + (SEAT_DX[seatGid] || 0), s.row*48+24 - BODY_DY + (SEAT_DY[seatGid] || 0));
+            // HD Accounting pods: the HD desk art faces SOUTH (screen toward the
+            // viewer), so the sitter belongs on the south side facing UP at the
+            // computer — shift the landing spot 2 rows below the map's seat tile
+            // (96px, inside the server's 160px SEAT_SNAP_ALLOWANCE).
+            const podSouth = (s.row === 119 || s.row === 125) && [160, 164, 168].includes(s.col)
+                          && this.textures.exists('hdA_desk');
+            player.setPosition(s.col*48+24 + (SEAT_DX[seatGid] || 0), (s.row + (podSouth ? 2 : 0))*48+24 - BODY_DY + (SEAT_DY[seatGid] || 0));
             player.body.enable = false;             // seat tile is solid — disable body so we rest on it
             // Desk-type seats face the desk: monitor workstations render the standing DOWN
             // frame, manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the
@@ -16618,7 +16628,8 @@
             // same pose). Beds render the lying pose. Every other seat keeps the approach
             // facing you walked in with.
             const deskInfo = deskChairAt(seatGid, s.col, s.row);
-            this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
+            this._deskPose = podSouth ? { pose: 'standup' }   // HD pod: back to viewer, facing the screen
+                           : this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
                            : seatGid === 2593 ? { pose: 'stand' }  // tall HR-desk chair: workstation look (SEAT_DY parks the feet on the 2609 desk-top cell — matches _deskPoseAt's derived-cell branch)
                            : STUDIO_CHAIR_GIDS.has(seatGid) ? { pose: 'stand' }  // studio front-desk armchair: workstation look (matches _deskPoseAt's derived-cell branch on the 5033 seat tile)
                            : BED_GIDS.has(seatGid) ? { pose: 'lie' }

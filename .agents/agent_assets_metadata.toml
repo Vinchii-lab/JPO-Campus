@@ -636,3 +636,10 @@ uri = "file://attached_assets/generated_images/hd_crisp_before_after.png"
 type = "image"
 title = "🔍 Crisp fix — before (left) vs after (right)"
 description = "Two causes of the blur: the game was smoothing HD textures at render (now forced to sharp pixel sampling), and my frame processing was softening + fading the art (rebuilt with sharpening and restored contrast). Crown, hair and outlines now read crisp like your reference."
+
+[[outputs]]
+id = "lyRP1r8IAkROCIRQiRaJ1"
+uri = "file://attached_assets/generated_images/chair_final.png"
+type = "image"
+title = "🪑 Chair where it belongs — front of desk, facing the computer"
+description = "Left: someone sitting — back to us, facing the screen, chair back over their legs. Right: empty desk with the chair pulled up in front. Sitting at these desks now parks you in that chair automatically."
