@@ -538,3 +538,10 @@ uri = "file://artifacts/jpo-huddle/design/umbrella-held.png"
 type = "image"
 title = "Umbrella held in hand"
 description = "The umbrella now has a full shaft with a hook handle that slants down into the character's hand — held, not stuck on the head."
+
+[[outputs]]
+id = "jOXySATiv4w6lbkdkA71b"
+uri = "file://artifacts/jpo-huddle/design/rain-outfit-final.png"
+type = "image"
+title = "Boots on the sprite, umbrella in hand"
+description = "Full rain outfit: boots now cover the shoes completely in all four directions, and the umbrella shaft angles down to the hand in side view."
