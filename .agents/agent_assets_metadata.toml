@@ -524,3 +524,10 @@ uri = "file://attached_assets/generated_images/adam_upgrade_proof.png"
 type = "image"
 title = "🎨 Adam art upgrade — before (top) vs after (bottom)"
 description = "Same size, same poses. Three changes: sun-lit highlights on hair/face tops, colored outlines (dark green around hair, dark purple around the shirt) instead of flat black, and grounded contact shading at the feet. Applied per body layer, so recolors and all baked wearables stay 100% compatible."
+
+[[outputs]]
+id = "feZNk7RTddxM3oBybHJ2k"
+uri = "file://artifacts/jpo-huddle/design/boots-fixed.png"
+type = "image"
+title = "Rain boots on the feet"
+description = "Boots now sit on the feet in all four directions, worn together with the umbrella."

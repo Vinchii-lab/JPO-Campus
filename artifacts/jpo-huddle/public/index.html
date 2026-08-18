@@ -3543,7 +3543,9 @@
       // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
       // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
       raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2, frames: 3, backFrame: 2, showUp: true },
-      rainboots: { tex: 'wear_rainboots', dy: 25,  side: 2, frames: 3, backFrame: 2, showUp: true },
+      // dy 42 (not 25): baked frames put the boot art's centre at texel 16+dy/3,
+      // and the feet rows sit at 28-31 — 25 left the boots floating at the shins.
+      rainboots: { tex: 'wear_rainboots', dy: 42,  side: 2, frames: 3, backFrame: 2, showUp: true },
       // Umbrella: held above the head, still visible from the back.
       umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, frames: 3, backFrame: 2, showUp: true },
     };

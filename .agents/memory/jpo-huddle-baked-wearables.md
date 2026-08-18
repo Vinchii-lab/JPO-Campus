@@ -13,3 +13,8 @@ description: Wearables are baked into player textures per frame via layer-derive
 - Wide art (headphones 18px) is clip-rected per frame so it can't bleed into neighbor frames; left rows are drawn mirrored from the right-facing art frame.
 - Known accepted growth: texture cache is unbounded per palette+wear combo (matches pre-existing palette cache design; small player counts).
 - Browser tests live in /tmp/jpotest (`baked_wear_test.cjs`): seed approved row FIRST, register, equip via SQL UPDATE of equipped_* columns, reload. Set localStorage `jpo_tutorial_seen=1` via evaluateOnNewDocument or the first-login tour covers screenshots. Chromium path: `/nix/store/m7qi78k6711fpwnrm4r2kn4p3ga3jal9-ungoogled-chromium-123.0.6312.105/bin/chromium`.
+
+## Feet-gear dy gotcha (Aug 18 2026)
+- Baked wearable Y = texel 16 + dy/3 (anchor delta cancels on run frames where a.fy==ref.fy), so a def dy tuned "by eye" can strand feet gear at the shins where it blends into the outfit and looks missing. Feet rows are 28-31 → rainboots need dy 42, not 25.
+- Verify placement numerically: dump the baked sheet via in-page _buildPlayerTex + canvas toDataURL, then grep the boot palette rows with magick txt:.
+- `_wearAnchors`/DIR_START are closure-scoped, NOT on window — a harness reading window._wearAnchors always sees undefined; judge bake readiness by the rendered pixels instead.
