@@ -3680,7 +3680,7 @@
     // (see _stepPet/_petTrick). Everything is derived client-side from the
     // pet object each frame, zero network traffic, so mirroring a species
     // later is just adding it to this set (+ a trick case if it gets one).
-    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix']);
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix', 'pet_frog']);
     // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
@@ -13387,6 +13387,34 @@
               },
             });
           }
+          return;
+        }
+        if (sp === 'pet_frog') {
+          // Signature trick: a happy triple HOP with squash-and-stretch and a
+          // ribbit note. Higher stages hop bigger — the King Frog bounds.
+          const st = petObj._petStage || 1;
+          petObj._trickBusy = true;
+          const y0 = petObj.y, bs = petObj._baseScale || 1;
+          const hopH = 14 + st * 6;
+          const note = this.add.text(petObj.x, y0 - 34, '🎵', { fontSize: '13px', resolution: 2 })
+            .setOrigin(0.5).setDepth(3.2).setAlpha(0);
+          this.tweens.add({ targets: note, alpha: 1, y: y0 - 56, duration: 700, yoyo: true,
+            onComplete: () => note.destroy() });
+          let hop = 0;
+          const doHop = () => {
+            if (!petObj.active) { if (note.active) note.destroy(); return; }
+            hop++;
+            // crouch → leap → land: scaleY squashes on takeoff/landing
+            this.tweens.add({ targets: petObj, scaleY: bs * 0.8, duration: 70, yoyo: true });
+            this.tweens.add({
+              targets: petObj, y: y0 - hopH, duration: 180, ease: 'Quad.easeOut', yoyo: true,
+              onComplete: () => {
+                if (hop < 3 && petObj.active) doHop();
+                else if (petObj.active) { petObj.y = y0; petObj.setScale(bs); petObj._trickBusy = false; }
+              },
+            });
+          };
+          doHop();
           return;
         }
         if (sp === 'pet_dog') {
