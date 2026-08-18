@@ -40,10 +40,16 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
         // Luminance-map the base pixel into boot yellow so the sprite's own
         // shading (outline vs lit side) survives instead of a flat blob.
         const lum = (0.299*base.data[i] + 0.587*base.data[i+1] + 0.114*base.data[i+2]) / 96;
-        const cuff = painted === WINDOW - 1 ? CUFF_RATIO : 1;   // top row = cuff
-        out.data[i]   = Math.min(255, Math.round(BOOT[0] * lum * cuff));
-        out.data[i+1] = Math.min(255, Math.round(BOOT[1] * lum * cuff));
-        out.data[i+2] = Math.min(255, Math.round(BOOT[2] * lum * cuff));
+        if (painted === 0) {
+          // Bottom row = dark rubber SOLE — this is what visually separates
+          // "wearing boots" from just recoloring your clothes yellow.
+          out.data[i] = 58; out.data[i+1] = 58; out.data[i+2] = 80;
+        } else {
+          const cuff = painted === WINDOW - 1 ? CUFF_RATIO : 1;   // top row = cuff
+          out.data[i]   = Math.min(255, Math.round(BOOT[0] * lum * cuff));
+          out.data[i+1] = Math.min(255, Math.round(BOOT[1] * lum * cuff));
+          out.data[i+2] = Math.min(255, Math.round(BOOT[2] * lum * cuff));
+        }
         out.data[i+3] = 255;
         painted++;
       }
