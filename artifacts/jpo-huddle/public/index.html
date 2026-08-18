@@ -3546,8 +3546,10 @@
       // dy 42 (not 25): baked frames put the boot art's centre at texel 16+dy/3,
       // and the feet rows sit at 28-31 — 25 left the boots floating at the shins.
       rainboots: { tex: 'wear_rainboots', dy: 42,  side: 2, frames: 3, backFrame: 2, showUp: true },
-      // Umbrella: held above the head, still visible from the back.
-      umbrella:  { tex: 'wear_umbrella',  dy: -30, side: 8, frames: 3, backFrame: 2, showUp: true },
+      // Umbrella: HELD — the art is 22px tall (canopy + shaft + J-hook handle
+      // ending at the hand). dy -15 keeps the canopy top at texel row 0 while
+      // the handle lands at the hand rows (~19-20). Old canopy-only art used -30.
+      umbrella:  { tex: 'wear_umbrella',  dy: -15, side: 8, frames: 3, backFrame: 2, showUp: true },
     };
     // Phase-3 baked wearables: items flagged here are BAKED into the player
     // texture per frame (anchor-tracked via assets/layers/anchors.json) instead

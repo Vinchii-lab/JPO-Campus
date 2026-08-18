@@ -18,3 +18,4 @@ description: Wearables are baked into player textures per frame via layer-derive
 - Baked wearable Y = texel 16 + dy/3 (anchor delta cancels on run frames where a.fy==ref.fy), so a def dy tuned "by eye" can strand feet gear at the shins where it blends into the outfit and looks missing. Feet rows are 28-31 → rainboots need dy 42, not 25.
 - Verify placement numerically: dump the baked sheet via in-page _buildPlayerTex + canvas toDataURL, then grep the boot palette rows with magick txt:.
 - `_wearAnchors`/DIR_START are closure-scoped, NOT on window — a harness reading window._wearAnchors always sees undefined; judge bake readiness by the rendered pixels instead.
+- Umbrella reads as HELD by extending the art itself (22px tall: canopy + shaft + J-hook to the hand rows ~19-20, dy -15). Front/back shafts must slant sideways to the hand — a straight center shaft draws through the face.

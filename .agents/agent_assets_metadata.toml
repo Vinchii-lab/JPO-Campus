@@ -531,3 +531,10 @@ uri = "file://artifacts/jpo-huddle/design/boots-fixed.png"
 type = "image"
 title = "Rain boots on the feet"
 description = "Boots now sit on the feet in all four directions, worn together with the umbrella."
+
+[[outputs]]
+id = "CSIxXvrpEYZsDmoU3xuso"
+uri = "file://artifacts/jpo-huddle/design/umbrella-held.png"
+type = "image"
+title = "Umbrella held in hand"
+description = "The umbrella now has a full shaft with a hook handle that slants down into the character's hand — held, not stuck on the head."
