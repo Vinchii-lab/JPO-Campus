@@ -19,3 +19,5 @@ description: Wearables are baked into player textures per frame via layer-derive
 - Verify placement numerically: dump the baked sheet via in-page _buildPlayerTex + canvas toDataURL, then grep the boot palette rows with magick txt:.
 - `_wearAnchors`/DIR_START are closure-scoped, NOT on window — a harness reading window._wearAnchors always sees undefined; judge bake readiness by the rendered pixels instead.
 - Umbrella reads as HELD by extending the art itself (22px tall: canopy + shaft + J-hook to the hand rows ~19-20, dy -15). Front/back shafts must slant sideways to the hand — a straight center shaft draws through the face.
+- Clothing = LAYER sheets, not stickers (Aug 2026): shirts/pants/footwear items should paint the sprite's own pixels (tools/cosmetic-layer-gen.cjs pattern; boots via tools/boot-layer-gen.cjs paint each column's bottom-3 rows). Overlays are only for items that genuinely sit ON the character (hats, held). Slots: top/bottom/neckwear/held/feet + legacy hat + wings.
+- Fitting-room QA: tools/wearable-fitcheck.cjs dumps a 4-direction contact sheet per item — run it for every new/changed wearable before presenting.

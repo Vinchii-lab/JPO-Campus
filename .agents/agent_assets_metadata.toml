@@ -552,3 +552,10 @@ uri = "file://artifacts/jpo-huddle/design/umbrella-hand.png"
 type = "image"
 title = "Umbrella moved to the hand"
 description = "Canopy shifted over the hand side with a short straight shaft down into the hand — no more pole across the head."
+
+[[outputs]]
+id = "D26lLbZdFmM8098yo2YZR"
+uri = "file://artifacts/jpo-huddle/design/fitcheck.png"
+type = "image"
+title = "Fitting room: every item, every direction"
+description = "Boots painted on the feet, raincoat on the body, umbrella in hand, crown and beret on the head — all four directions. This contact sheet is the new automated check every item passes before players see it."

@@ -753,10 +753,10 @@ const SEASONAL_PETS  = { pet_frog: "rainy" };
 // NEW body wearables declare a slot here and live in their own DB column, so
 // they stack with the legacy slot and wings. An item absent from WEAR_SLOT
 // equips into the legacy slot.
-const WEAR_SLOT = { raincoat: "top", rainboots: "bottom", umbrella: "held" };
-const SLOT_COL  = { top: "equipped_top", bottom: "equipped_bottom", neckwear: "equipped_neckwear", held: "equipped_held" };
-const SLOT_KEYS = ["top", "bottom", "neckwear", "held"];
-const emptySlots = () => ({ top: "", bottom: "", neckwear: "", held: "" });
+const WEAR_SLOT = { raincoat: "top", rainboots: "feet", umbrella: "held" };
+const SLOT_COL  = { top: "equipped_top", bottom: "equipped_bottom", neckwear: "equipped_neckwear", held: "equipped_held", feet: "equipped_feet" };
+const SLOT_KEYS = ["top", "bottom", "neckwear", "held", "feet"];
+const emptySlots = () => ({ top: "", bottom: "", neckwear: "", held: "", feet: "" });
 // Wings are their OWN equip slot (Aug 2026): you wear wings AND a wearable
 // at the same time. Ownership still lives in the shared cosmetics array;
 // only the equipped slot differs (jpo_players.equipped_wings).
@@ -2457,6 +2457,7 @@ function rowToPlayerState(row) {
       bottom:   row.equipped_bottom   || "",
       neckwear: row.equipped_neckwear || "",
       held:     row.equipped_held     || "",
+      feet:     row.equipped_feet     || "",
     },
     pet:       row.equipped_pet || "",
     petAcc:    row.equipped_pet_acc || "",
@@ -7428,7 +7429,7 @@ io.on("connection", (socket) => {
                 updated_at = now()
           WHERE email = $1 AND coins >= $2 AND NOT ($3 = ANY(cosmetics))
           RETURNING coins, cosmetics, equipped_cosmetic, equipped_wings,
-                    equipped_top, equipped_bottom, equipped_neckwear, equipped_held`,
+                    equipped_top, equipped_bottom, equipped_neckwear, equipped_held, equipped_feet`,
         [p.email, cost, item],
       );
       if (rows.length === 0) {
@@ -7440,7 +7441,7 @@ io.on("connection", (socket) => {
       p.cosmetics = rows[0].cosmetics || [];
       p.equipped = rows[0].equipped_cosmetic || "";
       p.wings = rows[0].equipped_wings || "";
-      p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "" };
+      p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "", feet: rows[0].equipped_feet || "" };
       socket.emit("coinUpdate",  { coins: p.coins });
       socket.emit("shopSuccess", { item, equipped: p.equipped, wings: p.wings, slots: p.slots });
       io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
@@ -7548,13 +7549,13 @@ io.on("connection", (socket) => {
             SET ${col} = $2, updated_at = now()
           WHERE email = $1 AND ($2 = '' OR $2 = ANY(cosmetics))
           RETURNING equipped_cosmetic, equipped_wings,
-                    equipped_top, equipped_bottom, equipped_neckwear, equipped_held`,
+                    equipped_top, equipped_bottom, equipped_neckwear, equipped_held, equipped_feet`,
         [p.email, item],
       );
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.equipped = rows[0].equipped_cosmetic || "";
       p.wings = rows[0].equipped_wings || "";
-      p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "" };
+      p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "", feet: rows[0].equipped_feet || "" };
       socket.emit("equipUpdate", { equipped: p.equipped, wings: p.wings, slots: p.slots });
       io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
     } catch (err) { console.error("equipCosmetic failed:", err); }
@@ -8216,10 +8217,11 @@ io.on("connection", (socket) => {
            equipped_top      = CASE WHEN equipped_top      = $1 THEN '' ELSE equipped_top      END,
            equipped_bottom   = CASE WHEN equipped_bottom   = $1 THEN '' ELSE equipped_bottom   END,
            equipped_neckwear = CASE WHEN equipped_neckwear = $1 THEN '' ELSE equipped_neckwear END,
-           equipped_held     = CASE WHEN equipped_held     = $1 THEN '' ELSE equipped_held     END
+           equipped_held     = CASE WHEN equipped_held     = $1 THEN '' ELSE equipped_held     END,
+           equipped_feet     = CASE WHEN equipped_feet     = $1 THEN '' ELSE equipped_feet     END
          WHERE email = $3 AND $1 = ANY(cosmetics)
          RETURNING coins, cosmetics, equipped_cosmetic, equipped_wings, equipped_pet, equipped_pet_acc,
-                   equipped_top, equipped_bottom, equipped_neckwear, equipped_held`,
+                   equipped_top, equipped_bottom, equipped_neckwear, equipped_held, equipped_feet`,
         [item, win.amount, p.email]);
       const winSql = () => client.query(
         `UPDATE jpo_players SET cosmetics = array_append(cosmetics, $1)
@@ -8282,6 +8284,7 @@ io.on("connection", (socket) => {
         bottom:   done.sellerRow.equipped_bottom   || "",
         neckwear: done.sellerRow.equipped_neckwear || "",
         held:     done.sellerRow.equipped_held     || "",
+        feet:     done.sellerRow.equipped_feet     || "",
       };
       if (done.winnerPetXp != null) { p.petXp = p.petXp || {}; delete p.petXp[done.item]; }
       socket.emit("coinUpdate", { coins: p.coins });
@@ -9160,6 +9163,10 @@ try {
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_bottom text NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_neckwear text NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_held text NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS equipped_feet text NOT NULL DEFAULT ''`);
+  // Boots moved from the bottom slot to their own feet slot (Aug 2026) so a
+  // future pants item and footwear never fight over one column. Idempotent.
+  await pool.query(`UPDATE jpo_players SET equipped_feet = 'rainboots', equipped_bottom = '' WHERE equipped_bottom = 'rainboots'`);
   await pool.query(
     `UPDATE jpo_players SET equipped_wings = equipped_cosmetic, equipped_cosmetic = ''
       WHERE equipped_cosmetic = ANY($1) AND equipped_wings = ''`,

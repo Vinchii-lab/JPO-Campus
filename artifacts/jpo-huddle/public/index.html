@@ -3418,9 +3418,9 @@
     // Outfit slots (Aug 2026): the boss's rule — head/neck/top/bottom must all
     // be wearable AT ONCE. Legacy single slot keeps hats/eyewear/extras; NEW
     // body wearables live here. Keep WEAR_SLOT in lockstep with server.js.
-    let _equippedSlots = { top: '', bottom: '', neckwear: '', held: '' };
-    const WEAR_SLOT = { raincoat: 'top', rainboots: 'bottom', umbrella: 'held' };
-    const SLOT_KEYS = ['top', 'bottom', 'neckwear', 'held'];
+    let _equippedSlots = { top: '', bottom: '', neckwear: '', held: '', feet: '' };
+    const WEAR_SLOT = { raincoat: 'top', rainboots: 'feet', umbrella: 'held' };
+    const SLOT_KEYS = ['top', 'bottom', 'neckwear', 'held', 'feet'];
     // Seasonal calendar — mirror of server seasonNow() (server is the real
     // gate; this only hides off-season shop rows).
     function seasonNow(d = new Date()) {
@@ -3563,12 +3563,16 @@
       headphones:'head', beret:'head', chefhat:'head', camera:'head',
       gamerheadset:'head', book:'head', guitar:'head', spectacles:'head',
       beanie:'head', flatcap:'head', rangerhat:'head', catears:'head',
-      umbrella:'head', rainboots:'feet',
+      umbrella:'head',
     };
     for (const [wid, anc] of Object.entries(_WEAR_BAKE_ANCHOR)) WEARABLE_DEFS[wid].bake = anc;
     // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
     // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
     WEARABLE_DEFS.raincoat.bakeLayer = true;
+    // Rainboots: also a LAYER sheet (painted onto each frame's own foot pixels
+    // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
+    // the sprite the way anchored overlay stickers can.
+    WEARABLE_DEFS.rainboots.bakeLayer = true;
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
     // USABLE_ITEMS map in server.js (the server is authoritative on price and
@@ -4458,7 +4462,7 @@
       _ownedItems     = data.cosmetics || [];
       _equippedCosmetic = data.equipped || '';
       _equippedWings  = data.wings || '';
-      _equippedSlots  = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, data.slots || {});
+      _equippedSlots  = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, data.slots || {});
       _equippedPet    = data.pet || '';
       _equippedPetAcc = data.petAcc || '';
       _myPetXp = data.petXp || {};
@@ -4852,7 +4856,7 @@
       if (!_ownedItems.includes(item)) _ownedItems.push(item);
       _equippedCosmetic = equipped ?? item;   // buying auto-equips
       if (wings !== undefined) _equippedWings = wings || '';
-      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, slots);
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, slots);
       _refreshShopUI();
       const meta = COSMETICS.find(c => c.id === item);
       document.getElementById('shop-msg').style.color = '#27ae60';
@@ -4866,7 +4870,7 @@
     socket.on('equipUpdate', ({ equipped, wings, slots }) => {
       _equippedCosmetic = equipped || '';
       _equippedWings = wings || '';
-      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '' }, slots);
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, slots);
       _refreshShopUI();
       window._gameScene?._setLocalCosmetic(_equippedCosmetic);
       window._gameScene?._setLocalWings(_equippedWings);
