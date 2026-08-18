@@ -37,12 +37,15 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
     const framesA = Math.floor(w / 16);
     const frameWA = w / framesA;              // 16 (run/sit3) or 32 (sit/sit2)
     for (let f = 0; f < framesA; f++) {
-      // shoulder line for THIS frame
+      // Hooded coat (Aug 2026, owner request): the hood covers the HAIR too,
+      // so the coat is unmistakably a coat — recoloring your wardrobe yellow
+      // can never touch your head. Top = first hair/shirt/pants row; skin
+      // (face + hands) stays visible under the hood.
       let top = -1;
       for (let y = 0; y < h && top < 0; y++)
         for (let x = f * frameWA; x < (f + 1) * frameWA; x++) {
           const i = (y * w + x) * 4;
-          if (shirt.data[i+3] >= 128 || pants.data[i+3] >= 128) { top = y; break; }
+          if (shirt.data[i+3] >= 128 || pants.data[i+3] >= 128 || hair.data[i+3] >= 128) { top = y; break; }
         }
       if (top < 0) continue;
       for (let x = f * frameWA; x < (f + 1) * frameWA; x++) {
@@ -51,7 +54,7 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
         for (let y = top; y <= bot - 3; y++) {
           const i = (y * w + x) * 4;
           if (base.data[i+3] < 128) continue;
-          if (skin.data[i+3] >= 128 || hair.data[i+3] >= 128) continue;
+          if (skin.data[i+3] >= 128) continue;
           sil[y * w + x] = 1;
         }
       }
