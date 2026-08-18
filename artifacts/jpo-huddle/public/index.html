@@ -13418,7 +13418,9 @@
             const king = st >= 3;
             const cw = king ? 17 : 12;                       // cloud half-width
             const tint = king ? 0x5a6478 : 0x9aa4b8;         // storm vs drizzle grey
-            const cx0 = petObj.x, cy0 = y0 - petObj.displayHeight - 18;
+            // Hover the cloud clearly ABOVE the head — with headroom for the
+            // hops (hopH) so the frog never bounces into its own cloud.
+            const cx0 = petObj.x, cy0 = y0 - petObj.displayHeight - hopH - 22;
             cloud = this.add.container(cx0, cy0, [
               this.add.ellipse(0, 3, cw * 2.4, cw * 0.9, tint, 0.9),
               this.add.circle(-cw * 0.8, -2, cw * 0.62, tint, 0.9),
