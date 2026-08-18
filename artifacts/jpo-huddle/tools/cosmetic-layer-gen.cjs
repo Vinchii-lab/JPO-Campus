@@ -36,16 +36,15 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
     const sil = new Uint8Array(w * h);
     const framesA = Math.floor(w / 16);
     const frameWA = w / framesA;              // 16 (run/sit3) or 32 (sit/sit2)
+    const hood = new Uint8Array(w * h);   // hood dome mask, drawn separately
     for (let f = 0; f < framesA; f++) {
-      // Hooded coat (Aug 2026, owner request): the hood covers the HAIR too,
-      // so the coat is unmistakably a coat — recoloring your wardrobe yellow
-      // can never touch your head. Top = first hair/shirt/pants row; skin
-      // (face + hands) stays visible under the hood.
+      // Body of the coat: shoulder line down, skin (hands) and hair excluded —
+      // the hair is handled by the HOOD below, not recolored.
       let top = -1;
       for (let y = 0; y < h && top < 0; y++)
         for (let x = f * frameWA; x < (f + 1) * frameWA; x++) {
           const i = (y * w + x) * 4;
-          if (shirt.data[i+3] >= 128 || pants.data[i+3] >= 128 || hair.data[i+3] >= 128) { top = y; break; }
+          if (shirt.data[i+3] >= 128 || pants.data[i+3] >= 128) { top = y; break; }
         }
       if (top < 0) continue;
       for (let x = f * frameWA; x < (f + 1) * frameWA; x++) {
@@ -54,8 +53,34 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
         for (let y = top; y <= bot - 3; y++) {
           const i = (y * w + x) * 4;
           if (base.data[i+3] < 128) continue;
-          if (skin.data[i+3] >= 128) continue;
+          if (skin.data[i+3] >= 128 || hair.data[i+3] >= 128) continue;
           sil[y * w + x] = 1;
+        }
+      }
+      // HOOD (Aug 2026, owner request): a drawn dome that REPLACES the hair —
+      // not a recolor. It must fully cover every hair pixel (layers draw over
+      // the base, they can't erase), then gets smoothed into one rounded shape
+      // so no hairstyle silhouette (spikes, bangs, buns) survives. Face skin
+      // stays visible in the opening.
+      const x0 = f * frameWA, x1 = (f + 1) * frameWA;
+      const hairTop = new Int16Array(frameWA).fill(-1);
+      const hairBot = new Int16Array(frameWA).fill(-1);
+      for (let x = x0; x < x1; x++)
+        for (let y = 0; y < h; y++)
+          if (hair.data[(y*w+x)*4+3] >= 128) {
+            if (hairTop[x-x0] < 0) hairTop[x-x0] = y;
+            hairBot[x-x0] = y;
+          }
+      for (let cx = 0; cx < frameWA; cx++) {
+        if (hairTop[cx] < 0) continue;
+        // Round the dome: clamp single-column spikes to the neighbours' level.
+        const L = cx > 0 && hairTop[cx-1] >= 0 ? hairTop[cx-1] : hairTop[cx];
+        const R = cx < frameWA-1 && hairTop[cx+1] >= 0 ? hairTop[cx+1] : hairTop[cx];
+        const domeTop = Math.max(hairTop[cx], Math.min(L, R));
+        for (let y = domeTop; y <= hairBot[cx]; y++) {
+          const i = (y * w + (x0 + cx)) * 4;
+          if (skin.data[i+3] >= 128) continue;    // face opening
+          hood[y * w + x0 + cx] = 1;
         }
       }
     }
@@ -91,6 +116,27 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
           out.data[i+2] = Math.round(out.data[i+2] * ACCENT_RATIO);
         }
       }
+    }
+    // Pass 3: paint the HOOD — flat slicker yellow with its own shading, so
+    // zero hair texture bleeds through: dark outline where the dome meets
+    // nothing/body, dark rim where it borders the face (drawstring edge),
+    // lighter crown highlight on the dome's top row.
+    const HOOD_FLAT = [Math.round(COAT[0]*1.0), Math.round(COAT[1]*1.0), Math.round(COAT[2]*1.0)];
+    for (let p = 0; p < w * h; p++) {
+      if (!hood[p]) continue;
+      const x = p % w, y = (p / w) | 0, i = p * 4;
+      const nb = [[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+      let edge = false, rim = false;
+      for (const [nx, ny] of nb) {
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) { edge = true; continue; }
+        const q = ny * w + nx;
+        if (skin.data[q*4+3] >= 128) rim = true;
+        else if (!hood[q] && !sil[q]) edge = true;
+      }
+      let r = HOOD_FLAT[0], g = HOOD_FLAT[1], b = HOOD_FLAT[2];
+      if (rim)       { r = Math.round(r*0.55); g = Math.round(g*0.55); b = Math.round(b*0.55); }
+      else if (edge) { r = Math.round(r*0.45); g = Math.round(g*0.45); b = Math.round(b*0.45); }
+      out.data[i] = r; out.data[i+1] = g; out.data[i+2] = b; out.data[i+3] = 255;
     }
     fs.writeFileSync(path.join(LDIR, `${CAP(char)}_${suffix}_wear_raincoat.png`), PNG.sync.write(out));
   }
