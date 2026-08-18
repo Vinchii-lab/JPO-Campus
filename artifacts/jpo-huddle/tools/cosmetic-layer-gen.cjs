@@ -85,15 +85,23 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
       }
       if (minC < 0) continue;
       const ecx = (minC + maxC) / 2;
-      const rx = (maxC - minC) / 2 + 1;          // one px wider than the hair
+      const rx = (maxC - minC) / 2 + 0.5;        // snug — no wider than the hair
       const ry = headBot - headTop + 1;
-      for (let cx = Math.max(0, minC - 1); cx <= Math.min(frameWA - 1, maxC + 1); cx++) {
+      const cheekY = headTop + Math.round(ry * 0.6);   // taper starts at cheek level
+      for (let cx = minC; cx <= maxC; cx++) {
         const t = (cx - ecx) / rx;
         if (t * t > 1) continue;
         let domeTop = Math.round(headBot - ry * Math.sqrt(1 - t * t));
         if (hairTop[cx] >= 0 && hairTop[cx] < domeTop) domeTop = hairTop[cx];  // never expose hair
-        const domeBot = hairBot[cx] >= 0 ? hairBot[cx] : headBot;
+        // Drape (owner's reference): the hood runs all the way DOWN to the
+        // shoulder line so it meets the coat as one piece — framing the face
+        // and wrapping the neck — instead of stopping at the hairline like a
+        // helmet. (`top` is the coat's shoulder row from the body pass.)
+        const domeBot = top >= 0 ? top - 1 : (hairBot[cx] >= 0 ? hairBot[cx] : headBot);
         for (let y = Math.max(0, domeTop); y <= domeBot; y++) {
+          // Taper below cheek level: the drape narrows toward the neck so the
+          // shoulders stay visible (full-width drape read as a bell/ghost).
+          if (y > cheekY && Math.abs(cx - ecx) > rx * 0.75) continue;
           const i = (y * w + (x0 + cx)) * 4;
           if (skin.data[i+3] >= 128) continue;    // face opening
           hood[y * w + x0 + cx] = 1;
