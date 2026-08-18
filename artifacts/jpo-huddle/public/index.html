@@ -13393,8 +13393,10 @@
           return;
         }
         if (sp === 'pet_frog') {
-          // Signature trick: a happy triple HOP with squash-and-stretch and a
-          // ribbit note. Higher stages hop bigger — the King Frog bounds.
+          // Signature trick: the RAIN DANCE 🌧️ — a happy triple hop with a
+          // ribbit note. Tadpole keeps the plain hop; stage 2+ summons a
+          // little rain cloud that drizzles while it dances, and the King
+          // Frog gets a proper storm cloud with lightning flickers.
           const st = petObj._petStage || 1;
           petObj._trickBusy = true;
           const y0 = petObj.y, bs = petObj._baseScale || 1;
@@ -13403,17 +13405,74 @@
             .setOrigin(0.5).setDepth(3.2).setAlpha(0);
           this.tweens.add({ targets: note, alpha: 1, y: y0 - 56, duration: 700, yoyo: true,
             onComplete: this._trackPetFx(petObj, note) });
+          // ── the cloud (stage 2+) ─────────────────────────────────────
+          let cloud = null, rainEv = null;
+          const endRain = () => {
+            if (rainEv) { rainEv.remove(); rainEv = null; }
+            if (cloud && cloud.active) {
+              this.tweens.add({ targets: cloud, alpha: 0, y: cloud.y - 6,
+                duration: 380, ease: 'Sine.easeIn', onComplete: cloud._kill });
+            }
+          };
+          if (st >= 2) {
+            const king = st >= 3;
+            const cw = king ? 17 : 12;                       // cloud half-width
+            const tint = king ? 0x5a6478 : 0x9aa4b8;         // storm vs drizzle grey
+            const cx0 = petObj.x, cy0 = y0 - petObj.displayHeight - 18;
+            cloud = this.add.container(cx0, cy0, [
+              this.add.ellipse(0, 3, cw * 2.4, cw * 0.9, tint, 0.9),
+              this.add.circle(-cw * 0.8, -2, cw * 0.62, tint, 0.9),
+              this.add.circle(cw * 0.1, -5, cw * 0.75, tint, 0.9),
+              this.add.circle(cw * 0.85, -1, cw * 0.55, tint, 0.9),
+            ]).setDepth(3.1).setAlpha(0);
+            cloud._kill = this._trackPetFx(petObj, cloud);
+            this.tweens.add({ targets: cloud, alpha: 1, duration: 250, ease: 'Sine.easeOut' });
+            const groundY = y0 - 1;
+            rainEv = this.time.addEvent({
+              delay: king ? 60 : 120, repeat: Math.floor((king ? 2000 : 1700) / (king ? 60 : 120)),
+              callback: () => {
+                if (!petObj.active || !cloud || !cloud.active) { if (rainEv) rainEv.remove(); return; }
+                // droplet: falls from the cloud, lands as a tiny splash ripple
+                const dxr = (Math.random() * 2 - 1) * cw * 2;
+                const d = this.add.rectangle(cloud.x + dxr, cloud.y + 8, 1.5, king ? 6 : 4, 0x6fb8ff, 0.85).setDepth(3);
+                const dKill = this._trackPetFx(petObj, d);
+                this.tweens.add({ targets: d, y: groundY, duration: king ? 240 : 300, ease: 'Quad.easeIn',
+                  onComplete: () => {
+                    const lx = d.x; dKill();
+                    if (!petObj.active) return;
+                    const r = this.add.ellipse(lx, groundY, 7, 2.6, 0x9fd8ff, 0)
+                      .setDepth(1).setStrokeStyle(1, 0x9fd8ff, 0.5);
+                    this.tweens.add({ targets: r, scaleX: 1.9, scaleY: 1.9, alpha: 0,
+                      duration: 380, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+                  } });
+                // King Frog: the storm cloud FLICKERS with lightning ⚡
+                if (king && Math.random() < 0.14) {
+                  const bolt = this.add.text(cloud.x + (Math.random() * 16 - 8), cloud.y + 10, '⚡',
+                    { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 0).setDepth(3.2).setAlpha(0.95);
+                  this.tweens.add({ targets: bolt, alpha: 0, y: bolt.y + 6, duration: 220,
+                    ease: 'Quad.easeIn', onComplete: this._trackPetFx(petObj, bolt) });
+                  const fl = this.add.circle(cloud.x, cloud.y, cw * 1.6, 0xfff6c9, 0.35).setDepth(3.05);
+                  this.tweens.add({ targets: fl, alpha: 0, duration: 140,
+                    onComplete: this._trackPetFx(petObj, fl) });
+                }
+              },
+            });
+          }
+          // ── the dance: crouch → leap → land, three times ─────────────
           let hop = 0;
           const doHop = () => {
-            if (!petObj.active) { petObj._trickBusy = false; return; }
+            if (!petObj.active) { petObj._trickBusy = false; endRain(); return; }
             hop++;
-            // crouch → leap → land: scaleY squashes on takeoff/landing
             this.tweens.add({ targets: petObj, scaleY: bs * 0.8, duration: 70, yoyo: true });
             this.tweens.add({
               targets: petObj, y: y0 - hopH, duration: 180, ease: 'Quad.easeOut', yoyo: true,
               onComplete: () => {
-                if (hop < 3 && petObj.active) doHop();
-                else if (petObj.active) { petObj.y = y0; petObj.setScale(bs); petObj._trickBusy = false; }
+                if (hop < (st >= 2 ? 4 : 3) && petObj.active) doHop();
+                else {
+                  if (petObj.active) { petObj.y = y0; petObj.setScale(bs); petObj._trickBusy = false; }
+                  else petObj._trickBusy = false;
+                  endRain();
+                }
               },
             });
           };

@@ -566,3 +566,10 @@ uri = "file://artifacts/jpo-huddle/design/frogking_check.png"
 type = "image"
 title = "King Frog 👑 — walking & idle"
 description = "Stage-3 King Frog with the new royal bound gait (left: walking, right: idle). Step glints, glow trail, and crown shimmer play live in-game."
+
+[[outputs]]
+id = "rdDszky14jI6-2gLiXzBC"
+uri = "file://artifacts/jpo-huddle/design/rain_dance_check.png"
+type = "image"
+title = "Rain dance 🌧️🐸"
+description = "Left: stage-2 Frog with his little drizzle cloud. Right: King Frog summoning his storm cloud mid-dance. Rain, splashes, and lightning flickers play live in-game."
