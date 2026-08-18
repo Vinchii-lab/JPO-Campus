@@ -545,3 +545,10 @@ uri = "file://artifacts/jpo-huddle/design/rain-outfit-final.png"
 type = "image"
 title = "Boots on the sprite, umbrella in hand"
 description = "Full rain outfit: boots now cover the shoes completely in all four directions, and the umbrella shaft angles down to the hand in side view."
+
+[[outputs]]
+id = "kMRlm45pDFCxB174mvxaE"
+uri = "file://artifacts/jpo-huddle/design/umbrella-hand.png"
+type = "image"
+title = "Umbrella moved to the hand"
+description = "Canopy shifted over the hand side with a short straight shaft down into the hand — no more pole across the head."
