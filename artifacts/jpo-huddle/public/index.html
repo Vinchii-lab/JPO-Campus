@@ -4106,7 +4106,7 @@
             const im = new Image();
             im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
             im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
-            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=3`;
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=5`;
           }
         }
       }

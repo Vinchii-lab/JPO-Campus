@@ -71,17 +71,44 @@ for (const char of Object.keys(CHAR_ZONE_COLORS)) {
             if (hairTop[x-x0] < 0) hairTop[x-x0] = y;
             hairBot[x-x0] = y;
           }
+      // The dome is a true HALF-ELLIPSE computed from the head's bounding box
+      // only — NOT from the hair's own column profile (that just re-created
+      // the hairstyle's silhouette). Every hair pixel is still covered
+      // (domeTop is clamped above hairTop), but the outline is the ellipse's.
+      let minC = -1, maxC = -1, headTop = h, headBot = -1;
       for (let cx = 0; cx < frameWA; cx++) {
         if (hairTop[cx] < 0) continue;
-        // Round the dome: clamp single-column spikes to the neighbours' level.
-        const L = cx > 0 && hairTop[cx-1] >= 0 ? hairTop[cx-1] : hairTop[cx];
-        const R = cx < frameWA-1 && hairTop[cx+1] >= 0 ? hairTop[cx+1] : hairTop[cx];
-        const domeTop = Math.max(hairTop[cx], Math.min(L, R));
-        for (let y = domeTop; y <= hairBot[cx]; y++) {
+        if (minC < 0) minC = cx;
+        maxC = cx;
+        if (hairTop[cx] < headTop) headTop = hairTop[cx];
+        if (hairBot[cx] > headBot) headBot = hairBot[cx];
+      }
+      if (minC < 0) continue;
+      const ecx = (minC + maxC) / 2;
+      const rx = (maxC - minC) / 2 + 1;          // one px wider than the hair
+      const ry = headBot - headTop + 1;
+      for (let cx = Math.max(0, minC - 1); cx <= Math.min(frameWA - 1, maxC + 1); cx++) {
+        const t = (cx - ecx) / rx;
+        if (t * t > 1) continue;
+        let domeTop = Math.round(headBot - ry * Math.sqrt(1 - t * t));
+        if (hairTop[cx] >= 0 && hairTop[cx] < domeTop) domeTop = hairTop[cx];  // never expose hair
+        const domeBot = hairBot[cx] >= 0 ? hairBot[cx] : headBot;
+        for (let y = Math.max(0, domeTop); y <= domeBot; y++) {
           const i = (y * w + (x0 + cx)) * 4;
           if (skin.data[i+3] >= 128) continue;    // face opening
           hood[y * w + x0 + cx] = 1;
         }
+      }
+      // Hood PEAK: a small 2px point at the dome's crown — the giveaway
+      // detail no hairstyle has, so the hood never reads as "yellow hair".
+      {
+        let crown = h;
+        for (let cx = minC; cx <= maxC; cx++)
+          for (let y = 0; y < h; y++)
+            if (hood[y * w + x0 + cx]) { if (y < crown) crown = y; break; }
+        const px = x0 + Math.round(ecx);
+        if (crown - 1 >= 0) hood[(crown - 1) * w + px] = 1;
+        if (crown - 2 >= 0) hood[(crown - 2) * w + px] = 1;
       }
     }
     const out = new PNG({ width: w, height: h });
