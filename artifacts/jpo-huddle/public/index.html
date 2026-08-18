@@ -12102,11 +12102,17 @@
             // Decreasing tilePosition scrolls the sampled texture DOWN on screen = falling rain.
             wx.far.tilePositionY  -= 340 * dt; wx.far.tilePositionX  += 40 * dt;
             wx.near.tilePositionY -= 520 * dt; wx.near.tilePositionX += 70 * dt;
-            // Synced schedule: ~1 in 4 ten-minute slots opens with a 2.5-min storm.
+            // Synced WEATHER CYCLE (owner request): the rain isn't continuous —
+            // each 10-min slot is hashed into one of three phases, so the sky
+            // clears, then rains, then storms, in a shared schedule every
+            // client derives from the wall clock (no server involvement):
+            //   ~40% dry spell · ~40% rain · ~20% thunderstorm
             const now = Date.now(), slot = Math.floor(now / 600000);
-            const storm = (((slot * 2654435761) >>> 0) % 4 === 0) && (now - slot * 600000 < 150000);
-            const t = storm ? { far: 0.34, near: 0.46, tint: 0.16 }    // full storm
-                            : { far: 0.10, near: 0.16, tint: 0.03 };   // light drizzle
+            const phase = ((slot * 2654435761) >>> 0) % 5;   // 0-1 dry, 2-3 rain, 4 storm
+            const storm = phase === 4;
+            const t = storm      ? { far: 0.34, near: 0.46, tint: 0.16 }    // thunderstorm
+                    : phase >= 2 ? { far: 0.10, near: 0.16, tint: 0.03 }    // steady rain
+                                 : { far: 0,    near: 0,    tint: 0    };   // dry spell
             const k = Math.min(1, dt * 1.2);   // ease between the two over ~a second
             wx.far.alpha  += (t.far  - wx.far.alpha)  * k;
             wx.near.alpha += (t.near - wx.near.alpha) * k;
