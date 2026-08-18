@@ -559,3 +559,10 @@ uri = "file://artifacts/jpo-huddle/design/fitcheck.png"
 type = "image"
 title = "Draped hood — like your reference"
 description = "Hood wraps around the face and neck and meets the coat at the shoulders as one piece. Snug crown with the peak, tapered at the neck so the shoulders show, face in the opening. All four directions."
+
+[[outputs]]
+id = "jJIKVQa97NvIbx0juYjiL"
+uri = "file://artifacts/jpo-huddle/design/frogking_check.png"
+type = "image"
+title = "King Frog 👑 — walking & idle"
+description = "Stage-3 King Frog with the new royal bound gait (left: walking, right: idle). Step glints, glow trail, and crown shimmer play live in-game."

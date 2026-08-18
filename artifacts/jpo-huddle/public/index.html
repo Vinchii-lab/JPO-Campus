@@ -13399,10 +13399,10 @@
           const note = this.add.text(petObj.x, y0 - 34, '🎵', { fontSize: '13px', resolution: 2 })
             .setOrigin(0.5).setDepth(3.2).setAlpha(0);
           this.tweens.add({ targets: note, alpha: 1, y: y0 - 56, duration: 700, yoyo: true,
-            onComplete: () => note.destroy() });
+            onComplete: this._trackPetFx(petObj, note) });
           let hop = 0;
           const doHop = () => {
-            if (!petObj.active) { if (note.active) note.destroy(); return; }
+            if (!petObj.active) { petObj._trickBusy = false; return; }
             hop++;
             // crouch → leap → land: scaleY squashes on takeoff/landing
             this.tweens.add({ targets: petObj, scaleY: bs * 0.8, duration: 70, yoyo: true });
@@ -15127,6 +15127,10 @@
               turtle_s3:          { sway: 3,  swayF: 0.005, bounce: 0.050, bounceF: 0.007, frameMs: 320 },
               turtle_sapphire_s2: { sway: 3,  swayF: 0.008, bounce: 0.028, bounceF: 0.010, frameMs: 235 },
               turtle_sapphire_s3: { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 280 },
+              // Frogs (rainy seasonal): s2 = springy busy hop; s3 King Frog =
+              // big slow royal bound — heavy, unhurried, landing with weight.
+              frog_s2:            { sway: 8,  swayF: 0.022, bounce: 0.055, bounceF: 0.030, frameMs: 110 },
+              frog_s3:            { sway: 5,  swayF: 0.010, bounce: 0.080, bounceF: 0.014, frameMs: 190 },
               // Dragons st>=2 FLY: no waddle, wing-flap frame cadence.
               dragon_s2:          { sway: 1.5,swayF: 0.006, bounce: 0.020, bounceF: 0.009, frameMs: 130 },
               dragon_s3:          { sway: 1.5,swayF: 0.005, bounce: 0.020, bounceF: 0.007, frameMs: 155 },
@@ -15161,6 +15165,7 @@
               cat_s2: 'slink',   cat_black_s2: 'slink', cat_snow_s2: 'slink',
               cat_s3: 'thump',   cat_black_s3: 'float', cat_snow_s3: 'strut',
               turtle_s2: 'thump', turtle_s3: 'thump', turtle_sapphire_s3: 'float',
+              frog_s2: 'hop',    frog_s3: 'thump',
               dragon_s2: 'float', dragon_s3: 'float',
               dragon_crimson_s2: 'float', dragon_crimson_s3: 'float',
               dragon_obsidian_s2: 'float', dragon_obsidian_s3: 'float',
@@ -15201,6 +15206,8 @@
                 turtle_s2:          { kind: 'dust',  color: 0xc9b892 },
                 turtle_s3:          { kind: 'ripple', color: 0x9dbf7a },
                 turtle_sapphire_s3: { kind: 'glint', color: 0x7fe0ff },
+                frog_s2:            { kind: 'ripple', color: 0x7fd8b8 },
+                frog_s3:            { kind: 'glint', color: 0xffd75e },
               }[stageKey];
               if (fx && fx.kind === 'dust') {
                 const p = this.add.circle(petObj.x - Math.sign(petObj.flipX ? -1 : 1) * 6,
@@ -15253,6 +15260,7 @@
               pet_dragon_obsidian: { core: 0xffb066, glow: 0xff5500, rise: -8,  drift: 4 },
               pet_unicorn:         { core: 0xfff0ff, glow: 0xd9a8ff, rise: -10, drift: 6, stars: true },
               pet_phoenix:         { core: 0xffe9b8, glow: 0xff7a2d, rise: -12, drift: 4 },
+              pet_frog:            { core: 0xd8f0c0, glow: 0x9fd75e, rise: -8,  drift: 4 },
             }[petObj._petId]) || null;
             if (trailTh && (!petObj._trailAt || _now >= petObj._trailAt)) {
               petObj._trailAt = _now + 150 + Math.random() * 90;
@@ -15348,6 +15356,7 @@
               pet_dragon_crimson:  { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
               pet_dragon_obsidian: { glyphs: ['✦'],       glow: 0xff5500, rise: true },
               pet_unicorn:         { glyphs: ['✨', '⭐'], glow: 0xd9a8ff, rise: true },
+              pet_frog:            { glyphs: ['💧', '✦'], glow: 0x6fc98e, rise: true },
             }[petObj._petId]) || null;
             if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
               petObj._auraAt = now + 1600 + Math.random() * 1800;
@@ -15368,7 +15377,7 @@
               }
               // Her Majesty the swan: a pale-gold crown shimmers into view
               // just above her head while she rests. Royalty doesn't ask.
-              if (petObj._petId === 'pet_duck_snow' && Math.random() < 0.45) {
+              if ((petObj._petId === 'pet_duck_snow' || petObj._petId === 'pet_frog') && Math.random() < 0.45) {
                 const cr = this.add.text(petObj.x, petObj.y - 38, '♕', {
                   fontSize: '12px', color: '#ffe9a8', resolution: 2 })
                   .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
