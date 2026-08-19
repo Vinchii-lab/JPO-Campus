@@ -1797,6 +1797,11 @@
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
 }
 #pt-error { color: #2ecc71; font-size: 10px; flex: 1; text-align: left; }
+#pt-challenge-hint {
+  max-width: 230px; color: #b7b5ca; font-size: 8px; line-height: 1.55;
+  text-align: right; text-shadow: none;
+}
+#pt-challenge-hint b { color: #FFC046; }
 .pt-btn {
   padding: 12px 16px; font-family: inherit; font-size: 12px; background: #3a3a5e;
   color: #fff; border: 2px solid #5C4BE1; border-radius: 6px; cursor: pointer;
@@ -2727,8 +2732,8 @@
       </div>
       <div class="pt-footer">
          <div id="pt-error"></div>
-         <button id="pt-save" class="pt-btn" type="button">Save Build</button>
-         <button id="pt-challenge-bot" class="pt-btn pt-btn-primary" type="button">Challenge Bot</button>
+          <div id="pt-challenge-hint">Walk up to a coworker with a pet, then select <b>Pet Battle</b>.</div>
+          <button id="pt-save" class="pt-btn" type="button">Save Build</button>
       </div>
     </div>
   </div>
@@ -2798,7 +2803,6 @@
            <button class="pt-btn" id="pb-result-close">Close</button>
            <button class="pt-btn pt-btn-primary" id="pb-result-spectate" style="display:none">Spectate Live</button>
            <button class="pt-btn" id="pb-result-quit" style="display:none">Quit Pet Wars</button>
-            <button class="pt-btn pt-btn-primary" id="pb-result-rematch" style="display:none">Rematch Bot</button>
          </div>
       </div>
     </div>
@@ -2855,7 +2859,7 @@
     <button id="rps-menu-profile" type="button">👤 View profile</button>
     <button id="rps-menu-dm" type="button">💬 Whisper</button>
     <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
-    <button id="rps-menu-petbattle" type="button">Pet Battle</button>
+    <button id="rps-menu-petbattle" type="button">⚔️ Pet Battle</button>
     <button id="rps-menu-gift" type="button">💰 Send coins</button>
     <button id="rps-menu-trade" type="button">🐾 Trade pets</button>
     <button id="rps-menu-store" type="button">🏪 Their store</button>
@@ -8551,10 +8555,12 @@
       }
     }
 
-    // Context menu on avatar click: 💬 Whisper / ✊ Challenge.
+    // Context menu on avatar click. Pet Battle is offered only for coworkers
+    // who currently have a pet equipped; the server still re-checks ownership.
     function _rpsShowMenu(playerId, px, py) {
       _rpsMenuTargetId = playerId;
       _rpsMenuAt = Date.now();
+      rpsEl('rps-menu-petbattle').style.display = _online[playerId]?.pet ? '' : 'none';
       rpsMenu.style.left = Math.max(6, Math.min(px, innerWidth - 170)) + 'px';
       rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 150)) + 'px';
       rpsMenu.classList.add('open');
@@ -18460,12 +18466,6 @@
        socket.emit('petBattleSetBuild', { pet: _equippedPet, build: pbBuild });
     });
 
-    pbEl('pt-challenge-bot').addEventListener('pointerdown', () => {
-       pbEl('pt-train-modal').classList.remove('open');
-       pbState = 'pending';
-       socket.emit('petBattleBotChallenge');
-    });
-
     socket.on('petBattleBuild', (payload) => {
       const { pet, build, budget, spent, stage, attrs, stats } = payload;
       pbBudget = budget; pbBuild = { ...build }; pbAttrs = attrs; pbDerivedStats = stats;
@@ -19751,17 +19751,6 @@
              };
            }
           
-          const oppData = payload.combatants[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
-           if (!watched && oppData.isBot) {
-             pbEl('pb-result-rematch').style.display = 'block';
-             pbEl('pb-result-rematch').onclick = () => {
-                pbCloseAll();
-                pbState = 'pending';
-                socket.emit('petBattleBotChallenge');
-             };
-          } else {
-             pbEl('pb-result-rematch').style.display = 'none';
-          }
        });
        pbProcessQueue();
     });

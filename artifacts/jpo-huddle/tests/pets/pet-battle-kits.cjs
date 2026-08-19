@@ -7,6 +7,15 @@ const root = path.resolve(__dirname, "../..");
 const serverSource = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const clientSource = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
 
+assert.doesNotMatch(clientSource, /pt-challenge-bot|Challenge Bot|petBattleBotChallenge/,
+  "the Pet Arena should not expose a training-bot challenge path");
+assert.match(clientSource, /Walk up to a coworker with a pet, then select[\s\S]*?Pet Battle/,
+  "the Pet Arena should direct players to challenge coworkers with equipped pets");
+assert.match(clientSource, /rps-menu-petbattle[\s\S]*?Pet Battle/,
+  "nearby coworkers must retain the Pet Battle context-menu action");
+assert.match(clientSource, /rps-menu-petbattle'\)\.style\.display = _online\[playerId\]\?\.pet/,
+  "the Pet Battle context action should appear only for coworkers with an equipped pet");
+
 // Load only the declarative server kit registry. Requiring server.js would
 // start the live server, so this contract test evaluates the self-contained
 // registry section in an empty VM instead.
