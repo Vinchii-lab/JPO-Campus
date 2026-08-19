@@ -3077,7 +3077,7 @@ async function restorePlayer(socket, row) {
   }
   // Durable Grand Event lobby/bracket follows the account across socket ids.
   // This direct push covers reconnects even before the client sends uiSync.
-  grandEventEmitToSocket(socket.id);
+  grandEventSyncToSocket(socket.id);
 
   for (const pid in players) {
     if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
@@ -4054,6 +4054,12 @@ async function petBattleFinish(b, { reason, winnerSide = null, forfeit = false }
     combatants: petBattleView(b),
     tournament: !!b.tournament,
   }));
+  petBattleEmitTournamentSpectators(b, "petBattleResult", {
+    matchId, reason, forfeit, draw,
+    winnerSide,
+    combatants: petBattleView(b),
+    tournament: true,
+  });
   b.state = "done";
   petBattleUnmap(b);
   if (b.tournament && winner) {
@@ -4097,6 +4103,11 @@ async function petBattleResolve(b) {
     result, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
     overtimeReset: tournamentDecision?.action === "overtime-reset",
   }));
+  petBattleEmitTournamentSpectators(b, "petBattleRound", {
+    matchId: b.matchId, round: b.round, maxRounds: PB_MAX_ROUNDS,
+    result, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
+    overtimeReset: tournamentDecision?.action === "overtime-reset",
+  });
 
   // Reset picks for the next round.
   A.pick = null; D.pick = null;
@@ -4170,6 +4181,15 @@ function petBattleBeginPick(b) {
       suddenDeath: !!b.suddenDeath,
     };
   });
+  petBattleEmitTournamentSpectators(b, "petBattleSpectatorStatus", {
+    matchId: b.matchId,
+    round: b.round + 1,
+    maxRounds: PB_MAX_ROUNDS,
+    pickMs: PB_PICK_MS,
+    combatants: petBattleView(b),
+    tournament: true,
+    suddenDeath: !!b.suddenDeath,
+  });
   // Bot picks after a natural beat.
   if (petBattleIsBot(b)) {
     clearTimeout(b.botTimer);
@@ -4196,6 +4216,7 @@ function petBattleStart(b) {
     tournament: !!b.tournament,
     eventLabel: b.tournament ? "Pet Wars Grand Event" : "",
   }));
+  petBattleEmitTournamentSpectators(b, "petBattleStart", grandEventSpectatorStartPayload(b));
   petBattleBeginPick(b);
 }
 
@@ -4265,6 +4286,7 @@ function grandEventEntrantSnapshot(p) {
     build: { ...effectivePetBuild(p, p.pet) },
     seed: 0,
     status: "active",
+    viewMode: "playing",
     joinedAt: Date.now(),
   };
 }
@@ -4372,6 +4394,7 @@ function grandEventPublicView(email = null) {
     minPlayers: GE_MIN_PLAYERS,
     maxPlayers: GE_MAX_PLAYERS,
     allowedCounts: [...GE_ALLOWED_COUNTS],
+    canStart: grandEvent.state === "registration" && GE_ALLOWED_COUNTS.has(grandEvent.entrants.size),
     pot: grandEvent.entrants.size * grandEvent.config.entryFee,
     entrants: [...grandEvent.entrants.values()]
       .sort((a, b) => (a.seed || a.joinedAt) - (b.seed || b.joinedAt))
@@ -4396,11 +4419,14 @@ function grandEventPublicView(email = null) {
     me: {
       joined: !!mine,
       status: mine?.status || null,
+      viewMode: mine?.viewMode || (mine?.status === "eliminated" ? "decision" : "playing"),
       isCurrent,
       ready: !!email && readySet.has(email),
       canReady: grandEvent.state === "running" && isCurrent && current?.state === "ready" && !readySet.has(email),
       canJoin: grandEvent.state === "registration" && !mine && grandEvent.entrants.size < GE_MAX_PLAYERS,
       canWithdraw: grandEvent.state === "registration" && !!mine,
+      canChooseAfterLoss: (grandEvent.state === "running" || grandEvent.state === "complete")
+        && mine?.status === "eliminated",
     },
   };
 }
@@ -4415,6 +4441,78 @@ function grandEventBroadcast() {
   for (const id of admins) {
     if (!players[id]) io.to(id).emit("grandEventState", grandEventPublicView(null));
   }
+}
+
+function grandEventCurrentBattle() {
+  const match = grandEventCurrentMatch();
+  if (!grandEvent || grandEvent.state !== "running" || match?.state !== "active" || !match.battleId) return null;
+  for (const battle of new Set(battleBySocket.values())) {
+    if (battle?.tournament
+        && battle.grandEventId === grandEvent.id
+        && battle.grandEventMatchId === match.id
+        && battle.matchId === match.battleId
+        && battle.state !== "done") return battle;
+  }
+  return null;
+}
+
+function grandEventSpectatorSocketIds(battle) {
+  if (!battle?.tournament || !grandEvent || battle.grandEventId !== grandEvent.id) return [];
+  const ids = [];
+  for (const entrant of grandEvent.entrants.values()) {
+    if (entrant.status !== "eliminated" || entrant.viewMode !== "spectate") continue;
+    const id = grandEventSocketForEmail(entrant.email);
+    if (id && id !== battle.challengerId && id !== battle.opponentId) ids.push(id);
+  }
+  return ids;
+}
+
+function grandEventSpectatorStartPayload(battle) {
+  if (!battle?.tournament) return null;
+  return {
+    matchId: battle.matchId,
+    maxRounds: PB_MAX_ROUNDS,
+    pickMs: PB_PICK_MS,
+    you: "challenger",
+    viewSide: "challenger",
+    spectator: true,
+    combatants: petBattleView(battle),
+    tournament: true,
+    eventLabel: "Pet Wars Grand Event",
+  };
+}
+
+function petBattleEmitTournamentSpectators(battle, event, payload) {
+  if (!payload || !battle?.tournament) return;
+  for (const id of grandEventSpectatorSocketIds(battle)) {
+    io.to(id).emit(event, { ...payload, spectator: true, viewSide: "challenger" });
+  }
+}
+
+function grandEventEmitCurrentBattleToSpectator(id) {
+  const email = players[id]?.email;
+  const entrant = email ? grandEvent?.entrants.get(email) : null;
+  if (!entrant || entrant.status !== "eliminated" || entrant.viewMode !== "spectate") return;
+  const battle = grandEventCurrentBattle();
+  if (!battle) return;
+  io.to(id).emit("petBattleStart", grandEventSpectatorStartPayload(battle));
+  io.to(id).emit("petBattleSpectatorStatus", {
+    matchId: battle.matchId,
+    round: battle.round + (battle.state === "picking" ? 1 : 0),
+    maxRounds: PB_MAX_ROUNDS,
+    pickMs: battle.state === "picking" ? PB_PICK_MS : 0,
+    combatants: petBattleView(battle),
+    tournament: true,
+    spectator: true,
+    viewSide: "challenger",
+    suddenDeath: !!battle.suddenDeath,
+    resolving: battle.state === "resolving" || battle.state === "settling",
+  });
+}
+
+function grandEventSyncToSocket(id) {
+  grandEventEmitToSocket(id);
+  grandEventEmitCurrentBattleToSpectator(id);
 }
 
 function grandEventClearTimers() {
@@ -4569,7 +4667,7 @@ async function grandEventCreate(config, createdBy) {
       if (!grandEvent || grandEvent.id !== id || grandEvent.state !== "registration") return;
       if (GE_ALLOWED_COUNTS.has(grandEvent.entrants.size)) await grandEventStartBracket();
       else await grandEventCancelRegistration(
-        `Registration closed with ${grandEvent.entrants.size} player${grandEvent.entrants.size === 1 ? "" : "s"} — the event needs an even roster of 8–16. Every entry fee was refunded.`,
+        `Registration closed with ${grandEvent.entrants.size} player${grandEvent.entrants.size === 1 ? "" : "s"} — the event needs at least 8 players and a supported roster of 8, 10, 12, 14, or 16. Every entry fee was refunded.`,
       );
     });
   }, config.joinMs);
@@ -4636,7 +4734,8 @@ async function grandEventWithdraw(id) {
 async function grandEventStartBracket() {
   if (!grandEvent || grandEvent.state !== "registration") throw new Error("No registration lobby is open.");
   const count = grandEvent.entrants.size;
-  if (!GE_ALLOWED_COUNTS.has(count)) throw new Error("Start requires an even roster of 8, 10, 12, 14, or 16 players.");
+  if (!GE_ALLOWED_COUNTS.has(count))
+    throw new Error("Start requires at least 8 players and a supported roster of 8, 10, 12, 14, or 16.");
   clearTimeout(grandEvent.joinTimer);
   grandEvent.joinTimer = null;
 
@@ -4652,7 +4751,11 @@ async function grandEventStartBracket() {
       (a.registrationOrder || 999) - (b.registrationOrder || 999)
       || a.joinedAt - b.joinedAt
       || a.email.localeCompare(b.email))
-    .forEach((entry, i) => { entry.seed = i + 1; entry.status = "active"; });
+    .forEach((entry, i) => {
+      entry.seed = i + 1;
+      entry.status = "active";
+      entry.viewMode = "playing";
+    });
 
   grandEvent.state = "running";
   grandEvent.rounds = [];
@@ -4723,6 +4826,20 @@ async function grandEventReady(id) {
   await grandEventPersist();
   grandEventBroadcast();
   if (match.ready.includes(match.p1) && match.ready.includes(match.p2)) await grandEventStartBattle(match);
+}
+
+async function grandEventSetViewMode(id, mode) {
+  const p = players[id];
+  if (!p?.email || !grandEvent || !["running", "complete"].includes(grandEvent.state))
+    throw new Error("No Grand Event is available.");
+  const entrant = grandEvent.entrants.get(p.email);
+  if (!entrant || entrant.status !== "eliminated")
+    throw new Error("Quit and Spectate are available after elimination.");
+  if (mode !== "spectate" && mode !== "quit") throw new Error("Choose Quit or Spectate.");
+  entrant.viewMode = mode;
+  await grandEventPersist();
+  grandEventBroadcast();
+  if (mode === "spectate") grandEventEmitCurrentBattleToSpectator(id);
 }
 
 async function grandEventStartBattle(match) {
@@ -7362,7 +7479,7 @@ io.on("connection", (socket) => {
     } else {
       socket.emit("rlglOver", {});
     }
-    grandEventEmitToSocket(socket.id);
+    grandEventSyncToSocket(socket.id);
   });
 
   // ── Pet Wars Grand Event ──────────────────────────────────────────────
@@ -7454,7 +7571,23 @@ io.on("connection", (socket) => {
       .catch((err) => socket.emit("grandEventActionResult", { ok: false, message: err.message || "Couldn't ready up." }));
   });
 
-  socket.on("grandEventSync", () => grandEventEmitToSocket(socket.id));
+  socket.on("grandEventViewMode", (payload) => {
+    if (!takeToken(interactBucket)) return;
+    const mode = String(payload?.mode || "");
+    grandEventQueue(() => grandEventSetViewMode(socket.id, mode))
+      .then(() => socket.emit("grandEventActionResult", {
+        ok: true,
+        message: mode === "spectate"
+          ? "Live spectating is on. The next Pet Battle will open automatically."
+          : "You left Pet Wars. Your locked entry and result are unchanged.",
+      }))
+      .catch((err) => socket.emit("grandEventActionResult", {
+        ok: false,
+        message: err.message || "Couldn't update your Pet Wars view.",
+      }));
+  });
+
+  socket.on("grandEventSync", () => grandEventSyncToSocket(socket.id));
 
   // ── Admin: Red Light, Green Light ─────────────────────────────────────
   socket.on("adminRlglStart", (payload) => {

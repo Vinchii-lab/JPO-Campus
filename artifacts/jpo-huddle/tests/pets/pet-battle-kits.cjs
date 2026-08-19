@@ -164,10 +164,14 @@ const wingKeyframes = clientSource.slice(
   clientSource.indexOf("@keyframes pb-motion-beam"),
 );
 assert.doesNotMatch(wingKeyframes, /--pb-flight/, "flying attacks should animate in place, not slide across the arena");
-assert.match(clientSource, /pb-sprite-container\.pb-is-flying\s*\{\s*animation:\s*pb-idle-hover/,
-  "flying pets should visibly hover between attacks");
-assert.match(clientSource, /pet_dragon'.*pet_dragon_crimson'.*pet_dragon_obsidian'.*pet_phoenix/s,
-  "every flying battle pet should receive the hover treatment");
+assert.match(clientSource, /groundedMythical[\s\S]*?assets\/pets\/anim\/[\s\S]*?_sit\.png/,
+  "dragon and phoenix battle idles should use their exact-form sit artwork");
+assert.doesNotMatch(clientSource, /pb-sprite-container\.pb-is-flying\s*\{\s*animation:\s*pb-idle-hover/,
+  "dragon and phoenix battle idles must not hover between attacks");
+assert.match(clientSource, /const fr = \(seated \|\| groundedMythical\) \? petObj\._animSet\.sit/,
+  "stationary office dragons and phoenixes should land in their sit frame");
+assert.match(clientSource, /if \(flying && !seated && dist > gap \+ 1\)/,
+  "office flight should remain active only while the mythical pet is actually moving");
 
 const statsSource = serverSource.slice(
   serverSource.indexOf("function petBattleStats("),

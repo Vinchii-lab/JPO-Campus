@@ -1867,14 +1867,6 @@
   align-items: flex-end; justify-content: center; margin-top: 10px;
 }
 @media (min-width: 600px) { .pb-sprite-container { width: 160px; height: 160px; } }
-/* Flying pets never rest on the arena floor. Moving `bottom` instead of
-   `transform` lets their idle hover keep running underneath their attack pose. */
-.pb-sprite-container.pb-is-flying { animation: pb-idle-hover 1.35s ease-in-out infinite; }
-@keyframes pb-idle-hover {
-  0%, 100% { bottom: 10px; }
-  50% { bottom: 22px; }
-}
-
 .pb-sprite { width: 100%; height: auto; max-height: 100%; object-fit: contain; image-rendering: pixelated; transition: transform 0.2s; filter: drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
 .pb-opponent .pb-sprite { transform: scaleX(-1); }
 
@@ -2376,6 +2368,11 @@
 .ge-lobby-head { display:flex;align-items:center;gap:10px; }
 .ge-lobby-title { font-weight:900;font-size:17px;color:#ffd66b;letter-spacing:.5px; }
 .ge-lobby-state { margin-left:auto;padding:3px 8px;border-radius:999px;background:#2d2350;color:#cdbfff;font-size:10px;font-weight:800;text-transform:uppercase; }
+.ge-lobby-close {
+  border:0;background:transparent;color:#cdbfff;font:900 16px/1 monospace;
+  padding:4px;cursor:pointer;border-radius:6px;
+}
+.ge-lobby-close:hover { color:#fff;background:rgba(255,255,255,.1); }
 .ge-lobby-copy { margin:7px 0 10px;color:#d7cdec;font-size:12px;line-height:1.45; }
 .ge-lobby-actions { display:flex;flex-wrap:wrap;gap:7px;align-items:center; }
 .ge-btn {
@@ -2423,6 +2420,11 @@
 .ge-current-player small { display:block;color:#9f94b5;font-size:9px;font-weight:400;margin-top:3px; }
 .ge-vs { color:#f0b83f;font-weight:900;font-size:16px; }
 .ge-current-actions { display:flex;justify-content:center;gap:8px;align-items:center;flex-wrap:wrap; }
+.ge-loss-choice {
+  margin-top:10px;padding:10px;border:1px solid #8a67c9;border-radius:10px;
+  background:rgba(18,13,38,.7);text-align:center;
+}
+.ge-loss-choice strong { display:block;color:#ffdc78;margin-bottom:7px; }
 .ge-bracket {
   display:flex;align-items:stretch;gap:12px;padding:8px 16px 18px;overflow-x:auto;
   scroll-snap-type:x proximity;
@@ -2778,7 +2780,9 @@
          <h2 id="pb-result-title">Victory!</h2>
          <p id="pb-result-xp">+3 XP</p>
          <div class="pb-result-btn-row">
-            <button class="pt-btn" id="pb-result-close">Close</button>
+           <button class="pt-btn" id="pb-result-close">Close</button>
+           <button class="pt-btn pt-btn-primary" id="pb-result-spectate" style="display:none">Spectate Live</button>
+           <button class="pt-btn" id="pb-result-quit" style="display:none">Quit Pet Wars</button>
             <button class="pt-btn pt-btn-primary" id="pb-result-rematch" style="display:none">Rematch Bot</button>
          </div>
       </div>
@@ -2801,6 +2805,7 @@
     <div class="ge-lobby-head">
       <div class="ge-lobby-title">🏆 Pet Wars Grand Event</div>
       <div id="ge-lobby-state" class="ge-lobby-state">registration</div>
+      <button id="ge-lobby-close" class="ge-lobby-close" type="button" aria-label="Dismiss Pet Wars invite">✕</button>
     </div>
     <div id="ge-lobby-copy" class="ge-lobby-copy"></div>
     <div class="ge-lobby-actions">
@@ -3605,7 +3610,7 @@
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="o-btn o-btn-approve" onclick="ownerGrandEventCreate()">Open registration</button>
-          <button class="o-btn" onclick="ownerGrandEventStart()">Lock bracket &amp; start</button>
+          <button class="o-btn" id="op-ge-start" onclick="ownerGrandEventStart()" disabled>Need 8 players to start</button>
           <button class="o-btn o-btn-reject" onclick="ownerGrandEventCancel()">Cancel &amp; refund</button>
         </div>
         <div id="op-ge-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
@@ -16518,8 +16523,11 @@
             petObj.angle *= 0.85;                                                    // settle upright
             petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
             if (petObj._animSet) {
-              // Sit frame when the owner is seated, neutral frame otherwise.
-              const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
+              // Dragons and phoenixes land into their exact-form sit pose
+              // whenever they stop. They only show flight frames while moving.
+              const groundedMythical = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
+                || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);
+              const fr = (seated || groundedMythical) ? petObj._animSet.sit : petObj._animSet.idle;
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             const now = performance.now();
@@ -16619,15 +16627,11 @@
               this._petTrick(petObj);
             }
           }
-          // ── FLIGHT (boss rule, Aug 2026): dragons stage 2+ are AIRBORNE at
-          // all times — hover bob via display origin (never touches x/y, so
-          // follow logic and tricks are untouched) + wings always flapping,
-          // even while idling, + a soft ground-shadow blob so you can read
-          // where they are. They only LAND (sit frame, no shadow) when the
-          // owner sits down.
+          // ── FLIGHT: dragons stage 2+ and final phoenixes fly while following
+          // their owner, then land in their exact-form sit pose when stationary.
           const flying = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
             || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);   // grown phoenix is AIRBORNE like the dragons
-          if (flying && !seated) {
+          if (flying && !seated && dist > gap + 1) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
             const movingFly = dist > gap + 1;
             // SWOOP LANDING (storyboard #3) — per-dragon personality:
@@ -17811,6 +17815,9 @@
     // ══════════════════════════════════════════════════════════════════════════
     // ── Pet Wars Grand Event client ──────────────────────────────────────────
     let _geState = null;
+    let _geDismissedId = null;
+    let _gePendingViewMode = null;
+    try { _geDismissedId = sessionStorage.getItem('jpo_ge_dismissed') || null; } catch (e) {}
     const geEl = (id) => document.getElementById(id);
     const geEsc = (v) => String(v == null ? '' : v)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -17844,6 +17851,12 @@
     window.geClosePanel = geClosePanel;
     geEl('ge-panel-close').onclick = geClosePanel;
     geEl('ge-panel').addEventListener('click', (e) => { if (e.target === geEl('ge-panel')) geClosePanel(); });
+    geEl('ge-lobby-close').onclick = () => {
+      if (!_geState?.id) return;
+      _geDismissedId = _geState.id;
+      try { sessionStorage.setItem('jpo_ge_dismissed', _geDismissedId); } catch (e) {}
+      geEl('ge-lobby-card').classList.remove('open');
+    };
     geEl('ge-view-btn').onclick = geOpenPanel;
     geEl('ge-join-btn').onclick = () => {
       geEl('ge-lobby-msg').textContent = 'Locking in your entry…';
@@ -17857,6 +17870,43 @@
       socket.emit('grandEventReady');
     };
 
+    function geChooseView(mode) {
+      if (mode !== 'spectate' && mode !== 'quit') return;
+      // Apply an immediate client gate while the durable server update is in
+      // flight, so a queued spectator packet cannot reopen a quit match.
+      _gePendingViewMode = mode;
+      if (mode === 'quit' && _geState?.id) {
+        _geDismissedId = _geState.id;
+        try { sessionStorage.setItem('jpo_ge_dismissed', _geDismissedId); } catch (e) {}
+        pbCloseAll();
+        geClosePanel();
+      }
+      socket.emit('grandEventViewMode', { mode });
+    }
+
+    function geLossChoiceHtml(s) {
+      if (s.me?.status !== 'eliminated' || !s.me?.canChooseAfterLoss || s.me?.viewMode === 'quit') return '';
+      if (s.me?.viewMode === 'spectate') {
+        return `<div class="ge-loss-choice"><strong>📺 Live spectating is on</strong>
+          <span class="ge-msg">The next tournament battle opens automatically.</span>
+          <div class="ge-current-actions" style="margin-top:8px">
+            <button class="ge-btn danger" type="button" data-ge-view-mode="quit">Quit Pet Wars</button>
+          </div></div>`;
+      }
+      return `<div class="ge-loss-choice"><strong>Your run is over. What next?</strong>
+        <div class="ge-current-actions">
+          <button class="ge-btn primary" type="button" data-ge-view-mode="spectate">Spectate Live</button>
+          <button class="ge-btn danger" type="button" data-ge-view-mode="quit">Quit Pet Wars</button>
+        </div>
+        <span class="ge-msg">Your entry stays locked and your bracket result will not change.</span></div>`;
+    }
+
+    function geWireLossChoices(el) {
+      el.querySelectorAll('[data-ge-view-mode]').forEach((button) => {
+        button.addEventListener('click', () => geChooseView(button.dataset.geViewMode));
+      });
+    }
+
     function geRenderCurrent(s) {
       const el = geEl('ge-current');
       const m = geCurrentMatch(s);
@@ -17867,7 +17917,8 @@
         return;
       }
       if (!m) {
-        el.innerHTML = `<div class="ge-current-title">${s.state === 'complete' ? 'Tournament complete' : 'Building next round…'}</div>`;
+        el.innerHTML = `<div class="ge-current-title">${s.state === 'complete' ? 'Tournament complete' : 'Building next round…'}</div>${geLossChoiceHtml(s)}`;
+        geWireLossChoices(el);
         return;
       }
       const readyCopy = m.state === 'ready'
@@ -17882,8 +17933,9 @@
         <div class="ge-current-actions">
           ${s.me?.canReady ? '<button class="ge-btn primary" type="button" data-ge-ready>Ready for battle</button>' : ''}
           <span class="ge-msg">${geEsc(readyCopy)} · Winner gets ${geCoins(s.currentReward)} round coins</span>
-        </div>`;
+        </div>${geLossChoiceHtml(s)}`;
       el.querySelector('[data-ge-ready]')?.addEventListener('click', () => socket.emit('grandEventReady'));
+      geWireLossChoices(el);
     }
 
     function geRenderBracket(s) {
@@ -17923,12 +17975,18 @@
         geClosePanel();
         return;
       }
-      lobby.classList.add('open');
+      const leftEvent = s.me?.viewMode === 'quit';
+      const dismissed = _geDismissedId === s.id && !s.me?.isCurrent;
+      lobby.classList.toggle('open', !leftEvent && !dismissed);
+      if (leftEvent) geClosePanel();
       geEl('ge-lobby-state').textContent = s.state;
       const m = geCurrentMatch(s);
       let copy = '';
       if (s.state === 'registration') {
-        copy = `${s.entrants.length} entered · ${geCoins(s.entryFee)}-coin entry · pot ${geCoins(s.pot)} · closes in ${geTimeLeft(s.joinDeadline)}. Equip the pet and build you want frozen into the bracket.`;
+        const need = s.canStart
+          ? 'The roster is eligible to start.'
+          : `At least ${s.minPlayers} players are required; supported rosters are ${s.allowedCounts.join(', ')}.`;
+        copy = `${s.entrants.length} entered · ${geCoins(s.entryFee)}-coin entry · pot ${geCoins(s.pot)} · closes in ${geTimeLeft(s.joinDeadline)}. ${need} Equip the pet and build you want frozen into the bracket.`;
       } else if (s.state === 'running') {
         const names = m ? `${m.p1?.name || 'TBD'} vs ${m.p2?.name || 'TBD'}` : 'Next round loading';
         copy = `${s.rounds[s.currentRoundIndex]?.label || 'Bracket'}: ${names}. ${s.me?.isCurrent ? 'Your matchup is up.' : 'Follow the live bracket.'}`;
@@ -17945,6 +18003,13 @@
       ready.style.display = s.me?.isCurrent && s.state === 'running' ? '' : 'none';
       ready.disabled = !s.me?.canReady;
       ready.textContent = s.me?.ready ? 'Ready ✓' : 'Ready for battle';
+      const hostStart = document.getElementById('op-ge-start');
+      if (hostStart) {
+        hostStart.disabled = !s.canStart;
+        hostStart.textContent = s.canStart
+          ? `Lock ${s.entrants.length}-player bracket & start`
+          : `Need ${s.minPlayers}+ players (${s.allowedCounts.join('/')})`;
+      }
       geEl('ge-header-sub').textContent = `${s.entrants.length} entrants · ${geCoins(s.entryFee)} entry · ${geEsc(s.prizeLabel)}`;
       geEl('ge-summary').innerHTML = [
         ['Entrants', `${s.entrants.length} / ${s.maxPlayers}`],
@@ -17970,13 +18035,28 @@
 
     socket.on('grandEventState', (s) => {
       const previous = _geState;
+      if (s?.id && previous?.id && s.id !== previous.id && _geDismissedId === previous.id) {
+        _geDismissedId = null;
+        try { sessionStorage.removeItem('jpo_ge_dismissed'); } catch (e) {}
+      }
       _geState = s;
+      if (_gePendingViewMode && s?.me?.viewMode === _gePendingViewMode) {
+        _gePendingViewMode = null;
+      }
+      if (s?.me?.canReady) {
+        _geDismissedId = null;
+        try { sessionStorage.removeItem('jpo_ge_dismissed'); } catch (e) {}
+      }
       geRender();
       if (s?.me?.canReady && !previous?.me?.canReady) {
         geEl('ge-lobby-msg').textContent = 'Your matchup is up — ready before the clock expires.';
       }
     });
     socket.on('grandEventActionResult', ({ ok, message } = {}) => {
+      if (!ok && _gePendingViewMode) {
+        _gePendingViewMode = null;
+        geRender();
+      }
       const el = geEl('ge-lobby-msg');
       el.style.color = ok ? '#9ee6b2' : '#ff9eaa';
       el.textContent = message || '';
@@ -18009,6 +18089,7 @@
     let pbBuildSavePending = false;
     let pbDerivedStats = null;
     let pbTournament = false;
+    let pbSpectator = false;
     const pbChoreoAnimations = new Set();
     
     // Per-species visual theme mapping for Special and Ultimate moves
@@ -18246,6 +18327,7 @@
       pbAnimQueue = []; pbIsAnimating = false;
       pbMatchId = null; pbState = null; pbMySide = null;
       pbTournament = false;
+      pbSpectator = false;
       pbLastRoundSummary = '';
       pbClearTimers();
       pbChoreoAnimations.forEach(animation => animation.cancel());
@@ -18263,6 +18345,11 @@
       pbEl('pb-waiting').classList.remove('open');
       pbEl('pb-incoming').classList.remove('open');
       pbEl('pb-result-screen').classList.remove('open');
+      pbEl('pb-controls').style.display = '';
+      pbEl('pb-forfeit-btn').style.display = '';
+      pbEl('pb-result-close').style.display = '';
+      pbEl('pb-result-spectate').style.display = 'none';
+      pbEl('pb-result-quit').style.display = 'none';
     }
 
     pbEl('rps-menu-petbattle').addEventListener('pointerdown', (e) => {
@@ -18426,6 +18513,13 @@
 
     function pbSetPetImage(img, petId, stage, force = false) {
        const candidates = [];
+       const stem = String(petId || '').replace(/^pet_/, '');
+       const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
+       const groundedMythical = String(petId || '').startsWith('pet_dragon')
+         || petId === 'pet_phoenix';
+       // Dragons and phoenixes move through the air, but at rest the requested
+       // pose is their exact-form sit frame—not their static flying artwork.
+       if (groundedMythical) candidates.push('assets/pets/anim/' + stem + suffix + '_sit.png');
        if (stage >= 3) candidates.push('assets/pets/' + petId + '_s3.png');
        if (stage >= 2) candidates.push('assets/pets/' + petId + '_s2.png');
        candidates.push('assets/pets/' + petId + '.png');
@@ -18510,26 +18604,31 @@
        }
 
        const sprite = pbEl(prefix + '-sprite');
-       const flyingPets = new Set([
-         'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian', 'pet_phoenix',
-       ]);
-       sprite.closest('.pb-sprite-container')?.classList.toggle('pb-is-flying', flyingPets.has(data.petId));
+       // Airborne movement is applied only by move choreography classes. The
+       // neutral arena pose stays grounded for every pet.
+       sprite.closest('.pb-sprite-container')?.classList.remove('pb-is-flying');
        pbSetPetImage(sprite, data.petId, data.stage);
     }
 
     socket.on('petBattleStart', (payload) => {
-       if (payload.matchId !== pbMatchId && pbMatchId) return;
+       const spectator = !!payload.spectator;
+       if (spectator) {
+          const viewerMode = _gePendingViewMode || _geState?.me?.viewMode;
+          if (viewerMode !== 'spectate') return;
+          if (payload.matchId !== pbMatchId && pbMatchId) pbCloseAll();
+       } else if (payload.matchId !== pbMatchId && pbMatchId) return;
        pbMatchId = payload.matchId;
        pbState = 'starting';
-       pbMySide = payload.you;
+       pbMySide = payload.viewSide || payload.you || 'challenger';
        pbTournament = !!payload.tournament;
+       pbSpectator = spectator;
        pbLastRoundSummary = '';
        
        pbEl('pb-waiting').classList.remove('open');
        pbEl('pb-incoming').classList.remove('open');
        pbEl('pb-overlay').classList.add('open');
        pbEl('pb-result-screen').classList.remove('open');
-       pbEl('pb-result-xp').textContent = 'Pending XP...';
+       pbEl('pb-result-xp').textContent = spectator ? 'Read-only live tournament feed' : 'Pending XP...';
        pbEl('pb-overlay').focus();
        if (pbTournament) geClosePanel();
        
@@ -18560,13 +18659,17 @@
        labelMove('pb-btn-special', 'special', 'pb-cd-special');
        labelMove('pb-btn-ultimate', 'ultimate', 'pb-cd-ultimate');
        pbSetRound(1, payload.maxRounds);
-       pbEl('pb-status-text').textContent = pbTournament
+       pbEl('pb-status-text').textContent = spectator
+         ? "Watching live — players are choosing their moves."
+         : pbTournament
          ? "Grand Event matchup — winner advances. Get ready!"
          : "Get ready!";
        pbEl('pb-controls').style.opacity = '0.5';
        pbEl('pb-controls').style.pointerEvents = 'none';
+       pbEl('pb-controls').style.display = spectator ? 'none' : '';
        
-       pbEl('pb-forfeit-btn').disabled = false;
+       pbEl('pb-forfeit-btn').style.display = spectator ? 'none' : '';
+       pbEl('pb-forfeit-btn').disabled = spectator;
        pbEl('pb-forfeit-btn').onclick = () => {
           pbEl('pb-forfeit-btn').disabled = true;
           pbEl('pb-status-text').textContent = "Surrendering...";
@@ -19355,8 +19458,25 @@
        }
     }
 
+    socket.on('petBattleSpectatorStatus', (payload) => {
+       if (!pbSpectator || payload.matchId !== pbMatchId) return;
+       pbClearTimers();
+       pbSetRound(Math.max(1, payload.round || 1), payload.maxRounds, payload.suddenDeath);
+       if (payload.pickMs) pbStartTimer(payload.pickMs);
+       pbEl('pb-status-text').textContent = payload.resolving
+         ? 'Watching live — the current clash is resolving…'
+         : payload.suddenDeath
+           ? 'Watching live — sudden-death moves are being chosen…'
+           : 'Watching live — players are choosing their moves…';
+       const side = pbMySide || 'challenger';
+       const foeSide = side === 'challenger' ? 'opponent' : 'challenger';
+       if (payload.combatants?.[side]) pbRenderSide('pb-cha', payload.combatants[side]);
+       if (payload.combatants?.[foeSide]) pbRenderSide('pb-opp', payload.combatants[foeSide]);
+    });
+
     socket.on('petBattlePickStatus', (payload) => {
        if (payload.matchId !== pbMatchId) return;
+       if (pbSpectator) return;
        pbClearTimers();
        let myGen = pbGen;
        pbAnimQueue.push(async () => {
@@ -19461,10 +19581,12 @@
           // Re-render pips
           pbRenderSide('pb-cha', {...myData, hp: myRes.hp, charge: myRes.charge});
           pbRenderSide('pb-opp', {...oppData, hp: oppRes.hp, charge: oppRes.charge});
-           const roundNotes = [
-             myRes.moveName ? 'You used ' + myRes.moveName + '.' : '',
+            const roundNotes = [
+              myRes.moveName
+                ? (pbSpectator ? `${myData.name} used ${myRes.moveName}.` : `You used ${myRes.moveName}.`)
+                : '',
              ...(myRes.notes || []),
-             ...(oppRes.notes || []).map(note => 'Opponent: ' + note),
+              ...(oppRes.notes || []).map(note => (pbSpectator ? `${oppData.name}: ` : 'Opponent: ') + note),
            ].filter(Boolean);
            if (roundNotes.length) {
              pbLastRoundSummary = roundNotes.slice(0, 4).join(' ');
@@ -19486,27 +19608,66 @@
        
        pbAnimQueue.push(async () => {
           if (myGen !== pbGen) return;
-          pbState = 'done';
-           pbEl('pb-status-text').textContent = payload.draw ? "It's a draw!" : payload.youWon
+           pbState = 'done';
+           const watched = pbSpectator || !!payload.spectator;
+           const watchedWinner = watched && payload.winnerSide
+             ? payload.combatants?.[payload.winnerSide]
+             : null;
+            pbEl('pb-status-text').textContent = watched
+              ? (payload.draw ? "The watched match ended in a draw." : `${watchedWinner?.name || 'The winner'} advances!`)
+              : payload.draw ? "It's a draw!" : payload.youWon
              ? (payload.tournament ? "You won — advancing in the Grand Event!" : "You won!")
              : (payload.tournament ? "Eliminated from the Grand Event." : "You lost!");
           
           await new Promise(r => setTimeout(r, 1000));
           
-           pbEl('pb-result-title').textContent = payload.draw ? "DRAW" : payload.youWon
+            pbEl('pb-result-title').textContent = watched ? "MATCH FINAL" : payload.draw ? "DRAW" : payload.youWon
              ? (payload.tournament ? "ADVANCING!" : "VICTORY!")
              : (payload.tournament ? "ELIMINATED" : "DEFEAT");
-          pbEl('pb-result-title').style.color = payload.youWon ? "#FFC046" : (payload.draw ? "#bdc3c7" : "#e74c3c");
+           pbEl('pb-result-title').style.color = watched || payload.youWon ? "#FFC046" : (payload.draw ? "#bdc3c7" : "#e74c3c");
+           if (watched) {
+             pbEl('pb-result-xp').textContent = payload.draw
+               ? 'No one advanced from this live match.'
+               : `${watchedWinner?.name || 'The winner'} advances in the Grand Event.`;
+           }
           pbEl('pb-result-screen').classList.add('open');
-          
-           pbEl('pb-result-close').onclick = () => {
+
+           const close = pbEl('pb-result-close');
+           const spectate = pbEl('pb-result-spectate');
+           const quit = pbEl('pb-result-quit');
+           close.style.display = '';
+           close.textContent = watched ? 'Back to bracket' : 'Close';
+           spectate.style.display = 'none';
+           quit.style.display = 'none';
+            close.onclick = () => {
              const tournament = !!payload.tournament;
              pbCloseAll();
              if (tournament) geOpenPanel();
            };
+
+           if (watched) {
+             quit.style.display = '';
+             quit.onclick = () => {
+               geChooseView('quit');
+               pbCloseAll();
+             };
+           } else if (payload.tournament && !payload.draw && !payload.youWon) {
+             close.style.display = 'none';
+             spectate.style.display = '';
+             quit.style.display = '';
+             spectate.onclick = () => {
+               geChooseView('spectate');
+               pbCloseAll();
+               geOpenPanel();
+             };
+             quit.onclick = () => {
+               geChooseView('quit');
+               pbCloseAll();
+             };
+           }
           
           const oppData = payload.combatants[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
-          if (oppData.isBot) {
+           if (!watched && oppData.isBot) {
              pbEl('pb-result-rematch').style.display = 'block';
              pbEl('pb-result-rematch').onclick = () => {
                 pbCloseAll();

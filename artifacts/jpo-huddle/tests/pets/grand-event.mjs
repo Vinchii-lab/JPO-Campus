@@ -104,6 +104,14 @@ async function cleanup() {
 
 async function seed() {
   await cleanup();
+  // Other Grand Event test fixtures also exercise restore behavior. If one was
+  // deliberately crash-stopped, do not let its active snapshot hijack this
+  // isolated server before the fresh geit-* roster can create its own event.
+  await pool.query(
+    `DELETE FROM jpo_grand_events
+      WHERE created_by IN ('test-seed','test-seed-battle')
+         OR created_by LIKE 'geit-%@justpressone.com'`,
+  );
   for (let i = 0; i < emails.length; i++) {
     const xp = i === 0 ? { pet_dog: 70 } : { pet_dog: 0 };
     const builds = i === 0
@@ -135,6 +143,10 @@ async function connectPlayers({ autoPlay = false } = {}) {
       phEnd: eventQueue(socket, "phEnd"),
       battleStages: [],
       battleResults: new Map(),
+      spectatorStarts: [],
+      spectatorRounds: [],
+      spectatorStatuses: [],
+      pickStatuses: [],
     };
     socket.on("grandEventState", (state) => {
       client.state = state;
@@ -144,6 +156,7 @@ async function connectPlayers({ autoPlay = false } = {}) {
       }
     });
     socket.on("petBattleStart", (payload) => {
+      if (payload?.spectator) client.spectatorStarts.push(payload);
       for (const side of Object.values(payload.combatants || {})) {
         if (side?.name === names[0]) {
           client.battleStages.push({ stage: side.stage, build: side.build, tournament: payload.tournament });
@@ -151,6 +164,7 @@ async function connectPlayers({ autoPlay = false } = {}) {
       }
     });
     socket.on("petBattlePickStatus", (payload) => {
+      client.pickStatuses.push(payload);
       if (!autoPlay || !payload?.matchId || !Array.isArray(payload.legal)) return;
       const key = `${payload.matchId}:${payload.round}`;
       if (client.picks.has(key)) return;
@@ -160,6 +174,12 @@ async function connectPlayers({ autoPlay = false } = {}) {
     });
     socket.on("petBattleResult", (payload) => {
       if (payload?.matchId) client.battleResults.set(payload.matchId, payload);
+    });
+    socket.on("petBattleRound", (payload) => {
+      if (payload?.spectator) client.spectatorRounds.push(payload);
+    });
+    socket.on("petBattleSpectatorStatus", (payload) => {
+      client.spectatorStatuses.push(payload);
     });
     await new Promise((resolve, reject) => {
       socket.once("connect", resolve);
@@ -229,6 +249,12 @@ try {
   }
   ok(Number(await pool.query(`SELECT coins FROM jpo_players WHERE email=$1`, [emails[1]]).then(r => r.rows[0].coins)) === 850,
     "entry fee is debited from the authoritative balance");
+  admin.s.emit("grandEventStart");
+  const undersized = await admin.admin.next(8_000, "undersized start rejection");
+  ok(!undersized.ok && /at least 8 players/.test(undersized.message || ""),
+    "host cannot start below the explicit eight-player minimum");
+  ok(admin.state?.state === "registration",
+    "an undersized start attempt leaves registration and escrow unchanged");
   const cancelledId = admin.state.id;
   admin.s.emit("grandEventCancel");
   ok((await admin.admin.next(10_000, "cancel result")).ok, "host can cancel before bracket lock");
@@ -313,6 +339,84 @@ try {
 
   await startServer();
   clients = await connectPlayers({ autoPlay: true });
+  const firstSettledMatch = crashSnapshot.rounds[0].matches[0];
+  const firstLoserEmail = firstSettledMatch.winner === firstSettledMatch.p1
+    ? firstSettledMatch.p2
+    : firstSettledMatch.p1;
+  const observer = clients[emails.indexOf(firstLoserEmail)];
+  const observerBalanceBefore = Number((await pool.query(
+    `SELECT coins FROM jpo_players WHERE email=$1`, [firstLoserEmail],
+  )).rows[0].coins);
+
+  observer.s.emit("grandEventViewMode", { mode: "spectate" });
+  const spectateChoice = await observer.action.next(8_000, "spectate choice");
+  ok(spectateChoice.ok, "an eliminated entrant can opt into live spectating");
+  await waitFor(() => observer.state?.me?.viewMode === "spectate", 8_000, "spectator preference");
+  await waitFor(() => observer.spectatorStarts.length > 0, 30_000, "sanitized spectator battle start");
+  ok(observer.spectatorStarts.every((payload) => payload.spectator && payload.tournament
+      && payload.viewSide === "challenger" && payload.combatants),
+    "spectators receive a read-only sanitized tournament start snapshot");
+
+  // Reconnect while the event is active. The durable preference should restore,
+  // and either the current battle or the next one should reopen automatically.
+  const startsBeforeReconnect = observer.spectatorStarts.length;
+  observer.s.disconnect();
+  const reconnected = new Promise((resolve, reject) => {
+    observer.s.once("connect", resolve);
+    observer.s.once("connect_error", reject);
+  });
+  observer.s.connect();
+  await reconnected;
+  observer.s.emit("register", {
+    firstName: names[emails.indexOf(firstLoserEmail)],
+    lastName: "GrandEvent",
+    email: firstLoserEmail,
+    password: "testpass123",
+    character: chars[emails.indexOf(firstLoserEmail)],
+    department: "IT",
+  });
+  await observer.approved.next(15_000, "spectator reconnect approved");
+  await waitFor(() => observer.state?.me?.viewMode === "spectate", 8_000, "restored spectator preference");
+  await waitFor(() => observer.spectatorStarts.length > startsBeforeReconnect, 30_000, "spectator battle after reconnect");
+  await waitFor(() => observer.spectatorRounds.length > 0, 30_000, "sanitized spectator round");
+  ok(observer.spectatorStatuses.length > 0 && observer.pickStatuses.length === 0,
+    "spectators receive progress updates without legal moves or control prompts");
+  ok(observer.spectatorRounds.every((payload) => payload.spectator
+      && payload.result && payload.combatants),
+    "live spectators receive battle animation rounds with public combatants");
+
+  const currentAtQuit = observer.state.currentMatchId;
+  observer.s.emit("grandEventViewMode", { mode: "quit" });
+  const quitChoice = await observer.action.next(8_000, "quit choice");
+  ok(quitChoice.ok, "an eliminated spectator can quit Pet Wars");
+  await waitFor(() => observer.state?.me?.viewMode === "quit", 8_000, "quit preference");
+  // Baseline only after the server acknowledges the durable Quit. Packets sent
+  // while the request itself was in flight are not post-ack spectator delivery.
+  const spectatorEventCountAtQuit = observer.spectatorStarts.length
+    + observer.spectatorRounds.length
+    + [...observer.battleResults.values()].filter((payload) => payload.spectator).length;
+  await waitFor(
+    () => observer.state?.state === "complete" || observer.state?.currentMatchId !== currentAtQuit,
+    35_000,
+    "bracket advances after spectator quits",
+  );
+  await sleep(300);
+  const spectatorEventCountAfterQuit = observer.spectatorStarts.length
+    + observer.spectatorRounds.length
+    + [...observer.battleResults.values()].filter((payload) => payload.spectator).length;
+  ok(spectatorEventCountAfterQuit === spectatorEventCountAtQuit,
+    "quit spectators stop receiving later live battle events");
+  ok(observer.state?.me?.status === "eliminated",
+    "quit is a viewer preference and never reverses bracket elimination");
+  ok(Number((await pool.query(
+    `SELECT coins FROM jpo_players WHERE email=$1`, [firstLoserEmail],
+  )).rows[0].coins) === observerBalanceBefore
+    && Number((await pool.query(
+      `SELECT count(*) AS n FROM jpo_grand_event_payouts WHERE event_id=$1 AND email=$2 AND kind='refund'`,
+      [eventId, firstLoserEmail],
+    )).rows[0].n) === 0,
+  "quit does not refund the locked entry or create a refund claim");
+
   const completed = await waitFor(
     () => clients.find((c) => c.state?.state === "complete" && c.state.champion)?.state,
     120_000,
