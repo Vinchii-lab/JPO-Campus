@@ -2013,6 +2013,13 @@
 .pb-sprite-container.pb-is-flying.pb-motion-wing { animation: pb-motion-wing .9s steps(9,end); z-index: 30; }
 .pb-motion-beam { animation: pb-motion-beam .82s steps(8,end); }
 .pb-motion-rebirth { animation: pb-motion-rebirth .94s cubic-bezier(.16,.8,.22,1); }
+/* Dragon and phoenix neutral poses are airborne. Their images cycle through
+   wing frames in JS; this is the small floating body motion between flaps. */
+.pb-sprite-container.pb-is-flying:not(.pb-in-action) { animation: pb-idle-hover .82s ease-in-out infinite; }
+@keyframes pb-idle-hover {
+  0%, 100% { bottom: 18px; }
+  50% { bottom: 33px; }
+}
 @keyframes pb-motion-bite {
   0%,100% { transform: translate(0,0) scale(1); }
   20% { transform: translate(var(--pb-back),8px) scale(1.06,.9); }
@@ -16523,11 +16530,7 @@
             petObj.angle *= 0.85;                                                    // settle upright
             petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
             if (petObj._animSet) {
-              // Dragons and phoenixes land into their exact-form sit pose
-              // whenever they stop. They only show flight frames while moving.
-              const groundedMythical = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
-                || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);
-              const fr = (seated || groundedMythical) ? petObj._animSet.sit : petObj._animSet.idle;
+              const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             const now = performance.now();
@@ -16627,11 +16630,11 @@
               this._petTrick(petObj);
             }
           }
-          // ── FLIGHT: dragons stage 2+ and final phoenixes fly while following
-          // their owner, then land in their exact-form sit pose when stationary.
+          // ── FLIGHT: dragons stage 2+ and final phoenixes stay airborne with
+          // their wings cycling even while they are holding position.
           const flying = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
             || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);   // grown phoenix is AIRBORNE like the dragons
-          if (flying && !seated && dist > gap + 1) {
+          if (flying) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
             const movingFly = dist > gap + 1;
             // SWOOP LANDING (storyboard #3) — per-dragon personality:
@@ -18332,6 +18335,8 @@
       pbClearTimers();
       pbChoreoAnimations.forEach(animation => animation.cancel());
       pbChoreoAnimations.clear();
+      pbStopFlightIdle(pbEl('pb-cha-sprite'));
+      pbStopFlightIdle(pbEl('pb-opp-sprite'));
       pbEl('pb-cha-fx').replaceChildren();
       pbEl('pb-opp-fx').replaceChildren();
       pbEl('pb-arena-fx').replaceChildren();
@@ -18513,13 +18518,6 @@
 
     function pbSetPetImage(img, petId, stage, force = false) {
        const candidates = [];
-       const stem = String(petId || '').replace(/^pet_/, '');
-       const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
-       const groundedMythical = String(petId || '').startsWith('pet_dragon')
-         || petId === 'pet_phoenix';
-       // Dragons and phoenixes move through the air, but at rest the requested
-       // pose is their exact-form sit frame—not their static flying artwork.
-       if (groundedMythical) candidates.push('assets/pets/anim/' + stem + suffix + '_sit.png');
        if (stage >= 3) candidates.push('assets/pets/' + petId + '_s3.png');
        if (stage >= 2) candidates.push('assets/pets/' + petId + '_s2.png');
        candidates.push('assets/pets/' + petId + '.png');
@@ -18534,6 +18532,38 @@
           else img.onerror = null;
        };
        img.src = candidates[0];
+    }
+
+    function pbIsFlyingPet(petId) {
+       return String(petId || '').startsWith('pet_dragon') || petId === 'pet_phoenix';
+    }
+
+    function pbFlightFrames(petId, stage) {
+       const stem = String(petId || '').replace(/^pet_/, '');
+       const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
+       return [1, 2, 3].map((n) => `assets/pets/anim/${stem}${suffix}_walk${n}.png`);
+    }
+
+    function pbStopFlightIdle(img) {
+       if (img?._pbFlightTimer) clearInterval(img._pbFlightTimer);
+       if (img) img._pbFlightTimer = null;
+    }
+
+    function pbStartFlightIdle(img, petId, stage) {
+       pbStopFlightIdle(img);
+       const frames = pbFlightFrames(petId, stage);
+       let index = 0;
+       const showFrame = () => {
+          if (!img.isConnected || img.dataset.pbActionPose) return;
+          img.onerror = () => {
+             pbStopFlightIdle(img);
+             // A missing animation frame must never leave a broken pet image.
+             pbSetPetImage(img, petId, stage, true);
+          };
+          img.src = frames[index++ % frames.length];
+       };
+       showFrame();
+       img._pbFlightTimer = setInterval(showFrame, 145);
     }
 
     function pbActionPoseCandidates(petId, stage) {
@@ -18558,11 +18588,15 @@
     function pbShowActionPose(img, petId, stage) {
        const token = String(pbGen) + ':' + String(Date.now()) + ':' + Math.random().toString(36).slice(2);
        const candidates = pbActionPoseCandidates(petId, stage);
+       const container = img.closest('.pb-sprite-container');
        let at = 0;
        img.dataset.pbActionPose = token;
+       container?.classList.add('pb-in-action');
        const restore = () => {
           if (img.dataset.pbActionPose !== token) return;
           pbSetPetImage(img, petId, stage, true);
+          container?.classList.remove('pb-in-action');
+          if (pbIsFlyingPet(petId)) pbStartFlightIdle(img, petId, stage);
        };
        img.onerror = () => {
           at += 1;
@@ -18604,10 +18638,12 @@
        }
 
        const sprite = pbEl(prefix + '-sprite');
-       // Airborne movement is applied only by move choreography classes. The
-       // neutral arena pose stays grounded for every pet.
-       sprite.closest('.pb-sprite-container')?.classList.remove('pb-is-flying');
+       const container = sprite.closest('.pb-sprite-container');
+       const flying = pbIsFlyingPet(data.petId);
+       container?.classList.toggle('pb-is-flying', flying);
        pbSetPetImage(sprite, data.petId, data.stage);
+       if (flying) pbStartFlightIdle(sprite, data.petId, data.stage);
+       else pbStopFlightIdle(sprite);
     }
 
     socket.on('petBattleStart', (payload) => {

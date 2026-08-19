@@ -164,14 +164,16 @@ const wingKeyframes = clientSource.slice(
   clientSource.indexOf("@keyframes pb-motion-beam"),
 );
 assert.doesNotMatch(wingKeyframes, /--pb-flight/, "flying attacks should animate in place, not slide across the arena");
-assert.match(clientSource, /groundedMythical[\s\S]*?assets\/pets\/anim\/[\s\S]*?_sit\.png/,
-  "dragon and phoenix battle idles should use their exact-form sit artwork");
-assert.doesNotMatch(clientSource, /pb-sprite-container\.pb-is-flying\s*\{\s*animation:\s*pb-idle-hover/,
-  "dragon and phoenix battle idles must not hover between attacks");
-assert.match(clientSource, /const fr = \(seated \|\| groundedMythical\) \? petObj\._animSet\.sit/,
-  "stationary office dragons and phoenixes should land in their sit frame");
-assert.match(clientSource, /if \(flying && !seated && dist > gap \+ 1\)/,
-  "office flight should remain active only while the mythical pet is actually moving");
+assert.match(clientSource, /pb-sprite-container\.pb-is-flying:not\(\.pb-in-action\)[\s\S]*?animation:\s*pb-idle-hover/,
+  "dragon and phoenix battle idles should remain visibly airborne");
+assert.match(clientSource, /function pbFlightFrames[\s\S]*?return \[1, 2, 3\]\.map[\s\S]*?_walk\$\{n\}/,
+  "dragon and phoenix battle idles should cycle all three exact-form wing frames");
+assert.match(clientSource, /setInterval\(showFrame,\s*145\)/,
+  "dragon and phoenix wing frames should keep flapping between battle actions");
+assert.match(clientSource, /classList\.toggle\('pb-is-flying', flying\)/,
+  "every dragon and phoenix battle sprite should receive the airborne idle");
+assert.match(clientSource, /if \(flying\) \{[\s\S]*?petObj\._animSet\.walk/,
+  "office dragons and phoenixes should keep cycling flight frames while stationary");
 
 const statsSource = serverSource.slice(
   serverSource.indexOf("function petBattleStats("),
