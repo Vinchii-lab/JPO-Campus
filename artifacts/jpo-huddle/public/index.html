@@ -1867,6 +1867,13 @@
   align-items: flex-end; justify-content: center; margin-top: 10px;
 }
 @media (min-width: 600px) { .pb-sprite-container { width: 160px; height: 160px; } }
+/* Flying pets never rest on the arena floor. Moving `bottom` instead of
+   `transform` lets their idle hover keep running underneath their attack pose. */
+.pb-sprite-container.pb-is-flying { animation: pb-idle-hover 1.35s ease-in-out infinite; }
+@keyframes pb-idle-hover {
+  0%, 100% { bottom: 10px; }
+  50% { bottom: 22px; }
+}
 
 .pb-sprite { width: 100%; height: auto; max-height: 100%; object-fit: contain; image-rendering: pixelated; transition: transform 0.2s; filter: drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
 .pb-opponent .pb-sprite { transform: scaleX(-1); }
@@ -2010,7 +2017,8 @@
 .pb-motion-shell { animation: pb-motion-shell .82s cubic-bezier(.3,.8,.2,1); }
 .pb-motion-dive { animation: pb-motion-dive .86s cubic-bezier(.25,.76,.2,1); }
 .pb-motion-tongue { animation: pb-motion-tongue .72s steps(8,end); }
-.pb-motion-wing { animation: pb-motion-wing .9s steps(9,end); z-index: 30; }
+.pb-motion-wing,
+.pb-sprite-container.pb-is-flying.pb-motion-wing { animation: pb-motion-wing .9s steps(9,end); z-index: 30; }
 .pb-motion-beam { animation: pb-motion-beam .82s steps(8,end); }
 .pb-motion-rebirth { animation: pb-motion-rebirth .94s cubic-bezier(.16,.8,.22,1); }
 @keyframes pb-motion-bite {
@@ -17913,7 +17921,12 @@
           if (data.charge >= 3) pips[i].classList.add('ult-ready');
        }
 
-       pbSetPetImage(pbEl(prefix + '-sprite'), data.petId, data.stage);
+       const sprite = pbEl(prefix + '-sprite');
+       const flyingPets = new Set([
+         'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian', 'pet_phoenix',
+       ]);
+       sprite.closest('.pb-sprite-container')?.classList.toggle('pb-is-flying', flyingPets.has(data.petId));
+       pbSetPetImage(sprite, data.petId, data.stage);
     }
 
     socket.on('petBattleStart', (payload) => {
