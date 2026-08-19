@@ -20,3 +20,9 @@ Species identity is visual and physical, not a hidden combat rules layer. The ne
 **Why:** “Fight differently” means porting the recognizable in-office pet trick choreography into battle—not generic bite/scratch/hover substitutes and not hidden mechanics. Examples include Splash Dive, Moonlit/Void Blink, Blizzard Binky, Ice Shell, Dragon breath, Rain Dance, Prism Beam, and Ember Dive.
 
 **How to apply:** Map every battle pet/form deterministically by the authoritative round-result move: Attack uses its lower office beat, Special uses a distinct mid-tier beat, and Ultimate uses the exact form's signature final trick. Use the same resolved move path for players and bots. Translate Phaser choreography into cancellable arena-relative DOM effects, and restore all visual state afterward. Flying pets retain their airborne idle state. Keep form/training as the only stat inputs and do not dispatch species-specific status effects.
+
+Move identity changes choreography only; action-pose artwork must follow the pet's frozen current evolution stage for every move. A final-form pet must never briefly render baby or stage-two artwork to perform Attack or Special.
+
+**Why:** Selecting action art by move tier made evolved pets visibly change form mid-skill even though the movement mapping itself was correct.
+
+**How to apply:** Choose movement/effects from Attack, Special, or Ultimate, but use only the exact action sprite for the battle snapshot's current stage. If that action asset is absent, keep the current-stage idle sprite; never fall back to another evolution's action art. Restore the same stage's idle sprite afterward.

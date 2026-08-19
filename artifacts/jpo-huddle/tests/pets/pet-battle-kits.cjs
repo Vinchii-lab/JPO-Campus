@@ -111,8 +111,34 @@ for (const pet of expectedPets) {
 assert.ok(choreographies.size >= 25, "the roster needs distinct lower-tier and signature office choreographies");
 assert.ok(attackEffects.size >= 8, "the roster needs varied on-target contact effects");
 assert.match(clientSource, /function pbShowActionPose\(/, "battle attacks must swap to existing action art");
-assert.match(clientSource, /preferredSuffix\s*=\s*moveId === 'ultimate'[\s\S]*moveId === 'special'/,
-  "Attack, Special, and Ultimate should prefer their matching form action art");
+assert.match(clientSource, /Choreography varies by move, but the character never changes visible[\s\S]*const suffix = stage >= 3/,
+  "move choreography must preserve the pet's current visible form");
+assert.doesNotMatch(clientSource, /preferredSuffix\s*=\s*moveId/,
+  "moves must not select a different evolution's action art");
+const actionPoseStart = clientSource.indexOf("function pbActionPoseCandidates(");
+const actionPoseEnd = clientSource.indexOf("const pbActionPoseAvailability", actionPoseStart);
+const actionPoseSandbox = {};
+vm.runInNewContext(
+  `${clientSource.slice(actionPoseStart, actionPoseEnd)}
+   globalThis.__pbActionPoseCandidates = pbActionPoseCandidates;`,
+  actionPoseSandbox,
+  { filename: "client-action-pose-candidates.js" },
+);
+for (const pet of expectedPets) {
+  const stem = pet.replace(/^pet_/, "");
+  for (const stage of [1, 2, 3]) {
+    const suffix = stage === 3 ? "_s3" : stage === 2 ? "_s2" : "";
+    const exactSrc = `assets/pets/anim/${stem}${suffix}_action.png`;
+    const candidates = Array.from(actionPoseSandbox.__pbActionPoseCandidates(pet, stage));
+    assert.deepEqual(candidates, [exactSrc],
+      `${pet} stage ${stage} must never fall back to another evolution's action art`);
+    if (stage > 1 && !fs.existsSync(path.join(root, "public", exactSrc))) {
+      const lowerForm = stage === 3 ? `${stem}_s2_action.png` : `${stem}_action.png`;
+      assert.ok(!candidates.some(src => src.endsWith(lowerForm)),
+        `${pet} stage ${stage} must keep its idle art when exact action art is unavailable`);
+    }
+  }
+}
 assert.match(clientSource, /function pbSpawnAnimalHit\(/, "battle attacks must create animal-specific contact feedback");
 assert.match(clientSource, /function pbPlayOfficeChoreo\(/, "battle attacks must use the office choreography adapter");
 assert.match(clientSource, /pbPlayOfficeChoreo\(myPrefix, oppPrefix, attacker, attRes\.move/,

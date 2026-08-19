@@ -18064,30 +18064,28 @@
        img.src = candidates[0];
     }
 
-    function pbActionPoseCandidates(petId, stage, moveId = 'attack') {
+    function pbActionPoseCandidates(petId, stage) {
        const stem = String(petId || '').replace(/^pet_/, '');
-       const preferredSuffix = moveId === 'ultimate' ? '_s3' : moveId === 'special' ? '_s2' : '';
-       const candidates = ['assets/pets/anim/' + stem + preferredSuffix + '_action.png'];
-       if (stage >= 3) candidates.push('assets/pets/anim/' + stem + '_s3_action.png');
-       if (stage >= 2) candidates.push('assets/pets/anim/' + stem + '_s2_action.png');
-       candidates.push('assets/pets/anim/' + stem + '_action.png');
-       // Unicorn currently has only final-form action art. Lower forms keep
-       // their normal sprite while still showing the horn impact effect.
-       return [...new Set(candidates)];
+       // Choreography varies by move, but the character never changes visible
+       // form to perform it. Never fall back to another evolution's action
+       // image; if this exact asset is missing, keep the stage-matched idle art.
+       const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
+       return ['assets/pets/anim/' + stem + suffix + '_action.png'];
     }
 
+    const pbActionPoseAvailability = new Map();
     function pbPreloadActionPose(petId, stage) {
-       ['attack', 'special', 'ultimate'].forEach(moveId => {
-          pbActionPoseCandidates(petId, stage, moveId).forEach(src => {
-             const preload = new Image();
-             preload.src = src;
-          });
+       pbActionPoseCandidates(petId, stage).forEach(src => {
+          const preload = new Image();
+          preload.onload = () => pbActionPoseAvailability.set(src, true);
+          preload.onerror = () => pbActionPoseAvailability.set(src, false);
+          preload.src = src;
        });
     }
 
-    function pbShowActionPose(img, petId, stage, moveId) {
+    function pbShowActionPose(img, petId, stage) {
        const token = String(pbGen) + ':' + String(Date.now()) + ':' + Math.random().toString(36).slice(2);
-       const candidates = pbActionPoseCandidates(petId, stage, moveId);
+       const candidates = pbActionPoseCandidates(petId, stage);
        let at = 0;
        img.dataset.pbActionPose = token;
        const restore = () => {
@@ -18099,7 +18097,22 @@
           if (at < candidates.length) img.src = candidates[at];
           else restore();
        };
-       img.src = candidates[0];
+       const exactSrc = candidates[0];
+       const available = pbActionPoseAvailability.get(exactSrc);
+       if (available === true) {
+          img.src = exactSrc;
+       } else if (available !== false) {
+          // Keep the current-stage idle image visible while an uncached exact
+          // action asset is checked; a missing asset never produces a broken
+          // frame or falls through to a different evolution.
+          const probe = new Image();
+          probe.onload = () => {
+             pbActionPoseAvailability.set(exactSrc, true);
+             if (img.dataset.pbActionPose === token) img.src = exactSrc;
+          };
+          probe.onerror = () => pbActionPoseAvailability.set(exactSrc, false);
+          probe.src = exactSrc;
+       }
        return restore;
     }
 
@@ -19036,7 +19049,7 @@
              async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
                const attackProfile = getPbAttackProfile(attacker.petId, attRes.move);
-               const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage, attRes.move);
+               const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage);
                try {
                    if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attRes.move, attTheme, myGen))) return;
                    const isUlt = attRes.move === 'ultimate';
