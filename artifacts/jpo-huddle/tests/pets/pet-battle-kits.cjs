@@ -22,7 +22,7 @@ vm.runInNewContext(
   { filename: "server-kit-registry.js" },
 );
 
-const { PB_KITS: kits, PB_PASSIVE_HINTS: passiveHints } = sandbox.__battleKits;
+const { PB_KITS: kits } = sandbox.__battleKits;
 const expectedPets = [
   "pet_duck", "pet_duck_snow",
   "pet_cat", "pet_cat_black", "pet_cat_snow",
@@ -34,12 +34,6 @@ const expectedPets = [
 ];
 assert.deepEqual(Object.keys(kits).sort(), expectedPets.sort(), "every current pet needs exactly one server kit");
 
-const allowedEffects = new Set([
-  "none", "weaken", "chill", "freeze", "bleed", "burn", "inferno",
-  "poison", "expose", "power", "counter", "shield", "greatShield",
-  "heal", "aegis", "drain", "voidDrain", "rally", "evade", "charge",
-  "burrow", "regen", "storm", "phoenixBurn", "rebirth",
-]);
 const kitIds = new Set();
 const specialNames = new Set();
 const ultimateNames = new Set();
@@ -48,19 +42,13 @@ const motions = new Set();
 for (const pet of expectedPets) {
   const kit = kits[pet];
   assert.ok(kit.id && !kitIds.has(kit.id), `${pet} needs a unique kit id`);
-  assert.ok(kit.passive && passiveHints[kit.id], `${pet} needs an accurate public passive description`);
   assert.ok(kit.motion, `${pet} needs a movement family`);
-  assert.ok(allowedEffects.has(kit.specialEffect), `${pet} has an unsupported special effect`);
-  assert.ok(allowedEffects.has(kit.ultimateEffect), `${pet} has an unsupported ultimate effect`);
   for (const field of ["attackName", "guardName", "specialName", "ultimateName"]) {
     assert.ok(kit[field], `${pet} is missing ${field}`);
   }
   for (const field of ["attackHint", "guardHint", "specialHint", "ultimateHint"]) {
     assert.ok(kit[field], `${pet} is missing ${field}`);
   }
-  assert.ok(kit.hpMult >= 0.85 && kit.hpMult <= 1.2, `${pet} HP multiplier is outside the side-grade budget`);
-  assert.ok(kit.atkMult >= 0.85 && kit.atkMult <= 1.2, `${pet} attack multiplier is outside the side-grade budget`);
-
   kitIds.add(kit.id);
   specialNames.add(kit.specialName);
   ultimateNames.add(kit.ultimateName);
@@ -71,6 +59,10 @@ assert.equal(kitIds.size, expectedPets.length, "kit ids must be unique");
 assert.equal(specialNames.size, expectedPets.length, "special move names must be unique");
 assert.equal(ultimateNames.size, expectedPets.length, "ultimate move names must be unique");
 assert.ok(motions.size >= 8, "the roster needs genuinely varied motion families");
+assert.equal(kits.pet_dragon.motion, "wing", "Dragon must fly into its attacks");
+assert.equal(kits.pet_dragon_crimson.motion, "wing", "Crimson Dragon must fly into its attacks");
+assert.equal(kits.pet_dragon_obsidian.motion, "wing", "Obsidian Dragon must fly into its attacks");
+assert.equal(kits.pet_phoenix.motion, "wing", "Phoenix must fly into its attacks");
 
 for (const motion of motions) {
   assert.match(clientSource, new RegExp(`\\.pb-motion-${motion}\\b`), `client is missing the ${motion} animation`);
@@ -80,4 +72,24 @@ for (const pet of expectedPets) {
     `client motion fallback is missing ${pet}`);
 }
 
-console.log(`PASS ${expectedPets.length} distinct pet kits, ${motions.size} motion families, complete public metadata`);
+const statsSource = serverSource.slice(
+  serverSource.indexOf("function petBattleStats("),
+  serverSource.indexOf("// ── Helpers", serverSource.indexOf("function petBattleStats(")),
+);
+assert.doesNotMatch(statsSource, /kit\.(?:hpMult|atkMult|guardBonus|critBonus|dodgeBonus|specialMult|ultimateMult)/,
+  "species must not change combat stats");
+
+const resolverSource = serverSource.slice(
+  serverSource.indexOf("function petBattleResolveRound("),
+  serverSource.indexOf("// Emit a semantic event", serverSource.indexOf("function petBattleResolveRound(")),
+);
+for (const dispatch of [
+  /applyEffect\(A/, /applyEffect\(D/,
+  /applyGuardIdentity\(A/, /applyGuardIdentity\(D/,
+  /applyCounter\(A/, /applyCounter\(D/,
+  /tick\(A/, /tick\(D/,
+]) {
+  assert.doesNotMatch(resolverSource, dispatch, "visual kits must not dispatch hidden combat effects");
+}
+
+console.log(`PASS ${expectedPets.length} visual kits, ${motions.size} movement families, shared combat rules`);

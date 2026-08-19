@@ -1674,7 +1674,7 @@ const PB_KITS = {
     attackMult: 1, specialMult: .72, ultimateMult: .8, specialEffect: "heal", ultimateEffect: "aegis", guardCounter: 0,
   },
   pet_phoenix: {
-    id: "reborn-flame", passive: "Ash Runner", motion: "rebirth",
+    id: "reborn-flame", passive: "Ash Runner", motion: "wing",
     attackName: "Flame Wing", guardName: "Ash Veil", specialName: "Searing Wing", ultimateName: "Supernova",
     attackHint: "Blazing wing cut", guardHint: "Ash-softened guard", specialHint: "Burn + regeneration", ultimateHint: "Arms one rebirth",
     hpMult: .94, atkMult: 1.05, guardBonus: 0, critBonus: .03, dodgeBonus: .02,
@@ -1705,15 +1705,22 @@ function petBattleKit(petId) {
   return { ...PB_DEFAULT_KIT, ...(PB_KITS[petId] || {}), petId };
 }
 function petBattlePublicKit(kit) {
+  const visualHints = kit.motion === "wing"
+    ? {
+        attack: "Fly in and strike", guard: "Hold position",
+        special: "Aerial strike", ultimate: "Full-speed fly-by",
+      }
+    : {
+        attack: "Move in and strike", guard: "Brace in place",
+        special: "Signature hit", ultimate: "Big finishing hit",
+      };
   return {
-    id: kit.id, passive: kit.passive,
-    passiveHint: PB_PASSIVE_HINTS[kit.id] || "balanced battle stats",
-    motion: kit.motion,
+    id: kit.id, motion: kit.motion,
     moves: {
-      attack: { name: kit.attackName, hint: kit.attackHint },
-      guard: { name: kit.guardName, hint: kit.guardHint },
-      special: { name: kit.specialName, hint: kit.specialHint },
-      ultimate: { name: kit.ultimateName, hint: kit.ultimateHint },
+      attack: { name: kit.attackName, hint: visualHints.attack },
+      guard: { name: kit.guardName, hint: visualHints.guard },
+      special: { name: kit.specialName, hint: visualHints.special },
+      ultimate: { name: kit.ultimateName, hint: visualHints.ultimate },
     },
   };
 }
@@ -1754,10 +1761,10 @@ function effectivePetBuild(p, pet) {
   return clean || { power: 0, vitality: 0, speed: 0, critical: 0, focus: 0 };
 }
 
-// ── Combat math (pure; species identity stays inside a bounded power budget)
-// A kit changes the shape of the pet (durability, speed, crit, move effects),
-// not the reward rules or authority model. Rare pets are side-grades, never a
-// paid/stat tier. Stage + owner build remain the main progression inputs.
+// ── Combat math (pure; every species uses the same rules)
+// Pet identity is animation and presentation only. Form + owner training are
+// the complete source of combat numbers, so a dragon's flight never hides a
+// paid/stat advantage or an extra status trick.
 function petBattleStats(stage, build, kit = PB_DEFAULT_KIT) {
   const b = build || {};
   const p = b.power || 0, v = b.vitality || 0, sp = b.speed || 0, cr = b.critical || 0, fo = b.focus || 0;
@@ -1765,23 +1772,23 @@ function petBattleStats(stage, build, kit = PB_DEFAULT_KIT) {
   const hpBase   = [0, 50, 62, 74][stage] || 50;
   const atkBase  = [0, 10, 12, 14][stage] || 10;
   const formMult = [0, 1.00, 1.10, 1.22][stage] || 1.0;  // stage improves multipliers
-  const attack = Math.round((atkBase + p * 3) * formMult * kit.atkMult);
+  const attack = Math.round((atkBase + p * 3) * formMult);
   return {
-    maxHp:    Math.round((hpBase + v * 6) * formMult * kit.hpMult),
+    maxHp:    Math.round((hpBase + v * 6) * formMult),
     attack,
     // guard mitigation fraction (higher vitality + focus = tougher block), capped.
-    guardCut: Math.min(0.78, Math.max(0.3, 0.45 + v * 0.03 + fo * 0.02 + kit.guardBonus)),
+    guardCut: Math.min(0.75, 0.45 + v * 0.03 + fo * 0.02),
     // crit chance & multiplier from the critical attribute (bounded).
-    critChance: Math.min(0.6, Math.max(0.01, 0.05 + cr * 0.05 + kit.critBonus)),
+    critChance: Math.min(0.6, 0.05 + cr * 0.05),
     critMult:   1.5 + Math.min(0.5, cr * 0.05),
     // Speed is an actual combat choice: quicker pets can cleanly evade a blow.
     // It is capped well below certainty so form/build never guarantees a dodge.
-    dodgeChance: Math.min(0.34, Math.max(0, sp * 0.025 + kit.dodgeBonus)),
+    dodgeChance: Math.min(0.3, sp * 0.025),
     speed:      sp,
     focus:      fo,
     // special = a bigger, cooldown-gated hit; ultimate = charge-gated finisher.
-    special:  Math.round(attack * (1.6 + fo * 0.05) * kit.specialMult),
-    ultimate: Math.round(attack * (2.4 + fo * 0.06) * kit.ultimateMult),
+    special:  Math.round(attack * (1.6 + fo * 0.05)),
+    ultimate: Math.round(attack * (2.4 + fo * 0.06)),
   };
 }
 
@@ -3464,18 +3471,7 @@ function petBattleCombatantView(b, side) {
 }
 
 function petBattleStatusView(side) {
-  const s = side.status || {};
-  const out = [];
-  if (s.shield > 0) out.push(`Shield ${s.shield}`);
-  if (s.dot?.turns > 0) out.push(`${s.dot.kind} ${s.dot.turns}`);
-  if (s.weaken > 0) out.push(`Weakened ${s.weaken}`);
-  if (s.exposed > 0) out.push(`Exposed ${s.exposed}`);
-  if (s.power > 0) out.push(`Power Up ${s.power}`);
-  if (s.evade > 0) out.push(`Evade ${s.evade}`);
-  if (s.counter > 0) out.push(`Counter ${s.counter}`);
-  if (s.regen > 0) out.push(`Regen ${s.regen}`);
-  if (s.rebirth) out.push("Rebirth armed");
-  return out;
+  return [];
 }
 
 // The full pair of combatant views, from the perspective label the client wants.
@@ -3525,12 +3521,8 @@ function petBattleMoveLegal(side, move) {
 function petBattleBotMove(bot, foe) {
   if (petBattleMoveLegal(bot, "ultimate")) return "ultimate";
   const lowHp = bot.hp <= bot.stats.maxHp * 0.35;
-  const recoveryKit = ["heal", "rally", "burrow", "regen", "phoenixBurn"].includes(bot.kit.specialEffect);
-  if (lowHp && recoveryKit && petBattleMoveLegal(bot, "special")) return "special";
-  if (lowHp && Math.random() < 0.55) return "guard";
-  const setupUseful = !(foe.status?.weaken || foe.status?.exposed || foe.status?.dot);
-  if (petBattleMoveLegal(bot, "special") && (setupUseful || Math.random() < 0.48)) return "special";
-  if (bot.kit.guardCounter > 0 && Math.random() < 0.22) return "guard";
+  if (lowHp && Math.random() < 0.5) return "guard";
+  if (petBattleMoveLegal(bot, "special") && Math.random() < 0.6) return "special";
   if (Math.random() < 0.15) return "guard";
   return "attack";
 }
@@ -3567,7 +3559,8 @@ function petBattleResolveRound(b) {
     let base = move === "attack" ? atk.stats.attack
              : move === "special" ? atk.stats.special
              : atk.stats.ultimate;
-    if (move === "attack") base *= atk.kit.attackMult;
+    // Species never changes combat numbers; the kit only names and animates
+    // the same four fair move types.
     if (atk.status.weaken > 0) base *= 0.78;
     if (atk.status.power > 0) base *= 1.18;
     if (def.status.exposed > 0) base *= 1.18;
@@ -3754,13 +3747,8 @@ function petBattleResolveRound(b) {
       addShield(side, .08, side.kit.guardName, sideName);
     }
   }
-  applyGuardIdentity(A, "challenger");
-  applyGuardIdentity(D, "opponent");
-
-  if (A.pick === "special") applyEffect(A, D, A.kit.specialEffect, aBlow, "challenger", "opponent");
-  if (D.pick === "special") applyEffect(D, A, D.kit.specialEffect, dBlow, "opponent", "challenger");
-  if (A.pick === "ultimate") applyEffect(A, D, A.kit.ultimateEffect, aBlow, "challenger", "opponent");
-  if (D.pick === "ultimate") applyEffect(D, A, D.kit.ultimateEffect, dBlow, "opponent", "challenger");
+  // Intentionally no kit-specific status dispatch. Pet identity is expressed
+  // by its movement and hit animation, not hidden shields/burns/heals/etc.
 
   // Turtle-style guarded counters apply after simultaneous direct damage.
   function applyCounter(def, atk, incoming, defName, atkName) {
@@ -3772,8 +3760,6 @@ function petBattleResolveRound(b) {
     extra[defName].counterDamage += reflected;
     notes[atkName].push(`Countered for ${reflected}`);
   }
-  applyCounter(D, A, aBlow, "opponent", "challenger");
-  applyCounter(A, D, dBlow, "challenger", "opponent");
 
   // Ongoing effects tick once per completed round, then duration counters fall.
   function tick(side, sideName) {
@@ -3804,8 +3790,6 @@ function petBattleResolveRound(b) {
       notes[sideName].push(`Reborn at ${side.hp} HP`);
     }
   }
-  tick(A, "challenger");
-  tick(D, "opponent");
 
   // Charge/cooldown bookkeeping, per side, from THIS round's move.
   for (const side of [A, D]) {
