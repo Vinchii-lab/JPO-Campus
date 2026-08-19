@@ -1514,6 +1514,529 @@
       #dm-input { width: auto; flex: 1; min-width: 120px; }
       #dm-log { max-width: min(320px, calc(100vw - 100px)); }
     }
+  /* ── Pet Battle RPG Interface ── */
+#pt-train-modal, #pb-overlay {
+  position: fixed; inset: 0; z-index: 11000; display: none;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.85);
+  font-family: 'Press Start 2P', monospace; user-select: none;
+}
+#pt-train-modal.open, #pb-overlay.open { display: flex; }
+
+.pt-rpg-card {
+  background: #1e1e30; border: 4px solid #5C4BE1; border-radius: 12px;
+  box-shadow: 0 12px 0 #3a3a5e, 0 16px 40px rgba(0,0,0,0.8);
+  width: 480px; max-width: 95vw; color: #fff; text-shadow: 2px 2px 0 #000;
+  position: relative; overflow: hidden;
+}
+.pt-header {
+  background: #5C4BE1; padding: 16px; display: flex; justify-content: space-between;
+  border-bottom: 4px solid #3a3a5e;
+}
+.pt-header h3 { margin: 0; font-size: 16px; color: #FFC046; }
+.pt-close { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; }
+.pt-close:hover { color: #FFC046; }
+
+#pt-content { padding: 24px; display: flex; gap: 20px; }
+.pt-pet-col { flex: 0 0 140px; text-align: center; }
+.pt-img-box {
+  width: 140px; height: 140px; background: #111; border: 2px solid #5C4BE1;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px; position: relative;
+}
+#pt-pet-img { width: 96px; height: 96px; object-fit: contain; image-rendering: pixelated; }
+#pt-pet-name { font-size: 12px; color: #fff; margin-bottom: 6px; }
+#pt-pet-stage { font-size: 10px; color: #FFC046; }
+
+.pt-stats-col { flex: 1; }
+.pt-budget-row { font-size: 12px; margin-bottom: 16px; color: #ccc; }
+#pt-points-avail { color: #FFC046; font-size: 16px; margin-left: 8px; }
+.pt-attr-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.pt-attr-label { font-size: 12px; color: #fff; width: 90px; }
+.pt-attr-ctrl { display: flex; align-items: center; gap: 10px; }
+.pt-btn-calc {
+  width: 28px; height: 28px; background: #3a3a5e; border: 2px solid #5C4BE1;
+  color: #fff; font-family: inherit; font-size: 14px; cursor: pointer; border-radius: 4px;
+}
+.pt-btn-calc:hover { background: #5C4BE1; color: #FFC046; }
+.pt-btn-calc:active { transform: translateY(2px); }
+.pt-attr-val { width: 24px; text-align: center; font-size: 14px; color: #FFC046; }
+
+.pt-footer {
+  padding: 16px 24px; background: #111; border-top: 4px solid #3a3a5e;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+#pt-error { color: #e74c3c; font-size: 10px; flex: 1; text-align: left; }
+.pt-btn {
+  padding: 12px 16px; font-family: inherit; font-size: 12px; background: #3a3a5e;
+  color: #fff; border: 2px solid #5C4BE1; border-radius: 6px; cursor: pointer;
+}
+.pt-btn:hover { background: #5C4BE1; }
+.pt-btn:active { transform: translateY(2px); box-shadow: none; }
+.pt-btn-primary { background: #FFC046; border-color: #d99a2a; color: #111; text-shadow: none; }
+.pt-btn-primary:hover { background: #ffcf70; }
+
+/* Arena */
+.pb-arena {
+  width: 720px; max-width: 100vw; height: 480px; max-height: 100vh;
+  background: linear-gradient(180deg, #1e1e30 0%, #111 100%);
+  border: 4px solid #5C4BE1; border-radius: 12px; box-shadow: 0 0 0 4px #111, 0 20px 50px rgba(0,0,0,0.9);
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+}
+.pb-bg-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background: 
+    linear-gradient(rgba(92,75,225,0.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92,75,225,0.2) 1px, transparent 1px);
+  background-size: 32px 32px; transform: perspective(400px) rotateX(60deg) scale(2);
+  transform-origin: center bottom; opacity: 0.5;
+}
+.pb-top-bar {
+  position: absolute; top: 0; left: 0; right: 0; padding: 12px 24px;
+  display: flex; justify-content: space-between; align-items: center; z-index: 10;
+}
+#pb-round-text { font-size: 16px; color: #fff; text-shadow: 2px 2px 0 #5C4BE1; }
+#pb-forfeit-btn {
+  background: #e74c3c; border: 2px solid #c0392b; color: #fff; padding: 8px 12px;
+  font-family: inherit; font-size: 10px; border-radius: 6px; cursor: pointer;
+}
+#pb-forfeit-btn:hover { background: #c0392b; }
+
+.pb-stage { flex: 1; position: relative; z-index: 5; }
+.pb-arena-fx { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 24; }
+
+.pb-combatant {
+  position: absolute; display: flex; flex-direction: column; align-items: center;
+  width: 220px;
+}
+.pb-opponent { top: 60px; right: 40px; }
+.pb-challenger { bottom: 140px; left: 40px; }
+
+.pb-hud {
+  background: rgba(17,17,17,0.85); border: 2px solid #5C4BE1; border-radius: 8px;
+  padding: 10px; width: 100%; position: relative;
+}
+.pb-hud-name { font-size: 12px; color: #fff; margin-bottom: 4px; }
+.pb-hud-form { font-size: 9px; color: #FFC046; margin-bottom: 8px; }
+.pb-bar-bg { width: 100%; height: 12px; background: #000; border: 2px solid #333; margin-bottom: 4px; position: relative; }
+.pb-hp-bar { height: 100%; background: #2ecc71; width: 100%; transition: width 0.3s ease; }
+.pb-hp-text { position: absolute; right: 4px; top: -1px; font-size: 8px; color: #fff; text-shadow: 1px 1px 0 #000; }
+.pb-charge-bg { width: 100%; height: 6px; background: #000; border: 2px solid #333; display: flex; }
+.pb-charge-pip { flex: 1; border-right: 1px solid #333; transition: background 0.3s; }
+.pb-charge-pip:last-child { border-right: none; }
+.pb-charge-pip.filled { background: #3498db; }
+.pb-charge-pip.ult-ready { background: #f1c40f; box-shadow: 0 0 6px #f1c40f; }
+
+.pb-sprite-container {
+  width: 160px; height: 160px; position: relative; display: flex;
+  align-items: flex-end; justify-content: center; margin-top: 10px;
+}
+.pb-sprite { width: 128px; height: auto; image-rendering: pixelated; transition: transform 0.2s; filter: drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+.pb-opponent .pb-sprite { transform: scaleX(-1); }
+
+.pb-fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 20; }
+
+.pb-bottom-panel {
+  height: 120px; background: #111; border-top: 4px solid #5C4BE1;
+  display: flex; position: relative; z-index: 10;
+}
+.pb-msg-box {
+  flex: 1; padding: 20px; font-size: 14px; color: #fff; line-height: 1.6;
+  border-right: 4px solid #5C4BE1;
+}
+.pb-controls {
+  width: 320px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+  gap: 8px; padding: 12px; background: #1e1e30;
+}
+.pb-move-btn {
+  background: #3a3a5e; border: 2px solid #5C4BE1; color: #fff;
+  font-family: inherit; font-size: 12px; border-radius: 6px; cursor: pointer;
+  position: relative; overflow: hidden;
+}
+.pb-move-btn:hover:not(:disabled) { background: #5C4BE1; color: #FFC046; }
+.pb-move-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(1); }
+.pb-cd-text { font-size: 8px; color: #ff7675; position: absolute; bottom: 4px; right: 4px; }
+
+#pb-result-screen {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 30;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+#pb-result-screen.open { display: flex; }
+#pb-result-title { font-size: 32px; color: #FFC046; margin-bottom: 20px; text-shadow: 4px 4px 0 #c0392b; }
+#pb-result-xp { font-size: 16px; color: #2ecc71; margin-bottom: 30px; }
+.pb-result-btn-row { display: flex; gap: 16px; }
+
+/* Battle Animations */
+@keyframes pb-hit-shake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-10px, 5px); }
+  40% { transform: translate(10px, -5px); }
+  60% { transform: translate(-10px, -5px); }
+  80% { transform: translate(10px, 5px); }
+  100% { transform: translate(0, 0); }
+}
+.pb-shake { animation: pb-hit-shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
+
+@keyframes pb-flash {
+  0%, 100% { filter: brightness(1) drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+  50% { filter: brightness(3) drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+}
+.pb-flash { animation: pb-flash 0.15s ease-in-out 2; }
+
+@keyframes pb-atk-cha {
+  0% { transform: translate(0, 0); }
+  30% { transform: translate(60px, -40px); }
+  100% { transform: translate(0, 0); }
+}
+@keyframes pb-atk-opp {
+  0% { transform: translate(0, 0) scaleX(-1); }
+  30% { transform: translate(-60px, 40px) scaleX(-1); }
+  100% { transform: translate(0, 0) scaleX(-1); }
+}
+.pb-anim-atk-cha { animation: pb-atk-cha 0.4s ease-in-out; }
+.pb-anim-atk-opp { animation: pb-atk-opp 0.4s ease-in-out; }
+
+.pb-dmg-text {
+  position: absolute; font-size: 24px; font-weight: bold; color: #ff7675; text-shadow: 2px 2px 0 #000;
+  pointer-events: none; z-index: 100; animation: pb-dmg-float 1s ease-out forwards;
+}
+.pb-dmg-text.crit { font-size: 32px; color: #FFC046; text-shadow: 3px 3px 0 #c0392b; }
+@keyframes pb-dmg-float {
+  0% { opacity: 1; transform: translateY(0) scale(0.8); }
+  20% { transform: translateY(-30px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-60px) scale(1); }
+}
+
+.pb-crit-label {
+  position: absolute; font-size: 40px; color: #ff0000; font-weight: bold;
+  text-transform: uppercase; font-style: italic; text-shadow: 4px 4px 0 #fff;
+  z-index: 50; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-10deg);
+  pointer-events: none; animation: pb-crit-pop 0.8s forwards;
+}
+@keyframes pb-crit-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(3); }
+  20% { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(0.8); }
+}
+
+  
+#pb-waiting, #pb-incoming {
+  position: fixed; z-index: 10000; bottom: 80px; left: 50%; transform: translateX(-50%);
+  background: #1e1e30; border: 3px solid #5C4BE1; border-radius: 8px;
+  padding: 12px 20px; font-family: 'Press Start 2P', monospace; font-size: 10px; color: #fff;
+  display: none; align-items: center; gap: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.8);
+}
+#pb-waiting.open, #pb-incoming.open { display: flex; }
+.pb-btn-sm {
+  background: #3a3a5e; border: 2px solid #5C4BE1; color: #fff; font-family: inherit;
+  font-size: 9px; padding: 6px 10px; border-radius: 4px; cursor: pointer;
+}
+.pb-btn-sm:hover { background: #5C4BE1; }
+.pb-btn-sm-primary { background: #2ecc71; border-color: #27ae60; }
+.pb-btn-sm-primary:hover { background: #27ae60; }
+.pb-btn-sm-danger { background: #e74c3c; border-color: #c0392b; }
+.pb-btn-sm-danger:hover { background: #c0392b; }
+
+  
+/* ── Pet Battle RPG Interface ── */
+#pt-train-modal, #pb-overlay {
+  position: fixed; inset: 0; z-index: 11000; display: none;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.85);
+  font-family: 'Press Start 2P', monospace; user-select: none;
+}
+#pt-train-modal.open, #pb-overlay.open { display: flex; }
+
+.pt-rpg-card {
+  background: #1e1e30; border: 4px solid #5C4BE1; border-radius: 12px;
+  box-shadow: 0 12px 0 #3a3a5e, 0 16px 40px rgba(0,0,0,0.8);
+  width: 540px; max-width: 95vw; color: #fff; text-shadow: 2px 2px 0 #000;
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+}
+.pt-header {
+  background: #5C4BE1; padding: 16px; display: flex; justify-content: space-between;
+  border-bottom: 4px solid #3a3a5e; align-items: center;
+}
+.pt-header h3 { margin: 0; font-size: 16px; color: #FFC046; }
+.pt-close { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; }
+.pt-close:hover { color: #FFC046; }
+
+#pt-content { padding: 24px; display: flex; gap: 24px; flex-wrap: wrap; }
+.pt-pet-col { flex: 0 0 140px; text-align: center; }
+.pt-img-box {
+  width: 140px; height: 140px; background: #111; border: 2px solid #5C4BE1;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px; position: relative;
+}
+#pt-pet-img { width: 96px; height: 96px; object-fit: contain; image-rendering: pixelated; }
+#pt-pet-name { font-size: 12px; color: #fff; margin-bottom: 6px; }
+#pt-pet-stage { font-size: 10px; color: #FFC046; }
+
+.pt-stats-col { flex: 1; min-width: 200px; display: flex; flex-direction: column; }
+.pt-budget-row { font-size: 12px; margin-bottom: 16px; color: #ccc; }
+#pt-points-avail { color: #FFC046; font-size: 16px; margin-left: 8px; }
+.pt-attr-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.pt-attr-label { font-size: 10px; color: #fff; width: 75px; text-transform: uppercase; }
+.pt-attr-desc { font-size: 8px; color: #888; margin-bottom: 8px; text-shadow: none; min-height: 10px; }
+.pt-attr-ctrl { display: flex; align-items: center; gap: 6px; }
+.pt-btn-calc {
+  width: 24px; height: 24px; background: #3a3a5e; border: 2px solid #5C4BE1;
+  color: #fff; font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 4px;
+}
+.pt-btn-calc:hover { background: #5C4BE1; color: #FFC046; }
+.pt-btn-calc:active { transform: translateY(2px); }
+.pt-attr-val { width: 20px; text-align: center; font-size: 12px; color: #FFC046; }
+
+.pt-derived-stats {
+  margin-top: 12px; padding: 12px; background: #111; border: 2px solid #3a3a5e; border-radius: 8px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 9px; color: #ccc;
+}
+.pt-derived-stats span { color: #FFC046; }
+
+.pt-footer {
+  padding: 16px 24px; background: #111; border-top: 4px solid #3a3a5e;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+#pt-error { color: #2ecc71; font-size: 10px; flex: 1; text-align: left; }
+.pt-btn {
+  padding: 12px 16px; font-family: inherit; font-size: 12px; background: #3a3a5e;
+  color: #fff; border: 2px solid #5C4BE1; border-radius: 6px; cursor: pointer;
+}
+.pt-btn:hover { background: #5C4BE1; }
+.pt-btn:active { transform: translateY(2px); box-shadow: none; }
+.pt-btn-primary { background: #FFC046; border-color: #d99a2a; color: #111; text-shadow: none; }
+.pt-btn-primary:hover { background: #ffcf70; }
+
+/* Arena */
+.pb-arena {
+  width: 720px; max-width: 100vw; height: 100%; max-height: 520px;
+  background: linear-gradient(180deg, #1e1e30 0%, #111 100%);
+  border: 4px solid #5C4BE1; border-radius: 12px; box-shadow: 0 0 0 4px #111, 0 20px 50px rgba(0,0,0,0.9);
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+}
+.pb-bg-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background: 
+    linear-gradient(rgba(92,75,225,0.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92,75,225,0.2) 1px, transparent 1px);
+  background-size: 32px 32px; transform: perspective(400px) rotateX(60deg) scale(2);
+  transform-origin: center bottom; opacity: 0.5;
+}
+.pb-top-bar {
+  position: absolute; top: 0; left: 0; right: 0; padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center; z-index: 10;
+}
+#pb-round-text { font-size: 14px; color: #fff; text-shadow: 2px 2px 0 #5C4BE1; display: flex; align-items: center; gap: 12px; }
+#pb-timer { color: #f1c40f; }
+#pb-forfeit-btn {
+  background: #e74c3c; border: 2px solid #c0392b; color: #fff; padding: 8px 12px;
+  font-family: inherit; font-size: 10px; border-radius: 6px; cursor: pointer;
+}
+#pb-forfeit-btn:hover { background: #c0392b; }
+
+.pb-stage { flex: 1; position: relative; z-index: 5; }
+
+.pb-combatant {
+  position: absolute; display: flex; flex-direction: column; align-items: center;
+  width: 160px;
+}
+.pb-opponent { top: 40px; right: 20px; }
+.pb-challenger { bottom: 130px; left: 20px; }
+@media (min-width: 600px) {
+  .pb-combatant { width: 220px; }
+  .pb-opponent { top: 60px; right: 40px; }
+  .pb-challenger { bottom: 140px; left: 40px; }
+}
+
+.pb-hud {
+  background: rgba(17,17,17,0.85); border: 2px solid #5C4BE1; border-radius: 8px;
+  padding: 8px; width: 100%; position: relative;
+}
+.pb-hud-name { font-size: 10px; color: #fff; margin-bottom: 4px; }
+.pb-hud-form { font-size: 8px; color: #FFC046; margin-bottom: 8px; }
+.pb-bar-bg { width: 100%; height: 12px; background: #000; border: 2px solid #333; margin-bottom: 4px; position: relative; }
+.pb-hp-bar { height: 100%; background: #2ecc71; width: 100%; transition: width 0.3s ease; }
+.pb-hp-text { position: absolute; right: 4px; top: -1px; font-size: 8px; color: #fff; text-shadow: 1px 1px 0 #000; }
+.pb-charge-bg { width: 100%; height: 6px; background: #000; border: 2px solid #333; display: flex; }
+.pb-charge-pip { flex: 1; border-right: 1px solid #333; transition: background 0.3s; }
+.pb-charge-pip:last-child { border-right: none; }
+.pb-charge-pip.filled { background: #3498db; }
+.pb-charge-pip.ult-ready { background: #f1c40f; box-shadow: 0 0 6px #f1c40f; }
+
+.pb-sprite-container {
+  width: 120px; height: 120px; position: relative; display: flex;
+  align-items: flex-end; justify-content: center; margin-top: 10px;
+}
+@media (min-width: 600px) { .pb-sprite-container { width: 160px; height: 160px; } }
+
+.pb-sprite { width: 100%; height: auto; max-height: 100%; object-fit: contain; image-rendering: pixelated; transition: transform 0.2s; filter: drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+.pb-opponent .pb-sprite { transform: scaleX(-1); }
+
+.pb-fx-layer { position: absolute; inset: -40px; pointer-events: none; overflow: visible; z-index: 20; }
+
+.pb-bottom-panel {
+  min-height: 120px; background: #111; border-top: 4px solid #5C4BE1;
+  display: flex; flex-direction: column; position: relative; z-index: 10;
+}
+@media (min-width: 600px) { .pb-bottom-panel { flex-direction: row; } }
+
+.pb-msg-box {
+  flex: 1; padding: 12px; font-size: 12px; color: #fff; line-height: 1.4;
+  border-bottom: 2px solid #5C4BE1;
+}
+@media (min-width: 600px) { .pb-msg-box { padding: 20px; font-size: 14px; border-bottom: none; border-right: 4px solid #5C4BE1; } }
+
+.pb-controls {
+  width: 100%; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+  gap: 8px; padding: 12px; background: #1e1e30; box-sizing: border-box;
+}
+@media (min-width: 600px) { .pb-controls { width: 320px; } }
+
+.pb-move-btn {
+  background: #3a3a5e; border: 2px solid #5C4BE1; color: #fff;
+  font-family: inherit; font-size: 10px; border-radius: 6px; cursor: pointer;
+  position: relative; overflow: hidden; padding: 8px;
+}
+.pb-move-btn:hover:not(:disabled) { background: #5C4BE1; color: #FFC046; }
+.pb-move-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(1); }
+.pb-cd-text { font-size: 8px; color: #ff7675; position: absolute; bottom: 4px; right: 4px; }
+
+#pb-result-screen {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 30;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+}
+#pb-result-screen.open { display: flex; }
+#pb-result-title { font-size: 32px; color: #FFC046; margin-bottom: 20px; text-shadow: 4px 4px 0 #c0392b; }
+#pb-result-xp { font-size: 14px; color: #2ecc71; margin-bottom: 30px; text-align: center; line-height: 1.5; }
+.pb-result-btn-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+
+/* Battle Animations */
+@keyframes pb-hit-shake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-10px, 5px); }
+  40% { transform: translate(10px, -5px); }
+  60% { transform: translate(-10px, -5px); }
+  80% { transform: translate(10px, 5px); }
+  100% { transform: translate(0, 0); }
+}
+.pb-shake { animation: pb-hit-shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
+
+@keyframes pb-flash {
+  0%, 100% { filter: brightness(1) drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+  50% { filter: brightness(3) drop-shadow(0 10px 0 rgba(0,0,0,0.5)); }
+}
+.pb-flash { animation: pb-flash 0.15s ease-in-out 2; }
+
+@keyframes pb-guard-pose {
+  0% { transform: scale(1); filter: brightness(1); }
+  20% { transform: scale(0.9) translateY(10px); filter: brightness(0.8) drop-shadow(0 0 10px #bdc3c7); }
+  80% { transform: scale(0.9) translateY(10px); filter: brightness(0.8) drop-shadow(0 0 10px #bdc3c7); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.pb-anim-guard { animation: pb-guard-pose 0.8s ease-in-out; }
+
+@keyframes pb-dodge {
+  0% { transform: translateX(0); opacity: 1; filter: blur(0); }
+  20% { transform: translateX(-40px); opacity: 0.5; filter: blur(2px); }
+  80% { transform: translateX(-40px); opacity: 0.5; filter: blur(2px); }
+  100% { transform: translateX(0); opacity: 1; filter: blur(0); }
+}
+.pb-anim-dodge-cha { animation: pb-dodge 0.6s ease-in-out; }
+.pb-anim-dodge-opp { animation: pb-dodge 0.6s ease-in-out reverse; }
+
+@keyframes pb-atk-cha {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-20px, 10px); }
+  40% { transform: translate(60px, -40px); }
+  100% { transform: translate(0, 0); }
+}
+@keyframes pb-atk-opp {
+  0% { transform: translate(0, 0) scaleX(-1); }
+  20% { transform: translate(20px, 10px) scaleX(-1); }
+  40% { transform: translate(-60px, 40px) scaleX(-1); }
+  100% { transform: translate(0, 0) scaleX(-1); }
+}
+.pb-anim-atk-cha { animation: pb-atk-cha 0.5s ease-in-out; }
+.pb-anim-atk-opp { animation: pb-atk-opp 0.5s ease-in-out; }
+
+.pb-dmg-text {
+  position: absolute; font-size: 20px; font-weight: bold; color: #ff7675; text-shadow: 2px 2px 0 #000;
+  pointer-events: none; z-index: 100; animation: pb-dmg-float 1s ease-out forwards;
+}
+.pb-dmg-text.crit { font-size: 28px; color: #FFC046; text-shadow: 3px 3px 0 #c0392b; z-index: 101; }
+@keyframes pb-dmg-float {
+  0% { opacity: 1; transform: translateY(0) scale(0.8); }
+  20% { transform: translateY(-30px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-60px) scale(1); }
+}
+
+.pb-big-label {
+  position: absolute; font-size: 28px; font-weight: bold; font-style: italic; text-transform: uppercase;
+  z-index: 110; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-10deg);
+  pointer-events: none; animation: pb-big-label-pop 0.9s forwards; white-space: nowrap;
+}
+.pb-lbl-crit { color: #ff0000; text-shadow: 4px 4px 0 #fff; }
+.pb-lbl-dodge { color: #3498db; text-shadow: 4px 4px 0 #fff; transform: translate(-50%, -50%) rotate(10deg); }
+@keyframes pb-big-label-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(3) rotate(-10deg); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-10deg); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-10deg); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8) rotate(-10deg); }
+}
+
+/* Species-themed battle particles. Geometry is selected through data-fx;
+   flight paths are authored per particle with CSS variables from server-truth moves. */
+.pb-theme-particle {
+  position: absolute; left: 0; top: 0; width: 8px; height: 8px;
+  background: var(--pb-c1); color: var(--pb-c2); pointer-events: none; z-index: 40;
+  opacity: 0; box-shadow: 0 0 8px var(--pb-c1);
+  animation: pb-theme-flight var(--pb-dur) cubic-bezier(.2,.72,.25,1) var(--pb-delay) forwards;
+}
+.pb-theme-particle[data-fx="splash"] { border: 2px solid var(--pb-c2); border-radius: 50%; background: transparent; }
+.pb-theme-particle[data-fx="frost"] { transform: rotate(45deg); border: 1px solid #fff; }
+.pb-theme-particle[data-fx="scratch"] { width: 22px; height: 3px; border-radius: 0; box-shadow: 0 0 5px var(--pb-c1); }
+.pb-theme-particle[data-fx="shadow"] { width: 13px; height: 7px; border-radius: 70% 20%; filter: blur(1px); }
+.pb-theme-particle[data-fx="impact"] { border-radius: 1px; outline: 2px solid var(--pb-c2); }
+.pb-theme-particle[data-fx="earth"] { border-radius: 1px; box-shadow: 3px 3px 0 #24150c; }
+.pb-theme-particle[data-fx="wind"] { width: 26px; height: 3px; border-radius: 50%; background: linear-gradient(90deg, transparent, var(--pb-c1)); }
+.pb-theme-particle[data-fx="leaf"] { width: 13px; height: 7px; border-radius: 90% 10% 90% 10%; border: 1px solid var(--pb-c2); }
+.pb-theme-particle[data-fx="magic"] { border-radius: 50%; background: transparent; border: 3px solid var(--pb-c1); }
+.pb-theme-particle[data-fx="fire"] { clip-path: polygon(50% 0,100% 70%,50% 100%,0 70%); background: linear-gradient(var(--pb-c2),var(--pb-c1)); }
+.pb-theme-particle[data-fx="holy"] { clip-path: polygon(50% 0,100% 100%,0 100%); background: linear-gradient(135deg,#fff,var(--pb-c1),var(--pb-c2)); }
+.pb-theme-particle.pb-ult-particle { filter: brightness(1.4); box-shadow: 0 0 15px var(--pb-c1), 0 0 28px var(--pb-c2); }
+@keyframes pb-theme-flight {
+  0% { opacity: 0; transform: translate(var(--pb-sx),var(--pb-sy)) rotate(var(--pb-r0)) scale(.35); }
+  12% { opacity: 1; }
+  52% { opacity: 1; transform: translate(var(--pb-mx),var(--pb-my)) rotate(var(--pb-r1)) scale(var(--pb-scale)); }
+  100% { opacity: 0; transform: translate(var(--pb-dx),var(--pb-dy)) rotate(var(--pb-r2)) scale(.2); }
+}
+.pb-impact-shard {
+  position: absolute; left: var(--pb-x); top: var(--pb-y); width: 7px; height: 7px;
+  background: var(--pb-c1); box-shadow: 0 0 8px var(--pb-c1); z-index: 45;
+  animation: pb-impact-shard .48s steps(6,end) forwards;
+}
+@keyframes pb-impact-shard {
+  0% { opacity: 1; transform: translate(-50%,-50%) scale(1.5); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--pb-tx)),calc(-50% + var(--pb-ty))) scale(.3); }
+}
+.pb-screen-flash {
+  position: absolute; inset: 0; background: var(--pb-c1); mix-blend-mode: screen;
+  z-index: 38; pointer-events: none; animation: pb-screen-flash .7s steps(6,end) forwards;
+}
+@keyframes pb-screen-flash {
+  0%,100% { opacity: 0; }
+  18% { opacity: .06; }
+  28% { opacity: .42; }
+  38% { opacity: .08; }
+  48% { opacity: .28; }
+}
+.pb-crit-stop { animation: pb-arena-crit .42s steps(5,end); }
+@keyframes pb-arena-crit {
+  0%,100% { filter: none; transform: translate(0); }
+  20% { filter: contrast(1.8) brightness(1.5); transform: translate(-4px,2px); }
+  40% { transform: translate(5px,-3px); }
+  60% { filter: contrast(1.3) brightness(1.2); transform: translate(-3px,-2px); }
+}
+
   </style>
 </head>
 <body>
@@ -1736,11 +2259,126 @@
   </div>
   <div id="img-lightbox"><img alt="chat image" /></div>
 
+  
+  <!-- ── Pet Training Modal ── -->
+  <div id="pt-train-modal">
+    <div class="pt-rpg-card">
+      <div class="pt-header">
+        <h3 id="pt-title">Pet Training</h3>
+        <button class="pt-close" id="pt-close" aria-label="Close Pet Training" type="button">X</button>
+      </div>
+      <div id="pt-content">
+        <div class="pt-pet-col">
+          <div class="pt-img-box">
+            <img id="pt-pet-img" src="" alt="Your equipped pet" />
+          </div>
+          <div id="pt-pet-name"></div>
+          <div id="pt-pet-stage"></div>
+        </div>
+        <div class="pt-stats-col">
+          <div class="pt-budget-row">
+            <span>Points Available:</span>
+            <span id="pt-points-avail">0</span>
+          </div>
+          <div id="pt-attr-list">
+             <!-- JS injected -->
+          </div>
+        </div>
+      </div>
+      <div class="pt-footer">
+         <div id="pt-error"></div>
+         <button id="pt-save" class="pt-btn" type="button">Save Build</button>
+         <button id="pt-challenge-bot" class="pt-btn pt-btn-primary" type="button">Challenge Bot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pet Battle Overlay ── -->
+  <div id="pb-overlay">
+    <div class="pb-arena">
+      <div class="pb-bg-grid"></div>
+      <div class="pb-top-bar">
+         <span id="pb-round-text">Round 1</span>
+         <button id="pb-forfeit-btn" aria-label="Forfeit Match">Forfeit</button>
+      </div>
+      
+      <div class="pb-stage">
+        <div id="pb-arena-fx" class="pb-arena-fx" aria-hidden="true"></div>
+        <!-- Opponent -->
+        <div class="pb-combatant pb-opponent" id="pb-opp-box">
+           <div class="pb-hud">
+              <div class="pb-hud-name" id="pb-opp-name">Bot</div>
+              <div class="pb-hud-form" id="pb-opp-form">Form</div>
+              <div class="pb-bar-bg"><div class="pb-hp-bar" id="pb-opp-hp-bar"></div><div class="pb-hp-text" id="pb-opp-hp-text">50/50</div></div>
+              <div class="pb-charge-bg" id="pb-opp-charge-bg">
+                <div class="pb-charge-pip"></div>
+                <div class="pb-charge-pip"></div>
+                <div class="pb-charge-pip"></div>
+              </div>
+           </div>
+           <div class="pb-sprite-container">
+             <img class="pb-sprite" id="pb-opp-sprite" alt="Opponent Pet" src="" />
+             <div class="pb-fx-layer" id="pb-opp-fx"></div>
+           </div>
+        </div>
+        
+        <!-- Challenger -->
+        <div class="pb-combatant pb-challenger" id="pb-cha-box">
+           <div class="pb-sprite-container">
+             <img class="pb-sprite" id="pb-cha-sprite" alt="Your Pet" src="" />
+             <div class="pb-fx-layer" id="pb-cha-fx"></div>
+           </div>
+           <div class="pb-hud">
+              <div class="pb-hud-name" id="pb-cha-name">You</div>
+              <div class="pb-hud-form" id="pb-cha-form">Form</div>
+              <div class="pb-bar-bg"><div class="pb-hp-bar" id="pb-cha-hp-bar"></div><div class="pb-hp-text" id="pb-cha-hp-text">50/50</div></div>
+              <div class="pb-charge-bg" id="pb-cha-charge-bg">
+                <div class="pb-charge-pip"></div>
+                <div class="pb-charge-pip"></div>
+                <div class="pb-charge-pip"></div>
+              </div>
+           </div>
+        </div>
+      </div>
+      
+      <div class="pb-bottom-panel">
+          <div class="pb-msg-box" id="pb-status-text" aria-live="polite">Waiting for opponent...</div>
+         <div class="pb-controls" id="pb-controls">
+            <button class="pb-move-btn" id="pb-btn-attack" aria-label="Attack">ATTACK</button>
+            <button class="pb-move-btn" id="pb-btn-guard" aria-label="Guard">GUARD</button>
+            <button class="pb-move-btn" id="pb-btn-special" aria-label="Special Move">SPECIAL<br><small id="pb-cd-special"></small></button>
+            <button class="pb-move-btn" id="pb-btn-ultimate" aria-label="Ultimate Move">ULTIMATE<br><small id="pb-cd-ultimate"></small></button>
+         </div>
+      </div>
+
+      <div id="pb-result-screen">
+         <h2 id="pb-result-title">Victory!</h2>
+         <p id="pb-result-xp">+3 XP</p>
+         <div class="pb-result-btn-row">
+            <button class="pt-btn" id="pb-result-close">Close</button>
+            <button class="pt-btn pt-btn-primary" id="pb-result-rematch" style="display:none">Rematch Bot</button>
+         </div>
+      </div>
+    </div>
+  </div>
+
+  
+  <div id="pb-waiting">
+    <span id="pb-waiting-text">Challenging...</span>
+    <button id="pb-waiting-cancel" class="pb-btn-sm pb-btn-sm-danger" type="button">Cancel</button>
+  </div>
+  <div id="pb-incoming">
+    <span id="pb-incoming-text">Challenge from X!</span>
+    <button id="pb-incoming-accept" class="pb-btn-sm pb-btn-sm-primary" type="button">Accept</button>
+    <button id="pb-incoming-decline" class="pb-btn-sm pb-btn-sm-danger" type="button">Decline</button>
+  </div>
+
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
     <button id="rps-menu-profile" type="button">👤 View profile</button>
     <button id="rps-menu-dm" type="button">💬 Whisper</button>
     <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
+    <button id="rps-menu-petbattle" type="button">Pet Battle</button>
     <button id="rps-menu-gift" type="button">💰 Send coins</button>
     <button id="rps-menu-trade" type="button">🐾 Trade pets</button>
     <button id="rps-menu-store" type="button">🏪 Their store</button>
@@ -1998,6 +2636,7 @@
   <div id="coin-hud">
     <img src="assets/ui/jpo_coin.png" alt="coins" style="height:17px; vertical-align:-3px;"> <span id="coin-count">0</span>
     <button id="shop-btn" onclick="openShop()">Shop</button>
+    <button id="pet-bot-btn" onclick="openPetTraining()" title="Pet Battle Training" style="padding: 3px 10px; font-size: 12px; font-family: monospace; background: #e67e22; color: #fff; border: none; border-radius: 5px; cursor: pointer; transition: background 0.15s; margin-right: 8px;">Pet Arena</button>
     <button id="voice-btn" onclick="toggleVoice()" title="Voice: on — hold V to talk">🎙️</button>
   </div>
 
@@ -8121,7 +8760,7 @@
       // so no extra keyframes needed.
       function _spawnParticles(wrap, type) {
         const cfgs = {
-          fire:     { icons: ['🔥','💥','🔥','🔥','💥','🔥','🔥','💥','🔥'], n: 14 },
+          fire:     { icons: ['🔥','','🔥','🔥','💥','🔥','🔥','💥','🔥'], n: 14 },
           teleport: { icons: ['⚡','💜','⚡','✨','⚡','💜','⚡','✨'],         n: 12 },
           flop:     { icons: ['💦','💧','💦','💧','💦','💧','🌊'],            n: 12 },
           pounce:   { icons: ['💨','💨','🐾','💨','💨','🐾','💨'],            n: 10 },
@@ -16648,6 +17287,657 @@
         }
       }
     }
+
+    
+    
+    
+    // ══════════════════════════════════════════════════════════════════════════
+    // ── Pet Battle RPG Client ─────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    let pbMatchId = null;
+    let pbState = null;
+    let pbMySide = null;
+    let pbBuild = null;
+    let pbBudget = 0;
+    let pbAttrs = ["power", "vitality", "speed", "critical", "focus"];
+    let pbAnimQueue = [];
+    let pbIsAnimating = false;
+    let pbGen = 0;
+    let pbTimer = null;
+    let pbBuildSavePending = false;
+    let pbDerivedStats = null;
+    
+    // Per-species visual theme mapping for Special and Ultimate moves
+    const PB_THEME_BY_PET = {
+      'pet_duck':            { color: '#45b7e8', color2: '#d5fbff', fx: 'splash', special: 'Water Gun', ultimate: 'Hydro Blast' },
+      'pet_duck_snow':       { color: '#bdefff', color2: '#ffffff', fx: 'frost', special: 'Snowball', ultimate: 'Blizzard' },
+      'pet_cat':             { color: '#f4a340', color2: '#fff0b3', fx: 'scratch', special: 'Claw Swipe', ultimate: 'Feral Frenzy' },
+      'pet_cat_black':       { color: '#9d64db', color2: '#231135', fx: 'shadow', special: 'Night Slash', ultimate: 'Phantom Strike' },
+      'pet_cat_snow':        { color: '#d9f4ff', color2: '#ffffff', fx: 'frost', special: 'Chill Claw', ultimate: 'Avalanche' },
+      'pet_dog':             { color: '#ffbd4a', color2: '#fff2ba', fx: 'impact', special: 'Bite', ultimate: 'Earth Shaker' },
+      'pet_dog_choco':       { color: '#a95b2d', color2: '#e6a46f', fx: 'earth', special: 'Mud Slap', ultimate: 'Quake' },
+      'pet_dog_husky':       { color: '#65b8ef', color2: '#e8fbff', fx: 'frost', special: 'Ice Fang', ultimate: 'Tundra Howl' },
+      'pet_bunny':           { color: '#ffd1e5', color2: '#ffffff', fx: 'wind', special: 'Quick Kick', ultimate: 'Tornado Spin' },
+      'pet_bunny_cocoa':     { color: '#b76e42', color2: '#f0c19d', fx: 'earth', special: 'Burrow Strike', ultimate: 'Meteor Bound' },
+      'pet_turtle':          { color: '#45d37a', color2: '#d9ff7a', fx: 'leaf', special: 'Razor Leaf', ultimate: 'Nature Wrath' },
+      'pet_turtle_sapphire': { color: '#168fe1', color2: '#8ff5ff', fx: 'splash', special: 'Aqua Jet', ultimate: 'Tsunami' },
+      'pet_dragon':          { color: '#a66bf0', color2: '#f1b7ff', fx: 'magic', special: 'Arcane Flame', ultimate: 'Dragon Nova' },
+      'pet_dragon_crimson':  { color: '#f04444', color2: '#ffd24d', fx: 'fire', special: 'Ember Spit', ultimate: 'Inferno' },
+      'pet_dragon_obsidian': { color: '#5e4b78', color2: '#16101f', fx: 'shadow', special: 'Dark Pulse', ultimate: 'Void Eruption' },
+      'pet_frog':            { color: '#20c997', color2: '#b9ff63', fx: 'splash', special: 'Bubble', ultimate: 'Swamp Bomb' },
+      'pet_unicorn':         { color: '#ff7cba', color2: '#91f7ff', fx: 'holy', special: 'Prism Beam', ultimate: 'Starlight' },
+      'pet_phoenix':         { color: '#ff4d3d', color2: '#ffe34d', fx: 'fire', special: 'Searing Wing', ultimate: 'Supernova' },
+      'default':             { color: '#ffffff', color2: '#b8c0ff', fx: 'impact', special: 'Special', ultimate: 'Ultimate' }
+    };
+    function getPbTheme(petId) {
+      let baseId = petId;
+      if (!PB_THEME_BY_PET[baseId] && baseId.startsWith('pet_')) {
+        const parts = baseId.split('_');
+        baseId = parts[0] + '_' + parts[1]; // e.g. pet_dog_choco -> pet_dog if choco wasn't there
+      }
+      return PB_THEME_BY_PET[baseId] || PB_THEME_BY_PET['default'];
+    }
+
+    const pbEl = (id) => document.getElementById(id);
+
+    function pbClearTimers() {
+      if (pbTimer) { clearInterval(pbTimer); pbTimer = null; }
+      const timerEl = pbEl('pb-timer');
+      if (timerEl) timerEl.textContent = '';
+    }
+    
+    function pbStartTimer(ms) {
+       pbClearTimers();
+       let end = Date.now() + ms;
+       const update = () => {
+          let left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+          pbEl('pb-timer').textContent = '0:' + (left < 10 ? '0' : '') + left;
+          if (left <= 0) pbClearTimers();
+       };
+       update();
+       pbTimer = setInterval(update, 1000);
+    }
+
+    function pbSetRound(round, maxRounds) {
+      const timer = document.createElement('span');
+      timer.id = 'pb-timer';
+      pbEl('pb-round-text').replaceChildren(
+        document.createTextNode('Round ' + round + ' / ' + maxRounds + ' '),
+        timer
+      );
+    }
+
+    // Capture arrow/space inputs so moving player is disabled
+    pbEl('pb-overlay').addEventListener('keydown', (e) => {
+       if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) { e.preventDefault(); e.stopPropagation(); }
+    });
+    pbEl('pb-overlay').tabIndex = -1; // make focusable to trap keys
+
+    function pbCloseAll() {
+      pbGen++; 
+      pbAnimQueue = []; pbIsAnimating = false;
+      pbMatchId = null; pbState = null; pbMySide = null;
+      pbClearTimers();
+      pbEl('pb-cha-fx').replaceChildren();
+      pbEl('pb-opp-fx').replaceChildren();
+      pbEl('pb-arena-fx').replaceChildren();
+      pbEl('pb-cha-sprite').className = 'pb-sprite';
+      pbEl('pb-opp-sprite').className = 'pb-sprite';
+      pbEl('pb-overlay').querySelector('.pb-arena').classList.remove('pb-crit-stop');
+      pbEl('pb-overlay').classList.remove('open');
+      pbEl('pb-waiting').classList.remove('open');
+      pbEl('pb-incoming').classList.remove('open');
+      pbEl('pb-result-screen').classList.remove('open');
+    }
+
+    pbEl('rps-menu-petbattle').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const targetId = _rpsMenuTargetId;
+      _rpsHideMenu();
+      if (targetId) {
+         if (!_equippedPet) { _rpsToast("You need a pet equipped to battle!"); return; }
+         pbState = 'pending';
+         socket.emit('petBattleChallenge', { targetId });
+      }
+    });
+
+    window.openPetTraining = function() {
+      if (!_equippedPet) { _rpsToast("Equip a pet first!"); return; }
+      pbEl('pt-train-modal').classList.add('open');
+      pbBuildSavePending = false;
+      pbEl('pt-error').textContent = "Loading build...";
+      pbEl('pt-error').style.color = '#ccc';
+      socket.emit('petBattleGetBuild', { pet: _equippedPet });
+    };
+
+    pbEl('pt-close').addEventListener('pointerdown', () => pbEl('pt-train-modal').classList.remove('open'));
+
+    function renderPbBuild(spent, stats) {
+      const list = pbEl('pt-attr-list');
+      list.replaceChildren();
+      pbEl('pt-points-avail').textContent = Math.max(0, pbBudget - spent);
+      
+      const descs = {
+         power: "Boosts physical damage",
+         vitality: "Increases max HP and block mitigation",
+         speed: "Raises the chance to dodge incoming hits",
+         critical: "Increases critical hit chance and multiplier",
+         focus: "Boosts Special/Ultimate power and block efficiency"
+      };
+
+      pbAttrs.forEach(a => {
+         const row = document.createElement('div'); row.className = 'pt-attr-row';
+         
+         const left = document.createElement('div');
+         const lbl = document.createElement('div'); lbl.className = 'pt-attr-label'; lbl.textContent = a;
+         const desc = document.createElement('div'); desc.className = 'pt-attr-desc'; desc.textContent = descs[a];
+         left.append(lbl, desc);
+         
+         const ctrl = document.createElement('div'); ctrl.className = 'pt-attr-ctrl';
+         const bMinus = document.createElement('button'); bMinus.className = 'pt-btn-calc'; bMinus.textContent = '-';
+         bMinus.onclick = () => updatePbAttr(a, -1);
+         const v = document.createElement('div'); v.className = 'pt-attr-val'; v.textContent = pbBuild[a] || 0;
+         const bPlus = document.createElement('button'); bPlus.className = 'pt-btn-calc'; bPlus.textContent = '+';
+         bPlus.onclick = () => updatePbAttr(a, 1);
+         
+         ctrl.append(bMinus, v, bPlus);
+         row.append(left, ctrl);
+         list.appendChild(row);
+      });
+      
+       if (stats) {
+          const div = document.createElement('div');
+          div.className = 'pt-derived-stats';
+          const entries = [
+            ['HP', stats.maxHp],
+            ['ATK', stats.attack],
+            ['GUARD', Math.round(stats.guardCut * 100) + '% cut'],
+            ['CRIT', Math.round(stats.critChance * 100) + '% / ' + stats.critMult + 'x'],
+            ['DODGE', Math.round((stats.dodgeChance || 0) * 100) + '%'],
+            ['FOCUS', stats.focus || 0],
+          ];
+          entries.forEach(([label, value]) => {
+            const item = document.createElement('div');
+            item.append(document.createTextNode(label + ': '));
+            const strong = document.createElement('span');
+            strong.textContent = value;
+            item.appendChild(strong);
+            div.appendChild(item);
+          });
+          list.appendChild(div);
+      }
+    }
+
+    function updatePbAttr(attr, delta) {
+       const cur = pbBuild[attr] || 0;
+       const spent = pbAttrs.reduce((s, a) => s + (pbBuild[a] || 0), 0);
+       if (delta < 0 && cur > 0) pbBuild[attr] = cur - 1;
+       else if (delta > 0 && spent < pbBudget) pbBuild[attr] = cur + 1;
+        renderPbBuild(pbAttrs.reduce((s, a) => s + (pbBuild[a] || 0), 0), pbDerivedStats);
+       pbEl('pt-error').textContent = "Unsaved changes...";
+       pbEl('pt-error').style.color = '#FFC046';
+    }
+
+    pbEl('pt-save').addEventListener('pointerdown', () => {
+       pbBuildSavePending = true;
+       pbEl('pt-error').textContent = "Saving...";
+       pbEl('pt-error').style.color = '#ccc';
+       socket.emit('petBattleSetBuild', { pet: _equippedPet, build: pbBuild });
+    });
+
+    pbEl('pt-challenge-bot').addEventListener('pointerdown', () => {
+       pbEl('pt-train-modal').classList.remove('open');
+       pbState = 'pending';
+       socket.emit('petBattleBotChallenge');
+    });
+
+    socket.on('petBattleBuild', (payload) => {
+      const { pet, build, budget, spent, stage, attrs, stats } = payload;
+      pbBudget = budget; pbBuild = { ...build }; pbAttrs = attrs; pbDerivedStats = stats;
+      const img = pbEl('pt-pet-img');
+      pbSetPetImage(img, pet, stage);
+      const cPet = typeof PETS !== 'undefined' ? PETS.find(p => p.id === pet) : null;
+      pbEl('pt-pet-name').textContent = cPet ? cPet.species + ' — ' + cPet.name : pet;
+      pbEl('pt-pet-stage').textContent = stage >= 3 ? 'FINAL FORM' : stage === 2 ? 'EVOLVED' : 'BABY';
+      renderPbBuild(spent, stats);
+      pbEl('pt-error').textContent = pbBuildSavePending ? "Saved!" : "Build loaded";
+      pbEl('pt-error').style.color = '#2ecc71';
+      pbBuildSavePending = false;
+    });
+
+    socket.on('petBattleChallengeSent', (payload) => {
+       pbMatchId = payload.matchId;
+       pbEl('pb-waiting-text').textContent = 'Challenging ' + payload.toName + '...';
+       pbEl('pb-waiting').classList.add('open');
+    });
+
+    socket.on('petBattleChallengeIncoming', (payload) => {
+       pbMatchId = payload.matchId;
+       pbState = 'incoming';
+       pbEl('pb-incoming-text').textContent = payload.fromName + ' challenges you to a Pet Battle!';
+       pbEl('pb-incoming').classList.add('open');
+    });
+
+    pbEl('pb-waiting-cancel').addEventListener('pointerdown', () => {
+       socket.emit('petBattleCancel', { matchId: pbMatchId });
+       pbCloseAll();
+    });
+    pbEl('pb-incoming-accept').addEventListener('pointerdown', () => {
+       socket.emit('petBattleRespond', { matchId: pbMatchId, accept: true });
+       pbEl('pb-incoming').classList.remove('open');
+    });
+    pbEl('pb-incoming-decline').addEventListener('pointerdown', () => {
+       socket.emit('petBattleRespond', { matchId: pbMatchId, accept: false });
+       pbCloseAll();
+    });
+
+    socket.on('petBattleCancelled', (payload) => {
+       if (payload.matchId === pbMatchId) {
+          _rpsToast(payload.reason || "Battle cancelled.");
+          pbCloseAll();
+       }
+    });
+
+    socket.on('petBattleFail', (payload) => {
+       _rpsToast(payload.message);
+       if (pbBuildSavePending && pbEl('pt-train-modal').classList.contains('open')) {
+          pbBuildSavePending = false;
+          pbEl('pt-error').textContent = payload.message || "Build was not saved";
+          pbEl('pt-error').style.color = '#e74c3c';
+          return;
+       }
+       pbCloseAll();
+    });
+
+    function pbSetPetImage(img, petId, stage) {
+       const candidates = [];
+       if (stage >= 3) candidates.push('assets/pets/' + petId + '_s3.png');
+       if (stage >= 2) candidates.push('assets/pets/' + petId + '_s2.png');
+       candidates.push('assets/pets/' + petId + '.png');
+       const key = candidates.join('|');
+       if (img.dataset.pbCandidates === key) return;
+       img.dataset.pbCandidates = key;
+       let at = 0;
+       img.onerror = () => {
+          at += 1;
+          if (at < candidates.length) img.src = candidates[at];
+          else img.onerror = null;
+       };
+       img.src = candidates[0];
+    }
+
+    function pbRenderSide(prefix, data) {
+       pbEl(prefix + '-name').textContent = data.name;
+       pbEl(prefix + '-form').textContent = data.stage >= 3 ? 'FINAL FORM' : data.stage === 2 ? 'EVOLVED' : 'BABY';
+       pbEl(prefix + '-hp-bar').style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
+       pbEl(prefix + '-hp-text').textContent = Math.max(0, data.hp) + '/' + data.maxHp;
+       
+       const pips = pbEl(prefix + '-charge-bg').children;
+       for (let i = 0; i < 3; i++) {
+          pips[i].className = 'pb-charge-pip' + (i < data.charge ? ' filled' : '');
+          if (data.charge >= 3) pips[i].classList.add('ult-ready');
+       }
+
+       pbSetPetImage(pbEl(prefix + '-sprite'), data.petId, data.stage);
+    }
+
+    socket.on('petBattleStart', (payload) => {
+       if (payload.matchId !== pbMatchId && pbMatchId) return;
+       pbMatchId = payload.matchId;
+       pbState = 'starting';
+       pbMySide = payload.you;
+       
+       pbEl('pb-waiting').classList.remove('open');
+       pbEl('pb-incoming').classList.remove('open');
+       pbEl('pb-overlay').classList.add('open');
+       pbEl('pb-result-screen').classList.remove('open');
+       pbEl('pb-result-xp').textContent = 'Pending XP...';
+       pbEl('pb-overlay').focus();
+       
+       const myData = payload.combatants[pbMySide];
+       const oppData = payload.combatants[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
+       
+       pbRenderSide('pb-cha', myData);
+       pbRenderSide('pb-opp', oppData);
+       
+       const myTheme = getPbTheme(myData.petId);
+       function labelMove(buttonId, label, cooldownId) {
+          const button = pbEl(buttonId);
+          const name = document.createElement('span');
+          name.textContent = label;
+          const br = document.createElement('br');
+          const cooldown = document.createElement('small');
+          cooldown.id = cooldownId;
+          button.replaceChildren(name, br, cooldown);
+       }
+       labelMove('pb-btn-special', myTheme.special, 'pb-cd-special');
+       labelMove('pb-btn-ultimate', myTheme.ultimate, 'pb-cd-ultimate');
+       pbSetRound(1, payload.maxRounds);
+       pbEl('pb-status-text').textContent = "Get ready!";
+       pbEl('pb-controls').style.opacity = '0.5';
+       pbEl('pb-controls').style.pointerEvents = 'none';
+       
+       pbEl('pb-forfeit-btn').disabled = false;
+       pbEl('pb-forfeit-btn').onclick = () => {
+          pbEl('pb-forfeit-btn').disabled = true;
+          pbEl('pb-status-text').textContent = "Surrendering...";
+          socket.emit('petBattleForfeit', { matchId: pbMatchId });
+       };
+    });
+
+    function pbProcessQueue() {
+       if (pbIsAnimating || pbAnimQueue.length === 0) return;
+       pbIsAnimating = true;
+       const runGen = pbGen;
+       const task = pbAnimQueue.shift();
+       Promise.resolve().then(task).catch((err) => {
+          console.error('pet battle animation failed:', err);
+       }).finally(() => {
+          if (runGen !== pbGen) return;
+          pbIsAnimating = false;
+          pbProcessQueue();
+       });
+    }
+
+    function pbWait(ms, gen) {
+       return new Promise((resolve) => setTimeout(() => resolve(gen === pbGen), ms));
+    }
+
+    function pbLaunchThemeFx(attPrefix, defPrefix, theme, isUlt, stage) {
+       const layer = pbEl('pb-arena-fx');
+       const stageBox = pbEl('pb-arena-fx').getBoundingClientRect();
+       const attBox = pbEl(attPrefix + '-sprite').getBoundingClientRect();
+       const defBox = pbEl(defPrefix + '-sprite').getBoundingClientRect();
+       const sx = attBox.left + attBox.width / 2 - stageBox.left;
+       const sy = attBox.top + attBox.height / 2 - stageBox.top;
+       const dx = defBox.left + defBox.width / 2 - stageBox.left;
+       const dy = defBox.top + defBox.height / 2 - stageBox.top;
+       const duration = isUlt ? 820 : 500;
+       const count = isUlt ? 22 + stage * 5 : 8 + stage * 2;
+       const arcByFx = {
+          splash: -72, frost: -22, scratch: 0, shadow: 58, impact: -18,
+          earth: -92, wind: -42, leaf: -68, magic: 46, fire: -105, holy: -16,
+       };
+       for (let i = 0; i < count; i++) {
+          const particle = document.createElement('i');
+          particle.className = 'pb-theme-particle' + (isUlt ? ' pb-ult-particle' : '');
+          particle.dataset.fx = theme.fx;
+          const spread = (i - (count - 1) / 2) * (isUlt ? 2.4 : 2);
+          const direction = i % 2 ? 1 : -1;
+          const arc = (arcByFx[theme.fx] || -25) + direction * (i % 5) * 8;
+          let mx = (sx + dx) / 2 + direction * (theme.fx === 'magic' || theme.fx === 'shadow' ? 58 : 14);
+          let my = (sy + dy) / 2 + arc + spread;
+          if (theme.fx === 'scratch') { mx = dx - direction * 28; my = dy + spread * 1.5; }
+          if (theme.fx === 'wind') mx += direction * 44;
+          particle.style.setProperty('--pb-c1', theme.color);
+          particle.style.setProperty('--pb-c2', theme.color2);
+          particle.style.setProperty('--pb-sx', (sx + direction * (i % 4) * 3) + 'px');
+          particle.style.setProperty('--pb-sy', (sy + spread) + 'px');
+          particle.style.setProperty('--pb-mx', mx + 'px');
+          particle.style.setProperty('--pb-my', my + 'px');
+          particle.style.setProperty('--pb-dx', (dx + direction * (i % 6) * 4) + 'px');
+          particle.style.setProperty('--pb-dy', (dy + spread * .8) + 'px');
+          particle.style.setProperty('--pb-r0', (i * 17) + 'deg');
+          particle.style.setProperty('--pb-r1', (i * 57 + 90) + 'deg');
+          particle.style.setProperty('--pb-r2', (i * 103 + 220) + 'deg');
+          particle.style.setProperty('--pb-scale', isUlt ? String(1.8 + stage * .25) : '1.15');
+          particle.style.setProperty('--pb-dur', duration + 'ms');
+          particle.style.setProperty('--pb-delay', Math.min(160, i * (isUlt ? 6 : 10)) + 'ms');
+          particle.addEventListener('animationend', () => particle.remove(), { once: true });
+          layer.appendChild(particle);
+       }
+       if (isUlt) {
+          const flash = document.createElement('div');
+          flash.className = 'pb-screen-flash';
+          flash.style.setProperty('--pb-c1', theme.color);
+          flash.addEventListener('animationend', () => flash.remove(), { once: true });
+          layer.appendChild(flash);
+       }
+       return Math.round(duration * .74);
+    }
+
+    function pbSpawnImpact(prefix, theme, crit) {
+       const layer = pbEl('pb-arena-fx');
+       const stageBox = layer.getBoundingClientRect();
+       const target = pbEl(prefix + '-sprite').getBoundingClientRect();
+       const x = target.left + target.width / 2 - stageBox.left;
+       const y = target.top + target.height / 2 - stageBox.top;
+       const c1 = theme?.color || (crit ? '#ffd84d' : '#ffffff');
+       const n = crit ? 18 : 9;
+       for (let i = 0; i < n; i++) {
+          const angle = (Math.PI * 2 * i) / n + (i % 3) * .08;
+          const distance = (crit ? 65 : 38) + (i % 4) * 7;
+          const shard = document.createElement('i');
+          shard.className = 'pb-impact-shard';
+          shard.style.setProperty('--pb-x', x + 'px');
+          shard.style.setProperty('--pb-y', y + 'px');
+          shard.style.setProperty('--pb-tx', Math.cos(angle) * distance + 'px');
+          shard.style.setProperty('--pb-ty', Math.sin(angle) * distance + 'px');
+          shard.style.setProperty('--pb-c1', c1);
+          shard.addEventListener('animationend', () => shard.remove(), { once: true });
+          layer.appendChild(shard);
+       }
+    }
+
+    async function pbPlayHit(prefix, dmg, crit, dodged, guarded, theme, isUlt, attPrefix, stage, gen) {
+       const fxBox = pbEl(prefix + '-fx');
+       const sprite = pbEl(prefix + '-sprite');
+       if (theme) {
+          const impactAt = pbLaunchThemeFx(attPrefix, prefix, theme, isUlt, stage);
+          if (!(await pbWait(impactAt, gen))) return;
+       }
+       if (dodged) {
+          sprite.classList.add(prefix === 'pb-cha' ? 'pb-anim-dodge-cha' : 'pb-anim-dodge-opp');
+          const label = document.createElement('div');
+          label.className = 'pb-big-label pb-lbl-dodge';
+          label.textContent = 'DODGE';
+          fxBox.appendChild(label);
+          await pbWait(600, gen);
+          if (gen === pbGen) {
+             sprite.classList.remove('pb-anim-dodge-cha', 'pb-anim-dodge-opp');
+             label.remove();
+          }
+          return;
+       }
+
+       sprite.classList.add('pb-shake');
+       if (!guarded) sprite.classList.add('pb-flash');
+       pbSpawnImpact(prefix, theme, crit);
+       const labels = [];
+       if (dmg > 0) {
+          const damage = document.createElement('div');
+          damage.className = 'pb-dmg-text' + (crit ? ' crit' : '');
+          damage.textContent = '-' + dmg;
+          damage.style.left = '42px';
+          damage.style.top = '24px';
+          fxBox.appendChild(damage);
+          labels.push(damage);
+       }
+       if (crit) {
+          const critical = document.createElement('div');
+          critical.className = 'pb-big-label pb-lbl-crit';
+          critical.textContent = 'CRITICAL';
+          fxBox.appendChild(critical);
+          labels.push(critical);
+          const arena = pbEl('pb-overlay').querySelector('.pb-arena');
+          arena.classList.remove('pb-crit-stop');
+          void arena.offsetWidth;
+          arena.classList.add('pb-crit-stop');
+       }
+       if (guarded) {
+          const guard = document.createElement('div');
+          guard.className = 'pb-dmg-text';
+          guard.style.color = '#d7dde5';
+          guard.style.left = '10px';
+          guard.style.top = '60px';
+          guard.textContent = 'GUARDED';
+          fxBox.appendChild(guard);
+          labels.push(guard);
+       }
+       await pbWait(crit ? 720 : 480, gen);
+       if (gen === pbGen) {
+          sprite.classList.remove('pb-shake', 'pb-flash');
+          labels.forEach((label) => label.remove());
+          pbEl('pb-overlay').querySelector('.pb-arena').classList.remove('pb-crit-stop');
+       }
+    }
+
+    socket.on('petBattlePickStatus', (payload) => {
+       if (payload.matchId !== pbMatchId) return;
+       pbClearTimers();
+       let myGen = pbGen;
+       pbAnimQueue.push(async () => {
+          if (myGen !== pbGen) return;
+          pbState = 'picking';
+          if (payload.foePicked) {
+             pbEl('pb-status-text').textContent = "Opponent has locked their move!";
+             return;
+          }
+          
+           pbSetRound(payload.round, payload.maxRounds);
+          if (payload.pickMs) pbStartTimer(payload.pickMs);
+          
+          pbEl('pb-status-text').textContent = "Choose your move!";
+          pbEl('pb-controls').style.opacity = '1';
+          pbEl('pb-controls').style.pointerEvents = 'auto';
+          
+          const moves = ['attack', 'guard', 'special', 'ultimate'];
+          moves.forEach(m => {
+             const btn = pbEl('pb-btn-' + m);
+             if (payload.legal.includes(m)) {
+                btn.disabled = false;
+             } else {
+                btn.disabled = true;
+             }
+             btn.onclick = () => {
+                pbClearTimers();
+                pbEl('pb-controls').style.opacity = '0.5';
+                pbEl('pb-controls').style.pointerEvents = 'none';
+                pbEl('pb-status-text').textContent = "Waiting for opponent...";
+                socket.emit('petBattlePick', { matchId: pbMatchId, move: m });
+             };
+          });
+          
+          pbEl('pb-cd-special').textContent = payload.specialCd > 0 ? '[CD: ' + payload.specialCd + ']' : '';
+          pbEl('pb-cd-ultimate').textContent = payload.charge < payload.ultCharge ? '[' + payload.charge + '/' + payload.ultCharge + ']' : '[READY]';
+          
+          pbRenderSide('pb-cha', payload.you);
+          pbRenderSide('pb-opp', payload.foe);
+       });
+       pbProcessQueue();
+    });
+
+    socket.on('petBattleRound', (payload) => {
+       if (payload.matchId !== pbMatchId) return;
+       pbState = 'resolving';
+       pbClearTimers();
+       
+       let myGen = pbGen;
+       pbAnimQueue.push(async () => {
+          if (myGen !== pbGen) return;
+          pbEl('pb-status-text').textContent = "Clash!";
+          const myData = payload.combatants[pbMySide];
+          const oppData = payload.combatants[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
+          const myRes = payload.result[pbMySide];
+          const oppRes = payload.result[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
+          
+          const chaSprite = pbEl('pb-cha-sprite');
+          const oppSprite = pbEl('pb-opp-sprite');
+          const myTheme = getPbTheme(myData.petId);
+          const oppTheme = getPbTheme(oppData.petId);
+          
+          // Animate Guard Poses
+          if (myRes.move === 'guard') chaSprite.classList.add('pb-anim-guard');
+          if (oppRes.move === 'guard') oppSprite.classList.add('pb-anim-guard');
+          
+          // Animate Attacks (speed informed)
+           const myFirst = (myData.build?.speed || 0) >= (oppData.build?.speed || 0);
+          
+           async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
+             if (attRes.move === 'guard') return;
+             if (attRes.move === 'attack') {
+                 attSprite.classList.add(myPrefix === 'pb-cha' ? 'pb-anim-atk-cha' : 'pb-anim-atk-opp');
+                  if (!(await pbWait(200, myGen))) return;
+                  await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                                  attRes.guarded, null, false, myPrefix, attacker.stage, myGen);
+                  if (myGen !== pbGen) return;
+                 attSprite.classList.remove('pb-anim-atk-cha', 'pb-anim-atk-opp');
+             } else {
+                 const isUlt = attRes.move === 'ultimate';
+                  await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                                  attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage, myGen);
+             }
+          }
+          
+          if (myFirst) {
+              await doHit(myData, myRes, chaSprite, myTheme, 'pb-opp', 'pb-cha');
+              await doHit(oppData, oppRes, oppSprite, oppTheme, 'pb-cha', 'pb-opp');
+          } else {
+              await doHit(oppData, oppRes, oppSprite, oppTheme, 'pb-cha', 'pb-opp');
+              await doHit(myData, myRes, chaSprite, myTheme, 'pb-opp', 'pb-cha');
+          }
+           if (myGen !== pbGen) return;
+          
+          pbEl('pb-cha-hp-bar').style.width = Math.max(0, (myRes.hp / myData.maxHp) * 100) + '%';
+          pbEl('pb-cha-hp-text').textContent = Math.max(0, myRes.hp) + '/' + myData.maxHp;
+          pbEl('pb-opp-hp-bar').style.width = Math.max(0, (oppRes.hp / oppData.maxHp) * 100) + '%';
+          pbEl('pb-opp-hp-text').textContent = Math.max(0, oppRes.hp) + '/' + oppData.maxHp;
+          
+          // Re-render pips
+          pbRenderSide('pb-cha', {...myData, hp: myRes.hp, charge: myRes.charge});
+          pbRenderSide('pb-opp', {...oppData, hp: oppRes.hp, charge: oppRes.charge});
+          
+           if (!(await pbWait(400, myGen))) return;
+          chaSprite.classList.remove('pb-anim-guard');
+          oppSprite.classList.remove('pb-anim-guard');
+       });
+       pbProcessQueue();
+    });
+
+    socket.on('petBattleResult', (payload) => {
+       if (payload.matchId !== pbMatchId) return;
+       pbClearTimers();
+       let myGen = pbGen;
+       
+       pbAnimQueue.push(async () => {
+          if (myGen !== pbGen) return;
+          pbState = 'done';
+          pbEl('pb-status-text').textContent = payload.draw ? "It's a draw!" : payload.youWon ? "You won!" : "You lost!";
+          
+          await new Promise(r => setTimeout(r, 1000));
+          
+          pbEl('pb-result-title').textContent = payload.draw ? "DRAW" : payload.youWon ? "VICTORY!" : "DEFEAT";
+          pbEl('pb-result-title').style.color = payload.youWon ? "#FFC046" : (payload.draw ? "#bdc3c7" : "#e74c3c");
+          pbEl('pb-result-screen').classList.add('open');
+          
+          pbEl('pb-result-close').onclick = () => pbCloseAll();
+          
+          const oppData = payload.combatants[pbMySide === 'challenger' ? 'opponent' : 'challenger'];
+          if (oppData.isBot) {
+             pbEl('pb-result-rematch').style.display = 'block';
+             pbEl('pb-result-rematch').onclick = () => {
+                pbCloseAll();
+                pbState = 'pending';
+                socket.emit('petBattleBotChallenge');
+             };
+          } else {
+             pbEl('pb-result-rematch').style.display = 'none';
+          }
+       });
+       pbProcessQueue();
+    });
+
+    socket.on('petBattleXp', (payload) => {
+       if (payload.delta > 0) {
+          pbEl('pb-result-xp').textContent = '+' + payload.delta + ' XP';
+       } else {
+          const reason = payload.reason === 'dailyCap' ? 'Daily battle cap reached'
+            : payload.reason === 'rematchCooldown' ? 'Same-opponent cooldown'
+            : payload.reason === 'forfeit' ? 'Forfeit reward: 0 XP'
+            : 'No XP earned';
+          pbEl('pb-result-xp').textContent = reason;
+       }
+    });
 
     new Phaser.Game({
       type:   Phaser.AUTO,

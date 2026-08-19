@@ -1,0 +1,16 @@
+---
+name: JPO Huddle pet battles
+description: Durable authority and settlement rules for pet-vs-pet combat and battle XP.
+---
+
+Pet battles are a separate lifecycle from pet races and coin-wager games. The client may submit only a move; the server freezes each equipped pet's form and training at battle start, validates move legality, and owns every roll, stat, damage, HP, timer, and result.
+
+**Why:** Accepting combat numbers from the browser, rereading mutable player state mid-match, or sharing unrelated match state creates cheating and race-condition seams.
+
+**How to apply:** Any new battle mode or move must derive from the frozen server snapshot and settle through the pet-battle lifecycle rather than a client-authored receipt.
+
+Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim, a UTC per-pet daily rewarded-match cap, and a same-opponent cooldown. The training bot must retain a stable synthetic identity in that pair ledger; session-only players must never receive memory-only battle XP.
+
+**Why:** Retry/reconnect races, immediate bot rematches, and ephemeral identities otherwise bypass farming controls or double-credit XP.
+
+**How to apply:** Route every positive battle reward through the same transaction. Forfeits settle before removing the leaver: remaining player gets +2, leaver gets +0 and an explicit zero-XP receipt.

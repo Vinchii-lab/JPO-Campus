@@ -1,0 +1,14022 @@
+    // Self-healing cache buster: the server injects __BUILD__ at page-generation time.
+    // On load we ping /stamp; if the server has restarted since this page was cached,
+    // stamps won't match and we force a hard reload — bypassing every proxy / iframe cache.
+    window.__BUILD__ = '__BUILD_STAMP_TOKEN__';
+    // Reusable checker: also called on socket RECONNECT (see the additional
+    // 'connect' listener in the game script) so a tab left open for weeks
+    // self-heals the next time the server restarts — without this, only a
+    // fresh page load ever re-checked and long-lived tabs ran stale clients
+    // indefinitely. Reload-loop guard: BUILD_STAMP is per-process (Date.now()),
+    // so multiple autoscale instances answer /stamp with different values —
+    // never reload more than once per 5 minutes per tab.
+    window._checkStamp = function() {
+      fetch('/stamp?_=' + Date.now(), { cache: 'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (String(d.stamp) !== String(window.__BUILD__)) {
+            var last = 0;
+            try { last = Number(sessionStorage.getItem('jpo_cb_at') || 0); } catch (e) {}
+            if (Date.now() - last < 5 * 60 * 1000) return;
+            try { sessionStorage.setItem('jpo_cb_at', String(Date.now())); } catch (e) {}
+            console.log('[cache-buster] stale page detected — reloading');
+            location.href = location.pathname + '?_cb=' + d.stamp;
+          }
+        })
+        .catch(function(){});
+    };
+    window.addEventListener('load', window._checkStamp);
+  </script>
+  <script>
+    const socket = io();
+
+    // ── Build handshake: stale tabs pull themselves forward ─────────────
+    // The server sends its BUILD_STAMP on every (re)connect; if it doesn't
+    // match the stamp baked into THIS page, a new build shipped while this
+    // tab was open — reload once to pick it up (auto-rejoin restores the
+    // session seamlessly). Guarded per-stamp so a broken storage or proxy
+    // can never reload-loop.
+    socket.on('connect', () => socket.emit('clientBuild', { b: String(window.__BUILD__) }));
+    socket.on('buildStamp', (p) => {
+      const srv = String((p && p.stamp) || '');
+      if (!srv || srv === String(window.__BUILD__)) return;
+      // Funnel into the page's ONE reload authority — the cache-buster above
+      // re-verifies against /stamp and applies its own jpo_cb_at guard (one
+      // reload / 5 min / tab). Never reload from two code paths.
+      if (window._checkStamp) window._checkStamp();
+    });
+
+    // ── Resume tokens: lightweight auto-rejoin (see server.js) ──────────
+    // "Remember me" picks the storage: localStorage survives closing the
+    // browser; sessionStorage only survives a refresh of THIS tab. Saving to
+    // one always clears the other so a stale copy can't linger.
+    const TOKEN_KEY = 'jpo_session_token';
+    let _rememberMe = true;   // set at submit time from the active form's checkbox
+    function _saveToken(t) {
+      try {
+        if (_rememberMe) { localStorage.setItem(TOKEN_KEY, t); sessionStorage.removeItem(TOKEN_KEY); }
+        else             { sessionStorage.setItem(TOKEN_KEY, t); localStorage.removeItem(TOKEN_KEY); }
+      } catch {}
+    }
+    function _loadToken() {
+      try {
+        const fromLocal = localStorage.getItem(TOKEN_KEY);
+        if (fromLocal) { _rememberMe = true; return fromLocal; }
+        const fromSession = sessionStorage.getItem(TOKEN_KEY);
+        if (fromSession) { _rememberMe = false; return fromSession; }
+        return '';
+      } catch { return ''; }
+    }
+    function _clearToken() {
+      try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch {}
+    }
+
+    function _showRegisterForm() {
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-register')?.classList.remove('hidden');
+    }
+
+    // Returning browser: show the "reconnecting…" placeholder up front so the
+    // register form never flashes before the auto-resume resolves.
+    if (_loadToken()) {
+      document.getElementById('card-register')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.remove('hidden');
+    }
+
+    // Auto-identify with a stored token. We only emit once the socket is connected
+    // AND the game scene exists, so the currentPlayers snapshot (rendered by the
+    // scene handler) is never dropped by arriving too early. _resumeSent resets on
+    // disconnect so a network blip re-resumes the SAME session within the grace window.
+    let _connected = false, _resumeSent = false;
+    function _maybeResume() {
+      if (_resumeSent || !_connected || !window._gameScene) return;
+      const t = _loadToken();
+      if (!t) return;
+      _resumeSent = true;
+      socket.emit('resumeSession', { token: t });
+    }
+    socket.on('connect',    () => { _connected = true;  _maybeResume(); });
+    socket.on('disconnect', () => {
+      _connected = false; _resumeSent = false;
+      // A mid-match connection blip cancels the match server-side, but that
+      // rpsCancelled goes to the dead socket — close any RPS UI here so the
+      // player isn't left frozen in the pick modal until a refresh.
+      closeAllRps();
+      // Same for Office After Dark: the server already dropped us from the
+      // round — clear the darkness/HUD so nobody is stranded in the dark.
+      _roundReset();
+      // And Prop Hunt: a restart mid-round must not leave anyone frozen at
+      // the base, zoom-locked, or staring at a leftover prop.
+      if (window._phReset) window._phReset();
+    });
+
+    socket.on('sessionToken', ({ token }) => { if (token) _saveToken(token); });
+
+    socket.on('resumeFailed', () => {
+      _clearToken();
+      _showRegisterForm();
+    });
+
+    const WORLD_W = 10080;  // 210 tiles * 16px * 3 scale
+    const WORLD_H = 6144;   // 128 tiles * 16px * 3 scale
+    const SPEED   = 195;   // px/s — MUST match MOVE_SPEED in server.js (movement budget)
+    // Coffee walk-speed multiplier — MUST match COFFEE_MULT in server.js (the
+    // server widens its per-move budget by exactly this while a boost is live).
+    const COFFEE_MULT = 1.4;
+    // World-px from the sprite origin (center) down to its arcade body center. The
+    // body is setSize(12,10).setOffset(2,20) on a 16x32 frame at scale 3, so the
+    // feet-body sits 27px below the sprite center. Used for tile lookups and to snap
+    // a sitter so their body lands on the seat tile.
+    const BODY_DY = 27;
+
+    const CHARACTERS = ['adam', 'alex', 'amelia', 'bob'];
+    // 24-frame directional run sheets: RIGHT 0-5, UP(back) 6-11, LEFT 12-17, DOWN(front) 18-23
+    const DIR_ROWS  = { right:[0,5], up:[6,11], left:[12,17], down:[18,23] };
+    const DIR_START = { right:0, up:6, left:12, down:18 };
+    // Every character has three seated spritesheets: sit=RIGHT profile (mirror for LEFT),
+    // sit2=UP (back of head), sit3=DOWN (face). SIT_SUFFIX maps a direction to the texture-key
+    // suffix; the per-character texture key is `${char}_${suffix}` (e.g. 'alex_sit3'). Alex/
+    // Amelia/Bob seated sheets are recoloured offline from Adam's via an exact-shade palette LUT
+    // (see /tmp/gen_sit.py). SIT_DIR collapses 'left' onto the right sheet (flipped).
+    const SIT_SUFFIX = { right: 'sit', up: 'sit2', down: 'sit3' };
+    const SIT_DIR    = { right: 'right', left: 'right', up: 'up', down: 'down' };
+
+    // Tile GIDs that are ACTUAL announcement boards (Interiors tileset):
+    //   - colorful notice/bulletin boards       2638/2639 top, 2654/2655 base
+    //   - green chalkboard (on stand)           2667/2668 top, 2683/2684 base
+    //   - blackboard                            2670/2671 top, 2686/2687 base
+    // In JPO_HQ.tmj boards appear on BOTH the Furniture layer AND the Wall
+    // layer (wall-mounted boards in classrooms/offices are painted on Wall), so
+    // every board scan below probes both layers. Desks, monitors, lockers and
+    // shelves/plants are NOT boards.
+    const BOARD_GIDS = new Set([
+      2638,2639,2654,2655,
+      2667,2668,2683,2684,
+      2670,2671,2686,2687,
+    ]);
+    // ── Interactive office objects ─────────────────────────────────────
+    // Fixed stations you can use with E / the touch action button. Coords are
+    // scaled world px (tile*48) and MUST match OBJECTS in server.js — the
+    // server re-checks proximity and owns every cooldown. hl = the rectangle
+    // (world px) that pulses over the object while you're in range.
+    const OFFICE_OBJECTS = [
+      // (coffee_machine2 removed July 2026 — the counter object at c171-172 r70-71
+      // reads as a plant/lamp beside the fruit basket, per owner; don't re-add it.)
+      // White cabinet coffee makers (Interiors 2669 top / 2685 bottom) scattered through
+      // the rooms — the double-door units with the machine on top. Every id starting with
+      // 'coffee_machine' shares ONE per-person refill cooldown server-side and gets the
+      // idle-steam + _brewFx treatment automatically. Anchors = unit's horizontal center,
+      // one tile below its bottom row; coords MUST match OBJECTS in server.js.
+      { id:'coffee_machine3',  x:2016, y:1440, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:41*48,  y:28*48,  w:2*48, h:2*48 } }, // West Office pair (c41-42, r28-29)
+      { id:'coffee_machine4',  x:7056, y:1584, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:146*48, y:31*48,  w:2*48, h:2*48 } }, // East Office pair (c146-147, r31-32)
+      { id:'coffee_machine5',  x:4800, y:1776, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:99*48,  y:35*48,  w:2*48, h:2*48 } }, // Central Office pair (c99-100, r35-36)
+      { id:'coffee_machine6',  x:3600, y:3840, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:74*48,  y:78*48,  w:2*48, h:2*48 } }, // Lounge/Market pair (c74-75, r78-79)
+      // (coffee_machine7 removed July 2026 — the 2669/2685 unit at c183 r64-65 is in
+      // the QA manager's room and reads as a blender cabinet there, per owner.)
+      { id:'coffee_machine8',  x:8904, y:3648, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:185*48, y:74*48,  w:48,   h:2*48 } }, // Library single (c185, r74-75)
+      { id:'coffee_machine9',  x:3768, y:5088, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:78*48,  y:104*48, w:48,   h:2*48 } }, // IT Office single (c78, r104-105)
+      { id:'coffee_machine10', x:3768, y:5616, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:78*48,  y:115*48, w:48,   h:2*48 } }, // Dev Room single (c78, r115-116)
+      { id:'coffee_machine11', x:8952, y:5712, r:150, label:'Brew free coffee', touch:'Brew',
+        hl:{ x:186*48, y:117*48, w:48,   h:2*48 } }, // Training Room single (c186, r117-118)
+      { id:'water_cooler',    x:1800, y:3816, r:150, label:'Grab some water', touch:'Drink',
+        hl:{ x:37*48, y:78*48, w:48, h:2*48 } },     // hugs the cooler sprite (1×2 tiles on c37, r78-79), Market north wall
+      { id:'arcade',          x:5280, y:6000, r:170, label:'Play arcade (2P)', touch:'Play',
+        hl:{ x:108*48, y:123*48, w:2*48, h:2*48 } }, // arcade cabinets, Break Room basement corner (c108-109, r123-124)
+      // Game Room tables (c194-198): dedicated 2-player stations — the server
+      // forces the game (billiards / ping pong), so E fires interact directly
+      // (no picker). Coords MUST match OBJECTS in server.js.
+      { id:'pool_table',      x:9408, y:3336, r:170, label:'Play billiards (2P)', touch:'Play',
+        hl:{ x:194*48, y:68*48, w:4*48, h:3*48 } },  // green billiard table, Game Room (c194-197, r68-70)
+      { id:'pool_table2',     x:9408, y:3096, r:170, label:'Play billiards (2P)', touch:'Play',
+        hl:{ x:194*48, y:63*48, w:4*48, h:3*48 } },  // blue billiard table, Game Room (c194-197, r63-65)
+      { id:'pingpong_table',  x:9480, y:2760, r:170, label:'Play ping pong (2P)', touch:'Play',
+        hl:{ x:196*48, y:56*48, w:3*48, h:3*48 } },  // ping pong table, Game Room (c196-198, r56-58)
+      { id:'fridge',          x:5592, y:4008, r:190, label:'Buy a drink', touch:'Drinks',
+        hl:{ x:116*48, y:82*48, w:48, h:3*48 } },    // drink-cooler stack, cafeteria serving area (c116, r82-84; two more stacks above/below share the radius) — PAID drinks menu
+      { id:'kitchen_island',  x:5232, y:3624, r:240, label:'Buy a hot meal', touch:'Meals',
+        hl:{ x:104*48, y:74*48, w:10*48, h:2*48 } }, // cafeteria serving line: food display cases (Wall, c104-110) + checkout counter (Furniture 3831-3849, c111-113), r74-75 — PAID meals menu
+      { id:'snack_counter',   x:9048, y:1968, r:220, label:'Grab a gym snack', touch:'Eat',
+        hl:{ x:186*48, y:38*48, w:5*48, h:6*48 } },  // twin snack displays, Gym (c186-187 + c189-190, r38-43; one shared anchor) — still FREE
+      // ── Gym animated equipment (LimeZu strips; server broadcasts gymFx) ──
+      // The bags sway on an idle loop; E throws a punch everyone sees. The
+      // treadmill belts spin for a few seconds per run. The static Furniture
+      // tiles are swapped for animated sprites at create() — see the gym
+      // block there. Coords MUST match OBJECTS in server.js.
+      { id:'punch_bag1',      x:9432, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:196*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c196, r16-18)
+      { id:'punch_bag2',      x:9576, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:199*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c199, r16-18)
+      { id:'punch_bag3',      x:9720, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:202*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c202, r16-18)
+      { id:'punch_bag4',      x:9864, y:888, r:100, label:'Punch the bag', touch:'Punch',
+        hl:{ x:205*48, y:16*48, w:48, h:3*48 } },    // hanging bag (c205, r16-18)
+      { id:'treadmill1',      x:9336, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:193*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c193-195, r33-35)
+      { id:'treadmill2',      x:9480, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:196*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c196-198, r33-35)
+      { id:'treadmill3',      x:9624, y:1656, r:150, label:'Go for a run', touch:'Run',
+        hl:{ x:199*48, y:33*48, w:3*48, h:3*48 } },  // treadmill (c199-201, r33-35)
+      // ── Cafeteria kitchen: PAID food stations (server FOOD_STATIONS/FOOD_MENUS).
+      // ORDER MATTERS: the E-scan above is FIRST-MATCH, so produce_crates MUST
+      // stay before the grill banks (the crates sit inside the appliance bank's
+      // radius) — and fridge/kitchen_island above win their own overlap bands.
+      { id:'candy_stand',     x:4392, y:3576, r:150, label:'Buy sweets', touch:'Sweets',
+        hl:{ x:91*48, y:73*48, w:48, h:3*48 } },     // candy stand (Wall c91, r73-75)
+      { id:'dessert_case',    x:4728, y:3624, r:240, label:'Buy a dessert', touch:'Dessert',
+        hl:{ x:93*48, y:74*48, w:11*48, h:2*48 } },  // pink dessert counters + west display cases (c93-103, r74-75)
+      { id:'produce_crates',  x:5184, y:3984, r:170, label:'Buy fresh produce', touch:'Produce',
+        hl:{ x:106*48, y:82*48, w:4*48, h:2*48 } },  // produce crates (c106-109, r82-83) — keep BEFORE the grill banks
+      { id:'grill_bank',      x:4560, y:3960, r:200, label:'Order from the grill', touch:'Grill',
+        hl:{ x:91*48, y:81*48, w:9*48, h:3*48 } },   // kitchen appliance bank, west half (c91-99, r81-83)
+      { id:'grill_bank2',     x:4944, y:3960, r:200, label:'Order from the grill', touch:'Grill',
+        hl:{ x:100*48, y:81*48, w:7*48, h:3*48 } },  // kitchen appliance bank, east half (c100-106, r81-83)
+      { id:'bakery_line',     x:4512, y:4536, r:170, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:91*48, y:94*48, w:7*48, h:2*48 } },   // prep/bakery tables, west (c91-97, r94-95)
+      { id:'bakery_line2',    x:4848, y:4536, r:170, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:98*48, y:94*48, w:7*48, h:2*48 } },   // prep/bakery tables, middle (c98-104, r94-95)
+      { id:'bakery_line3',    x:5232, y:4536, r:210, label:'Buy fresh bakes', touch:'Bakery',
+        hl:{ x:105*48, y:94*48, w:9*48, h:2*48 } },  // prep/bakery tables + register, east (c105-113, r94-95)
+      // ── Office chores (server CHORES/CHORE_STATIONS): small repeatable jobs
+      // for coins. `chore` names the shared cooldown group — stations sharing
+      // it share one per-person timer, and it keys the ✨ "available again"
+      // marker. Coords MUST match OBJECTS in server.js. These stay LAST in the
+      // list so every existing station keeps winning its own overlap zone
+      // (the E-scan is first-match).
+      { id:'chore_plants1',  x:9312, y:2640, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:193*48, y:53*48, w:2*48, h:2*48 } },  // potted palm, Game Room (c193-194, r53-54)
+      { id:'chore_plants2',  x:9984, y:3264, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:207*48, y:66*48, w:2*48, h:2*48 } },  // potted palm, east hallway (c207-208, r66-67)
+      { id:'chore_plants3',  x:4992, y:5760, r:150, label:'Water the plants', touch:'Water', chore:'plants',
+        hl:{ x:103*48, y:118*48, w:2*48, h:2*48 } }, // potted palm, basement office (c103-104, r118-119)
+      { id:'chore_couch',    x:1728, y:4608, r:200, label:'Fluff the lounge cushions', touch:'Tidy', chore:'couch',
+        hl:{ x:33*48, y:94*48, w:6*48, h:2*48 } },   // lounge sofa row (c33-38, r94-95)
+      { id:'chore_weights',  x:9960, y:1104, r:170, label:'Re-rack the gym weights', touch:'Rack', chore:'weights',
+        hl:{ x:206*48, y:21*48, w:3*48, h:4*48 } },  // kettlebell racks, Gym (c206-208, r21-24)
+      { id:'chore_board',    x:2064, y:4128, r:150, label:'Wipe the whiteboard', touch:'Wipe', chore:'board',
+        hl:{ x:42*48, y:84*48, w:2*48, h:2*48 } },   // whiteboard + stool (c42-43, r84-85)
+      { id:'chore_meeting1', x:4632, y:5376, r:200, label:'Tidy the meeting room', touch:'Tidy', chore:'meeting',
+        hl:{ x:95*48, y:108*48, w:3*48, h:4*48 } },  // conference table, basement meeting room (c95-97, r108-111)
+      { id:'chore_meeting2', x:7632, y:3600, r:180, label:'Tidy the meeting room', touch:'Tidy', chore:'meeting',
+        hl:{ x:158*48, y:72*48, w:2*48, h:3*48 } },  // conference table, east meeting room (c158-159, r72-74)
+    ];
+    // Cafeteria tables (gid 2183 = table top-left marker) each get their own food
+    // spot — entries are appended at create() from the loaded map so a Tiled
+    // re-import keeps working. Ids MUST mirror the server's cafeteria_food<N>
+    // generation (same gid scan, same row-major order).
+    // ── Rooms ──────────────────────────────────────────────────────────
+    // Each announcement board belongs to a room; posting at a board only shows on
+    // that room's boards. Rooms are rectangular tile regions (col/row inclusive)
+    // matching the map's walled areas. Every board tile falls inside exactly one.
+    // (Derived from JPO_HQ.tmj's walled areas. Order matters: roomForTile returns
+    // the FIRST matching rect — the Game Room rect overlaps the wider Library
+    // rect's north-east corner, so Game Room MUST come before Library. Any tile
+    // outside every rect falls back to the generic 'office' id.
+    // Department mapping (Jul 2026): display names renamed per team layout, but the
+    // room `id`s are FROZEN — announcement boardIds are `<roomId>#<n>`, so changing an
+    // id would orphan that room's posted announcements. Rename `name` only.
+    // NOTE: ids 'itoffice'/'devroom' have SWAPPED display names on purpose (user request);
+    // 'breakroom' kept its id but is now the CEO's office (right half of the old Break
+    // Room row — the c105 wall splits it from the COO's office on the left).
+    const ROOMS = [
+      { id:'courtyard',  name:'Courtyard',        c0:2,   c1:29,  r0:14,  r1:127 },
+      { id:'westoffice', name:'Ops Office',       c0:31,  c1:77,  r0:15,  r1:43  },
+      { id:'central',    name:'CMA Office',       c0:79,  c1:125, r0:15,  r1:43  },
+      { id:'eastoffice', name:'Claims Office',    c0:127, c1:175, r0:15,  r1:43  },
+      { id:'naprooms',   name:'Nap Rooms',        c0:176, c1:187, r0:15,  r1:43  },
+      { id:'gym',        name:'Gym',              c0:188, c1:209, r0:14,  r1:43  },
+      { id:'studio',     name:'Front Desk',       c0:30,  c1:77,  r0:50,  r1:63  },
+      { id:'lounge',     name:'Recruiters Room',  c0:30,  c1:77,  r0:64,  r1:75  },
+      { id:'market',     name:'HR Room',          c0:30,  c1:75,  r0:76,  r1:95  },
+      { id:'cafeteria',  name:'Cafeteria',        c0:78,  c1:145, r0:50,  r1:95  },
+      { id:'gameroom',   name:'Game Room',        c0:177, c1:209, r0:50,  r1:71  }, // MUST stay before qa/library (rect overlap; first match wins)
+      { id:'qa',         name:'QA Room',          c0:146, c1:190, r0:50,  r1:71  }, // top portion of the old Library (above the r72-73 wall)
+      { id:'library',    name:'L&D Room',         c0:146, c1:190, r0:72,  r1:95  },
+      { id:'itoffice',   name:'Dev Room',         c0:30,  c1:61,  r0:96,  r1:111 }, // names swapped with devroom on purpose
+      { id:'devroom',    name:'IT Office',        c0:30,  c1:61,  r0:112, r1:127 },
+      { id:'conference', name:'Conference Hall',  c0:90,  c1:126, r0:98,  r1:116 },
+      { id:'coo',        name:"COO's Office",     c0:90,  c1:104, r0:117, r1:127 },
+      { id:'breakroom',  name:"CEO's Office",     c0:105, c1:126, r0:117, r1:127 },
+      { id:'manager',    name:"CFO's Office",     c0:127, c1:143, r0:98,  r1:127 },
+      { id:'training',   name:'Accounting',       c0:144, c1:190, r0:96,  r1:127 },
+    ];
+    function roomForTile(c, r) { const m = ROOMS.find(x => c>=x.c0 && c<=x.c1 && r>=x.r0 && r<=x.r1); return m ? m.id : 'office'; }
+    function roomNameById(id)  { const m = ROOMS.find(x => x.id === id); return m ? m.name : 'Announcements'; }
+    // Sittable tiles ALL live on the FURNITURE layer. The office chair in
+    // JPO_HQ.tmj is GID 2231 (472 of them!) and is used EVERYWHERE: workstation
+    // banks (a monitor tile — Wall 2078 — shares the chair cell, desk-front Wall
+    // 2094 sits directly below), conference-table rings, and market checkouts.
+    // The desk tiles are NOT seats — sitting on them put the player on the desk
+    // edge, so only the chair GID is listed. Seats with a fixed orientation get a
+    // SEAT_FACING entry below; any GID without one falls back to the approach
+    // direction (workstation/conference 2231 facings are derived per-tile at
+    // create() — see seatFacingAt).
+    const FURN_SEATS = new Set([
+      2231,                                                       // office chair (workstations, conference tables, checkouts, island stools)
+      // (2763/2764 REMOVED July 2026: on this map every instance is the pedestal row
+      // of the 2-wide, 3-tall white lectern/front-desk unit (2731/2732 over 2747/2748
+      // over 2763/2764 — a white board with a plant picture). Sitting buried the
+      // avatar inside the desk art. No true study carrels exist on JPO_HQ.tmj.)
+      2628,                                                       // lounge work-pod desk chair TOP tile (side view, faces left) — work seat
+      2644,                                                       // lounge work-pod chair BOTTOM tile — alias seat: SEAT_DY -48 snaps the sitter up onto the 2628 tile (every 2644 has 2628 directly above; verified map-wide)
+      2584, 2600, 2616,                                           // lounge work-pod LEFT chair stack (mirror of 2628/2644: top/seat/legs, faces RIGHT into the pod divider 2585/2601/2617). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2600 seat tile. Also standalone at (163,64-66), (163,80-82), (133,125-127).
+      2589, 2605, 2621,                                           // MIRRORED green side-view desk chair stack (top/seat/legs, faces LEFT — into its divider panel 2588/2604/2620 at COO/Accounting, or into the white 2113-2146 desk at the QA/L&D front desk). SEAT_DY aliases top (+48) and legs (-48) onto the middle 2605 seat tile. COO office (104,125-127) + Accounting (190,122-124) + QA/L&D front desk (160,72-74, no panel).
+      2588, 2604, 2620,                                           // that chair's big green divider panel column — ALIAS seats: SEAT_DX +48 (plus SEAT_DY on top/legs) lands the sitter on the chair's middle tile, so pressing E at the panel (which players read as the chair back) still seats you. Unlike pod divider 2585 (solid, appears in packed pods), 2588 appears ONLY directly west of a 2589 chair — verified map-wide.
+      2593,                                                       // tall HR-desk chair north of the desk (faces down; 2577 backrest row stays solid — see SEAT_DY)
+      2642,                                                       // dining chair south of a table (art faces up; 2626 tuck tile stays solid)
+      2522,                                                       // red ladder chair west of the HR tall desk (faces right; 2538 leg tile stays solid)
+      2835, 2836,                                                 // wooden bench TOPS
+      2851, 2852,                                                 // wooden bench FRONT row — alias: SEAT_DY -48 onto the bench top above (verified map-wide)
+      2758, 2759,                                                 // pouf top row (approach-facing)
+      3189, 3190, 3191,                                           // gray studio sofa cushion row
+      3173, 3174, 3175,                                           // gray studio sofa BACKREST row — alias: SEAT_DY +48 onto the cushion row below (verified map-wide)
+      3205, 3206, 3207,                                           // gray studio sofa FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
+      5016, 5017, 5032, 5033,                                     // studio front-desk grey armchair (TVStudio 2×2: back row 5016/5017 over seat row 5032/5033, centered between its two columns via SEAT_DX; back row aliases down onto the seat row via SEAT_DY). The 4-wide white control desk lives on the WALL layer at the seat row + the row below.
+      3192, 3193,                                                 // brown loveseat cushions
+      3176, 3177,                                                 // brown loveseat BACKREST row — alias: SEAT_DY +48 onto the cushions below (verified map-wide)
+      3224, 3225,                                                 // white lounge sofa cushion row (rooms east of Dev/IT)
+      3208, 3209,                                                 // white lounge sofa BACKREST row — alias: SEAT_DY +48 onto the cushions below (verified map-wide)
+      3241, 3257, 3273,                                           // grey SIDE-view sofa, seat column (arm-top/seat/base). CFO office (138,125-127). SEAT_DY aliases top/base onto the middle 3257.
+      3240, 3256, 3272,                                           // that sofa's BACKREST column — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide: 3240-col always has 3241-col to its east
+      3242, 3258, 3274,                                           // grey side-view sofa MIRRORED, seat column. COO office (99,125-127). SEAT_DY aliases top/base onto the middle 3258.
+      3243, 3259, 3275,                                           // its BACKREST column — alias: SEAT_DX -48 west onto the seat column (plus DY on top/base); verified map-wide
+      3307, 3323, 3339,                                           // tan SIDE-view sofa, seat column (top/seat/base — backrest column is WEST in the art). Accounting manager office (186,122-124). SEAT_DY aliases top/base onto the middle 3323.
+      3306, 3322, 3338,                                           // its BACKREST column — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
+      3236, 3252, 3268,                                           // grey HIGH-BACK side sofa, seat column (backrest column 3237/3253/3269 to its east). Lounge corners of Ops/CMA/Claims + Accounting (189,41-43). SEAT_DY aliases top/base onto the middle 3252.
+      3237, 3253, 3269,                                           // its BACKREST column — alias: SEAT_DX -48 west onto the seat column (plus DY on top/base); verified map-wide
+      3239, 3255, 3271,                                           // MIRRORED grey high-back side sofa, seat column (backrest column 3238/3254/3270 to its west). Same lounge corners. SEAT_DY aliases top/base onto the middle 3255.
+      3238, 3254, 3270,                                           // its BACKREST column — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
+      2877, 2893, 2909,                                           // blue drafting stool (1-wide 3-tall: cap/seat/pedestal; faces down). CFO office (133,118-120). SEAT_DY aliases cap/base onto the middle 2893.
+      2878, 2894, 2910,                                           // red drafting stool, same treatment. Accounting (150,121-123) + (171,125-127).
+      // (Historical note: 3252-3255 were once mislabeled "cabinet units" — cropping
+      // the tileset + checking all 4 map placements proved they're the middle row of
+      // these high-back sofas. The real coffee-maker cabinets are 2669/2685.)
+      3304, 3320, 3336,                                           // tan SIDE-view library armchair, seat column (top/seat/base — backrest column is EAST in the art). QA (167,64-66) + L&D (167,80-82). SEAT_DY aliases top/base onto the middle 3320.
+      3305, 3321, 3337,                                           // its BACKREST column — alias: SEAT_DX -48 west onto the seat column (plus DY on top/base); verified map-wide
+      7629, 7645, 7661,                                           // L&D green high-back reading chair, RIGHT column (pole-top/seat/legs — the seat pad is the middle 7645). East wall of L&D (190,88-93). SEAT_DY aliases top/legs onto 7645.
+      7628, 7644, 7660,                                           // its tall green BACKREST column (west) — alias: SEAT_DX +48 east onto the seat column (plus DY on top/base); verified map-wide
+      5425, 5426, 5427,                                           // green couch cushion row (Jail tileset)
+      5441, 5442, 5443,                                           // green couch FRONT row — alias: SEAT_DY -48 onto the cushion row above (verified map-wide)
+      7699, 7715,                                                 // classroom desk chair: 7715 seat + 7699 chair-back tile above (alias: SEAT_DY down onto 7715; every 7699 has 7715 directly below — verified map-wide). Chair art hugs the RIGHT of the tile -> SEAT_DX +18 into the desk column (desk front redrawn over the lap).
+      8827, 8828, 8843, 8844,                                     // CEO front armchair (2×2, faces down; top row 8827/8828 aliases to seat row 8843/8844 via SEAT_DY)
+      8887, 8888, 8903, 8904,                                     // CEO left armchair  (2×2, faces left; top row 8887/8888 aliases to seat row 8903/8904 via SEAT_DY)
+      8825, 8826, 8841, 8842,                                     // CEO right armchair (2×2, faces right; top row 8825/8826 aliases to seat row 8841/8842 via SEAT_DY)
+      8891, 8892,                                                 // CEO bottom armchair seat row only (faces up → standup pose; body row 8907/8908 stays solid, same as TV couch)
+      8449, 8450, 8451,                                           // up-facing TV couch, back-top row (body row 8465-8467 stays solid)
+      8481, 8482, 8483,                                           // up-facing TV couch, back-top row (body row 8497-8499 stays solid)
+      8460, 8461, 8462,                                           // Game Room TV couch (moved Wall→Furniture July 2026), back-top row (body row 8476-8478 stays solid)
+      7032, 7033, 7068, 7069,                                     // nap-room beds: lie row (renders the lying pose, see BED_GIDS)
+    ]);
+    // Per-tile seat overrides — used when the same GIDs appear as desk tops elsewhere
+    // and cannot be added to FURN_SEATS globally.  Key = "col,row" in tile coords.
+    // These cells have their Furniture (and any Wall) collision cleared at create()
+    // via isFurnSeat, and their facing is baked into seatFacingAt there too.
+    const SEAT_TILE_FACING = {
+      '128,124': 'down',  // CFO office: visitor bench, Jail desk south face (c128-130 r124)
+      '129,124': 'down',
+      '130,124': 'down',
+      // L&D trainer's desk chair (GID 2589/2605/2621 at c160, r72-74): the global
+      // SEAT_FACING[2589]='left' pin is correct for COO/Accounting (desk to the west),
+      // but at the L&D position the trainer's desk + classroom are to the EAST, so
+      // the sitter must face RIGHT. Three rows needed — seatFacingAt is keyed on the
+      // scan tile (whichever row the player pressed E on), not the SEAT_DY-snapped cell.
+      '160,72': 'right',  // L&D trainer's chair top tile
+      '160,73': 'right',  // L&D trainer's chair seat tile
+      '160,74': 'right',  // L&D trainer's chair legs tile
+      // Green desk chairs (GID 2589/2605/2621) at the Accounting manager east wall
+      // (c190,r122-124) and CEO area south desk (c104,r125-127): the global
+      // SEAT_FACING[2589]='left' aims the sitter at the panel/divider to the west —
+      // reads as "facing the chair back." Override to face RIGHT (east, away from panel)
+      // at both the chair column and the panel-alias column, all three rows each.
+      '189,122': 'right', '190,122': 'right',
+      '189,123': 'right', '190,123': 'right',
+      '189,124': 'right', '190,124': 'right',
+      '103,125': 'right', '104,125': 'right',
+      '103,126': 'right', '104,126': 'right',
+      '103,127': 'right', '104,127': 'right',
+      // L&D round table: its 10 chairs are gid 2231 on the WALL layer (the teal
+      // table is Wall 2043-2077), so FURN_SEATS never sees them — pin each cell
+      // here, facing the table center. The 'up' chair renders the standup pose
+      // (chair art redrawn from the Wall layer — see _makeSeatOccluders).
+      '175,76': 'down', '176,76': 'down', '177,76': 'down',
+      '174,77': 'right', '174,78': 'right', '174,79': 'right',
+      '178,77': 'left',  '178,78': 'left',  '178,79': 'left',
+      '176,80': 'up',
+    };
+    // Desk-type chairs that earn the server's work bonus (+3/min) — MUST match
+    // WORK_SEAT_GIDS in server.js. Drives the 💼 chip at sit time.
+    // Alias tiles are CLIENT-ONLY here (chip display keys off the tile you press
+    // E on): the server derives the seat from the FINAL position, so its set
+    // lists only the derived-cell gids. Client-only aliases: 2644 (right pod
+    // chair bottom → lands on 2628), 2584/2616 (left pod chair top/legs → land
+    // on 2600), 5016/5017/5032 (studio armchair tiles — the centered sit always
+    // derives to the RIGHT seat tile 5033). Server set = {2231,
+    // 2628, 2600, 5033} (+ WALL_WORK_SEAT_GIDS).
+    const WORK_CHAIR_GIDS = new Set([
+      2231, 2628, 2644, 2584, 2600, 2616, 5016, 5017, 5032, 5033,  // original work chairs
+      2605, 2589, 2621,   // L&D trainer's desk chair (all 3 stack tiles; also COO + Accounting)
+      3320, 3304, 3336,   // L&D tan armchair (all 3 stack tiles; also QA tan armchair)
+      7645, 7629, 7661,   // L&D green high-back reading chair (all 3 stack tiles)
+      7715, 7699,         // L&D classroom desk chair (seat + chair-back alias)
+    ]);
+    // Jail-tileset computer-desk chairs live on the WALL layer (the Furniture layer
+    // holds the desk itself: 5489-5492 top strips over 5505-5508 bodies — those top
+    // strips are NOT seats; they were once mislabeled "lavender couch cushions").
+    // gid -> pinned facing. All six chairs sit directly BELOW their desk -> 'up'.
+    // isFurnSeat() probes this alongside FURN_SEATS, and every chair here is a
+    // computer desk, so all of them pay the work bonus — MUST match
+    // WALL_WORK_SEAT_GIDS in server.js.
+    const WALL_SEATS = { 5533:'up', 5564:'up', 5565:'up' };
+    // Fixed sit-facing for seats whose orientation is baked into the tile art, so a seated
+    // player faces the way the FURNITURE faces (its open front) instead of the aisle they
+    // walked in from. Carrel chairs (2763/2764) have their desk directly ABOVE -> 'up'.
+    // Sofas/benches/couches open DOWN (backrest at top). The dining chair pair is a
+    // matched set: 2593 sits NORTH of a table (art faces down), 2642 sits SOUTH of one
+    // (art faces up/away). The office chair 2231 is deliberately NOT here — it rings
+    // tables on all four sides, so its facing is derived per-tile at create() (see
+    // seatFacingAt). Poufs (2758/2759) keep the approach direction on purpose.
+    const SEAT_FACING = {
+      2628:'left',                                                                   // lounge work-pod chair (side view)
+      2644:'left',                                                                   // work-pod chair bottom tile (alias — snaps up onto 2628, same facing)
+      2584:'right', 2600:'right', 2616:'right',                                      // lounge work-pod LEFT chair stack (mirror of 2628 — faces right into its divider)
+      2589:'left', 2605:'left', 2621:'left',                                         // mirrored green side-view desk chair (faces left into its divider panel)
+      2588:'left', 2604:'left', 2620:'left',                                         // that divider panel's alias tiles — same facing (sit lands on the chair column)
+      // Sofas / long chairs / benches deliberately have NO pin — they face the
+      // APPROACH direction (owner request July 2026): grey side sofas 3241/3242
+      // families, studio sofa 3189-3191, loveseat 3192/3193, white lounge sofa
+      // 3224/3225, green couch 5425-5427, wooden benches 2835/2836. Desk/computer
+      // chairs and art-constrained seats (back-view TV couches, beds) stay pinned.
+      5016:'down', 5017:'down', 5032:'down', 5033:'down',                            // studio front-desk armchair (faces its control desk below)
+      2593:'down',                                                                   // tall HR-desk chair north of its desk
+      2522:'right',                                                                  // red ladder chair west of the HR tall desk
+      2642:'up',                                                                     // dining chair south of table
+      2877:'down', 2893:'down', 2909:'down',                                         // blue drafting stool (CFO office c133,r118-120 — wall on west, faces south into office). All 3 tiles needed: player may be standing on cap/seat/pedestal when E is pressed
+      // Side-view high-back chairs are ART-CONSTRAINED like the desk chairs, not
+      // approach-facing like sofas: their tall backrest column reads as the chair's
+      // back, so an approach-facing sit could face INTO the backrest and read as
+      // "standing next to the chair" (Vince's July 2026 screenshot). Pin them.
+      3304:'left', 3320:'left', 3336:'left',                                         // tan library armchair seat col (backrest col EAST → sitter faces west)
+      3305:'left', 3321:'left', 3337:'left',                                         // its backrest alias tiles — same facing
+      7629:'left', 7645:'left', 7661:'left',                                         // L&D green reading chair seat col (chairs against EAST wall → sitter faces west/into room)
+      7628:'left', 7644:'left', 7660:'left',                                         // its backrest alias tiles — same facing
+      7699:'right', 7715:'right',                                                    // classroom desk chair (desk to its right; 7699 = chair-back alias tile)
+      8827:'down', 8828:'down', 8843:'down', 8844:'down',                            // CEO front armchair (backrest at top → faces south/down)
+      8887:'right', 8888:'right', 8903:'right', 8904:'right',                          // CEO west armchair → sitter faces east/right (inward toward center)
+      8825:'left', 8826:'left', 8841:'left', 8842:'left',                            // CEO east armchair → sitter faces west/left (inward toward center)
+      8891:'up', 8892:'up',                                                          // CEO bottom armchair seat row (back faces north → standup pose, faces north/up)
+      8449:'up', 8450:'up', 8451:'up',                                               // TV couch seen from behind — sit faces the TV above (standup pose)
+      8481:'up', 8482:'up', 8483:'up',                                               // second TV couch (basement south wall), same back view
+      8460:'up', 8461:'up', 8462:'up',                                               // Game Room TV couch (c203-208 r64) — faces the TV above (standup pose)
+      7032:'down', 7033:'down', 7068:'down', 7069:'down',                            // beds (pose overrides to 'lie')
+    };
+    // 2-tile-wide single seats (high-back armchairs, tan armchair, beds): BOTH tiles
+    // are sittable and both snap the avatar to the piece's horizontal CENTER (the
+    // boundary between the two tiles) so you never perch on one half. The left tile
+    // shifts +24px, the right tile -24px — the same world point either way. Remote
+    // pose lookups round to the RIGHT tile (x lands exactly on the boundary), which
+    // is why both tiles carry the gid entries here and in BED_GIDS/FURN_SEATS.
+    const SEAT_DX = {
+      // Tan side-view armchair: the cushion straddles the seat-column's EAST side up
+      // to the backrest boundary (art x≈9-22 of the 32px pair), so the seat column
+      // shifts +15 toward the backrest and the backrest column shifts -33 (= -48+15)
+      // so both tiles land on the SAME final point. -33 still crosses the boundary
+      // (0.6875 > 0.5 rounds the derived col to the seat column), +15 stays interior.
+      3304: 15, 3320: 15, 3336: 15,
+      3305: -33, 3321: -33, 3337: -33,
+      // L&D green reading chair: mirrored — the seat pad hugs the WEST side of the
+      // seat column against the backrest (art x≈1-10 of 16), so the seat column
+      // shifts -9 and the backrest column +39 (= 48-9) onto the same point.
+      7629: -9, 7645: -9, 7661: -9,
+      7628: 39, 7644: 39, 7660: 39,
+      // Classroom chair art hugs the RIGHT of its tile (pixel-verified: seat block
+      // spans x≈10-15 of 16): nudge the sitter 18px EAST so the body's front edge
+      // overlaps the desk column (whose tiles are redrawn over it — see the 7715
+      // occluder branch — so the lap tucks BEHIND the desk). Strictly interior
+      // offset — the derived cell can't change (0.375 < 0.5), so remote parity
+      // holds without the ±24/48 boundary rule. (An earlier -12 went the wrong
+      // way — owner screenshot.)
+      7699: 18, 7715: 18,
+      7032: 24, 7033: -24,   // pink nap-room bed (lie row)
+      7068: 24, 7069: -24,   // blue nap-room bed (lie row)
+      5016: 24, 5017: -24,   // studio front-desk armchair back row (aliases down via SEAT_DY, same centering)
+      5032: 24, 5033: -24,   // studio front-desk armchair seat row (2-wide, centered on the column boundary)
+      // CEO office 2×2 armchairs: left tile +24, right tile -24 (centers sitter between columns for all 4 types)
+      8827: 24, 8828: -24, 8843: 24, 8844: -24,   // front armchair (down-facing)
+      8887: 24, 8888: -24, 8903: 24, 8904: -24,   // left-facing armchair
+      8825: 24, 8826: -24, 8841: 24, 8842: -24,   // right-facing armchair
+      8891: 24, 8892: -24,                          // bottom armchair seat row (up-facing)
+      // Divider-panel alias tiles for the mirrored green desk chair: a FULL-tile +48
+      // shifts the sitter one column EAST onto the chair column (2589 stack) — exact
+      // integer column, so remote derived-cell parity holds (same rule as SEAT_DY ±48).
+      2588: 48, 2604: 48, 2620: 48,
+      // Side-view sofa BACKREST columns — full-tile shift onto the seat column so
+      // the whole sofa footprint is sittable ("sit where I please", owner July 2026):
+      3240: 48, 3256: 48, 3272: 48,     // CFO grey sofa backrest → seat column east
+      3243: -48, 3259: -48, 3275: -48,  // COO mirrored grey sofa backrest → seat column west
+      3306: 48, 3322: 48, 3338: 48,     // Accounting tan sofa backrest → seat column east
+      3237: -48, 3253: -48, 3269: -48,  // high-back lounge sofa backrest → seat column west
+      3238: 48, 3254: 48, 3270: 48,     // mirrored high-back lounge sofa backrest → seat column east
+    };
+    // Vertical seat shift. The tall HR-desk chairs (2593) sit one full tile NORTH of
+    // their tall desk — with the default snap the avatar's feet land a whole tile above
+    // the desk top, so nothing occludes the legs and the sitter reads as STANDING beside
+    // the desk. A HALF-tile drop (+24) parks the feet exactly on the desk-top cell's
+    // TOP EDGE (Furniture 2609 / Wall 2178-2179): the derived row is 81.5, and
+    // Math.round(81.5) rounds UP to 82 on both the local and remote paths, so the
+    // 2609 branch in _deskPoseAt still fires (upright standing DOWN frame) and
+    // _makeSeatOccluders still redraws the desk tiles — but only the feet/legs are
+    // hidden, keeping head+torso visible above the desk. A FULL tile (+48) was tried
+    // and sank the sitter so deep only the head cleared the desk ("under the table");
+    // +24 with the SIT sheet was tried even earlier and read as "head under the chair"
+    // (the sit frames are too short) — the pairing that works is +24 AND the stand
+    // pose. 2644 is the work-pod chair's BOTTOM tile: -48 snaps the sitter a full
+    // tile UP onto the 2628 chair tile, so approaching the two-tile chair from below
+    // works (the final position is identical to sitting on 2628 directly, which is
+    // what the server work-bonus derivation sees). Remote viewers derive the seat
+    // cell from the broadcast position with the SAME formula on exact integers, so
+    // local and remote agree — keep any new dy at ±24 (half-tile, rounds up) or ±48
+    // (full tile) or the two occluder lookups will disagree. All shifts stay inside
+    // the server's 160px SEAT_SNAP_ALLOWANCE.
+    const SEAT_DY = {
+      2593: 24,   // tall HR-desk chair: half-tile drop, feet on the desk-top cell's top edge
+      2644: -48,  // work-pod chair bottom tile: snap UP onto the 2628 chair tile
+      2584: 48,   // left pod chair TOP tile: snap DOWN onto the 2600 seat tile
+      2616: -48,  // left pod chair LEGS tile: snap UP onto the 2600 seat tile
+      5016: 48, 5017: 48,  // studio armchair back row: snap DOWN onto the 5032/5033 seat row
+      2589: 48,   // mirrored green desk chair TOP tile: snap DOWN onto the 2605 seat tile
+      2621: -48,  // mirrored green desk chair LEGS tile: snap UP onto the 2605 seat tile
+      2588: 48,   // divider panel TOP tile: down onto the chair's middle row (SEAT_DX shifts east)
+      2620: -48,  // divider panel LEGS tile: up onto the chair's middle row (SEAT_DX shifts east)
+      3241: 48,   // CFO side sofa arm-top tile: down onto the 3257 seat tile
+      3273: -48,  // CFO side sofa base tile: up onto the 3257 seat tile
+      3240: 48,   // CFO sofa backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      3272: -48,  // CFO sofa backrest BASE: up (SEAT_DX shifts east)
+      3242: 48,   // COO side sofa top tile: down onto the 3258 seat tile
+      3274: -48,  // COO side sofa base tile: up onto the 3258 seat tile
+      3243: 48,   // COO sofa backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3275: -48,  // COO sofa backrest BASE: up (SEAT_DX shifts west)
+      3307: 48,   // Accounting tan sofa seat-column TOP: down onto the 3323 seat tile
+      3339: -48,  // Accounting tan sofa seat-column BASE: up onto the 3323 seat tile
+      3306: 48,   // Accounting sofa backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      3338: -48,  // Accounting sofa backrest BASE: up (SEAT_DX shifts east)
+      3236: 48,   // high-back lounge sofa seat-column TOP: down onto the 3252 seat tile
+      3268: -48,  // high-back lounge sofa seat-column BASE: up onto the 3252 seat tile
+      3237: 48,   // its backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3269: -48,  // its backrest BASE: up (SEAT_DX shifts west)
+      3239: 48,   // mirrored high-back lounge sofa seat-column TOP: down onto the 3255 seat tile
+      3271: -48,  // mirrored seat-column BASE: up onto the 3255 seat tile
+      3238: 48,   // mirrored backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      3270: -48,  // mirrored backrest BASE: up (SEAT_DX shifts east)
+      // Whole-sofa sittability aliases (front/backrest rows snap onto the cushion row):
+      3173: 48, 3174: 48, 3175: 48,     // studio sofa backrest row → cushions below
+      3205: -48, 3206: -48, 3207: -48,  // studio sofa front row → cushions above
+      3176: 48, 3177: 48,               // loveseat backrest row → cushions below
+      3208: 48, 3209: 48,               // white lounge sofa backrest row → cushions below
+      5441: -48, 5442: -48, 5443: -48,  // green couch front row → cushions above
+      2851: -48, 2852: -48,             // wooden bench front row → bench top above
+      // Tan armchair + L&D green reading chair: every tile lands on the MIDDLE seat
+      // tile PLUS a 12px sink (so the head stays below the chair top and the feet
+      // overlap the base row, which the occluder branch redraws over the legs —
+      // without the sink the sitter read as perched ON TOP of the chair). +12 stays
+      // interior (0.25 < 0.5); the ±48 alias components keep derived-row parity
+      // (top: +60 → r+1.25 rounds to the middle; base: -36 → r-0.75 rounds up).
+      3320: 12,   // tan armchair seat tile: sink
+      3304: 60,   // tan armchair seat-column TOP: down onto the 3320 seat tile (+ sink)
+      3336: -36,  // tan armchair seat-column BASE: up onto the 3320 seat tile (+ sink)
+      3305: 60,   // tan armchair backrest TOP: down (SEAT_DX shifts west onto the seat column)
+      3321: 12,   // tan armchair backrest MIDDLE: sink (SEAT_DX shifts west)
+      3337: -36,  // tan armchair backrest BASE: up (SEAT_DX shifts west)
+      7645: 12,   // L&D reading chair seat pad: sink
+      7629: 60,   // L&D reading chair pole-top: down onto the 7645 seat tile (+ sink)
+      7661: -36,  // L&D reading chair legs: up onto the 7645 seat tile (+ sink)
+      7628: 60,   // its backrest TOP: down (SEAT_DX shifts east onto the seat column)
+      7644: 12,   // its backrest MIDDLE: sink (SEAT_DX shifts east)
+      7660: -36,  // its backrest BASE: up (SEAT_DX shifts east)
+      7699: 24,   // classroom chair-back tile: down onto the 7715 seat (48 minus the shared -24 lift; round(+0.5) still derives 7715's row)
+      7715: -24,  // classroom seat: half-tile LIFT — the seat surface sits at the top edge of the tile (art rows ≈8-16 of the 7699 tile); Math.round(-0.5) rounds UP so the derived row stays 7715's
+      2877: 48,   // blue drafting stool cap: down onto the 2893 seat tile
+      2909: -48,  // blue drafting stool pedestal: up onto the 2893 seat tile
+      2878: 48,   // red drafting stool cap: down onto the 2894 seat tile
+      2910: -48,  // red drafting stool pedestal: up onto the 2894 seat tile
+      // CEO office armchairs — top row aliases DOWN to the seat row (+48)
+      8827: 48, 8828: 48,   // front armchair top row → seat row 8843/8844
+      8887: 48, 8888: 48,   // left armchair top row  → seat row 8903/8904
+      8825: 48, 8826: 48,   // right armchair top row → seat row 8841/8842
+    };
+    // Bed lie cells (Hospital tileset). Sitting here renders the LYING pose: the
+    // upright front idle frame laid on the pillow row + a floating 💤 — the wire
+    // format still says anim:'sit' so the server/seat-snap path is unchanged.
+    const BED_GIDS = new Set([7032, 7033, 7068, 7069]);
+    // The office chair (2231) rings shared tables on the top, left, right AND
+    // bottom edges, so a single per-GID facing can't be correct. Its facing is
+    // derived PER-TILE at scene create(): face whichever orthogonal neighbour is
+    // a conference-table tile (tables live on the WALL layer in JPO_HQ.tmj), else
+    // pin 'down' when a workstation monitor (Wall 2078) or a checkout register
+    // (Wall 2148 — Market checkout + Library counters) shares the chair cell.
+    const CONF_CHAIR_GIDS = new Set([2231]);
+    const CONF_TABLE_GIDS = new Set([2097, 2098, 2099, 2113, 2114, 2115, 2129, 2130, 2131, 2145, 2146, 2147]);
+    // Wall tiles that mark a chair cell as a computer workstation: 2078 = monitor
+    // (desk-front 2094 below), 2148 = cash register on a counter (counter-front
+    // 2164 below). Same fixed geometry, same stand pose + occluder treatment.
+    const WORKSTATION_WALL_GIDS = new Set([2078, 2148]);
+    // TVStudio front-desk armchair tiles (the 2-wide grey chair behind each white
+    // control desk in the studio). Sitting gets the workstation treatment: the
+    // standing DOWN frame + desk/chair-front occluders (see _makeSeatOccluders
+    // and _deskPoseAt) so the sitter reads as seated behind the desk.
+    const STUDIO_CHAIR_GIDS = new Set([5016, 5017, 5032, 5033]);
+
+    // ── JPO_HQ.tmj tilesets ────────────────────────────────────────────
+    // Three lockstepped views of the SAME 13 embedded tilesets:
+    //  - TILESET_IMAGES:  preload texture key → asset file
+    //  - TILESET_NAMES:   Tiled tileset name  → texture key (create() wiring)
+    //  - TILESET_SHEETS:  firstgid → spritesheet key, DESCENDING, for _gidToSheet
+    // A re-imported map with new/renamed tilesets must update all three.
+    const TILESET_IMAGES = {
+      floors:    'Room_Builder_Floors_16x16.png',
+      walls:     'Room_Builder_3d_walls_16x16.png',
+      interiors: 'Interiors_free_16x16.png',
+      grocery:   'Grocery_16x16.png',
+      icecream:  'Ice_Cream_16x16.png',
+      tvstudio:  'TV_Studio_16x16.png',
+      jail:      'Jail_16x16.png',
+      hospital:  'Hospital_16x16.png',
+      classroom: 'Classroom_16x16.png',
+      ext:       'tilemap_packed.png',
+      basement:  'Basement_16x16.png',
+      gym1:      'Gym_layer_1.png',
+      gym:       'Gym_16x16.png',
+    };
+    const TILESET_NAMES = {
+      'Room builder':         'floors',
+      'Walls':                'walls',
+      'Interiors_free_16x16': 'interiors',
+      'Grocery':              'grocery',
+      'IceCream':             'icecream',
+      'TVStudio':             'tvstudio',
+      'Jail':                 'jail',
+      'Hospital':             'hospital',
+      'Classroom':            'classroom',
+      'Ext':                  'ext',
+      'Basement':             'basement',
+      'Gym_layer_1':          'gym1',
+      'Gym':                  'gym',
+    };
+    const TILESET_SHEETS = [
+      { first: 9378, key: 'gym_ss'       },
+      { first: 9093, key: 'gym1_ss'      },
+      { first: 8293, key: 'basement_ss'  },
+      { first: 8161, key: 'ext_ss'       },
+      { first: 7617, key: 'classroom_ss' },
+      { first: 5905, key: 'hospital_ss'  },
+      { first: 5185, key: 'jail_ss'      },
+      { first: 4961, key: 'tvstudio_ss'  },
+      { first: 4689, key: 'icecream_ss'  },
+      { first: 3441, key: 'grocery_ss'   },
+      { first: 2017, key: 'interiors_ss' },
+      { first: 601,  key: 'walls_ss'     },
+      { first: 1,    key: 'floors_ss'    },
+    ];
+
+    // Manager-desk "baked-in chair" families from the OLD map. On the current
+    // JPO_HQ.tmj there are no baked-in-chair desk sprites (2584/2600/2616 is the
+    // work-pod LEFT chair stack — a real seat, see FURN_SEATS — and the pods'
+    // RIGHT chair is 2628/2644), so the family list is empty. The deskChairAt/
+    // occluder seams stay wired so a future map with baked-in chairs only needs
+    // entries added here.
+    const DESK_FAMILIES = [];
+    // Given the faced furniture GID at tile (c,r), return the seat cell (col,row) of
+    // that desk's baked-in chair plus its facing, or null if it isn't a manager desk.
+    const deskChairAt = (gid, c, r) => {
+      for (const fam of DESK_FAMILIES) {
+        const bp = fam.gids[gid];
+        if (!bp) continue;
+        const oc = c - bp[0], or = r - bp[1];       // block origin (top-left cell)
+        // fam.facing records the chair's TRUE orientation (into the desk: blue->right,
+        // green->left). Sitting is approach-based (the avatar keeps the direction it was
+        // facing when it sat), so this `facing` no longer drives the sprite — it is only a
+        // fallback/record. Manager-desk occluders derive their cells from desk geometry.
+        return { col: oc + fam.chair[0], row: or + fam.chair[1], facing: fam.facing };
+      }
+      return null;
+    };
+
+    const CHAR_FILES  = {
+      adam:   '/assets/Adam_run_16x16.png',
+      alex:   '/assets/Alex_run_16x16.png',
+      amelia: '/assets/Amelia_run_16x16.png',
+      bob:    '/assets/Bob_run_16x16.png',
+    };
+
+    // Hair colors — earthy tones appropriate for hair
+    const HAIR_COLORS = [
+      { label: 'Original',  css: null       },
+      { label: 'Black',     css: '#1c1008'  },
+      { label: 'Dark Brown',css: '#4a2410'  },
+      { label: 'Brown',     css: '#7a4020'  },
+      { label: 'Auburn',    css: '#9c3820'  },
+      { label: 'Ginger',    css: '#c05018'  },
+      { label: 'Blonde',    css: '#c8982c'  },
+      { label: 'Platinum',  css: '#ddd0a0'  },
+      { label: 'White',     css: '#ece8e0'  },
+    ];
+
+    // Skin tones
+    const SKIN_TONES = [
+      { label: 'Original', css: null       },
+      { label: 'Fair',     css: '#fde0c0'  },
+      { label: 'Light',    css: '#f5b87a'  },
+      { label: 'Medium',   css: '#d4895c'  },
+      { label: 'Tan',      css: '#b06438'  },
+      { label: 'Brown',    css: '#7a3c1c'  },
+      { label: 'Dark',     css: '#4a2010'  },
+    ];
+
+    // Clothing colors — shared palette for both shirt and trousers.
+    // NOTE: server.js CLOTH_MAX must equal CLOTH_COLORS.length - 1.
+    const CLOTH_COLORS = [
+      { label: 'Original', css: null       },
+      { label: 'Red',      css: '#e84040'  },
+      { label: 'Crimson',  css: '#c02748'  },
+      { label: 'Orange',   css: '#f08030'  },
+      { label: 'Amber',    css: '#e8a020'  },
+      { label: 'Yellow',   css: '#e8c820'  },
+      { label: 'Lime',     css: '#8fce3a'  },
+      { label: 'Green',    css: '#50bb30'  },
+      { label: 'Emerald',  css: '#1fa96a'  },
+      { label: 'Teal',     css: '#20bba8'  },
+      { label: 'Cyan',     css: '#28c0d8'  },
+      { label: 'Sky',      css: '#4aa6ec'  },
+      { label: 'Blue',     css: '#3880f0'  },
+      { label: 'Indigo',   css: '#5a58d8'  },
+      { label: 'Purple',   css: '#9840f0'  },
+      { label: 'Magenta',  css: '#d63bbe'  },
+      { label: 'Pink',     css: '#e840a0'  },
+      { label: 'Brown',    css: '#8a5a34'  },
+      { label: 'Tan',      css: '#c99a68'  },
+      { label: 'Slate',    css: '#64748b'  },
+      { label: 'Charcoal', css: '#3c424c'  },
+      { label: 'Cream',    css: '#e8dcc0'  },
+      { label: 'White',    css: '#ecebe6'  },
+    ];
+
+    // Player appearance state
+    let _playerName     = '';
+    let _playerEmail    = '';
+    let _playerChar     = 'adam';
+    let _playerHairIdx  = 0;
+    let _playerSkinIdx  = 0;
+    let _playerShirtIdx = 0;
+    let _playerPantsIdx = 0;
+    let _playerCoins    = 0;
+    let _ownedItems     = [];
+    let _equippedCosmetic = '';   // which owned cosmetic is worn ('' = none); server-authoritative
+    let _equippedWings    = '';   // wings are their OWN slot — worn alongside a wearable
+    // Outfit slots (Aug 2026): the boss's rule — head/neck/top/bottom must all
+    // be wearable AT ONCE. Legacy single slot keeps hats/eyewear/extras; NEW
+    // body wearables live here. Keep WEAR_SLOT in lockstep with server.js.
+    let _equippedSlots = { top: '', bottom: '', neckwear: '', held: '', feet: '' };
+    const WEAR_SLOT = { raincoat: 'top', rainboots: 'feet', umbrella: 'held' };
+    const SLOT_KEYS = ['top', 'bottom', 'neckwear', 'held', 'feet'];
+    // Seasonal calendar — mirror of server seasonNow() (server is the real
+    // gate; this only hides off-season shop rows).
+    function seasonNow(d = new Date()) {
+      const m = d.getMonth(), day = d.getDate();
+      if (m === 7 || m === 8 || (m === 9 && day <= 10)) return 'rainy';
+      if ((m === 9 && day >= 11) || (m === 10 && day <= 4)) return 'halloween';
+      if ((m === 10 && day >= 5) || (m === 11 && day <= 26)) return 'christmas';
+      if ((m === 11 && day >= 27) || (m === 0 && day <= 15)) return 'newyears';
+      if ((m === 0 && day >= 16) || (m === 1 && day <= 16)) return 'valentines';
+      return null;
+    }
+    // Owned seasonal gear stays wearable forever — only the BUY rows hide.
+    const _seasonRowOk = (c) => !c.season || c.season === seasonNow() || _ownedItems.includes(c.id);
+
+    // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
+    // SHOP map in server.js — the server rejects unknown ids and enforces the
+    // real price, so drift here only breaks the UI (row that can't be bought
+    // or a wrong price label). The emoji is only the shop-row icon now: every
+    // wearable has a WEARABLE_DEFS entry, so the floating-emoji render path
+    // below is a dormant fallback for unknown/legacy ids.
+    const COSMETICS = [
+      // Aug 2026 shop cleanup: grouped by category (cat drives the section
+      // headers in the Wearables tab) with tiered prices, cheapest first in
+      // each group. Costs are display-only — the server SHOP map is
+      // authoritative and must stay in lockstep.
+      { id: 'beanie',       emoji: '🧶', name: 'Knit Beanie',   cost: 4000, cat: '🎩 Hats', desc: 'cozy knit with a pompom' },
+      { id: 'flatcap',      emoji: '🍀', name: 'Newsboy Cap',   cost: 4500, cat: '🎩 Hats', desc: 'vintage tweed with a lucky sprig' },
+      { id: 'beret',        emoji: '🎨', name: 'Artist Beret',  cost: 5000, cat: '🎩 Hats', desc: 'ooh là là, worn with a slouch' },
+      { id: 'cap',          emoji: '🧢', name: 'Street Cap',    cost: 5500, cat: '🎩 Hats', desc: 'red with a white front panel' },
+      { id: 'chefhat',      emoji: '👨‍🍳', name: 'Chef Hat',      cost: 6000, cat: '🎩 Hats', desc: 'the toque sits tall' },
+      { id: 'rangerhat',    emoji: '🤠', name: 'Ranger Hat',    cost: 6500, cat: '🎩 Hats', desc: 'wide brim, ready for adventure' },
+      { id: 'scifihelmet',  emoji: '🤖', name: 'Sci-Fi Helmet', cost: 10000, cat: '🎩 Hats', desc: 'full-face visor, straight from 3024' },
+      { id: 'crown',        emoji: '👑', name: 'Crown',         cost: 12000, cat: '🎩 Hats', desc: 'polished gold, three jewels' },
+      { id: 'spectacles',   emoji: '👓', name: 'Round Specs',   cost: 2500, cat: '🕶️ Eyewear', desc: 'scholarly round frames' },
+      { id: 'sunglasses',   emoji: '🕶️', name: 'Sunglasses',   cost: 3000, cat: '🕶️ Eyewear', desc: 'gold aviators, on your face' },
+      { id: 'shades',       emoji: '🕶️', name: 'Pixel Shades',  cost: 3500, cat: '🕶️ Eyewear', desc: 'one cool black visor bar' },
+      { id: 'headphones',   emoji: '🎧', name: 'Headphones',    cost: 4500, cat: '🎧 Audio', desc: 'crimson cups, ear to ear' },
+      { id: 'gamerheadset', emoji: '🎮', name: 'Gamer Headset', cost: 5500, cat: '🎧 Audio', desc: 'LED cups, mic on' },
+      { id: 'catears',      emoji: '😺', name: 'Cat-Ear Headset', cost: 6500, cat: '🎧 Audio', desc: 'golden ears, matching cups' },
+      { id: 'book',         emoji: '📖', name: 'Book',          cost: 3000, cat: '💎 Extras', desc: 'read while you walk' },
+      { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 4000, cat: '💎 Extras', desc: 'strapped around your neck' },
+      { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 6000, cat: '💎 Extras', desc: 'bright gold V with a medallion' },
+      { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 7500, cat: '💎 Extras', desc: 'sunburst, slung across your body' },
+      // Rainy-season limited drop (Aug 1 – Oct 10): hidden off-season via
+      // _seasonRowOk; the server buy handlers reject off-season anyway. These
+      // use the NEW outfit slots (WEAR_SLOT) so they stack with a hat + wings.
+      { id: 'rainboots',    emoji: '🥾', name: 'Rain Boots',    cost: 3500, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'yellow wellies, puddle-proof' },
+      { id: 'umbrella',     emoji: '☂️', name: 'Umbrella',      cost: 4000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'stay dry in style' },
+      { id: 'raincoat',     emoji: '🧥', name: 'Raincoat',      cost: 6000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'classic yellow slicker' },
+      // Wings: 8k–30k ladder, cheapest first (fairy tops the list). Costs
+      // display-only — server SHOP is authoritative, keep in lockstep.
+      { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 8000, wings: true, desc: 'shimmering wings on your back' },
+      { id: 'beewings',     emoji: '🐝', name: 'Bee Wings',      cost: 10000,  wings: true, desc: 'tiny buzzy wings, extra fast flap' },
+      { id: 'batwings',     emoji: '🦇', name: 'Bat Wings',      cost: 12000,  wings: true, desc: 'leathery and a little spooky' },
+      { id: 'butterflywings', emoji: '🦋', name: 'Butterfly Wings', cost: 14000, wings: true, desc: 'monarch colors on your back' },
+      { id: 'angelwings',   emoji: '😇', name: 'Angel Wings',    cost: 18000, wings: true, desc: 'soft white feathers, pick a side' },
+      { id: 'devilwings',   emoji: '😈', name: 'Devil Wings',    cost: 18000, wings: true, desc: 'ragged crimson, pick the other side' },
+      { id: 'jetpackwings', emoji: '🤖', name: 'Jetpack Wings',  cost: 24000, wings: true, desc: 'thrusters with a tiny blue flame' },
+      { id: 'goldenwings',  emoji: '✨', name: 'Golden Wings',   cost: 30000, wings: true, desc: 'gilded feathers that catch the light' },
+      { id: 'phoenixwings', emoji: '🔥', name: 'Phoenix Wings',  cost: 0, wings: true, rare: true, desc: 'blazing feathers for the boss\'s chosen' },
+    ];
+    const COSMETIC_EMOJI = Object.fromEntries(COSMETICS.map(c => [c.id, c.emoji]));
+
+    // Sprite wearables: cosmetics drawn ON the body as real pixel art (a
+    // Phaser image pinned to the wearer every frame) instead of a floating
+    // emoji. Ids MUST also exist in the server SHOP map and the COSMETICS
+    // catalog above (the emoji there is only the shop-row icon). tex = image
+    // key preloaded from /assets; dy = vertical offset from the sprite origin
+    // in world px; side = extra x-nudge toward the face when facing
+    // left/right (flipX mirrors the art). Hidden while facing 'up' (back view).
+    // NOTE on dy values: the character art only occupies the LOWER ~17px of
+    // its 16x32 frame (origin 0.5,0.5, feet at +27 world px), so the visible
+    // head top is ≈ y-24, eyes ≈ y-12, chin/neck ≈ y0 — NOT the frame top.
+    const WEARABLE_DEFS = {
+      // ALL dy values are EMPIRICAL (screenshot-swept in headless Chrome):
+      // each wearable's art sits differently inside its texture frame, so the
+      // head-geometry note above is only a starting point — never trust it
+      // without an in-game screenshot. Textures are 2-frame sheets (frame 0 =
+      // front, frame 1 = side profile facing right); optional sideDy overrides
+      // dy for the side frame.
+      // fairywings: worn on the BACK — drawn BEHIND the body (behind: true →
+      // _makeCosmetic slots it just under the wearer in the display list) and
+      // visible in every facing incl. 'up' (showUp; frame 0 = spread pair,
+      // frame 1 = folded side profile). side is NEGATIVE: sideways the wings
+      // trail the back, away from the face. A slow scaleX flap tween lives on
+      // the image itself.
+      fairywings: { tex: 'wear_fairywings', dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      // Wings collection: same geometry as fairywings (all sheets are drawn
+      // to the identical 32x20 two-frame layout).
+      beewings:       { tex: 'wear_beewings',       dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      batwings:       { tex: 'wear_batwings',       dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      butterflywings: { tex: 'wear_butterflywings', dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      angelwings:     { tex: 'wear_angelwings',     dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      devilwings:     { tex: 'wear_devilwings',     dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      jetpackwings:   { tex: 'wear_jetpackwings',   dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      goldenwings:    { tex: 'wear_goldenwings',    dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      phoenixwings:   { tex: 'wear_phoenixwings',   dy: 16, side: -18, sideDy: 12, behind: true, showUp: true },
+      shades: { tex: 'wear_shades', dy: 8,   side: 6 },
+      cap:    { tex: 'wear_cap',    dy: -22, side: 3, sideDy: -18 },
+      chain:  { tex: 'wear_chain',  dy: 22,  side: 3 },
+      // July 2026: the nine former emoji wearables became sprite wearables
+      // too (the emoji path below is now only a fallback for unknown ids).
+      sunglasses:   { tex: 'wear_sunglasses',   dy: 8,   side: 6 },
+      crown:        { tex: 'wear_crown',        dy: -24, side: 3, sideDy: -20 },
+      headphones:   { tex: 'wear_headphones',   dy: -6,  side: 0, sideDy: -6 },   // band over hair, cups ear-to-ear
+      beret:        { tex: 'wear_beret',        dy: -20, side: 3, sideDy: -17 },
+      chefhat:      { tex: 'wear_chefhat',      dy: -25, side: 3, sideDy: -21 },
+      camera:       { tex: 'wear_camera',       dy: 24,  side: 4 },
+      gamerheadset: { tex: 'wear_gamerheadset', dy: -6,  side: 0 },
+      book:         { tex: 'wear_book',         dy: 26,  side: 6, sideDy: 30 },
+      guitar:       { tex: 'wear_guitar',       dy: 22,  side: 2 },
+      // July 2026: six wearables adapted from the MV_Accessories pack
+      // (redrawn to game texel density in tools/wearable-gen.cjs).
+      spectacles:   { tex: 'wear_spectacles',   dy: 8,   side: 6 },
+      beanie:       { tex: 'wear_beanie',       dy: -22, side: 3, sideDy: -18 },
+      flatcap:      { tex: 'wear_flatcap',      dy: -21, side: 3, sideDy: -17 },
+      rangerhat:    { tex: 'wear_rangerhat',    dy: -22, side: 3, sideDy: -18 },
+      catears:      { tex: 'wear_catears',      dy: -9,  side: 0 },
+      scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
+      // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
+      // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
+      raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2, frames: 3, backFrame: 2, showUp: true },
+      // dy 45 (not 25): baked frames put the boot art's centre at texel 16+dy/3,
+      // and the feet+shoe rows sit at 28-31 — 25 left the boots floating at the
+      // shins, and 42 left the shoe row peeking out under the boot soles.
+      rainboots: { tex: 'wear_rainboots', dy: 45,  side: 2, frames: 3, backFrame: 2, showUp: true },
+      // Umbrella: Doraemon-style CAP — canopy-only art (14x9) perched right on
+      // top of the head like a hat. dy -36 puts its centre at texel row 4 so it
+      // caps the hair with no shaft/hand art at all (owner's request).
+      umbrella:  { tex: 'wear_umbrella',  dy: -36, side: 0, frames: 3, backFrame: 2, showUp: true },
+    };
+    // Phase-3 baked wearables: items flagged here are BAKED into the player
+    // texture per frame (anchor-tracked via assets/layers/anchors.json) instead
+    // of floating as an overlay sprite — perfect alignment in every pose,
+    // including seated. 'head' anchors follow the head-top, 'feet' the ground.
+    // NOT baked: wings (they keep their live flap tween + behind-body
+    // ordering) and scifihelmet (non-integer 4.4 scale can't map to texels).
+    const _WEAR_BAKE_ANCHOR = {
+      shades:'head', cap:'head', chain:'head', sunglasses:'head', crown:'head',
+      headphones:'head', beret:'head', chefhat:'head', camera:'head',
+      gamerheadset:'head', book:'head', guitar:'head', spectacles:'head',
+      beanie:'head', flatcap:'head', rangerhat:'head', catears:'head',
+      umbrella:'head',
+    };
+    for (const [wid, anc] of Object.entries(_WEAR_BAKE_ANCHOR)) WEARABLE_DEFS[wid].bake = anc;
+    // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
+    // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
+    WEARABLE_DEFS.raincoat.bakeLayer = true;
+    // Rainboots: also a LAYER sheet (painted onto each frame's own foot pixels
+    // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
+    // the sprite the way anchored overlay stickers can.
+    WEARABLE_DEFS.rainboots.bakeLayer = true;
+
+    // Usable-items catalog: ids MUST stay in lockstep with the server
+    // USABLE_ITEMS map in server.js (the server is authoritative on price and
+    // pack size — these labels are display-only). Rows render in the shop's
+    // Items tab; owned counts show in the bottom-left item bar.
+    const USABLES = [
+      { id: 'cigarette',    emoji: '🚬', name: 'Cigarette pack', pack: '×5', cost: 20,  verb: 'Smoke',  desc: 'smoke break, outside on the grass only' },
+      { id: 'coffee',       emoji: '☕', name: 'Coffee',                     cost: 10,  verb: 'Drink',  desc: '+40% walk speed for 45s, single cup' },
+      { id: 'coffee_round', emoji: '☕☕', name: 'Coffee round',              cost: 40,  verb: 'Share',  desc: 'coffee boost for everyone near you' },
+      { id: 'confetti',     emoji: '🎉', name: 'Confetti popper',            cost: 30,  verb: 'Pop',    desc: 'a party burst everyone can see' },
+      { id: 'fireworks',    emoji: '🎆', name: 'Fireworks',                  cost: 75,  verb: 'Launch', desc: 'a proper sky show over the office' },
+      { id: 'pizza_party',  emoji: '🍕', name: 'Pizza party',                cost: 150, verb: 'Party',  desc: '90s speed boost for everyone near you' },
+    ];
+
+    // Pets catalog: buy-once companions that follow their owner around the
+    // office. Ids MUST stay in lockstep with the server PETS map in server.js
+    // (the server is authoritative on price — these labels are display-only).
+    // Ownership shares _ownedItems (the cosmetics array — 'pet_' ids never
+    // collide with wearable ids); the active pet is _equippedPet ('' = none),
+    // a separate slot from the worn cosmetic.
+    // Breed/color variants (July 2026): each look is its OWN pet id
+    // (pet_<species>_<variant>) so the entire adopt/bring/persist/broadcast
+    // pipeline is reused untouched, and existing ids ARE the classic looks
+    // (no migration). Grouped by species (the `species` label drives the
+    // shop's group headers); classic price unchanged, fancy looks tiered up.
+    // Ids MUST stay in lockstep with the server PETS map (authoritative
+    // prices). Variant PNGs are recolors from tools/pet-variant-gen.cjs.
+    const PETS = [
+      { id: 'pet_duck',            species: 'Duck',        emoji: '🦆', name: 'Duck',           cost: 10000, desc: 'waddles along behind you' },
+      { id: 'pet_duck_snow',       species: 'Duck',        emoji: '🦢', name: 'Snow Duck',      cost: 14000, desc: 'fresh out of a winter pond' },
+      { id: 'pet_cat',             species: 'Office Cat',  emoji: '🐱', name: 'Tabby',          cost: 12500, desc: 'follows you, when it feels like it' },
+      { id: 'pet_cat_black',       species: 'Office Cat',  emoji: '🐈‍⬛', name: 'Black Cat',      cost: 16000, desc: 'crosses your path on purpose' },
+      { id: 'pet_cat_snow',        species: 'Office Cat',  emoji: '🤍', name: 'Snow Cat',       cost: 18000, desc: 'sheds on every dark outfit' },
+      { id: 'pet_dog',             species: 'Office Dog',  emoji: '🐶', name: 'Golden',         cost: 12500, desc: 'a very good boy' },
+      { id: 'pet_dog_choco',       species: 'Office Dog',  emoji: '🐕', name: 'Chocolate',      cost: 16000, desc: 'a very good boy, in dark mode' },
+      { id: 'pet_dog_husky',       species: 'Office Dog',  emoji: '🐺', name: 'Husky',          cost: 18000, desc: 'howls at stand-up' },
+      { id: 'pet_bunny',           species: 'Bunny',       emoji: '🐰', name: 'Snowball',       cost: 15000, desc: 'hops after you everywhere' },
+      { id: 'pet_bunny_cocoa',     species: 'Bunny',       emoji: '🐇', name: 'Cocoa Bunny',    cost: 19000, desc: 'espresso-brown and twice as fast' },
+      { id: 'pet_turtle',          species: 'Turtle',      emoji: '🐢', name: 'Turtle',         cost: 20000, desc: 'takes his sweet time' },
+      { id: 'pet_turtle_sapphire', species: 'Turtle',      emoji: '🌀', name: 'Sapphire Turtle', cost: 26000, desc: 'rare deep-sea colorway' },
+      { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
+      { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
+      { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
+      // Rainy-season limited pet (Aug 1 – Oct 10): Tadpole → Frog → King Frog.
+      { id: 'pet_frog',            species: 'Frog',        emoji: '🐸', name: 'Tadpole',        cost: 12000, season: 'rainy', desc: 'rainy-season only — grows into a king' },
+      // Rare tier: shop-visible so everyone can drool, but NOT buyable at any
+      // price — the only way in is a personal gift from the boss. (cost 0 is
+      // display-only anyway; the server hard-blocks buyPet on rare ids.)
+      { id: 'pet_unicorn',         species: 'Rare — gift only', emoji: '🦄', name: 'Unicorn',   cost: 0, rare: true, desc: 'sparkles when you least expect it' },
+      { id: 'pet_phoenix',         species: 'Rare — gift only', emoji: '🐦‍🔥', name: 'Phoenix', cost: 0, rare: true, desc: 'reborn from the Monday ashes' },
+    ];
+    const PET_EMOJI = Object.fromEntries(PETS.map(p => [p.id, p.emoji]));
+    // Species base id for any pet id: 'pet_dragon_crimson' → 'pet_dragon'.
+    // Accessory anchors key by species, so variants inherit placement free.
+    const petSpeciesId = (id) => (id || '').split('_').slice(0, 2).join('_');
+    const PET_GAP     = 68; // px the pet trails behind its owner (follow-at-distance)
+    const PET_PX      = 42; // longest-side px of a pet sprite in the world (~half a player)
+    const PET_SIT_GAP = 58; // wider ring while the owner is seated — parks the pet beside the chair, not on the body
+    let _equippedPet = '';  // active pet ('' = none); server-authoritative
+    // Pet evolution: per-pet treat XP for MY pets (server-authoritative via
+    // petFed / join payload). Thresholds MUST mirror PET_EVOLVE_XP in server.js.
+    let _myPetXp = {};
+    let _myPetNames = {};   // per-pet custom names ("pet_dog" → "Brownie")
+    const PET_EVOLVE_XP = [30, 70];
+    function _petStageOfXp(xp) { return xp >= PET_EVOLVE_XP[1] ? 3 : xp >= PET_EVOLVE_XP[0] ? 2 : 1; }
+    // Mythical gift pets (boss rule): TWO forms only — baby, then straight to
+    // FINAL FORM at the first treat threshold. No middle stage. MUST mirror server.js.
+    const PET_MYTHIC = new Set(['pet_unicorn', 'pet_phoenix']);
+    function _petStageFor(pet, xp) {
+      return PET_MYTHIC.has(pet) ? (xp >= PET_EVOLVE_XP[0] ? 3 : 1) : _petStageOfXp(xp);
+    }
+    function _myPetStage(pet) { return _petStageFor(pet, (_myPetXp || {})[pet] || 0); }
+    let _evoPreview = 0;   // owner-only stage override (0 = off): 🧬 test button
+
+    // Pet accessories: cosmetic add-ons drawn ON the active pet (one slot,
+    // '' = bare pet). Ids MUST stay in lockstep with the server
+    // PET_ACCESSORIES map in server.js (the server is authoritative on price
+    // — these labels are display-only). Ownership shares _ownedItems (the
+    // 'petacc_' prefix never collides with wearable or pet ids); the worn
+    // slot is _equippedPetAcc — it applies to whichever pet is out, and waits
+    // invisibly when no pet is out.
+    const PET_ACCESSORIES = [
+      { id: 'petacc_bow',    emoji: '🎀', name: 'Bow',         cost: 2000, desc: 'a dainty bow for a dapper pet' },
+      { id: 'petacc_bell',   emoji: '🔔', name: 'Bell Collar', cost: 2500, desc: 'hear them coming' },
+      { id: 'petacc_tophat', emoji: '🎩', name: 'Top Hat',     cost: 6000, desc: 'a most distinguished companion' },
+      { id: 'petacc_crown',  emoji: '👑', name: 'Tiny Crown',  cost: 8000, desc: 'royalty on four legs' },
+    ];
+    const PET_ACC_EMOJI = Object.fromEntries(PET_ACCESSORIES.map(a => [a.id, a.emoji]));
+    // Where an accessory sits on each species, relative to the pet object's
+    // origin (0.5, 1 — bottom-center): dy up from the feet to the head line,
+    // dx toward the FACING side (pets are drawn facing right; the offset
+    // mirrors when the pet flips). A duck's head is not a dragon's head.
+    const PET_ACC_ANCHOR = {
+      pet_duck:   { dx: 9,  dy: -30 },
+      pet_cat:    { dx: 10, dy: -30 },
+      pet_dog:    { dx: 10, dy: -32 },
+      pet_bunny:  { dx: 3,  dy: -36 },
+      pet_turtle: { dx: 11, dy: -22 },
+      pet_dragon: { dx: 6,  dy: -30 },
+      pet_unicorn:{ dx: 8,  dy: -34 },
+      pet_phoenix:{ dx: 7,  dy: -32 },
+    };
+    // Lively pets pilot (Aug 2026): species with procedural animation — a
+    // walk waddle/trot bounce, idle breathing, and a random idle "trick"
+    // (see _stepPet/_petTrick). Everything is derived client-side from the
+    // pet object each frame, zero network traffic, so mirroring a species
+    // later is just adding it to this set (+ a trick case if it gets one).
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix', 'pet_frog']);
+    // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
+    // and hovers on the head — one fit for all, off the species head anchor.
+    // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
+    // internal padding. Scarf/shades were retired (server refunds owners).
+    const PET_ACC_FIT_ALL = { mx: 0.8, my: 1.0, dy: -12 };   // hover clearly ABOVE the head, not on it
+    let _equippedPetAcc = '';  // worn pet accessory ('' = none); server-authoritative
+
+    // Department allowlist — MUST stay identical (same values, same order) to
+    // the server's DEPARTMENTS in server.js. Feeds BOTH the registration
+    // dropdown and the profile card's one-time legacy picker.
+    const DEPARTMENTS = ['HR', 'IT', 'Operations', 'Front Desk', 'CMA', 'QA', 'L&D', 'Claims', 'Accounting', 'Developer'];
+    let _playerItems    = {};   // usable items: itemId → remaining uses (server-authoritative)
+    let _boostUntil     = 0;    // coffee boost end (client mirror; the server enforces its own copy)
+
+    let _builderStep   = 0;
+    let _phaserKbd     = null;
+    let _approvedQueue = null;
+
+    // Per-character loaded images + detected zone colors
+    const _charImages     = {};
+    const _charZoneColors = {};   // { hair, skin, shirt, pants } each {r,g,b} or null
+
+    // ────────────────────────────────────────────────────────────────────
+    // Palette-swap helpers
+    // ────────────────────────────────────────────────────────────────────
+
+    function _hexCssToRGB(css) {
+      const n = parseInt(css.slice(1), 16);
+      return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    }
+
+    // Source colors per character — derived from frame-0 pixel analysis of each run spritesheet.
+    // Each zone has r/g/b (centroid of representative pixels) and t (swap threshold radius).
+    // yMin/yMax bound each swap to a row range within the 16×32 frame (0-based, exclusive yMax).
+    //
+    // Hair source selection rationale:
+    //   Adam:   source=(149,157,88) — bright olive; yMax=16 (was 17) to exclude the one
+    //           skin pixel (187,163,134) at y=16 that falls within t=80.
+    //   Alex/Amelia: source=(186,141,94) — bright highlight instead of (138,101,82).
+    //           Outlines (86,89,114) are 114 units away → never caught.
+    //           All hair shades (186→149→141→138) fall within t=65.
+    //   Bob:    t=35 (was 25) to also catch shirt-gray (93,88,95) that appears in the
+    //           hair zone (y<17); Y-masking keeps it separate from the shirt zone (y≥17).
+    const CHAR_ZONE_COLORS = {
+      adam:   {
+        // Frame-0 pixel dump anatomy: hair+fringe OLIVE (110,118,78 family incl. 93,96,67) y9-21;
+        // face y17-22; collar y23; shirt/torso PURPLE (159,116,168 / 128,94,142) y24-27;
+        // legs/pants OLIVE (93,96,67 / 104,114,83) y28-31. Hair and legs share the olive family,
+        // so hair is Y-capped at 23 to stay off the legs. Shirt (purple) and pants (olive) are
+        // separated by SOURCE COLOUR, so both can span the whole lower body (y>=23) without
+        // touching each other or the hair fringe.
+        hair:  {r:110,g:118,b:78, t:80, yMax:23},
+        skin:  {r:255,g:203,b:176,t:50},
+        shirt: {r:159,g:116,b:168,t:50, yMin:23},  // purple torso — matches only purple, never the olive hair-fringe/legs
+        pants: {r:93, g:96, b:67,  t:40, yMin:23},  // olive legs — matches only olive, never the purple torso
+      },
+      alex:   {
+        // Hair is a bob that hangs down the sides of the face (fringe) to y≈22, and the fringe
+        // shares colour (138,101,82) with the torso. Hair MUST claim y=10..22 before the shirt
+        // swap runs, or picking clothes repaints the fringe. Face pixels are far from the hair
+        // source (d>65) so they survive for the skin swap.
+        hair:        {r:186,g:141,b:94, t:65, yMin:10, yMax:23},
+        // Dark outline pixels (70,70,94)/(58,58,80)/(86,89,114) frame the hair. t:35 catches all
+        // three; mapped to a darkened version of the hair colour (ratio ≈ 0.49).
+        hairOutline: {r:70, g:70, b:94, t:35, yMin:10, yMax:23, darkRatio:0.49},
+        skin:  {r:255,g:203,b:176,t:50},
+        // Torso = reddish (162,57,75), legs = blue-grey (120,125,147). During the walk cycle the
+        // legs ride UP to y=23 and the torso drops to y=30, so both zones must span the WHOLE
+        // lower body (y>=23), not fixed torso/leg bands, or leg pixels flash their original
+        // colour mid-stride. shirt & pants share one clothes colour, so overlapping is harmless.
+        shirt: {r:162,g:57, b:75,  t:73, yMin:23},
+        pants: {r:120,g:125,b:147, t:40, yMin:23},
+      },
+      amelia: {
+        hair:        {r:138,g:101,b:82, t:65, yMin:11, yMax:24, shirtYMax:20, flowXMax:8},
+        hairOutline: {r:70, g:70, b:94, t:22, yMin:11, yMax:24, darkRatio:0.66},
+        skin:  {r:191,g:139,b:120,t:50},
+        shirt: {r:185,g:93, b:114, t:40, yMin:20, yMax:24, xMin:8},
+        pants: {r:185,g:93, b:114, t:50, yMin:24},
+      },
+      bob:    {
+        // Hair bob hangs to y≈22 (fringe colour 85,81,87). Extend hair to y=0..22 so the fringe
+        // is claimed by hair, not by the clothes swaps. Main swap (t=60) catches (70,70,94) at
+        // dist=58.9; hairOutline catches the darker outer outline (58,58,80) at dist=79.5.
+        hair:        {r:113,g:107,b:110,t:60, yMax:23},
+        hairOutline: {r:58, g:58, b:80, t:18, yMax:23, darkRatio:0.55},
+        skin:  {r:255,g:203,b:176,t:50},
+        // Bob's whole outfit is near-black navy — the SAME colour as every sprite outline — so it
+        // can only be recoloured by REGION (y-position), not by a unique source colour. shirt
+        // covers the torso y=23..27, pants the legs y=28+; both target the dark navy body pixels.
+        shirt: {r:70, g:70, b:94,  t:70, yMin:23, yMax:28},
+        pants: {r:70, g:70, b:94,  t:70, yMin:28},
+      },
+    };
+
+    // Seated anatomy differs from standing: the folded body packs hair/torso/legs into different
+    // rows, so the standing zones' Y-gates (tuned for a standing figure) would miss or mis-assign
+    // seated pixels during customization. These per-direction overrides retune ONLY the Y-bounds
+    // for the seated sheets. Geometry is shared across characters (every seated sheet is recoloured
+    // from Adam's), so one table serves everyone; the per-character SOURCE colours still come from
+    // the base zones. The values come straight from the generator's HAIRMAX (the row that splits
+    // olive-hair above from olive-legs below in Adam's source sheets, inherited by every recoloured
+    // sheet): right/down hair ends at y22, up (back of head, no fringe) at y17. `split` is the
+    // shirt/pants boundary used only when a character's shirt & pants share one source colour.
+    const SIT_ANATOMY = {
+      down:  { hairYMax:22, split:28 },
+      right: { hairYMax:22, split:29 },
+      up:    { hairYMax:17, split:24 },
+    };
+
+    // Merge a character's base zones with seated Y-overrides for one direction. Hair keeps NO yMin so
+    // the top/back of the head is always recoloured (the standing yMin cut it off), and its yMax is
+    // clamped to hairYMax so it stops at the torso — load-bearing for Amelia (brown hair within
+    // threshold of her pink body) and Bob (grey hair within threshold of his navy body), where the
+    // Y band is the only thing separating hair from the body. The flowing-hair 2nd pass and Amelia's
+    // xMin gate are dropped (no flowing hair / X-masking when seated).
+    //
+    // The shirt/pants zones ALWAYS start at hairYMax (pants uses `split` instead when it shares a
+    // source colour with the shirt). This is deliberately unconditional — NOT gated on a nominal
+    // shirt-vs-hair colour distance — because each sprite zone is a multi-shade family (see the shade
+    // lists in CHAR_ZONE_COLORS) and a character's darker hair shades can fall inside the shirt/pants
+    // threshold even when the nominal colours look far apart (e.g. Alex). If a body zone had no yMin,
+    // customizing the shirt while leaving hair at default (which SKIPS the hair pass, so hair pixels
+    // stay their original colour in the swap snapshot) would repaint the hair mass in the shirt colour.
+    // Clamping to hairYMax costs only the ~2px of true shirt that sits above HAIRMAX in Adam's source
+    // (the same accepted shoulder-seam residual for every seated character); protecting the hair is
+    // worth that. Adam is never passed here.
+    function _sitZones(char, dir) {
+      const base = CHAR_ZONE_COLORS[char]; if (!base) return base;
+      const a = SIT_ANATOMY[dir] || SIT_ANATOMY.down;
+      const sharedSrc = base.shirt && base.pants &&
+        base.shirt.r === base.pants.r && base.shirt.g === base.pants.g && base.shirt.b === base.pants.b;
+      const z = { ...base };
+      if (base.hair)        z.hair        = { ...base.hair, yMin:undefined, yMax:a.hairYMax, shirtYMax:undefined, flowXMax:undefined };
+      if (base.hairOutline) z.hairOutline = { ...base.hairOutline, yMin:undefined, yMax:a.hairYMax };
+      // skin stays colour-only (no Y gate) so it works at any seated row.
+      if (base.shirt) z.shirt = { ...base.shirt, yMin:a.hairYMax, yMax:sharedSrc?a.split:undefined, xMin:undefined };
+      if (base.pants) z.pants = { ...base.pants, yMin:sharedSrc?a.split:a.hairYMax, yMax:undefined, xMin:undefined };
+      return z;
+    }
+
+    function _detectZoneColors(char) {
+      return CHAR_ZONE_COLORS[char] || null;
+    }
+
+    // Swap pixels within threshold Euclidean distance of source → target, preserving luminance.
+    // fw     = image width in pixels (sheet width; used to compute row index for Y-range clamping).
+    // frameW = per-frame width for X-range clamping (defaults to fw). Pass 16 when fw is a
+    //          multi-frame sheet so xMin/xMax are applied per-frame, not per-sheet.
+    // yMin/yMax are row indices within the frame (0-based, yMax exclusive); omit to swap all rows.
+    // xMin/xMax are frame-local column indices (0-based, xMax exclusive); omit to swap all columns.
+    function _swapColorsData(pixels, sr, sg, sb, tr, tg, tb, threshold, fw, yMin, yMax, xMin, xMax, frameW, srcPixels) {
+      // Match colours against `src` (an optional pre-swap snapshot) but WRITE to `pixels`. When
+      // srcPixels is omitted, src === pixels (in-place) — the hair→skin passes rely on that
+      // cascade for priority. The shirt/pants passes pass a snapshot so they match the original
+      // body pixels and never re-match each other's output (needed where the two zones overlap).
+      const src = srcPixels || pixels;
+      const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
+      const t2 = threshold * threshold;
+      const rowBytes = (fw || 0) * 4;
+      const useY = rowBytes > 0 && (yMin !== undefined || yMax !== undefined);
+      const useX = rowBytes > 0 && (xMin !== undefined || xMax !== undefined);
+      const fwX  = frameW || fw;   // frame width for x-masking
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (src[i+3] < 128) continue;
+        if (useY || useX) {
+          const y = Math.floor(i / rowBytes);
+          if (useY) {
+            if (yMin !== undefined && y < yMin) continue;
+            if (yMax !== undefined && y >= yMax) continue;
+          }
+          if (useX) {
+            const x = ((i >> 2) % fw) % fwX;   // frame-local x
+            if (xMin !== undefined && x < xMin) continue;
+            if (xMax !== undefined && x >= xMax) continue;
+          }
+        }
+        const dr = src[i]-sr, dg = src[i+1]-sg, db = src[i+2]-sb;
+        if (dr*dr + dg*dg + db*db > t2) continue;
+        const lum = (0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2]) / srcLum;
+        pixels[i]   = Math.min(255, Math.round(tr * lum));
+        pixels[i+1] = Math.min(255, Math.round(tg * lum));
+        pixels[i+2] = Math.min(255, Math.round(tb * lum));
+      }
+    }
+
+    // Apply all four zone swaps to an ImageData in-place. Order: hair → skin → shirt → pants.
+    // Hair must run first on original pixels so that: (a) hair claims its zone before skin can
+    // pre-color face pixels to a brownish tone that would fall inside the hair threshold, and
+    // (b) skin then runs on already-hair-colored pixels which are far from the skin source,
+    // preventing skin from bleeding back into the hair zone.
+    // fw     = sheet width in pixels (forwarded to _swapColorsData for Y-range masking).
+    // frameW = per-frame width for X-range masking (pass 16 when fw is a multi-frame sheet).
+    function _applySwaps(pixels, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
+      if (hairIdx && zones?.hair && HAIR_COLORS[hairIdx]?.css) {
+        const [r,g,b] = _hexCssToRGB(HAIR_COLORS[hairIdx].css);
+        const hairYMax = (shirtIdx && zones.hair.shirtYMax != null) ? zones.hair.shirtYMax : zones.hair.yMax;
+        // Main fill swap
+        _swapColorsData(pixels, zones.hair.r, zones.hair.g, zones.hair.b, r,g,b, zones.hair.t??44, fw, zones.hair.yMin, hairYMax, zones.hair.xMin, zones.hair.xMax, frameW);
+        // Flowing-hair second pass (Amelia only)
+        if (shirtIdx && zones.hair.flowXMax != null && hairYMax < zones.hair.yMax) {
+          _swapColorsData(pixels, zones.hair.r, zones.hair.g, zones.hair.b, r,g,b, zones.hair.t??44, fw, hairYMax, zones.hair.yMax, zones.hair.xMin, zones.hair.flowXMax, frameW);
+        }
+        // Outline pass: dark border pixels that are too far from the fill source to be caught above.
+        // Target is a proportionally-darkened version of the selected hair colour so the outline
+        // stays visually darker than the fill, matching the original sprite's contrast ratio.
+        if (zones.hairOutline) {
+          const oz = zones.hairOutline;
+          const ratio = oz.darkRatio ?? 0.5;
+          const or = Math.round(r*ratio), og = Math.round(g*ratio), ob = Math.round(b*ratio);
+          _swapColorsData(pixels, oz.r, oz.g, oz.b, or,og,ob, oz.t??22, fw, oz.yMin, oz.yMax, oz.xMin, oz.xMax, frameW);
+        }
+      }
+      if (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    { const [r,g,b]=_hexCssToRGB(SKIN_TONES[skinIdx].css);   _swapColorsData(pixels,zones.skin.r, zones.skin.g, zones.skin.b, r,g,b,zones.skin.t ??50,fw,zones.skin.yMin, zones.skin.yMax, zones.skin.xMin, zones.skin.xMax,frameW); }
+      // Snapshot the pixels AFTER hair+skin but BEFORE the clothes passes, so shirt and pants each
+      // match the pre-clothes body rather than each other's output. This is what lets shirt & pants
+      // hold independent colours even where their zones overlap (Alex spans the whole lower body
+      // y>=23): an in-place pants pass could otherwise re-match pixels the shirt pass just recoloured.
+      const clothesSrc = (shirtIdx || pantsIdx) ? new Uint8ClampedArray(pixels) : null;
+      if (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) { const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[shirtIdx].css);_swapColorsData(pixels,zones.shirt.r,zones.shirt.g,zones.shirt.b,r,g,b,zones.shirt.t??40,fw,zones.shirt.yMin,zones.shirt.yMax,zones.shirt.xMin,zones.shirt.xMax,frameW,clothesSrc); }
+      if (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) {
+        const [r,g,b]=_hexCssToRGB(CLOTH_COLORS[pantsIdx].css);
+        _swapColorsData(pixels,zones.pants.r,zones.pants.g,zones.pants.b,r,g,b,zones.pants.t??50,fw,zones.pants.yMin,zones.pants.yMax,zones.pants.xMin,zones.pants.xMax,frameW,clothesSrc);
+        if (zones.shoe) _swapColorsData(pixels,zones.shoe.r,zones.shoe.g,zones.shoe.b,r,g,b,zones.shoe.t??40,fw,zones.shoe.yMin,zones.shoe.yMax,zones.shoe.xMin,zones.shoe.xMax,frameW,clothesSrc);
+      }
+    }
+
+    // ── Layered-character renderer ─────────────────────────────────────
+    // Every character sheet has been split offline (tools/char-layer-split.cjs)
+    // into per-part layer PNGs (skin/hair/shirt/pants; anything in none of them
+    // is un-recolorable body/outline). Recoloring tints ONLY the owning layer's
+    // pixels, which kills the legacy cross-zone bleed (clothes passes repainting
+    // hands, skin pass tinting Amelia's hair highlights) by construction.
+    // _applySwaps above is kept verbatim as the fallback while layers stream in.
+    const LAYER_NAMES = ['skin', 'hair', 'shirt', 'pants'];
+    const LAYER_SUFFIXES = ['run', 'sit', 'sit2', 'sit3'];
+    const _layerImages = {};   // `${char}_${suffix}` → {skin:Image,...}
+    const _layerData   = {};   // `${char}_${suffix}` → {w,h,skin:Uint8ClampedArray,...}
+
+    // Full-sheet layer alpha data, built lazily from the loaded images and
+    // cached. Returns null until ALL four layer images for the sheet are ready
+    // (callers then fall back to _applySwaps for that draw).
+    function _getLayerData(char, suffix) {
+      const key = `${char}_${suffix}`;
+      if (_layerData[key]) return _layerData[key];
+      const imgs = _layerImages[key];
+      if (!imgs) return null;
+      for (const l of LAYER_NAMES) {
+        const im = imgs[l];
+        if (!im || !im.complete || !im.naturalWidth) return null;
+      }
+      const w = imgs.skin.naturalWidth, h = imgs.skin.naturalHeight;
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      const out = { w, h };
+      for (const l of LAYER_NAMES) {
+        cx.clearRect(0, 0, w, h);
+        cx.drawImage(imgs[l], 0, 0);
+        out[l] = cx.getImageData(0, 0, w, h).data;
+      }
+      _layerData[key] = out;
+      return out;
+    }
+
+    // Slice a rect out of the full-sheet layer data so previews (which crop one
+    // frame from the sheet) get layer arrays aligned with their cropped pixels.
+    function _cropLayerData(char, suffix, sx, sy, w, h) {
+      const full = _getLayerData(char, suffix);
+      if (!full) return null;
+      if (sx === 0 && sy === 0 && w === full.w && h === full.h) return full;
+      const out = { w, h };
+      for (const l of LAYER_NAMES) {
+        const dst = new Uint8ClampedArray(w * h * 4);
+        for (let y = 0; y < h; y++) {
+          const srcOff = ((sy + y) * full.w + sx) * 4;
+          dst.set(full[l].subarray(srcOff, srcOff + w * 4), y * w * 4);
+        }
+        out[l] = dst;
+      }
+      return out;
+    }
+
+    // Zone membership test — same geometry/threshold rules as _swapColorsData.
+    function _zoneMatchPx(z, r, g, b, x, y) {
+      if (!z) return false;
+      if (z.yMin !== undefined && y < z.yMin) return false;
+      if (z.yMax !== undefined && y >= z.yMax) return false;
+      if (z.xMin !== undefined && x < z.xMin) return false;
+      if (z.xMax !== undefined && x >= z.xMax) return false;
+      const dr = r - z.r, dg = g - z.g, db = b - z.b;
+      return dr*dr + dg*dg + db*db <= z.t * z.t;
+    }
+
+    // Is a hair-layer pixel outline (gets the darkened tint) or fill? Mirrors
+    // the splitter's classify() hair rules, so the split and the tint agree.
+    function _hairIsOutline(zones, r, g, b, x, y) {
+      const hz = zones.hair;
+      if (!zones.hairOutline || !hz) return false;
+      const capped = hz.shirtYMax != null ? { ...hz, yMax: hz.shirtYMax } : hz;
+      if (_zoneMatchPx(capped, r, g, b, x, y)) return false;
+      if (hz.shirtYMax != null && hz.flowXMax != null &&
+          _zoneMatchPx({ ...hz, yMin: hz.shirtYMax, xMax: hz.flowXMax }, r, g, b, x, y)) return false;
+      if (hz.shirtYMax != null &&
+          _zoneMatchPx({ ...hz, yMin: hz.shirtYMax }, r, g, b, x, y) &&
+          !_zoneMatchPx(zones.shirt, r, g, b, x, y)) return false;
+      return _zoneMatchPx(zones.hairOutline, r, g, b, x, y);
+    }
+
+    // Luminance-preserving tint of one pixel (same math as _swapColorsData).
+    function _tintPx(data, i, sr, sg, sb, tr, tg, tb) {
+      const srcLum = (0.299*sr + 0.587*sg + 0.114*sb) || 1;
+      const lum = (0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2]) / srcLum;
+      data[i]   = Math.min(255, Math.round(tr * lum));
+      data[i+1] = Math.min(255, Math.round(tg * lum));
+      data[i+2] = Math.min(255, Math.round(tb * lum));
+    }
+
+    // Layer-driven replacement for _applySwaps: tint each selected zone's
+    // pixels using the layer masks as ground truth. `layers` dims must match
+    // `pixels` (use _cropLayerData). zones still supplies the tint SOURCE
+    // colours (for luminance ratios) and the hair outline darkRatio.
+    function _layeredSwaps(pixels, layers, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, fw, frameW) {
+      const hairT  = (hairIdx  && zones?.hair  && HAIR_COLORS[hairIdx]?.css)   ? _hexCssToRGB(HAIR_COLORS[hairIdx].css)   : null;
+      const skinT  = (skinIdx  && zones?.skin  && SKIN_TONES[skinIdx]?.css)    ? _hexCssToRGB(SKIN_TONES[skinIdx].css)    : null;
+      const shirtT = (shirtIdx && zones?.shirt && CLOTH_COLORS[shirtIdx]?.css) ? _hexCssToRGB(CLOTH_COLORS[shirtIdx].css) : null;
+      const pantsT = (pantsIdx && zones?.pants && CLOTH_COLORS[pantsIdx]?.css) ? _hexCssToRGB(CLOTH_COLORS[pantsIdx].css) : null;
+      if (!hairT && !skinT && !shirtT && !pantsT) return;
+      const fwX = frameW || fw;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i+3] < 128) continue;
+        if (skinT && layers.skin[i+3] >= 128) {
+          _tintPx(pixels, i, zones.skin.r, zones.skin.g, zones.skin.b, skinT[0], skinT[1], skinT[2]);
+        } else if (hairT && layers.hair[i+3] >= 128) {
+          const x = ((i >> 2) % fw) % fwX, y = Math.floor(i / (fw * 4));
+          if (_hairIsOutline(zones, pixels[i], pixels[i+1], pixels[i+2], x, y)) {
+            const oz = zones.hairOutline, ratio = oz.darkRatio ?? 0.5;
+            _tintPx(pixels, i, oz.r, oz.g, oz.b,
+              Math.round(hairT[0]*ratio), Math.round(hairT[1]*ratio), Math.round(hairT[2]*ratio));
+          } else {
+            _tintPx(pixels, i, zones.hair.r, zones.hair.g, zones.hair.b, hairT[0], hairT[1], hairT[2]);
+          }
+        } else if (shirtT && layers.shirt[i+3] >= 128) {
+          _tintPx(pixels, i, zones.shirt.r, zones.shirt.g, zones.shirt.b, shirtT[0], shirtT[1], shirtT[2]);
+        } else if (pantsT && layers.pants[i+3] >= 128) {
+          _tintPx(pixels, i, zones.pants.r, zones.pants.g, zones.pants.b, pantsT[0], pantsT[1], pantsT[2]);
+        }
+      }
+    }
+
+    // Any Phaser texture built via the legacy fallback (layers not loaded yet)
+    // is recorded here with its build recipe, then repainted IN PLACE (canvas
+    // redraw + texture.refresh — sprites keep their binding) once every layer
+    // image has settled. Without this, a texture cached during the brief
+    // image-load race would keep the legacy bleed until a full reload.
+    const _legacyTexBuilds = new Map();  // texKey → {char, suffix, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW}
+    let _layersSettled = false;
+
+    function _upgradeLegacyTextures() {
+      const scene = window._gameScene;
+      for (const [texKey, b] of Array.from(_legacyTexBuilds)) {
+        const L = _getLayerData(b.char, b.suffix);
+        if (!L) { _legacyTexBuilds.delete(texKey); continue; }  // layer 404 — legacy stays, nothing better available
+        if (!scene || !scene.textures.exists(texKey)) { _legacyTexBuilds.delete(texKey); continue; }
+        const cv = scene.textures.get(texKey).getSourceImage();
+        if (!(cv instanceof HTMLCanvasElement) || cv.width !== L.w || cv.height !== L.h) { _legacyTexBuilds.delete(texKey); continue; }
+        const baseKey = b.suffix === 'run' ? `run_${b.char}` : `${b.char}_${b.suffix}`;
+        if (!scene.textures.exists(baseKey)) { _legacyTexBuilds.delete(texKey); continue; }
+        const cx = cv.getContext('2d');
+        cx.clearRect(0, 0, cv.width, cv.height);
+        cx.drawImage(scene.textures.get(baseKey).source[0].image, 0, 0);
+        const id = cx.getImageData(0, 0, cv.width, cv.height);
+        _layeredSwaps(id.data, L, b.zones, b.hairIdx, b.skinIdx, b.shirtIdx, b.pantsIdx, cv.width, b.frameW);
+        cx.putImageData(id, 0, 0);
+        // A legacy-built texture may also carry BAKED wearables — the repaint
+        // above wiped them with the recolour, so re-bake before refreshing.
+        if (b.wearIds && b.wearIds.length) {
+          try { scene._bakeWearOnCanvas(cx, b.char, b.suffix, b.frameW, b.wearIds); }
+          catch (e) { console.warn('re-bake failed', e); }
+        }
+        scene.textures.get(texKey).refresh();
+        _legacyTexBuilds.delete(texKey);
+      }
+    }
+
+    // ── Baked wearables (Phase 3) ──────────────────────────────────────
+    // Per-frame body anchors extracted offline from the split layers
+    // (tools/wearable-anchors.cjs). Until the fetch resolves, wearables fall
+    // back to the classic overlay sprites — no visual gap either way.
+    let _wearAnchors = null;
+    // Readiness race: sprites built BEFORE these assets settle were baked
+    // without wearables and got fallback overlays — nothing would ever fix
+    // them up without a later outfit event (stationary/seated remotes could
+    // stay on overlays forever). So each settle path re-dresses everyone.
+    function _rewearAll() {
+      const sc = window._gameScene;
+      if (!sc) return;   // pre-login: every later build sees the ready state
+      try {
+        if (sc.player) {
+          sc._setLocalCosmetic(_equippedCosmetic);   // recreates/suppresses + rebuilds texture
+          sc._setLocalSlots(_equippedSlots);
+        }
+        for (const [pid, e] of Object.entries(sc.otherPlayers || {}))
+          if (e && e.wear) sc._updatePlayerCosmetics(pid, null, e.wear.equipped, e.wear.wings, e.wear.slots);
+      } catch (err) { console.warn('rewear failed', err); }
+    }
+    fetch('/assets/layers/anchors.json')
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (j) { _wearAnchors = j; _rewearAll(); } })
+      .catch(() => {});
+    // Layer-replacement cosmetic sheets (raincoat): `${char}_${suffix}_${id}` →
+    // loaded HTMLImageElement. Absent key = not loaded yet (or 404) → overlay.
+    const _wearLayerImgs = {};
+    (function _loadWearLayerSheets() {
+      const CAPC = c => c[0].toUpperCase() + c.slice(1);
+      let pending = 0;
+      const settle = () => { if (--pending === 0) _rewearAll(); };
+      for (const [wid, def] of Object.entries(WEARABLE_DEFS)) {
+        if (!def.bakeLayer) continue;
+        for (const char of CHARACTERS) {
+          for (const suffix of LAYER_SUFFIXES) {
+            pending++;
+            const im = new Image();
+            im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
+            im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=8`;
+          }
+        }
+      }
+    })();
+    function _wearBakeReady(id, char) {
+      const def = WEARABLE_DEFS[id];
+      if (!def || !char) return false;
+      if (def.bakeLayer)
+        return LAYER_SUFFIXES.every(sfx => _wearLayerImgs[`${char}_${sfx}_${id}`]);
+      return !!(def.bake && _wearAnchors && _wearAnchors[char]);
+    }
+    // Which worn ids get BAKED into the texture (sorted → stable tex keys).
+    // Wings are never baked: they keep their flap tween + behind-body order.
+    function _bakedWearIds(char, equipped, wings, slots) {
+      const ids = [];
+      for (const id of [equipped, ...Object.values(slots || {})])
+        if (id && _wearBakeReady(id, char) && !ids.includes(id)) ids.push(id);
+      return ids.sort();
+    }
+
+    // Kick off layer image loads for every character/sheet up front. When the
+    // LAST image settles (load or error), upgrade any legacy-built textures and
+    // re-run the visible previews so nothing stays on the fallback path.
+    (function _loadLayerImages() {
+      let pending = 0;
+      const settle = () => {
+        if (--pending > 0) return;
+        _layersSettled = true;
+        try { _upgradeLegacyTextures(); } catch (e) { console.warn('layer upgrade failed', e); }
+        try { _redrawPreview(); } catch (e) {}
+        try { if (typeof _redrawWardrobePreview === 'function') _redrawWardrobePreview(); } catch (e) {}
+      };
+      CHARACTERS.forEach(char => {
+        const C = char[0].toUpperCase() + char.slice(1);
+        LAYER_SUFFIXES.forEach(suffix => {
+          const set = {};
+          LAYER_NAMES.forEach(l => {
+            const im = new Image();
+            im.crossOrigin = 'anonymous';
+            pending++;
+            im.onload = im.onerror = settle;
+            im.src = `/assets/layers/${C}_${suffix}_${l}.png`;
+            set[l] = im;
+          });
+          _layerImages[`${char}_${suffix}`] = set;
+        });
+      });
+    })();
+
+    // Update the small color-summary strip below the preview canvas.
+    function _updateColorSummary() {
+      const el = document.getElementById('color-summary');
+      if (!el) return;
+      function dot(css) {
+        return css ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${css};border:1px solid #ccc;vertical-align:middle;margin-right:3px;"></span>` : `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:3px;background:#f5f5f5;"></span>`;
+      }
+      const hc  = _playerHairIdx  ? HAIR_COLORS[_playerHairIdx]?.css   : null;
+      const sc  = _playerSkinIdx  ? SKIN_TONES[_playerSkinIdx]?.css    : null;
+      const shc = _playerShirtIdx ? CLOTH_COLORS[_playerShirtIdx]?.css : null;
+      const pc  = _playerPantsIdx ? CLOTH_COLORS[_playerPantsIdx]?.css : null;
+      el.innerHTML = `${dot(hc)}Hair<br>${dot(sc)}Skin<br>${dot(shc)}Shirt<br>${dot(pc)}Trousers`;
+    }
+
+    // Redraw the 80×160 preview canvas with current appearance choices.
+    function _redrawPreview() {
+      const cv = document.getElementById('preview-canvas');
+      if (!cv) return;
+      const img = _charImages[_playerChar];
+      if (!img) return;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, 80, 160);
+      ctx.imageSmoothingEnabled = false;
+
+      const zones = _charZoneColors[_playerChar];
+      const noSwap = !_playerHairIdx && !_playerSkinIdx && !_playerShirtIdx && !_playerPantsIdx;
+
+      if (noSwap || !zones) {
+        ctx.drawImage(img, 288, 0, 16, 32, 0, 0, 80, 160);
+        _updateColorSummary();
+        return;
+      }
+
+      const tmp = document.createElement('canvas');
+      tmp.width = 16; tmp.height = 32;
+      const tc = tmp.getContext('2d');
+      tc.drawImage(img, 288, 0, 16, 32, 0, 0, 16, 32);
+      const id = tc.getImageData(0, 0, 16, 32);
+      const L = _cropLayerData(_playerChar, 'run', 288, 0, 16, 32);
+      if (L) _layeredSwaps(id.data, L, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16, 16);
+      else   _applySwaps(id.data, zones, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx, 16);
+      tc.putImageData(id, 0, 0);
+      ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, 80, 160);
+      _updateColorSummary();
+    }
+
+    // ── Load character images + detect zones ──────────────────────────
+    CHARACTERS.forEach(char => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = CHAR_FILES[char];
+      img.onload = () => {
+        _charImages[char] = img;
+        _charZoneColors[char] = _detectZoneColors(char);
+        _redrawPreview();
+        // Refresh hair style canvas if on builder
+        const cv = document.getElementById(`hair-cv-${char}`);
+        if (cv) _drawHairStyleCanvas(cv, char);
+      };
+    });
+
+    function _drawHairStyleCanvas(cv, char) {
+      const img = _charImages[char];
+      if (!img) return;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 288, 0, 16, 32, 0, 0, cv.width, cv.height);
+    }
+
+    // ── Build hair style picker (DOM) ──────────────────────────────────
+    const hairStylePicker = document.getElementById('hair-style-picker');
+    CHARACTERS.forEach((char, idx) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'hair-opt' + (idx === 0 ? ' selected' : '');
+      wrap.dataset.char = char;
+
+      const cv = document.createElement('canvas');
+      cv.id = `hair-cv-${char}`;
+      cv.width = 36; cv.height = 72;
+      cv.style.cssText = 'width:36px;height:72px';
+      _drawHairStyleCanvas(cv, char);
+
+      const lbl = document.createElement('span');
+      lbl.textContent = char.charAt(0).toUpperCase() + char.slice(1);
+
+      wrap.appendChild(cv); wrap.appendChild(lbl);
+      wrap.addEventListener('click', () => {
+        document.querySelectorAll('.hair-opt').forEach(el => el.classList.remove('selected'));
+        wrap.classList.add('selected');
+        _playerChar = char;
+        _redrawPreview();
+      });
+      hairStylePicker.appendChild(wrap);
+    });
+
+    // ── Build swatch pickers ───────────────────────────────────────────
+    function _buildSwatchRow(containerId, palette, getIdx, setIdx, isRound) {
+      const row = document.getElementById(containerId);
+      palette.forEach((item, idx) => {
+        const sw = document.createElement('div');
+        sw.className = (isRound ? 'cswatch' : 'sswatch') + (idx === 0 ? ' selected c-none' : '');
+        sw.title = item.label;
+        if (item.css) sw.style.background = item.css;
+        sw.addEventListener('click', () => {
+          row.querySelectorAll(isRound ? '.cswatch' : '.sswatch').forEach(el => el.classList.remove('selected'));
+          sw.classList.add('selected');
+          setIdx(idx);
+          _redrawPreview();
+        });
+        row.appendChild(sw);
+      });
+    }
+
+    _buildSwatchRow('hair-color-picker',   HAIR_COLORS, ()=>_playerHairIdx,    v=>{ _playerHairIdx=v;    }, true);
+    _buildSwatchRow('skin-tone-picker',    SKIN_TONES,  ()=>_playerSkinIdx,    v=>{ _playerSkinIdx=v;    }, false);
+    _buildSwatchRow('shirt-color-picker',    CLOTH_COLORS, ()=>_playerShirtIdx, v=>{ _playerShirtIdx=v; }, true);
+    _buildSwatchRow('trousers-color-picker', CLOTH_COLORS, ()=>_playerPantsIdx, v=>{ _playerPantsIdx=v; }, true);
+
+    // ── Step navigation ────────────────────────────────────────────────
+    function goToStep(n) {
+      _builderStep = n;
+      [1,2,3].forEach(i => {
+        document.getElementById(`bstep-${i}`).style.display = (i === n) ? '' : 'none';
+        const dot = document.getElementById(`sd-${i}`);
+        dot.classList.toggle('active', i === n);
+        dot.classList.toggle('done',   i < n);
+      });
+      const backBtn = document.getElementById('btn-back');
+      const nextBtn = document.getElementById('btn-next');
+      backBtn.style.visibility = n > 1 ? 'visible' : 'hidden';
+      if (n < 3) {
+        nextBtn.textContent = 'Next →';
+        nextBtn.onclick = () => goToStep(n + 1);
+      } else {
+        nextBtn.textContent = 'Request Access →';
+        nextBtn.onclick = tryRegister;
+      }
+      backBtn.onclick = () => goToStep(n - 1 < 1 ? 1 : n - 1);
+      _redrawPreview();
+    }
+
+    function goToBuilder() {
+      const first = document.getElementById('inp-first').value.trim();
+      const email = document.getElementById('inp-email').value.trim();
+      const dept  = document.getElementById('inp-dept').value;
+      const pw    = document.getElementById('inp-password').value;
+      const errEl = document.getElementById('reg-error');
+      if (!first) { errEl.textContent = 'First name is required.'; return; }
+      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      if (!DEPARTMENTS.includes(dept)) { errEl.textContent = 'Please pick your department.'; return; }
+      if (pw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+      errEl.textContent = '';
+      document.getElementById('info-section').style.display = 'none';
+      document.getElementById('builder-section').classList.add('active');
+      goToStep(1);
+    }
+
+    // ── Personal info inputs ───────────────────────────────────────────
+    function _stopAndEnter(e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') goToBuilder();
+    }
+    ['inp-first','inp-last','inp-nick','inp-email','inp-password'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('keydown', _stopAndEnter);
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+
+    // Department dropdown: options come from the ONE shared DEPARTMENTS list.
+    (() => {
+      const sel = document.getElementById('inp-dept');
+      const ph = document.createElement('option');
+      ph.value = ''; ph.textContent = 'Select your department…';
+      sel.appendChild(ph);
+      DEPARTMENTS.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d; o.textContent = d;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('keydown', (e) => e.stopPropagation());
+      sel.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      sel.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
+    document.getElementById('next-to-builder-btn').addEventListener('click', goToBuilder);
+
+    // ── Register ↔ Sign-in card toggle ─────────────────────────────────
+    document.getElementById('show-login-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-login').classList.remove('hidden');
+    });
+    document.getElementById('show-register-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('card-login').classList.add('hidden');
+      document.getElementById('card-register').classList.remove('hidden');
+    });
+
+    // ── Registration submit ────────────────────────────────────────────
+    function tryRegister() {
+      const first = document.getElementById('inp-first').value.trim();
+      const last  = document.getElementById('inp-last').value.trim();
+      const nick  = document.getElementById('inp-nick').value.trim();
+      const email = document.getElementById('inp-email').value.trim();
+      const pw    = document.getElementById('inp-password').value;
+      _rememberMe  = document.getElementById('inp-remember').checked;
+      _playerEmail = email;   // remembered so we can skip a stale copy of OURSELVES
+
+      document.getElementById('btn-next').disabled = true;
+      socket.emit('register', {
+        firstName: first, lastName: last, nickname: nick, email, password: pw,
+        department:  document.getElementById('inp-dept').value,
+        character:   _playerChar,
+        hairIdx:     _playerHairIdx,
+        skinIdx:     _playerSkinIdx,
+        shirtIdx:    _playerShirtIdx,
+        pantsIdx:    _playerPantsIdx,
+      });
+    }
+
+    // Register was refused (bad password / rate limit / server error): put the
+    // user back on the info step with the reason, ready to retry.
+    socket.on('authFailed', ({ message } = {}) => {
+      document.getElementById('btn-next').disabled = false;
+      document.getElementById('builder-section').classList.remove('active');
+      document.getElementById('info-section').style.display = '';
+      document.getElementById('reg-error').textContent = message || 'Registration failed — try again.';
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-login')?.classList.add('hidden');
+      document.getElementById('card-register').classList.remove('hidden');
+    });
+
+    // ── Sign-in submit ─────────────────────────────────────────────────
+    function tryLogin() {
+      const email = document.getElementById('login-email').value.trim();
+      const pw    = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      if (!email || !email.includes('@')) { errEl.textContent = 'A valid email is required.'; return; }
+      if (!pw) { errEl.textContent = 'Password is required.'; return; }
+      errEl.textContent = '';
+      _rememberMe  = document.getElementById('login-remember').checked;
+      _playerEmail = email;
+      document.getElementById('login-btn').disabled = true;
+      socket.emit('login', { email, password: pw });
+    }
+    function _loginStopAndEnter(e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') tryLogin();
+    }
+    ['login-email','login-password'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('keydown', _loginStopAndEnter);
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+    document.getElementById('login-btn').addEventListener('click', tryLogin);
+
+    socket.on('loginFailed', ({ message } = {}) => {
+      document.getElementById('login-btn').disabled = false;
+      document.getElementById('login-error').textContent = message || 'Sign in failed — try again.';
+      document.getElementById('card-pending')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-register')?.classList.add('hidden');
+      document.getElementById('card-login').classList.remove('hidden');
+    });
+
+    // ── Registration lifecycle ────────────────────────────────────────
+    socket.on('registrationPending', () => {
+      document.getElementById('card-register').classList.add('hidden');
+      document.getElementById('card-login')?.classList.add('hidden');
+      document.getElementById('card-reconnecting')?.classList.add('hidden');
+      document.getElementById('card-pending').classList.remove('hidden');
+    });
+
+    socket.on('rejected', () => {
+      _clearToken();   // don't auto-resume back into the queue on the next load
+      document.getElementById('card-pending').classList.add('hidden');
+      document.getElementById('card-rejected').classList.remove('hidden');
+    });
+
+    socket.on('kicked', () => {
+      _roundReset();
+      _clearToken();   // revoked: must re-register, not auto-resume
+      // Hide all overlay cards and show the kicked card
+      ['card-register','card-login','card-reconnecting','card-pending','card-rejected'].forEach(id => {
+        document.getElementById(id)?.classList.add('hidden');
+      });
+      document.getElementById('card-kicked').classList.remove('hidden');
+      // Also hide the game overlay (join overlay) in case they were in-game
+      document.getElementById('join-overlay').style.display = 'flex';
+    });
+
+    socket.on('approved', (data) => {
+      _playerName    = data.name;
+      _playerEmail   = data.email || _playerEmail;   // resume path skips the form — seed identity here (used to skip a stale self-copy)
+      _playerChar    = data.character;
+      _playerHairIdx  = data.hairIdx  ?? 0;
+      _playerSkinIdx  = data.skinIdx  ?? 0;
+      _playerShirtIdx = data.shirtIdx ?? data.clothesIdx ?? 0;
+      _playerPantsIdx = data.pantsIdx ?? data.clothesIdx ?? 0;
+      _playerCoins    = data.coins;
+      _ownedItems     = data.cosmetics || [];
+      _equippedCosmetic = data.equipped || '';
+      _equippedWings  = data.wings || '';
+      _equippedSlots  = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, data.slots || {});
+      _equippedPet    = data.pet || '';
+      _equippedPetAcc = data.petAcc || '';
+      _myPetXp = data.petXp || {};
+      _myPetNames = data.petNames || {};
+      _playerItems    = data.items || {};
+      _avatarChanges  = data.avatarChanges ?? 0;
+      _renderItemBar();
+
+      const overlay = document.getElementById('join-overlay');
+      if (overlay) {                 // null after the first approval removed it — a blip resume re-fires 'approved'
+        overlay.classList.add('hidden');
+        setTimeout(() => overlay.remove(), 300);
+        maybeStartTutorial();
+      }
+
+      document.body.classList.add('playing');
+      document.getElementById('coin-hud').classList.add('visible');
+      document.getElementById('coin-count').textContent = _playerCoins;
+      socket.emit('uiSync');   // office banner + bingo card resync (fresh login OR blip resume)
+
+      const scene = window._gameScene;
+      if (scene) scene._onApproved(data);
+      else _approvedQueue = data;
+
+      document.querySelector('canvas')?.focus();
+    });
+
+    // Once-a-day login bonus: the server grants it atomically on the first
+    // office entry of the calendar day; the matching coinUpdate arrives
+    // separately, this is just the celebratory toast.
+    let _dailyToastTimer = null;
+    // Generic top-center toast (reuses the daily-bonus element/styling).
+    function showToast(msg, ms = 5000) {
+      const t = document.getElementById('daily-toast');
+      t.textContent = msg;
+      t.classList.add('open');
+      clearTimeout(_dailyToastTimer);
+      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), ms);
+    }
+    socket.on('dailyBonus', (data) => {
+      const amount = (data || {}).amount || 0;
+      if (!amount) return;
+      showToast(`🎁 Daily login bonus! +${amount} coins`);
+    });
+
+    socket.on('coinUpdate', ({ coins, buddyBoost }) => {
+      // Only the minute tick carries buddyBoost (true/false); purchases and
+      // other coin events leave it undefined — don't flicker the chip then.
+      if (buddyBoost !== undefined && window._buddy) { window._buddy.boost = !!buddyBoost; _buddyChipRender(); }
+      _playerCoins = coins;
+      document.getElementById('coin-count').textContent = coins;
+      document.getElementById('shop-coin-display').textContent = coins;
+      document.getElementById('food-coin-display').textContent = coins;
+      // Affordability (the greyed "Buy" state) depends on the balance.
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+    });
+
+    // ── Live shop prices ────────────────────────────────────────────────
+    // The server sends the full price map on connect (priceList) and a
+    // one-item broadcast whenever the owner changes a price (priceUpdate).
+    // These labels are display-only — the server enforces the real price on
+    // every buy — so applying them just keeps the shop UI honest.
+    // Server always sends BASE prices; the shop label (`cost`) gets the sale
+    // % applied locally, while `baseCost` stays honest for the F8 editor.
+    function _saleAdj(c) {
+      if (!c || !_sale || Date.now() >= _sale.endsAt) return c;
+      return Math.max(1, Math.round(c * (100 - _sale.percent) / 100));
+    }
+    function _applyPrice(item, price) {
+      if (!Number.isInteger(price)) return;
+      for (const cat of [COSMETICS, PETS, PET_ACCESSORIES]) {
+        const row = cat.find(c => c.id === item);
+        if (row) { row.baseCost = price; row.cost = _saleAdj(price); return; }
+      }
+    }
+    function _reapplySaleToCatalogs() {
+      for (const cat of [COSMETICS, PETS, PET_ACCESSORIES]) {
+        for (const row of cat) {
+          if (row.baseCost == null) row.baseCost = row.cost;   // lazy init from shipped cost
+          row.cost = _saleAdj(row.baseCost);
+        }
+      }
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (typeof _opRenderPrices === 'function') _opRenderPrices();
+    }
+    socket.on('priceList', (map) => {
+      for (const [item, price] of Object.entries(map || {})) _applyPrice(item, price);
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (typeof _opRenderPrices === 'function') _opRenderPrices();
+    });
+    socket.on('priceUpdate', ({ item, price } = {}) => {
+      _applyPrice(item, price);
+      if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (typeof _opRenderPrices === 'function') _opRenderPrices();
+    });
+
+    // ── Flash sale (owner: F8 → Prices) ─────────────────────────────────
+    let _sale = null, _saleTick = null;
+    window.ownerStartSale = function () {
+      const pct = parseInt(document.getElementById('op-sale-pct').value, 10);
+      const min = parseInt(document.getElementById('op-sale-min').value, 10);
+      const msg = document.getElementById('op-sale-status');
+      if (!(pct >= 1 && pct <= 90))    { msg.textContent = 'Percent must be 1–90.'; return; }
+      if (!(min >= 1 && min <= 10080)) { msg.textContent = 'Minutes must be 1–10080 (a week).'; return; }
+      msg.textContent = 'Starting…';
+      socket.emit('adminSaleStart', { percent: pct, minutes: min });
+    };
+    window.ownerEndSale = function () { socket.emit('adminSaleEnd'); };
+    socket.on('adminSaleResult', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-sale-status');
+      if (msg && message) { msg.style.color = ok ? '#27ae60' : '#e74c3c'; msg.textContent = message; }
+    });
+    function _renderSaleStatus() {
+      const el = document.getElementById('op-sale-status');
+      if (!el) return;
+      if (!_sale || Date.now() >= _sale.endsAt) { el.style.color = '#888'; el.textContent = 'No sale running.'; return; }
+      const left = Math.max(0, Math.round((_sale.endsAt - Date.now()) / 1000));
+      const mm = Math.floor(left / 60), ss = left % 60;
+      el.style.color = '#f1c40f';
+      el.textContent = `🔥 SALE LIVE: ${_sale.percent}% off everything — ${mm}:${String(ss).padStart(2, '0')} left`;
+    }
+    socket.on('saleState', (s) => {
+      const started = s && (!_sale || _sale.endsAt !== s.endsAt || _sale.percent !== s.percent);
+      const ended = !s && _sale;
+      _sale = s || null;
+      clearInterval(_saleTick);
+      if (_sale) _saleTick = setInterval(_renderSaleStatus, 1000);
+      _renderSaleStatus();
+      _reapplySaleToCatalogs();   // shop labels get the discount; F8 keeps base prices
+      // Everyone in the office gets a heads-up toast (prices update on their own).
+      if (document.body.classList.contains('playing')) {
+        if (started) _rpsToast(`🔥 FLASH SALE! ${s.percent}% off everything in the shop — hurry!`);
+        else if (ended) _rpsToast('🛍️ The flash sale is over — prices are back to normal.');
+      }
+    });
+
+    // ── Huddles the connection coach ──────────────────────────────────
+    // Panel states arrive from the server (coachPanel = a direct E-press
+    // reply; coachMission = today's mission landed; coachStatus = silent
+    // chip refresh on approval). The chip re-opens the last known mission
+    // read-only from anywhere — re-rolling still means walking to Huddles
+    // (the server re-checks proximity on every coach event anyway).
+    let _coachPanelOpen = false;
+    let _coachState = null;          // today's mission as last told by the server
+    let _coachIntakeDepts = [];
+
+    function _missionChipRender() {
+      const chip = document.getElementById('mission-chip');
+      if (!_coachState) { chip.classList.remove('on'); return; }
+      chip.classList.add('on');
+      chip.classList.toggle('done', !!_coachState.done);
+      chip.textContent = (_coachState.done ? '✅ ' : '🎯 ') + _coachState.label;
+      chip.title = _coachState.flavor || _coachState.label;
+    }
+    document.getElementById('mission-chip').addEventListener('click', () => {
+      if (_coachState) openCoachPanel({ mission: _coachState, remote: true });
+    });
+
+    function closeCoachPanel() {
+      _coachPanelOpen = false;
+      document.getElementById('coach-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    document.getElementById('coach-panel').addEventListener('click', (e) => {
+      if (e.target.id === 'coach-panel') closeCoachPanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _coachPanelOpen) { e.preventDefault(); closeCoachPanel(); }
+    });
+
+    // ── Ms. Poli's HR library panel ─────────────────────────────────────
+    let _hrPanelOpen = false;
+    function closeHrPanel() {
+      _hrPanelOpen = false;
+      document.getElementById('hr-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    window.closeHrPanel = closeHrPanel;
+    document.getElementById('hr-panel').addEventListener('click', (e) => {
+      if (e.target.id === 'hr-panel') closeHrPanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _hrPanelOpen) { e.preventDefault(); closeHrPanel(); }
+    });
+    function openHrPanel(d) {
+      _hrPanelOpen = true;
+      document.getElementById('hr-panel').classList.add('open');
+      const body = document.getElementById('hr-body');
+      if (d.guest) {
+        body.innerHTML = '<div class="hr-say">Welcome to the library! 📚 I quiz registered teammates on our Code of Discipline — daily coins for those who know their stuff. Join with your email and come see me!</div>' +
+          '<button class="coach-btn" onclick="closeHrPanel()">Got it</button>';
+        return;
+      }
+      // Server-sent strings are escaped before touching innerHTML — the bank
+      // is static today, but this keeps the contract safe if it ever isn't.
+      const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      if (d.solved) {
+        body.innerHTML = `<div class="hr-say">${d.justPaid
+            ? `🎉 Correct! <b>+${d.justPaid} coins.</b>${d.paid >= 100 ? ' First try — you know your COD!' : ' See? Talking to HR pays off!'}`
+            : `You already aced today's question${d.paid ? ` (+${d.paid} coins)` : ''}. Come back tomorrow for a new one!`}
+          ${d.ref ? `<br><br><span style="color:#8a755d">📌 See: ${esc(d.ref)}</span>` : ''}</div>`;
+        return;
+      }
+      if (d.capped) {
+        body.innerHTML = '<div class="hr-say">That\'s all your tries for today! 😅 Go have a chat with <b>Junell, Claire, or Klynn</b> and come back tomorrow — new question, fresh tries.</div>';
+        return;
+      }
+      body.innerHTML =
+        `<div class="hr-say">${d.checkFailed ? '😵 Oops — I lost my notes while checking that. Your try was NOT counted, just send it again!<br><br>' : ''}${d.wrong ? '❌ Hmm, not quite — go ask <b>Junell, Claire, or Klynn</b> in person. They love this stuff. 😄<br><br>' : ''}${d.wrong && d.yourAnswer ? `<div style="background:#1c150e;border:1px dashed #5e452f;border-radius:8px;padding:8px 10px;margin-bottom:10px;color:#d8c9b8;">✍️ Your answer: “${esc(d.yourAnswer)}”</div>` : ''}
+         📋 <b>Today's question:</b><br><br>${esc(d.q)}</div>` +
+        `<textarea id="hr-answer-input" rows="3" maxlength="300" placeholder="Type your answer in your own words…"
+           style="width:100%;box-sizing:border-box;background:#31261b;color:#f5eee7;border:1px solid #5e452f;border-radius:8px;font-family:monospace;font-size:13px;padding:10px 12px;resize:vertical;"></textarea>` +
+        `<button class="coach-btn" id="hr-answer-send" style="margin-top:8px;" onclick="hrSendAnswer()">Submit answer</button>` +
+        `<div style="color:#8a755d;font-size:11px;margin-top:8px;">First try: +100 coins · after asking around: +50 · tries left today: ${d.triesLeft ?? '?'}</div>`;
+      const ta = document.getElementById('hr-answer-input');
+      ta.focus();
+      // Don't let the game eat typing; Enter submits (Shift+Enter = newline).
+      ta.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); hrSendAnswer(); }
+      });
+      ta.addEventListener('keyup', (e) => e.stopPropagation());
+    }
+    window.hrSendAnswer = function () {
+      const ta = document.getElementById('hr-answer-input');
+      const btn = document.getElementById('hr-answer-send');
+      const text = (ta?.value || '').trim();
+      if (text.length < 2) return;
+      if (btn) { btn.disabled = true; btn.textContent = '🤔 Ms. Poli is reading your answer…'; }
+      if (ta) ta.disabled = true;
+      socket.emit('hrAnswer', { answer: text });
+    };
+    socket.on('hrQuiz', (d) => openHrPanel(d || {}));
+
+    function openCoachPanel(d) {
+      _coachPanelOpen = true;
+      document.getElementById('coach-panel').classList.add('open');
+      const body = document.getElementById('coach-body');
+      if (d.guest) {
+        body.innerHTML = '<div class="coach-say">Hey! I\'m Huddles, the office connection coach. 🌱<br><br>' +
+          'I hand out daily missions (they pay coins!) to registered teammates — join with your email and come find me!</div>' +
+          '<button class="coach-btn" onclick="closeCoachPanel()">Got it</button>';
+        return;
+      }
+      if (d.needIntake) { _renderCoachIntake(body, d.departments || []); return; }
+      if (d.generating) {
+        body.innerHTML = '<div class="coach-say">Hmm, let me think about who you should meet today… 🤔</div>' +
+          '<div class="coach-status-line">✨ Huddles is picking your mission…</div>';
+        return;
+      }
+      if (d.mission) _renderCoachMission(body, d.mission, d.remote);
+    }
+
+    function _renderCoachIntake(body, departments) {
+      const goals = [
+        ['meet_new',       '👋 Meet new people'],
+        ['more_games',     '🎮 Play more mini-games'],
+        ['cross_team',     '🏢 Get to know other departments'],
+        ['coffee_buddies', '☕ More coffee-break company'],
+      ];
+      _coachIntakeDepts = [];
+      body.innerHTML =
+        '<div class="coach-say">Hey, I\'m Huddles! 🌱 My job is helping you actually <b>know</b> the people you work with. ' +
+        'Two quick questions and I\'ll start lining up daily missions — they pay coins, too.</div>' +
+        '<div><b>What do you want more of?</b></div>' +
+        goals.map(([v, l], i) => '<label class="coach-opt"><input type="radio" name="coach-goal" value="' + v + '"' + (i === 0 ? ' checked' : '') + '>' + l + '</label>').join('') +
+        '<div style="margin-top:12px"><b>Departments you\'re curious about</b> <span style="color:#6fae81">(up to 3, optional)</span></div>' +
+        '<div class="coach-depts">' + departments.map((d) => '<span class="coach-dept" data-dept="' + esc(d) + '">' + esc(d) + '</span>').join('') + '</div>' +
+        '<button class="coach-btn" id="coach-intake-save">Let\'s go →</button>';
+      body.querySelectorAll('.coach-dept').forEach((el) => el.addEventListener('click', () => {
+        const d = el.dataset.dept;
+        const i = _coachIntakeDepts.indexOf(d);
+        if (i >= 0) { _coachIntakeDepts.splice(i, 1); el.classList.remove('sel'); }
+        else if (_coachIntakeDepts.length < 3) { _coachIntakeDepts.push(d); el.classList.add('sel'); }
+      }));
+      body.querySelector('#coach-intake-save').addEventListener('click', () => {
+        const goal = body.querySelector('input[name="coach-goal"]:checked')?.value || 'meet_new';
+        socket.emit('coachIntake', { goal, depts: _coachIntakeDepts });
+        openCoachPanel({ generating: true });
+      });
+    }
+
+    function _renderCoachMission(body, m, remote) {
+      const status = m.done
+        ? '<div class="coach-status-line">✅ Done! +' + (m.reward || 50) + ' coins are yours. New mission tomorrow!</div>'
+        : '<div class="coach-status-line">Reward: 💰 ' + (m.reward || 50) + ' coins · a fresh mission every day</div>';
+      body.innerHTML =
+        '<div class="coach-say">' + esc(m.flavor || 'Here\'s your mission for today!') + '</div>' +
+        '<div class="coach-mission-label">' + (m.done ? '✅ ' : '🎯 ') + esc(m.label) + '</div>' + status +
+        '<div style="margin-top:12px; display:flex; gap:8px;">' +
+        (!m.done && m.canReroll
+          ? '<button class="coach-btn secondary" id="coach-reroll"' + (remote ? ' disabled title="Walk over to Huddles to re-roll"' : '') + '>🎲 Re-roll (1/day)</button>'
+          : '') +
+        '<button class="coach-btn" onclick="closeCoachPanel()">On it!</button></div>' +
+        (remote && !m.done && m.canReroll ? '<div class="coach-status-line">Find Huddles in the office to re-roll.</div>' : '');
+      body.querySelector('#coach-reroll')?.addEventListener('click', () => {
+        socket.emit('coachReroll');
+        openCoachPanel({ generating: true });
+      });
+    }
+
+    socket.on('coachPanel', (d) => openCoachPanel(d || {}));
+    socket.on('coachMission', (d) => {
+      _coachState = (d || {}).mission || null;
+      _missionChipRender();
+      if (_coachPanelOpen && _coachState) openCoachPanel({ mission: _coachState });
+    });
+    socket.on('coachStatus', (d) => { _coachState = (d || {}).mission || null; _missionChipRender(); });
+    socket.on('missionComplete', (d) => {
+      if (_coachState) { _coachState.done = true; _coachState.canReroll = false; }
+      _missionChipRender();
+      const t = document.getElementById('daily-toast');
+      t.textContent = '🎯 Mission complete! +' + ((d || {}).reward || 50) + ' coins';
+      t.classList.add('open');
+      clearTimeout(_dailyToastTimer);
+      _dailyToastTimer = setTimeout(() => t.classList.remove('open'), 5000);
+      if (_coachPanelOpen && _coachState) openCoachPanel({ mission: _coachState });
+    });
+    socket.on('missionCheer', (d) => window._gameScene?._missionCheer?.(d || {}));
+
+    // ── Cafeteria food menus ──────────────────────────────────────────
+    // The server sends the whole menu (title/items/prices) in foodMenu — this
+    // panel renders whatever arrives and NEVER hardcodes prices; buyFood
+    // re-validates proximity + price server-side. Reuses the shop's row CSS.
+    let _foodStation = null;
+    socket.on('foodMenu', (payload) => {
+      const { station, title, items, coins } = payload || {};
+      if (typeof station !== 'string' || !Array.isArray(items)) return;
+      _foodStation = station;
+      closeShop();   // panels are mutually exclusive
+      document.getElementById('food-title').textContent =
+        (typeof title === 'string' && title) ? title.slice(0, 40) : 'Menu';
+      document.getElementById('food-coin-display').textContent =
+        Number.isFinite(coins) ? coins : _playerCoins;
+      const box = document.getElementById('food-items');
+      box.textContent = '';
+      for (const it of items.slice(0, 12)) {
+        if (!it || typeof it.id !== 'string') continue;
+        const row = document.createElement('div');
+        row.className = 'shop-item';
+        const icon = document.createElement('div');
+        icon.className = 'shop-item-icon';
+        icon.textContent = String(it.icon || '🍽️').slice(0, 8);
+        const info = document.createElement('div');
+        info.className = 'shop-item-info';
+        const nm = document.createElement('div');
+        nm.className = 'shop-item-name';
+        nm.textContent = String(it.name || it.id).slice(0, 40);
+        const ct = document.createElement('div');
+        ct.className = 'shop-item-cost';
+        ct.textContent = `${it.price} coins`;
+        info.append(nm, ct);
+        const btn = document.createElement('button');
+        btn.className = 'buy-btn';
+        btn.textContent = 'Buy';
+        const itemId = it.id;
+        btn.onclick = () => socket.emit('buyFood', { station: _foodStation, item: itemId });
+        row.append(icon, info, btn);
+        box.append(row);
+      }
+      document.getElementById('food-msg').textContent = '';
+      document.getElementById('food-modal').classList.add('open');
+    });
+    socket.on('foodBought', (payload) => {
+      const { name, icon, price, coins } = payload || {};
+      if (Number.isFinite(coins)) document.getElementById('food-coin-display').textContent = coins;
+      const msg = document.getElementById('food-msg');
+      msg.style.color = '#27ae60';
+      msg.textContent = `${icon || ''} ${String(name || 'Enjoy').slice(0, 40)} — enjoy! (−${price} 🪙)`;
+    });
+    socket.on('foodError', (payload) => {
+      const { message } = payload || {};
+      const text = String(message || "Can't buy that right now.").slice(0, 120);
+      const modal = document.getElementById('food-modal');
+      if (modal.classList.contains('open')) {
+        const msg = document.getElementById('food-msg');
+        msg.style.color = '#e74c3c';
+        msg.textContent = text;
+      } else {
+        _rpsToast(text);
+      }
+    });
+    function closeFoodMenu() {
+      document.getElementById('food-modal').classList.remove('open');
+      document.getElementById('food-msg').textContent = '';
+      _foodStation = null;
+      document.querySelector('canvas')?.focus();
+    }
+
+    socket.on('shopSuccess', ({ item, equipped, wings, slots }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedCosmetic = equipped ?? item;   // buying auto-equips
+      if (wings !== undefined) _equippedWings = wings || '';
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, slots);
+      _refreshShopUI();
+      const meta = COSMETICS.find(c => c.id === item);
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${meta ? meta.name : item} equipped!`;
+      window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+      window._gameScene?._setLocalWings(_equippedWings);
+      window._gameScene?._setLocalSlots(_equippedSlots);
+    });
+
+    // Free wear/take-off confirmation (no purchase involved).
+    socket.on('equipUpdate', ({ equipped, wings, slots }) => {
+      _equippedCosmetic = equipped || '';
+      _equippedWings = wings || '';
+      if (slots) _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, slots);
+      _refreshShopUI();
+      window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+      window._gameScene?._setLocalWings(_equippedWings);
+      window._gameScene?._setLocalSlots(_equippedSlots);
+    });
+
+    // Wardrobe purchase confirmed: the server already took the coins
+    // (coinUpdate arrives separately); adopt the new colours and re-render.
+    socket.on('outfitSuccess', (data) => {
+      const { shirtIdx, pantsIdx } = data || {};
+      _playerShirtIdx = shirtIdx; _playerPantsIdx = pantsIdx;
+      _wardrobeShirtSel = shirtIdx; _wardrobePantsSel = pantsIdx;
+      _refreshShopUI();
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = 'New outfit on! 👕';
+      window._gameScene?._applyLocalOutfit();
+    });
+
+    // Avatar makeover confirmed: adopt the new character/hair and rebuild
+    // our own palette-swapped sheets (coinUpdate arrives separately).
+    socket.on('avatarSuccess', ({ character, hairIdx, avatarChanges } = {}) => {
+      _playerChar = character || _playerChar;
+      _playerHairIdx = hairIdx ?? _playerHairIdx;
+      _avatarChanges = avatarChanges ?? _avatarChanges;
+      _wardrobeCharSel = _playerChar; _wardrobeHairSel = _playerHairIdx;
+      _refreshShopUI();
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = 'New look! 💇';
+      window._gameScene?._applyLocalOutfit();
+    });
+
+    // Someone (possibly on another screen) changed outfit: rebuild their
+    // palette-swapped sheets. Self is handled by outfitSuccess above.
+    socket.on('playerOutfitUpdate', (data) => {
+      if (!data || data.id === socket.id) return;
+      window._gameScene?._applyRemoteOutfit(data.id, data);
+    });
+
+    socket.on('shopError', (msg) => {
+      document.getElementById('shop-msg').style.color = '#e74c3c';
+      document.getElementById('shop-msg').textContent = msg;
+    });
+
+    socket.on('playerCosmeticUpdate', ({ id, cosmetics, equipped, wings, slots }) => {
+      window._gameScene?._updatePlayerCosmetics(id, cosmetics, equipped, wings, slots);
+    });
+
+    // ── Pets ──────────────────────────────────────────────────────────
+    // Purchase confirmed (coins already taken — coinUpdate arrives separately).
+    socket.on('petSuccess', ({ item, pet, petAcc }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedPet = pet ?? item;   // adopting auto-brings the pet out
+      _equippedPetAcc = petAcc ?? _equippedPetAcc;   // accessory carries over to the new pet
+      _refreshShopUI();
+      const meta = PETS.find(p => p.id === item);
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${meta ? meta.name : 'Pet'} adopted! It's following you.`;
+      window._gameScene?._setLocalPet(_equippedPet);
+    });
+
+    // Free bring/send-home confirmation (no purchase involved).
+    socket.on('petUpdate', ({ pet, petAcc }) => {
+      _equippedPet = pet || '';
+      _equippedPetAcc = petAcc ?? _equippedPetAcc;
+      _refreshShopUI();
+      window._gameScene?._setLocalPet(_equippedPet);
+    });
+
+    // Accessory purchase confirmed (coins already taken — coinUpdate arrives
+    // separately). Buying auto-equips, like adopting a pet does.
+    socket.on('petAccSuccess', ({ item, petAcc }) => {
+      if (!_ownedItems.includes(item)) _ownedItems.push(item);
+      _equippedPetAcc = petAcc ?? item;
+      _refreshShopUI();
+      const meta = PET_ACCESSORIES.find(a => a.id === item);
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = _equippedPet
+        ? `${meta ? meta.name : 'Accessory'} on — looking sharp!`
+        : `${meta ? meta.name : 'Accessory'} bought — it'll show when a pet is with you.`;
+      window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
+    });
+
+    // Free put-on/take-off confirmation ('' = bare pet).
+    // ── Pet evolution: treat fed / evolved announcements ─────────────────
+    socket.on('petFed', ({ pet, xp, stage, next }) => {
+      _myPetXp[pet] = xp;
+      const prog = next != null ? ` (${xp}/${next} to ${stage === 1 ? 'EVOLVE' : 'FINAL FORM'})` : ' — FINAL FORM, max level! 👑';
+      showToast(`🦴 Yum! Your pet gained XP${prog}`, 4000);
+      if (_petPanelOpen) renderPetPanel();
+    });
+    socket.on('petEvolved', ({ id, name, stage, petName }) => {
+      const label = stage >= 3 ? 'reached FINAL FORM! 👑✨' : 'EVOLVED! ✨';
+      const who = petName ? `${name}'s ${petName}` : `${name}'s pet`;
+      showToast(`🎉 ${who} ${label}`, 6000);
+      if (id === socket.id) {
+        window._gameScene?._setLocalPet(_equippedPet);
+        window._evoPop?.();
+        if (_petPanelOpen) renderPetPanel();
+      }
+    });
+    // ── Pet card: click YOUR pet → feed treats, watch the XP bar fill ────
+    let _petPanelOpen = false;
+    function _petStageArt(pet, stage) {
+      // Prefer real stage art if it shipped for this pet (dog lines so far).
+      return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
+    }
+    function renderPetPanel() {
+      const pet = _equippedPet;
+      if (!pet) return;
+      const xp = (_myPetXp || {})[pet] || 0;
+      const stage = _petStageFor(pet, xp);
+      const next = PET_MYTHIC.has(pet)
+        ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
+        : (PET_EVOLVE_XP.find((t) => t > xp) ?? null);
+      const def = PETS.find((c) => c.id === pet);
+      const custom = (_myPetNames || {})[pet] || '';
+      document.getElementById('pet-panel-name').textContent = custom || (def ? def.name : 'Your pet');
+      document.getElementById('pet-panel-species').textContent = custom && def ? def.name : '';
+      document.getElementById('pet-panel-rename').textContent = custom ? '✏️ rename' : '✏️ name your pet';
+      document.getElementById('pet-panel-stage').textContent =
+        stage >= 3 ? 'FINAL FORM 👑' : stage === 2 ? 'Evolved ✨' : 'Baby 🐣';
+      const img = document.getElementById('pet-panel-img');
+      img.src = _petStageArt(pet, stage);
+      img.onerror = () => { img.onerror = null; img.src = `/assets/pets/${pet}.png`; };
+      const lo = stage >= 3 ? PET_EVOLVE_XP[1] : stage === 2 ? PET_EVOLVE_XP[0] : 0;
+      const pct = next ? Math.round(((xp - lo) / (next - lo)) * 100) : 100;
+      document.getElementById('pet-panel-bar').style.width = `${pct}%`;
+      document.getElementById('pet-panel-xp').textContent =
+        next ? `${xp} treat${xp === 1 ? '' : 's'} — ${next - xp} more to ${stage === 1 && !PET_MYTHIC.has(pet) ? 'EVOLVE ✨' : 'FINAL FORM 👑'}`
+             : `${xp} treats — max level, what a champion! 👑`;
+    }
+    window._openPetPanel = () => {
+      if (!_equippedPet) return;
+      _petPanelOpen = true;
+      renderPetPanel();
+      document.getElementById('pet-panel').style.display = 'flex';
+    };
+    function closePetPanel() {
+      _petPanelOpen = false;
+      document.getElementById('pet-panel').style.display = 'none';
+    }
+    document.getElementById('pet-panel-close').addEventListener('click', closePetPanel);
+    document.getElementById('pet-panel').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('pet-panel')) closePetPanel();   // click outside card
+    });
+    document.getElementById('pet-panel-feed').addEventListener('click', () => {
+      socket.emit('feedPet');
+      document.getElementById('pet-panel-feed').blur();
+    });
+    // Inline rename: the input lives INSIDE the card (the boss hated the
+    // browser prompt bar at the top of the page).
+    function _petRenameRow(show) {
+      const row = document.getElementById('pet-rename-row');
+      row.style.display = show ? 'flex' : 'none';
+      document.getElementById('pet-panel-rename').style.display = show ? 'none' : '';
+      if (show) {
+        const inp = document.getElementById('pet-rename-input');
+        inp.value = (_myPetNames || {})[_equippedPet] || '';
+        inp.focus(); inp.select();
+      }
+    }
+    document.getElementById('pet-panel-rename').addEventListener('click', () => _petRenameRow(true));
+    document.getElementById('pet-rename-cancel').addEventListener('click', () => _petRenameRow(false));
+    function _petRenameSave() {
+      socket.emit('namePet', { petName: document.getElementById('pet-rename-input').value });
+      _petRenameRow(false);
+    }
+    document.getElementById('pet-rename-save').addEventListener('click', _petRenameSave);
+    document.getElementById('pet-rename-input').addEventListener('keydown', (e) => {
+      e.stopPropagation();                              // typing must not move the character
+      if (e.key === 'Enter') _petRenameSave();
+      if (e.key === 'Escape') _petRenameRow(false);
+    });
+    socket.on('petNamed', ({ pet, petName }) => {
+      _myPetNames = _myPetNames || {};
+      _myPetNames[pet] = petName;
+      if (_petPanelOpen) renderPetPanel();
+      showToast(petName ? `🐾 Say hello to ${petName}!` : '🐾 Name cleared.', 3000);
+    });
+
+    // Little evolve pop so a stage change feels like a moment, not a texture
+    // swap — used by real evolutions (petEvolved) and the owner test button.
+    window._evoPop = () => {
+      const sc = window._gameScene;
+      const p = sc?.localPet;
+      if (p && sc) {
+        const s0 = p._baseScale || 1;
+        p.setScale(s0 * 0.2); p.setAlpha(0.3);
+        sc.tweens.add({ targets: p, alpha: 1, duration: 420, ease: 'Sine.easeOut' });
+        sc.tweens.add({ targets: p, scaleX: s0, scaleY: s0, duration: 420, ease: 'Back.easeOut' });
+        for (let i = 0; i < 6; i++) {
+          const st = sc.add.text(p.x + (Math.random() * 44 - 22), p.y - Math.random() * 30,
+            '✨', { fontSize: '13px', resolution: 2 }).setOrigin(0.5, 1).setDepth(3).setAlpha(0);
+          sc.tweens.add({ targets: st, alpha: { from: 1, to: 0 }, y: st.y - 30, delay: i * 70,
+            duration: 700, ease: 'Sine.easeOut', onComplete: () => st.destroy() });
+        }
+      }
+    };
+    socket.on('petAccUpdate', ({ petAcc }) => {
+      _equippedPetAcc = petAcc || '';
+      _refreshShopUI();
+      window._gameScene?._setLocalPet(_equippedPet);   // rebuild pet + overlay
+    });
+
+    socket.on('playerPetUpdate', ({ id, pet, petAcc, petStage }) => {
+      window._gameScene?._updatePlayerPet(id, pet, petAcc, petStage);
+    });
+
+    // ── Usable items (cigarettes, coffee) ─────────────────────────────
+    socket.on('usableBought', ({ item, items }) => {
+      _playerItems = items || {};
+      _renderItemBar();
+      const label = USABLES.find(u => u.id === item)?.name || 'Item';
+      document.getElementById('shop-msg').style.color = '#27ae60';
+      document.getElementById('shop-msg').textContent = `${label} added — use it from the items bar!`;
+    });
+
+    socket.on('itemsUpdate', ({ items }) => {
+      _playerItems = items || {};
+      _renderItemBar();
+    });
+
+    socket.on('itemError', ({ message }) => {
+      _rpsToast(message || "Can't use that right now.");
+    });
+
+    // Smoke puffs over whoever lit up — visible to everyone.
+    socket.on('smokeStart', ({ id, durationMs }) => {
+      window._gameScene?._startSmoke(id, durationMs || 10000);
+    });
+
+    // Coffee: the drinker speeds up locally (the server widens its movement
+    // budget in lockstep); everyone else just sees a ☕ bubble over their head.
+    // Group items reuse this event per recipient with an optional emoji
+    // (🍕 for pizza party) — the boost mechanics are identical.
+    socket.on('coffeeBoost', (payload) => {
+      const { id, durationMs, emoji, machine } = payload || {};
+      const scene = window._gameScene;
+      const em = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '☕';
+      // Machine brews carry the machine id — play the brew animation at the
+      // machine itself so everyone nearby sees it actually making the coffee.
+      if (typeof machine === 'string' && scene) scene._brewFx(machine);
+      if (id === socket.id) {
+        _boostUntil = Date.now() + (durationMs || 45000);
+        _boostEmoji = em;
+        _startBoostChip();
+        if (scene?.player) scene._showEmoteBubble(scene.player, em, true);
+      } else if (scene) {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, em, false);
+        }
+      }
+    });
+
+    // Group consumable visuals (confetti / fireworks / pizza burst) — pure
+    // flavor at the thrower's world position, visible to everyone (like smoke).
+    socket.on('groupEffect', (payload) => {
+      const { effect, x, y, emoji } = payload || {};
+      if (typeof x !== 'number' || typeof y !== 'number') return;
+      window._gameScene?._groupBurst(effect, x, y, emoji);
+    });
+
+    // ── Office chores ─────────────────────────────────────────────────
+    // Per-chore cooldown state: choreId → ts when it's available again.
+    // Seeded by the server's choreState on office entry; choreDone updates
+    // the one we just did. Drives the ✨ marker over each chore station.
+    window._choreReadyAt = {};
+    socket.on('choreState', (payload) => {
+      const { chores } = payload || {};
+      const now = Date.now();
+      window._choreReadyAt = {};
+      for (const [c, ms] of Object.entries(chores || {})) {
+        if (typeof ms === 'number' && ms >= 0) window._choreReadyAt[c] = now + ms;
+      }
+    });
+    socket.on('choreDone', (payload) => {
+      const { chore, pay, line, emoji, nextInMs } = payload || {};
+      if (typeof chore === 'string' && typeof nextInMs === 'number') {
+        window._choreReadyAt[chore] = Date.now() + nextInMs;
+      }
+      const ic = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '🧹';
+      const txt = (typeof line === 'string' ? line.slice(0, 120) : 'Chore done!');
+      _rpsToast(`${ic} ${txt} +${Number(pay) || 0} coins`);
+    });
+
+    // ── Interactive office objects: feedback ──────────────────────────
+    socket.on('interactError', (payload) => {
+      const { message } = payload || {};
+      _rpsToast(message || "Can't do that right now.");
+    });
+    // Water cooler: the sipper gets a rotating flavor line; everyone sees a 🥤 bubble.
+    socket.on('waterCooler', (payload) => {
+      const { line } = payload || {};
+      if (line) _rpsToast('💧 ' + line);
+    });
+    // Food spots (fridge / kitchen island / snack counter / cafeteria tables):
+    // the eater gets a rotating flavor line; everyone sees the food emoji bubble.
+    // `icon` is the toast prefix per station kind (fridge omits it -> 🧊).
+    socket.on('fridgeSnack', (payload) => {
+      const { line, icon } = payload || {};
+      const ic = (typeof icon === 'string' && icon.length > 0 && icon.length <= 8) ? icon : '🧊';
+      if (typeof line === 'string' && line) _rpsToast(ic + ' ' + line.slice(0, 120));
+    });
+    socket.on('objectEffect', (payload) => {
+      const { id, kind, emoji } = payload || {};
+      const scene = window._gameScene;
+      const EFFECT_EMOJI = { water: '🥤', snack: '🍪', chore: '🧹' };   // default bubble per effect kind
+      if (!scene || !Object.hasOwn(EFFECT_EMOJI, kind)) return;
+      // 'snack'/'chore' carry the specific emoji from the server;
+      // sanity-cap the length and fall back to the default on anything odd.
+      const bubble = ((kind === 'snack' || kind === 'chore') && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8)
+        ? emoji : EFFECT_EMOJI[kind];
+      if (id === socket.id) {
+        if (scene.player) scene._showEmoteBubble(scene.player, bubble, true);
+      } else {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, bubble, false);
+        }
+      }
+    });
+
+    // Gym equipment (punch bags / treadmills): everyone plays the machine's
+    // animation strip; the athlete gets an emote bubble like other effects.
+    socket.on('gymFx', (payload) => {
+      const { id, object, kind } = payload || {};
+      const scene = window._gameScene;
+      if (!scene || (kind !== 'punch' && kind !== 'run')) return;
+      if (typeof object === 'string') scene._gymFx(object, kind);
+      const bubble = kind === 'punch' ? '🥊' : '🏃';
+      if (id === socket.id) {
+        if (scene.player) scene._showEmoteBubble(scene.player, bubble, true);
+      } else {
+        const entry = scene.otherPlayers[id];
+        if (entry) {
+          if (entry.chatBubble) entry.chatBubble.destroy();
+          entry.chatBubble = scene._showEmoteBubble(entry.sprite, bubble, false);
+        }
+      }
+    });
+
+    // Countdown chip under the coin HUD while the boost is live.
+    let _boostTimer = null;
+    let _boostEmoji = '☕';   // what the current boost came from (☕ or 🍕)
+    function _startBoostChip() {
+      const chip = document.getElementById('boost-chip');
+      clearInterval(_boostTimer);
+      const tick = () => {
+        const left = _boostUntil - Date.now();
+        if (left <= 0) {
+          chip.classList.remove('on');
+          clearInterval(_boostTimer); _boostTimer = null;
+          return;
+        }
+        // Office After Dark: an alive crew member's boost is suppressed while
+        // the round is live (the server clamps their move budget to base
+        // speed) — hide the chip too, but keep the timer running so the boost
+        // and its chip come back if the timer outlasts the round.
+        if (_roundPhase === 'active' && _roundAlive && _roundRole !== 'killer') {
+          chip.classList.remove('on');
+          return;
+        }
+        chip.classList.add('on');
+        chip.textContent = `${_boostEmoji} +40% speed · ${Math.ceil(left / 1000)}s`;
+      };
+      tick();
+      _boostTimer = setInterval(tick, 500);
+    }
+
+    // 💼 chip while seated at a computer/desk. Driven by the scene's own
+    // desk-seat detection (_deskPose non-null == the server's work-seat rule),
+    // so it appears the moment you sit — the server pays the bonus on its
+    // once-per-minute coin tick from the same seat-tile check.
+    function _setWorkChip(on) {
+      document.getElementById('work-chip').classList.toggle('on', !!on);
+    }
+
+    // ── Shop ──────────────────────────────────────────────────────────
+    function openShop() {
+      _wardrobeShirtSel = _playerShirtIdx;   // wardrobe picks start at what you're wearing
+      _wardrobePantsSel = _playerPantsIdx;
+      _wardrobeHairSel  = _playerHairIdx;
+      _wardrobeCharSel  = _playerChar || 'adam';
+      _refreshShopUI();
+      document.getElementById('shop-msg').textContent = '';
+      document.getElementById('shop-modal').classList.add('open');
+    }
+    function closeShop() {
+      document.getElementById('shop-modal').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    function buyItem(item) { socket.emit('buyCosmetic', { item }); }
+    function equipItem(item, slot) { socket.emit('equipCosmetic', { item, slot }); }   // '' = take off (slot says which)
+    function buyUsable(item) { socket.emit('buyUsable', { item }); }
+    function buyPet(item) { socket.emit('buyPet', { item }); }
+    function equipPet(item) { socket.emit('equipPet', { item }); }         // '' = send it home
+    function buyPetAcc(item) { socket.emit('buyPetAcc', { item }); }
+    function equipPetAcc(item) { socket.emit('equipPetAcc', { item }); }   // '' = take it off
+    function useItem(item) {
+      socket.emit('useItem', { item });
+      document.querySelector('canvas')?.focus();   // give movement keys back after the click
+    }
+    // ── Shop tabs + pagination ──
+    // One tab visible at a time; paged tabs slice their catalog into pages of
+    // SHOP_PAGE_SIZE with ‹ › arrows. Tab switch resets to page 1. All the
+    // existing _refreshShopUI() call sites (coinUpdate, buy/equip acks) keep
+    // working — it re-renders whatever tab is open.
+    const SHOP_PAGE_SIZE = 6;
+    let _shopTab  = 'wear';   // 'wear' | 'items' | 'pets' | 'wardrobe'
+    let _shopPage = 0;
+    function shopTab(t)  {
+      _shopTab = t; _shopPage = 0;
+      if (t === 'market') { _marketFilter = null; socket.emit('marketOpen', {}); }   // fresh snapshot, unfiltered
+      _refreshShopUI();
+    }
+    function shopPage(d) { _shopPage += d; _refreshShopUI(); }
+
+    function _shopRow(c, btn) {
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      const icon = document.createElement('div');
+      icon.className = 'shop-item-icon';
+      if (c.id && c.id.startsWith('pet_')) {
+        // Pets show their actual sprite in the shop (emoji is the fallback
+        // elsewhere); crisp scaling for pixel art.
+        const im = document.createElement('img');
+        im.src = `/assets/pets/${c.id}.png`;
+        im.alt = c.name;
+        im.style.cssText = 'width:38px;height:38px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;';
+        icon.append(im);
+      } else if (typeof WEARABLE_DEFS !== 'undefined' && WEARABLE_DEFS[c.id]) {
+        // Wearables & wings: draw frame 0 (front view) of the real 2-frame
+        // sprite sheet onto a small canvas — the actual item, not an emoji.
+        const cv = document.createElement('canvas');
+        cv.width = 38; cv.height = 38;
+        cv.style.cssText = 'width:38px;height:38px;image-rendering:pixelated;';
+        const im = new Image();
+        im.onload = () => {
+          const fw = im.width / (WEARABLE_DEFS[c.id].frames || 2), fh = im.height;  // frame 0 = leftmost
+          const s = Math.min(34 / fw, 34 / fh);
+          const dw = fw * s, dh = fh * s;
+          const g = cv.getContext('2d');
+          g.imageSmoothingEnabled = false;
+          g.drawImage(im, 0, 0, fw, fh, (38 - dw) / 2, (38 - dh) / 2, dw, dh);
+        };
+        im.src = `/assets/${WEARABLE_DEFS[c.id].tex}.png`;
+        icon.append(cv);
+      } else {
+        icon.textContent = c.emoji;
+      }
+      if (c.rare) row.classList.add('rare');
+      const info = document.createElement('div');
+      info.className = 'shop-item-info';
+      const nm = document.createElement('div');
+      nm.className = 'shop-item-name';
+      nm.textContent = c.name + (c.pack ? ' ' : '');
+      if (c.pack) {
+        const pk = document.createElement('span');
+        pk.style.cssText = 'font-weight:normal;color:#a49c88';
+        pk.textContent = c.pack;
+        nm.append(pk);
+      }
+      const ct = document.createElement('div');
+      ct.className = 'shop-item-cost';
+      // Rare pets: no price tag — make it clear coins can't touch this.
+      ct.textContent = c.rare ? `✨ RARE · not for sale — ${c.desc}`
+                             : `${Number(c.cost).toLocaleString()} coins — ${c.desc}`;
+      info.append(nm, ct);
+      row.append(icon, info, btn);
+      return row;
+    }
+
+    // Rebuild the active shop tab from its catalog + current ownership state.
+    // Wearables buttons: Buy (not owned), Wear (owned, not worn — free),
+    // Wearing ✓ (worn — click to take off). Cheap enough to rebuild wholesale.
+    function _refreshShopUI() {
+      document.getElementById('shop-coin-display').textContent = _playerCoins;
+      for (const t of ['wear', 'wings', 'items', 'pets', 'wardrobe', 'market'])
+        document.getElementById('shop-tab-btn-' + t).classList.toggle('sel', _shopTab === t);
+      const cosBox  = document.getElementById('shop-cosmetics');
+      const wingBox = document.getElementById('shop-wings');
+      const useBox  = document.getElementById('shop-usables');
+      const petsBox = document.getElementById('shop-pets');
+      const wardBox = document.getElementById('shop-wardrobe');
+      const mktBox  = document.getElementById('shop-market');
+      cosBox.style.display  = _shopTab === 'wear'     ? '' : 'none';
+      wingBox.style.display = _shopTab === 'wings'    ? '' : 'none';
+      useBox.style.display  = _shopTab === 'items'    ? '' : 'none';
+      petsBox.style.display = _shopTab === 'pets'     ? '' : 'none';
+      wardBox.style.display = _shopTab === 'wardrobe' ? '' : 'none';
+      mktBox.style.display  = _shopTab === 'market'   ? '' : 'none';
+      if (_shopTab === 'market') _renderMarket();
+
+      // Page window for the active (paged) tab; clamp so a shrinking catalog
+      // or stale page index can never show an empty page.
+      const catalog = _shopTab === 'wear' ? COSMETICS.filter(c => !c.wings && _seasonRowOk(c))
+                    : _shopTab === 'wings' ? COSMETICS.filter(c => c.wings)
+                    : _shopTab === 'items' ? USABLES
+                    : _shopTab === 'pets' ? PETS.concat(PET_ACCESSORIES).filter(_seasonRowOk) : null;
+      let pages = 1;
+      if (catalog) {
+        pages = Math.max(1, Math.ceil(catalog.length / SHOP_PAGE_SIZE));
+        _shopPage = Math.min(Math.max(_shopPage, 0), pages - 1);
+      }
+      const pager = document.getElementById('shop-pager');
+      pager.classList.toggle('on', !!catalog && pages > 1);
+      if (catalog && pages > 1) {
+        document.getElementById('shop-page-label').textContent = `${_shopPage + 1}/${pages}`;
+        document.getElementById('shop-page-prev').disabled = _shopPage === 0;
+        document.getElementById('shop-page-next').disabled = _shopPage === pages - 1;
+      }
+      const slice = catalog ? catalog.slice(_shopPage * SHOP_PAGE_SIZE, (_shopPage + 1) * SHOP_PAGE_SIZE) : [];
+
+      if (_shopTab === 'wear' || _shopTab === 'wings') {
+        const box = _shopTab === 'wings' ? wingBox : cosBox;
+        box.textContent = '';
+        let lastCat = null;   // category headers (Hats / Eyewear / ...), one per run on this page
+        for (const c of slice) {
+          if (c.cat && c.cat !== lastCat) {
+            lastCat = c.cat;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = c.cat;
+            box.append(h);
+          }
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          if (!_ownedItems.includes(c.id)) {
+            if (c.rare) {
+              // Gift-only: tease instead of buy (server blocks buyCosmetic too).
+              btn.textContent = '🎁 Gift only';
+              btn.classList.add('poor');
+              btn.onclick = () => showToast('🎁 Rare item — the boss decides who gets one.');
+            } else {
+              btn.textContent = 'Buy';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyItem(c.id);
+            }
+          } else if ((c.wings ? _equippedWings : WEAR_SLOT[c.id] ? _equippedSlots[WEAR_SLOT[c.id]] : _equippedCosmetic) === c.id) {
+            btn.textContent = 'Wearing ✓'; btn.classList.add('wearing');
+            btn.onclick = () => equipItem('', c.wings ? 'wings' : (WEAR_SLOT[c.id] || 'wear'));   // take it off (its own slot)
+          } else {
+            btn.textContent = 'Wear'; btn.classList.add('wear');
+            btn.onclick = () => equipItem(c.id);     // switch, free
+          }
+          box.append(_shopRow(c, btn));
+        }
+      } else if (_shopTab === 'items') {
+        useBox.textContent = '';
+        for (const c of slice) {
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          const owned = _playerItems[c.id] || 0;
+          btn.textContent = owned > 0 ? `Buy (×${owned})` : 'Buy';
+          if (_playerCoins < c.cost) btn.classList.add('poor');
+          btn.onclick = () => buyUsable(c.id);
+          useBox.append(_shopRow(c, btn));
+        }
+      } else if (_shopTab === 'pets') {
+        // Pets: Adopt (not owned) / Bring (owned, not out — free) /
+        // With you ✓ (out — click to send it home). Mirrors the wearables tab.
+        // Accessories (petacc_ rows, paged after the pets): Buy / Put on /
+        // On ✓ — one slot, putting on a new one swaps it, On ✓ takes it off.
+        petsBox.textContent = '';
+        let accHeaderDone = false, lastSpecies = null;
+        for (const c of slice) {
+          const isAcc = c.id.startsWith('petacc_');
+          // Species group headers: one per species run on the current page
+          // (variants are ordered by species in PETS, so runs are contiguous).
+          if (!isAcc && c.species && c.species !== lastSpecies) {
+            lastSpecies = c.species;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = c.species;
+            petsBox.append(h);
+          }
+          if (isAcc && !accHeaderDone) {
+            accHeaderDone = true;
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:12px;opacity:.75;margin:6px 2px 2px;';
+            h.textContent = _ownedItems.some(o => o.startsWith('pet_'))
+              ? 'Accessories — dress up your pet'
+              : 'Accessories — adopt a pet first to show these off';
+            petsBox.append(h);
+          }
+          const btn = document.createElement('button');
+          btn.className = 'buy-btn';
+          if (isAcc) {
+            if (!_ownedItems.includes(c.id)) {
+              btn.textContent = 'Buy';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyPetAcc(c.id);
+            } else if (_equippedPetAcc === c.id) {
+              btn.textContent = 'On ✓'; btn.classList.add('wearing');
+              btn.onclick = () => equipPetAcc('');      // take it off
+            } else {
+              btn.textContent = 'Put on'; btn.classList.add('wear');
+              btn.onclick = () => equipPetAcc(c.id);    // swap, free
+            }
+          } else if (!_ownedItems.includes(c.id)) {
+            if (c.rare) {
+              // Gift-only: the button teases instead of buying (server
+              // hard-blocks buyPet on rare ids regardless).
+              btn.textContent = '🎁 Gift only';
+              btn.classList.add('poor');
+              btn.onclick = () => showToast('🎁 Rare pet — the boss decides who gets one.');
+            } else {
+              btn.textContent = 'Adopt';
+              if (_playerCoins < c.cost) btn.classList.add('poor');
+              btn.onclick = () => buyPet(c.id);
+            }
+          } else if (_equippedPet === c.id) {
+            btn.textContent = 'With you ✓'; btn.classList.add('wearing');
+            btn.onclick = () => equipPet('');       // send it home
+          } else {
+            btn.textContent = 'Bring'; btn.classList.add('wear');
+            btn.onclick = () => equipPet(c.id);     // switch, free
+          }
+          petsBox.append(_shopRow(c, btn));
+        }
+      } else {
+        _renderWardrobe();
+      }
+    }
+    // Wardrobe UI: two swatch grids (shirt / trousers) + one Apply button.
+    // WARDROBE_PRICE here is a display label only — the server enforces the
+    // real price. Selection is pending until Apply; openShop() resets it to
+    // what you're currently wearing.
+    const WARDROBE_PRICE = 25;
+    const AVATAR_PRICE = 100;   // display label only — server enforces the real price
+    let _wardrobeShirtSel = 0, _wardrobePantsSel = 0;
+    let _wardrobeHairSel = 0, _wardrobeCharSel = 'adam';
+    let _avatarChanges = 0;   // how many makeovers this account has done (first is free)
+    function _renderWardrobe() {
+      const mk = (boxId, selIdx, curIdx, onPick) => {
+        const box = document.getElementById(boxId);
+        box.textContent = '';
+        CLOTH_COLORS.forEach((c, i) => {
+          const b = document.createElement('button');
+          b.className = 'cloth-swatch';
+          b.title = i === curIdx ? `${c.label} (wearing)` : c.label;
+          if (c.css) b.style.background = c.css; else b.classList.add('orig');
+          if (i === selIdx) b.classList.add('sel');
+          b.onclick = () => onPick(i);
+          box.append(b);
+        });
+      };
+      mk('wardrobe-shirt', _wardrobeShirtSel, _playerShirtIdx, (i) => { _wardrobeShirtSel = i; _renderWardrobe(); });
+      mk('wardrobe-pants', _wardrobePantsSel, _playerPantsIdx, (i) => { _wardrobePantsSel = i; _renderWardrobe(); });
+      const btn  = document.getElementById('wardrobe-apply');
+      const noop = _wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx;
+      btn.classList.toggle('poor', noop || _playerCoins < WARDROBE_PRICE);
+      btn.textContent = noop ? 'Pick new colours' : `Apply — ${WARDROBE_PRICE} coins`;
+
+      // ── Avatar makeover: character buttons + hair swatches ──
+      const charBox = document.getElementById('wardrobe-char');
+      charBox.textContent = '';
+      CHARACTERS.forEach((ch) => {
+        const b = document.createElement('button');
+        b.className = 'cloth-swatch';
+        b.style.cssText = 'width:auto;padding:2px 8px;font-size:11px;text-transform:capitalize;';
+        b.textContent = ch;
+        b.title = ch === _playerChar ? `${ch} (current)` : ch;
+        if (ch === _wardrobeCharSel) b.classList.add('sel');
+        b.onclick = () => { _wardrobeCharSel = ch; _renderWardrobe(); };
+        charBox.append(b);
+      });
+      const hairBox = document.getElementById('wardrobe-hair');
+      hairBox.textContent = '';
+      HAIR_COLORS.forEach((c, i) => {
+        const b = document.createElement('button');
+        b.className = 'cloth-swatch';
+        b.title = i === _playerHairIdx ? `${c.label} (current)` : c.label;
+        if (c.css) b.style.background = c.css; else b.classList.add('orig');
+        if (i === _wardrobeHairSel) b.classList.add('sel');
+        b.onclick = () => { _wardrobeHairSel = i; _renderWardrobe(); };
+        hairBox.append(b);
+      });
+      const free = _avatarChanges === 0;
+      document.getElementById('avatar-price-sub').textContent = free
+        ? 'New hair colour or a whole new character — your FIRST makeover is free! (after that: ' + AVATAR_PRICE + ' coins)'
+        : `New hair colour or a whole new character — ${AVATAR_PRICE} coins per makeover`;
+      const abtn  = document.getElementById('avatar-apply');
+      const anoop = _wardrobeCharSel === _playerChar && _wardrobeHairSel === _playerHairIdx;
+      abtn.classList.toggle('poor', anoop || (!free && _playerCoins < AVATAR_PRICE));
+      abtn.textContent = anoop ? 'Pick a new look' : (free ? 'Apply — FREE (first makeover)' : `Apply — ${AVATAR_PRICE} coins`);
+      _redrawWardrobePreview();
+    }
+    // Live wardrobe preview: same recolor pipeline as the registration
+    // preview (_redrawPreview), but with the PENDING shirt/pants picks over
+    // the player's real character/hair/skin. Standing-down frame at 288,0.
+    function _redrawWardrobePreview() {
+      const cv = document.getElementById('wardrobe-preview');
+      if (!cv) return;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      const img = _charImages[_wardrobeCharSel];
+      if (!img) return;
+      ctx.imageSmoothingEnabled = false;
+      const zones = _charZoneColors[_wardrobeCharSel];
+      const noSwap = !_wardrobeHairSel && !_playerSkinIdx && !_wardrobeShirtSel && !_wardrobePantsSel;
+      if (noSwap || !zones) {
+        ctx.drawImage(img, 288, 0, 16, 32, 0, 0, cv.width, cv.height);
+        return;
+      }
+      const tmp = document.createElement('canvas');
+      tmp.width = 16; tmp.height = 32;
+      const tc = tmp.getContext('2d');
+      tc.drawImage(img, 288, 0, 16, 32, 0, 0, 16, 32);
+      const id = tc.getImageData(0, 0, 16, 32);
+      const L = _cropLayerData(_wardrobeCharSel, 'run', 288, 0, 16, 32);
+      if (L) _layeredSwaps(id.data, L, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16, 16);
+      else   _applySwaps(id.data, zones, _wardrobeHairSel, _playerSkinIdx, _wardrobeShirtSel, _wardrobePantsSel, 16);
+      tc.putImageData(id, 0, 0);
+      ctx.drawImage(tmp, 0, 0, 16, 32, 0, 0, cv.width, cv.height);
+    }
+    // Greyed states still emit (same pattern as cosmetic Buy buttons): the
+    // server answers with the authoritative shopError; only the true no-op
+    // (nothing changed) short-circuits locally.
+    function applyOutfit() {
+      if (_wardrobeShirtSel === _playerShirtIdx && _wardrobePantsSel === _playerPantsIdx) return;
+      socket.emit('changeOutfit', { shirtIdx: _wardrobeShirtSel, pantsIdx: _wardrobePantsSel });
+    }
+    function applyAvatar() {
+      if (_wardrobeCharSel === _playerChar && _wardrobeHairSel === _playerHairIdx) return;
+      socket.emit('changeAvatar', { character: _wardrobeCharSel, hairIdx: _wardrobeHairSel });
+    }
+    window.applyAvatar = applyAvatar;
+    // Items bar: rows are generated once from the USABLES catalog (ids must
+    // match the server's USABLE_ITEMS); a row shows only while you own that
+    // item, and the whole bar hides when you own nothing usable.
+    (function _buildItemBar() {
+      const bar = document.getElementById('item-bar');
+      for (const u of USABLES) {
+        const row = document.createElement('div');
+        row.className = 'item-row'; row.id = 'item-row-' + u.id;
+        const icon = document.createElement('span');
+        icon.className = 'item-icon'; icon.textContent = u.emoji;
+        const count = document.createElement('span');
+        count.className = 'item-count'; count.id = 'item-count-' + u.id; count.textContent = '×0';
+        const btn = document.createElement('button');
+        btn.className = 'use-btn'; btn.type = 'button'; btn.textContent = u.verb || 'Use';
+        btn.onclick = () => useItem(u.id);
+        row.append(icon, count, btn);
+        bar.append(row);
+      }
+    })();
+    function _renderItemBar() {
+      let any = false;
+      for (const u of USABLES) {
+        const n = _playerItems[u.id] || 0;
+        document.getElementById('item-row-' + u.id).classList.toggle('owned', n > 0);
+        document.getElementById('item-count-' + u.id).textContent = '×' + n;
+        if (n > 0) any = true;
+      }
+      document.getElementById('item-bar').classList.toggle('has-items', any);
+    }
+
+    // ── Touch / shared input state ────────────────────────────────────
+    // ?touch=1 forces the on-screen controls on (QA aid on non-touch devices).
+    const IS_TOUCH = /[?&]touch=1/.test(location.search) || (window.matchMedia
+      ? window.matchMedia('(pointer: coarse)').matches
+      : ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+    if (IS_TOUCH) document.body.classList.add('touch-device');
+    // Virtual movement booleans (OR'd with the keyboard in update) + a one-shot action flag.
+    const touchMove   = { up:false, down:false, left:false, right:false };
+    const touchAction = { queued:false };
+
+    // ── Chat ──────────────────────────────────────────────────────────
+    let _chatOpen = false;
+    const chatBar   = document.getElementById('chat-bar');
+    const chatInput = document.getElementById('chat-input');
+
+    function openChat() {
+      if (_chatOpen) return;
+      if (_dmOpen) closeDM();   // chat and the DM composer are mutually exclusive
+      _chatOpen = true;
+      document.body.classList.add('chatting');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      chatBar.classList.add('open');
+      chatInput.value = '';
+      setTimeout(() => chatInput.focus(), 30);
+    }
+    function closeChat() {
+      _chatOpen = false;
+      document.body.classList.remove('chatting');
+      chatBar.classList.remove('open');
+      _setPendingImg(null);   // Esc / close always discards a staged picture
+      document.querySelector('canvas')?.focus();
+    }
+    function sendChat() {
+      const msg = chatInput.value.trim();
+      if (msg) socket.emit('chatMessage', { message: msg });
+      if (_pendingChatImg) socket.emit('chatImage', { img: _pendingChatImg });
+      closeChat();
+    }
+
+    // ── Chat images: paste (Ctrl+V) or drag-and-drop, like Teams ──────
+    // Pictures are ephemeral exactly like text chat: broadcast once, kept
+    // only in each player's session log, gone on a server restart.
+    const CHAT_IMG_LIMIT = 2 * 1024 * 1024;   // 2 MB — matches the server cap
+    let _pendingChatImg = null;               // data URL staged in the preview chip
+    const _imgPreview   = document.getElementById('chat-img-preview');
+    const _imgPreviewEl = _imgPreview.querySelector('img');
+
+    function _setPendingImg(dataUrl) {
+      _pendingChatImg = dataUrl;
+      _imgPreviewEl.src = dataUrl || '';
+      _imgPreview.classList.toggle('on', !!dataUrl);
+    }
+    document.getElementById('chat-img-x').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); _setPendingImg(null); chatInput.focus();
+    });
+
+    // Auto-shrink: big photos are resized (max edge 1280) and re-encoded as
+    // JPEG with descending quality until they fit under the cap — nobody
+    // ever sees a "file too big" error. Small PNG/JPEG/WebP pass through
+    // untouched (keeps screenshots crisp and PNG transparency intact).
+    function _shrinkChatImage(file) {
+      return new Promise((resolve, reject) => {
+        const ok = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+        if (ok && file.size <= CHAT_IMG_LIMIT) {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error('read failed'));
+          r.readAsDataURL(file);
+          return;
+        }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const MAX_EDGE = 1280;
+          const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+          const cv = document.createElement('canvas');
+          cv.width  = Math.max(1, Math.round(img.width  * scale));
+          cv.height = Math.max(1, Math.round(img.height * scale));
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          for (const q of [0.85, 0.7, 0.55, 0.4, 0.25]) {
+            const out = cv.toDataURL('image/jpeg', q);
+            // base64 chars ≈ bytes × 4/3 — compare in data-URL space
+            if (out.length <= CHAT_IMG_LIMIT * 1.37) { resolve(out); return; }
+          }
+          reject(new Error('too big'));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+        img.src = url;
+      });
+    }
+
+    function _stageChatImage(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      _shrinkChatImage(file)
+        .then((dataUrl) => { if (!_chatOpen) openChat(); _setPendingImg(dataUrl); })
+        .catch(() => showToast("😵 Couldn't read that picture — try a PNG or JPEG."));
+    }
+
+    // Paste anywhere while playing (chat opens itself if needed) — but never
+    // steal a paste aimed at another input (DM box, shop, admin fields).
+    document.addEventListener('paste', (e) => {
+      if (!document.body.classList.contains('playing')) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ae !== chatInput) {
+        // Pasting a picture into the DM composer stages it there instead.
+        if ((ae.id === 'dm-input' || ae.id === 'dm-to') && window._dmStageImage) {
+          const dmItem = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+          if (dmItem) { e.preventDefault(); window._dmStageImage(dmItem.getAsFile()); }
+        }
+        return;
+      }
+      const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      if (!item) return;
+      e.preventDefault();
+      _stageChatImage(item.getAsFile());
+    });
+
+    // Drag-and-drop a picture anywhere onto the office.
+    window.addEventListener('dragover', (e) => { e.preventDefault(); });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!document.body.classList.contains('playing')) return;
+      const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+      if (!f) return;
+      // If the DM composer is open, the drop is meant for the whisper.
+      if (window._dmIsOpen?.() && window._dmStageImage) window._dmStageImage(f);
+      else _stageChatImage(f);
+    });
+
+    socket.on('chatImgError', (m) => showToast('🐢 ' + m));
+
+    document.addEventListener('keydown', e => {
+      if ((e.key === 't' || e.key === 'T') && !_chatOpen && !_dmOpen && !_rpsUiOpen
+          && !document.getElementById('shop-modal').classList.contains('open')
+          && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault(); openChat();
+      }
+    });
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendChat(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChat(); }
+      e.stopPropagation();
+    });
+
+    // ── Emotes (reaction bubbles) ─────────────────────────────────────
+    // Ids MUST match the server's EMOTES allowlist in server.js. Array order
+    // defines the 1–8 keyboard shortcuts and the button order in the bar.
+    const EMOTES = [
+      { id:'wave',   char:'👋' },
+      { id:'heart',  char:'❤️' },
+      { id:'laugh',  char:'😂' },
+      { id:'party',  char:'🎉' },
+      { id:'thumbs', char:'👍' },
+      { id:'fire',   char:'🔥' },
+      { id:'sad',    char:'😢' },
+      { id:'shock',  char:'😮' },
+    ];
+    const EMOTE_CHARS = {};
+    EMOTES.forEach(e => { EMOTE_CHARS[e.id] = e.char; });
+
+    function sendEmote(id) {
+      socket.emit('emote', { emote: id });
+      // On touch the bar overlays the game — auto-collapse it after a pick.
+      if (IS_TOUCH) document.getElementById('emote-bar').classList.remove('open');
+    }
+
+    {
+      const bar = document.getElementById('emote-bar');
+      EMOTES.forEach((e, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'emote-btn';
+        b.setAttribute('aria-label', 'Emote: ' + e.id);
+        b.innerHTML = e.char + '<span class="emote-key">' + (i + 1) + '</span>';
+        // pointerdown (not click) + preventDefault keeps focus on the game canvas.
+        b.addEventListener('pointerdown', ev => { ev.preventDefault(); sendEmote(e.id); });
+        bar.appendChild(b);
+      });
+      // ⚔️ quick challenge rides in the emote bar (NOT in EMOTES — it isn't an
+      // emote id the server knows about; it opens the challenge flow instead).
+      const cb = document.createElement('button');
+      cb.type = 'button';
+      cb.className = 'emote-btn challenge';
+      cb.setAttribute('aria-label', 'Challenge nearest player');
+      cb.title = 'Challenge the nearest player';
+      cb.textContent = '⚔️';
+      cb.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        if (IS_TOUCH) bar.classList.remove('open');
+        window._quickChallenge?.();
+      });
+      bar.appendChild(cb);
+      // 🌙 Office After Dark rides in the emote bar too — starts a round
+      // (works the same on touch, so it doesn't need its own floating button).
+      const rb = document.createElement('button');
+      rb.type = 'button';
+      rb.className = 'emote-btn challenge';
+      rb.setAttribute('aria-label', 'Start Office After Dark');
+      rb.title = 'Office After Dark — lights out, find the killer';
+      rb.textContent = '🌙';
+      rb.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        if (IS_TOUCH) bar.classList.remove('open');
+        window._roundStart?.();
+      });
+      bar.appendChild(rb);
+      document.getElementById('emote-toggle')?.addEventListener('pointerdown', ev => {
+        ev.preventDefault(); bar.classList.toggle('open');
+      });
+    }
+
+    // Number keys 1–8 fire emotes while playing (never while typing in a field).
+    document.addEventListener('keydown', e => {
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= EMOTES.length) { e.preventDefault(); sendEmote(EMOTES[n - 1].id); }
+    });
+
+    // ── Minimap (M key) ─────────────────────────────────────────────────
+    // Whole-office overview with live player dots. The static office layout
+    // (Floor / Wall / Furniture) is rasterised ONCE into an offscreen canvas
+    // (1 tile → mmScale px); only the dots are redrawn on a timer while open.
+    // BLOCKED during After Dark (lobby AND active) — a live position map
+    // would ruin the hide-and-hunt — and force-closed if a round begins.
+    let _mmOpen = false, _mmBg = null, _mmTimer = null, _mmScale = 1;
+    const _mmEl = document.getElementById('minimap');
+    const _mmCv = document.getElementById('minimapCanvas');
+    // Pretty background: a pre-rendered shot of the ACTUAL office art
+    // (assets/minimap.png, regenerate with the capture script after map edits).
+    // The blocky tile raster below stays as the fallback if it fails to load.
+    const _mmImg = new Image();
+    let _mmImgOk = false;
+    _mmImg.onload = () => { _mmImgOk = true; _mmBg = null; };
+    _mmImg.src = '/assets/minimap.png';
+
+    function _mmBuildBg(map) {
+      // Fit the whole map inside ~92vw × 78vh, whole-pixel tiles for crispness.
+      _mmScale = Math.max(1, Math.floor(Math.min(
+        (window.innerWidth * 0.92) / map.width, (window.innerHeight * 0.78) / map.height)));
+      const bg = document.createElement('canvas');
+      bg.width = map.width * _mmScale; bg.height = map.height * _mmScale;
+      const g = bg.getContext('2d');
+      if (_mmImgOk) {   // real map art, scaled to fit — no tile raster needed
+        g.imageSmoothingEnabled = true;
+        g.drawImage(_mmImg, 0, 0, bg.width, bg.height);
+        return bg;
+      }
+      g.fillStyle = '#10131f'; g.fillRect(0, 0, bg.width, bg.height);
+      const paint = (layerName, color) => {
+        const layer = map.getLayer(layerName);
+        if (!layer) return;
+        g.fillStyle = color;
+        for (let ty = 0; ty < map.height; ty++)
+          for (let tx = 0; tx < map.width; tx++) {
+            const t = layer.data[ty][tx];
+            if (t && t.index > 0) g.fillRect(tx * _mmScale, ty * _mmScale, _mmScale, _mmScale);
+          }
+      };
+      paint('Floor',     '#2a3149');
+      paint('Furniture', '#4a5578');
+      paint('Wall',      '#6b779e');
+      return bg;
+    }
+
+    function _mmDraw() {
+      const sc = window._gameScene;
+      if (!sc || !sc._tileMap) return;
+      if (_roundPhase) { _mmClose(); return; }   // round started while open
+      const map = sc._tileMap;
+      if (!_mmBg) _mmBg = _mmBuildBg(map);
+      _mmCv.width = _mmBg.width; _mmCv.height = _mmBg.height;
+      const g = _mmCv.getContext('2d');
+      g.drawImage(_mmBg, 0, 0);
+      // world px → minimap px (layers render at setScale(3))
+      const k = _mmScale / (map.tileWidth * 3);
+      const dot = (x, y, color, ring) => {
+        g.beginPath(); g.arc(x * k, y * k, ring ? 5 : 4, 0, Math.PI * 2);
+        g.fillStyle = color; g.fill();
+        if (ring) { g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
+      };
+      const label = (x, y, text) => {
+        g.font = '10px sans-serif'; g.textAlign = 'center';
+        g.fillStyle = 'rgba(0,0,0,.55)';
+        const w = g.measureText(text).width;
+        g.fillRect(x * k - w / 2 - 3, y * k - 19, w + 6, 12);
+        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, y * k - 10);
+      };
+      for (const id in sc.otherPlayers) {
+        const e = sc.otherPlayers[id];
+        if (!e || !e.sprite) continue;
+        dot(e.sprite.x, e.sprite.y, '#5ad1ff');
+        label(e.sprite.x, e.sprite.y, e.nameTag?.text || '?');
+      }
+      if (sc.player) {
+        dot(sc.player.x, sc.player.y, '#ffd84d', true);
+        label(sc.player.x, sc.player.y, 'You');
+      }
+    }
+
+    function _mmClose() {
+      _mmOpen = false; _mmEl.classList.remove('open');
+      if (_mmTimer) { clearInterval(_mmTimer); _mmTimer = null; }
+      _mmBg = null;   // rebuild next open — window may have been resized
+    }
+    function _mmToggle() {
+      if (_mmOpen) return _mmClose();
+      if (_roundPhase) return;                       // no map during After Dark
+      if (!window._gameScene?._tileMap) return;      // scene not ready yet
+      _mmOpen = true; _mmEl.classList.add('open');
+      _mmDraw();
+      _mmTimer = setInterval(_mmDraw, 400);
+    }
+    _mmEl.addEventListener('click', _mmClose);
+
+    document.addEventListener('keydown', e => {
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === 'KeyM') { e.preventDefault(); _mmToggle(); }
+      else if (e.key === 'Escape' && _mmOpen) { e.preventDefault(); _mmClose(); }
+    });
+
+    // ── Private DMs (whispers) ─────────────────────────────────────────
+    // In-session only: whispers are never persisted. The composer resolves a
+    // display name to ONE specific live session (socket id) via the online
+    // roster below, so name collisions are settled here, not on the server.
+    let _dmOpen = false;
+    let _dmTargetId = null;   // socket id picked via autocomplete / avatar click
+    const dmBar     = document.getElementById('dm-bar');
+    const dmTo      = document.getElementById('dm-to');
+    const dmInput   = document.getElementById('dm-input');
+    const dmSuggest = document.getElementById('dm-suggest');
+    const dmError   = document.getElementById('dm-error');
+    const dmLog     = document.getElementById('dm-log');
+
+    // Online roster (id → {name, character}), maintained at DOM level from the
+    // same socket events the scene consumes (socket.io supports multiple
+    // listeners). Skips ourselves AND a stale ghost copy of our own email that
+    // can briefly linger during a reconnect (same rule as _addOtherPlayer).
+    const _online = {};
+    function _rosterSkip(id, d) {
+      if (id === socket.id) return true;
+      return !!(_playerEmail && d && d.email && d.email === _playerEmail);
+    }
+    socket.on('currentPlayers', (all) => {
+      Object.keys(_online).forEach(k => delete _online[k]);
+      Object.entries(all).forEach(([id, d]) => {
+        if (!_rosterSkip(id, d)) _online[id] = { name: d.name || '?', character: d.character || '' };
+      });
+    });
+    socket.on('playerJoined', (d) => {
+      if (d && d.id && !_rosterSkip(d.id, d)) _online[d.id] = { name: d.name || '?', character: d.character || '' };
+    });
+    socket.on('playerLeft', (id) => { delete _online[id]; });
+
+    function _dmSetError(msg) {
+      dmError.textContent = msg || '';
+      dmError.classList.toggle('open', !!msg);
+      if (msg) _dmHideSuggest();
+    }
+    function _dmHideSuggest() { dmSuggest.classList.remove('open'); dmSuggest.innerHTML = ''; }
+
+    function _dmMatches(q) {
+      const s = (q || '').trim().toLowerCase();
+      return Object.entries(_online).filter(([, p]) => !s || p.name.toLowerCase().includes(s));
+    }
+
+    // Rebuild the suggestion dropdown from the current input. Each row is a
+    // SPECIFIC session — picking one binds _dmTargetId, so two people with the
+    // same display name stay distinguishable (character tag shown as a hint).
+    function _dmShowSuggest() {
+      _dmSetError('');
+      const items = _dmMatches(dmTo.value).slice(0, 8);
+      dmSuggest.innerHTML = '';
+      if (!items.length) { _dmHideSuggest(); return; }
+      items.forEach(([id, p]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'dm-sug';
+        b.textContent = p.name;                       // textContent — names are user data
+        if (p.character) {
+          const tag = document.createElement('small');
+          tag.textContent = p.character;
+          b.appendChild(tag);
+        }
+        b.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          _dmTargetId = id;
+          dmTo.value = p.name;
+          _dmHideSuggest();
+          dmInput.focus();
+        });
+        dmSuggest.appendChild(b);
+      });
+      dmSuggest.classList.add('open');
+    }
+
+    function openDM(prefillId) {
+      if (_dmOpen) return;
+      if (_chatOpen) closeChat();
+      _dmOpen = true;
+      document.body.classList.add('chatting');   // reuse all "typing" CSS behavior
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      dmBar.classList.add('open');
+      _dmSetError('');
+      dmInput.value = '';
+      if (prefillId && _online[prefillId]) {
+        _dmTargetId = prefillId;
+        dmTo.value = _online[prefillId].name;
+        _dmHideSuggest();
+        setTimeout(() => dmInput.focus(), 30);
+      } else {
+        _dmTargetId = null;
+        dmTo.value = '';
+        _dmHideSuggest();
+        setTimeout(() => dmTo.focus(), 30);
+      }
+    }
+    function closeDM() {
+      _dmOpen = false;
+      _dmTargetId = null;
+      document.body.classList.remove('chatting');
+      dmBar.classList.remove('open');
+      _dmHideSuggest(); _dmSetError('');
+      if (typeof _setDmPendingImg === 'function') _setDmPendingImg(null);   // discard staged picture
+      document.querySelector('canvas')?.focus();
+    }
+
+    // Resolve the recipient to one socket id. A dropdown pick wins; otherwise
+    // fall back to the typed name (unique exact match, then unique partial).
+    function _dmResolveTarget() {
+      if (_dmTargetId && _online[_dmTargetId]) return _dmTargetId;
+      _dmTargetId = null;
+      const typed = dmTo.value.trim();
+      if (!typed) { _dmSetError('Who is it for? Type a name or pick from the list.'); dmTo.focus(); return null; }
+      const s = typed.toLowerCase();
+      const exact = Object.entries(_online).filter(([, p]) => p.name.toLowerCase() === s);
+      if (exact.length === 1) return exact[0][0];
+      if (exact.length > 1) { _dmSetError(`Several people are named “${typed}” — pick one from the list.`); _dmShowSuggest(); dmTo.focus(); return null; }
+      const partial = _dmMatches(s);
+      if (partial.length === 1) return partial[0][0];
+      if (partial.length > 1) { _dmSetError(`A few names match “${typed}” — pick one from the list.`); _dmShowSuggest(); dmTo.focus(); return null; }
+      _dmSetError(`No one named “${typed}” is in the office right now.`);
+      dmTo.focus();
+      return null;
+    }
+
+    // Staged whisper image (paste or drop while the DM composer is open) —
+    // reuses the chat pipeline's shrink helper, sent via 'whisperImage'.
+    let _pendingDmImg = null;
+    const _dmImgPreview = document.getElementById('dm-img-preview');
+    function _setDmPendingImg(dataUrl) {
+      _pendingDmImg = dataUrl;
+      _dmImgPreview.querySelector('img').src = dataUrl || '';
+      _dmImgPreview.classList.toggle('on', !!dataUrl);
+    }
+    document.getElementById('dm-img-x').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); _setDmPendingImg(null); dmInput.focus();
+    });
+    window._dmStageImage = function (file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      _shrinkChatImage(file)
+        .then((dataUrl) => _setDmPendingImg(dataUrl))
+        .catch(() => showToast("😵 Couldn't read that picture — try a PNG or JPEG."));
+    };
+    window._dmIsOpen = () => _dmOpen;
+
+    function sendDM() {
+      const target = _dmResolveTarget();
+      if (!target) return;
+      const msg = dmInput.value.trim();
+      if (!msg && !_pendingDmImg) { dmInput.focus(); return; }
+      if (msg) socket.emit('whisper', { targetId: target, message: msg });
+      if (_pendingDmImg) socket.emit('whisperImage', { targetId: target, img: _pendingDmImg });
+      closeDM();
+    }
+
+    // Session-only DM feed (top-right). Entries fade after a while; received
+    // whispers are clickable to reply.
+    function _dmLogAdd(kind, who, text, fromId, img) {
+      const div = document.createElement('div');
+      div.className = 'dm-msg ' + kind;   // 'in' | 'out' | 'err'
+      if (kind !== 'err') {
+        const whoSpan = document.createElement('span');
+        whoSpan.className = 'dm-who';
+        whoSpan.textContent = kind === 'in' ? `(whisper) ${who}: ` : `(to ${who}): `;
+        div.appendChild(whoSpan);
+      }
+      if (text) div.appendChild(document.createTextNode(text));   // textContent path — never innerHTML
+      if (typeof img === 'string' && img.startsWith('data:image/')) {
+        const im = document.createElement('img');
+        im.className = 'dm-img'; im.src = img; im.alt = 'whispered image';
+        im.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); _openLightbox(img); });
+        div.appendChild(im);
+      }
+      if (kind === 'in' && fromId) {
+        div.title = 'Click to reply';
+        div.addEventListener('pointerdown', (ev) => {
+          ev.preventDefault();
+          if (!_dmOpen && !_chatOpen && document.body.classList.contains('playing')) openDM(fromId);
+        });
+      }
+      dmLog.appendChild(div);
+      while (dmLog.children.length > 6) dmLog.removeChild(dmLog.firstChild);
+      setTimeout(() => {
+        div.style.transition = 'opacity 1s';
+        div.style.opacity = '0';
+        setTimeout(() => div.remove(), 1000);
+      }, kind === 'err' ? 6000 : 14000);
+    }
+
+    socket.on('whisper', (payload) => {
+      const { fromId, fromName, message, img } = payload || {};
+      const hasImg = typeof img === 'string' && img.startsWith('data:image/');
+      if ((typeof message !== 'string' || !message) && !hasImg) return;
+      _dmLogAdd('in', fromName || '?', message || '', fromId, hasImg ? img : undefined);
+      if (message) _chatLogAdd('whisper', fromName || '?', message, { dir: 'in' });   // history log (private, only we see it)
+      if (hasImg) _chatLogAddImg('whisper', fromName || '?', img, { dir: 'in' });
+      // Also show a purple whisper bubble over the sender's avatar if visible.
+      if (fromId && window._gameScene) window._gameScene._showWhisperBubble(fromId, message || '📷 sent you a picture');
+    });
+    socket.on('whisperSent', (payload) => {
+      const { toName, message, img } = payload || {};
+      const hasImg = typeof img === 'string' && img.startsWith('data:image/');
+      if ((typeof message !== 'string' || !message) && !hasImg) return;
+      _dmLogAdd('out', toName || '?', message || '', undefined, hasImg ? img : undefined);
+      if (message) _chatLogAdd('whisper', toName || '?', message, { dir: 'out' });   // history log
+      if (hasImg) _chatLogAddImg('whisper', toName || '?', img, { dir: 'out' });
+    });
+    socket.on('whisperFailed', (payload) => {
+      const { message } = payload || {};
+      _dmLogAdd('err', '', message || "They're not in the office right now.");
+    });
+
+    // Tab opens the composer — ONLY while playing and never while typing in a
+    // field (Tab must keep doing normal focus-nav inside forms/modals).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return;
+      if (document.getElementById('shop-modal').classList.contains('open')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      openDM();
+    });
+    dmTo.addEventListener('input', () => { _dmTargetId = null; _dmShowSuggest(); });
+    dmTo.addEventListener('focus', () => { if (_dmOpen) _dmShowSuggest(); });
+    dmTo.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  {
+        e.preventDefault(); e.stopPropagation();
+        // A unique match locks in on Enter so keyboard-only flow needs no click.
+        const items = _dmMatches(dmTo.value);
+        if (!_dmTargetId && items.length === 1) { _dmTargetId = items[0][0]; dmTo.value = items[0][1].name; }
+        _dmHideSuggest();
+        dmInput.focus();
+      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDM(); }
+      e.stopPropagation();
+    });
+    dmInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); sendDM(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDM(); }
+      e.stopPropagation();
+    });
+
+    // ── Chat history log (session-only, purely client-side) ──────────
+    // A top-left 💬 panel that logs every public chat message (and your own
+    // whispers, marked private) since the page loaded. Nothing is stored on
+    // the server or in the DB — refresh/rejoin starts an empty log. This is
+    // a PASSIVE panel (no input field), so it never joins the 'chatting'
+    // mutual-exclusion seams and never blocks movement or other UI.
+    let _logOpen = false;
+    let _logUnread = 0;
+    const CHATLOG_MAX = 200;   // cap the DOM buffer so long sessions stay light
+    const clBtn    = document.getElementById('chatlog-btn');
+    const clBadge  = document.getElementById('chatlog-badge');
+    const clPanel  = document.getElementById('chatlog-panel');
+    const clScroll = document.getElementById('chatlog-scroll');
+    const clEmpty  = document.getElementById('chatlog-empty');
+
+    function _clBadgeRender() {
+      clBadge.textContent = _logUnread > 9 ? '9+' : String(_logUnread);
+      clBadge.classList.toggle('on', _logUnread > 0 && !_logOpen);
+    }
+    function openChatLog() {
+      _logOpen = true;
+      clPanel.classList.add('open');
+      clBtn.classList.add('active');
+      _logUnread = 0; _clBadgeRender();
+      clScroll.scrollTop = clScroll.scrollHeight;
+    }
+    function closeChatLog() {
+      _logOpen = false;
+      clPanel.classList.remove('open');
+      clBtn.classList.remove('active');
+    }
+    function toggleChatLog() { _logOpen ? closeChatLog() : openChatLog(); }
+
+    function _clTime() {
+      const d = new Date();
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    // kind: 'chat' | 'whisper'. opts: { me } for own public messages,
+    // { dir: 'in'|'out' } for whispers. Names/text via textContent — never innerHTML.
+    function _chatLogAdd(kind, who, text, opts) {
+      const o = opts || {};
+      const div = document.createElement('div');
+      div.className = 'cl-msg' + (kind === 'whisper' ? ' whisper' : '') + (o.me ? ' me' : '');
+      const t = document.createElement('span');
+      t.className = 'cl-time';
+      t.textContent = _clTime();
+      div.appendChild(t);
+      const n = document.createElement('span');
+      n.className = 'cl-name';
+      n.textContent = kind === 'whisper'
+        ? (o.dir === 'out' ? `(to ${who}): ` : `(whisper) ${who}: `)
+        : `${who}: `;
+      div.appendChild(n);
+      div.appendChild(document.createTextNode(text));
+      if (o.mid) _clAttachReacts(div, o.mid);
+      // Only auto-scroll when the reader is already at (or near) the bottom —
+      // measured BEFORE appending so scrolling up to re-read is never yanked away.
+      const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
+      clEmpty.style.display = 'none';
+      clScroll.appendChild(div);
+      while (clScroll.children.length > CHATLOG_MAX) clScroll.removeChild(clScroll.firstChild);
+      if (!_logOpen) { _logUnread++; _clBadgeRender(); }
+      else if (nearBottom) clScroll.scrollTop = clScroll.scrollHeight;
+    }
+
+    // Additional DOM-level listener (socket.io supports multiple listeners —
+    // same pattern as the _online roster). The scene's own 'chatMessage'
+    // listener keeps rendering bubbles; this one only feeds the log.
+    socket.on('chatMessage', (payload) => {
+      const p = payload || {};
+      if (typeof p.message !== 'string' || !p.message) return;
+      _chatLogAdd('chat', p.name || '?', p.message, { me: p.id === socket.id, mid: p.mid });
+    });
+
+    // Chat images land in the log as clickable thumbnails. Pictures are far
+    // heavier than text, so beyond the shared 200-entry cap only the newest
+    // CHATLOG_IMG_MAX image entries keep their pixels — older ones collapse
+    // to a "📷 (photo expired)" stub so scrollback stays light.
+    const CHATLOG_IMG_MAX = 30;
+    // Shared image-entry renderer: public chat images AND whispered images
+    // land in the history log the same way (label differs).
+    function _chatLogAddImg(kind, who, img, o = {}) {
+      _clImgEntry(kind === 'whisper'
+        ? (o.dir === 'out' ? `(to ${who}): ` : `(whisper) ${who}: `)
+        : `${who}: `, img, !!o.me);
+    }
+    function _clImgEntry(label, img, me, mid) {
+      const div = document.createElement('div');
+      div.className = 'cl-msg' + (me ? ' me' : '');
+      const t = document.createElement('span');
+      t.className = 'cl-time'; t.textContent = _clTime();
+      div.appendChild(t);
+      const n = document.createElement('span');
+      n.className = 'cl-name'; n.textContent = label;
+      div.appendChild(n);
+      const im = document.createElement('img');
+      im.className = 'cl-img'; im.src = img; im.alt = 'shared image';
+      im.addEventListener('pointerdown', (e) => { e.preventDefault(); _openLightbox(img); });
+      div.appendChild(im);
+      if (mid) _clAttachReacts(div, mid);
+      const nearBottom = clScroll.scrollHeight - clScroll.scrollTop - clScroll.clientHeight < 40;
+      clEmpty.style.display = 'none';
+      clScroll.appendChild(div);
+      while (clScroll.children.length > CHATLOG_MAX) clScroll.removeChild(clScroll.firstChild);
+      const imgs = clScroll.querySelectorAll('img.cl-img');
+      for (let i = 0; i < imgs.length - CHATLOG_IMG_MAX; i++) {
+        const stub = document.createTextNode('📷 (photo expired)');
+        imgs[i].replaceWith(stub);
+      }
+      if (!_logOpen) { _logUnread++; _clBadgeRender(); }
+      else if (nearBottom) clScroll.scrollTop = clScroll.scrollHeight;
+    }
+    socket.on('chatImage', (payload) => {
+      const p = payload || {};
+      if (typeof p.img !== 'string' || !p.img.startsWith('data:image/')) return;
+      _clImgEntry(`${p.name || '?'}: `, p.img, p.id === socket.id, p.mid);
+    });
+
+    // ── Chat reactions (Teams-style): hover a log message → 🙂 → pick an
+    // emoji. The server relays {mid, emoji, id, name}; a repeat from the same
+    // person toggles their reaction off. Counts live on the message element. ──
+    const CHAT_REACT_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+    function _clAttachReacts(div, mid) {
+      div.dataset.mid = String(mid);
+      div._reacts = {};   // emoji -> { [socketId]: name }
+      const btn = document.createElement('span');
+      btn.className = 'cl-react-btn'; btn.textContent = '🙂';
+      const picker = document.createElement('span');
+      picker.className = 'cl-react-picker';
+      for (const em of CHAT_REACT_EMOJI) {
+        const s = document.createElement('span');
+        s.textContent = em;
+        s.addEventListener('pointerdown', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          socket.emit('chatReact', { mid, emoji: em });
+          picker.classList.remove('open');
+        });
+        picker.appendChild(s);
+      }
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        for (const p of clScroll.querySelectorAll('.cl-react-picker.open')) if (p !== picker) p.classList.remove('open');
+        picker.classList.toggle('open');
+      });
+      const pills = document.createElement('div');
+      pills.className = 'cl-reacts';
+      div.appendChild(btn); div.appendChild(picker); div.appendChild(pills);
+    }
+    function _clRenderReacts(div) {
+      const pills = div.querySelector('.cl-reacts');
+      if (!pills) return;
+      pills.textContent = '';
+      for (const [em, who] of Object.entries(div._reacts || {})) {
+        const ids = Object.keys(who);
+        if (!ids.length) continue;
+        const pill = document.createElement('span');
+        pill.className = 'cl-react-pill' + (who[socket.id] ? ' mine' : '');
+        pill.textContent = `${em} ${ids.length}`;
+        pill.title = ids.map((i) => who[i]).join(', ');
+        pill.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          socket.emit('chatReact', { mid: Number(div.dataset.mid), emoji: em });
+        });
+        pills.appendChild(pill);
+      }
+    }
+    socket.on('chatReact', (d = {}) => {
+      const div = clScroll.querySelector(`[data-mid="${d.mid}"]`);
+      if (!div || typeof d.emoji !== 'string') return;
+      const who = (div._reacts[d.emoji] = div._reacts[d.emoji] || {});
+      if (who[d.id]) delete who[d.id];   // toggle off
+      else who[d.id] = d.name || '?';
+      _clRenderReacts(div);
+    });
+
+    // Full-size lightbox: click a thumbnail to zoom, click anywhere to close.
+    const _lightbox = document.getElementById('img-lightbox');
+    function _openLightbox(src) {
+      _lightbox.querySelector('img').src = src;
+      _lightbox.classList.add('open');
+    }
+    _lightbox.addEventListener('pointerdown', (e) => { e.preventDefault(); _lightbox.classList.remove('open'); });
+
+    // pointerdown + preventDefault (not click) keeps focus on the game canvas.
+    clBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleChatLog(); });
+    document.getElementById('chatlog-x').addEventListener('pointerdown', (e) => { e.preventDefault(); closeChatLog(); });
+
+    // ── Log out: clear the auto-rejoin token, drop the socket, and reload
+    // straight back to a clean Join/Sign-in screen. Doesn't touch anyone else. ──
+    document.getElementById('logout-btn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (!confirm('Log out of JPO HQ?')) return;
+      _clearToken();
+      socket.disconnect();
+      window.location.reload();
+    });
+
+    // ── First-timer tutorial: a short guided tour with a spotlight ring +
+    // caption card. Shown once automatically after the very first approval
+    // (localStorage flag — survives refresh, not tied to remember-me), and
+    // replayable anytime via the ❓ button. Steps with target:null are plain
+    // centered cards (no on-screen element to point at, e.g. movement keys
+    // or in-world objects like the coffee machine). ──
+    const TUT_SEEN_KEY = 'jpo_tutorial_seen';
+    const TUTORIAL_STEPS = [
+      { title: "Welcome to JPO HQ! 👋", target: null,
+        text: "Working from home can feel like working alone — so we built this office to bring us back together. Here you can bump into coworkers you'd never meet otherwise, chat with people outside your department, put faces (and voices!) to names, and just hang out and play like you would in a real office. Walk with WASD or the arrow keys — here's a quick tour." },
+      { title: "Chat with people nearby 💬", target: ['#chat-hint', '#touch-chat'],
+        text: "Press T to open chat and say something everyone nearby can see. Press Tab (or the 🤫 touch button) to whisper privately to one person." },
+      { title: "Catch up on chat", target: '#chatlog-btn',
+        text: "Missed something? Click here — or press C — to see everything said in public chat since you joined." },
+      { title: "Earn coins 🪙", target: '#coin-hud',
+        text: "You earn +2 coins a minute just by walking around — sit at any computer for +3/min instead. Your first login each day also gives a one-time +10 bonus." },
+      { title: "Visit the Shop 🛍️", target: '#shop-btn',
+        text: "Spend coins on cosmetics (sunglasses, crowns, and more), outfit colors in the Wardrobe, coffee, cigarettes — and pets! Cats, dogs, dragons and more, each with accessories." },
+      { title: "Talk with your voice 🎙️", target: '#voice-btn',
+        text: "Hold V to talk to anyone near you — like a real office chat. Let go and you're muted again. Your browser will ask for mic permission the first time." },
+      { title: "Find people on the map 🗺️", target: null,
+        text: "Press M to see the whole office and where everyone is right now. Press M or Esc to close it." },
+      { title: "Emotes & challenges ⚔️", target: ['#emote-bar', '#emote-toggle'],
+        text: "Click here (or press 1–8) to react with an emote. The last slot, ⚔️, challenges the nearest player to a friendly game — or click any avatar and choose Challenge." },
+      { title: "Explore the office ☕", target: null,
+        text: "Look for the coffee machine, water cooler, fridge, and arcade around the office — walk up and press E to interact." },
+      { title: "Logging out 🚪", target: '#logout-btn',
+        text: "Done for the day? Click here to sign out safely — it won't affect anyone else in the office. Have fun!" },
+    ];
+    let _tutStep = 0;
+    let _tutResizeHandler = null;
+
+    function maybeStartTutorial() {
+      if (localStorage.getItem(TUT_SEEN_KEY) === '1') return;
+      startTutorial();
+    }
+
+    function startTutorial() {
+      _tutStep = 0;
+      document.getElementById('tut-overlay').classList.add('open');
+      document.getElementById('tut-card').classList.add('open');
+      _renderTutStep();
+      if (!_tutResizeHandler) {
+        _tutResizeHandler = () => _renderTutStep();
+        window.addEventListener('resize', _tutResizeHandler);
+      }
+    }
+
+    function endTutorial() {
+      localStorage.setItem(TUT_SEEN_KEY, '1');
+      document.getElementById('tut-overlay').classList.remove('open');
+      document.getElementById('tut-card').classList.remove('open');
+      document.getElementById('tut-highlight').classList.remove('show');
+      if (_tutResizeHandler) { window.removeEventListener('resize', _tutResizeHandler); _tutResizeHandler = null; }
+    }
+
+    function _renderTutStep() {
+      const step = TUTORIAL_STEPS[_tutStep];
+      if (!step) { endTutorial(); return; }
+
+      document.getElementById('tut-title').textContent = step.title;
+      document.getElementById('tut-text').textContent = step.text;
+      document.getElementById('tut-step-count').textContent = `${_tutStep + 1} / ${TUTORIAL_STEPS.length}`;
+      document.getElementById('tut-next').textContent = (_tutStep === TUTORIAL_STEPS.length - 1) ? 'Got it' : 'Next';
+
+      const highlight = document.getElementById('tut-highlight');
+      const card = document.getElementById('tut-card');
+      // A step's target can list multiple selectors (e.g. desktop vs. touch
+      // layouts show different elements for the same feature) — use the
+      // first one that's actually visible right now, not just present in the
+      // DOM. NOTE: all HUD targets are position:fixed, where offsetParent is
+      // always null — so visibility is checked via the rendered box size
+      // (display:none elements measure 0×0), never via offsetParent.
+      let targetEl = null;
+      if (step.target) {
+        const selectors = Array.isArray(step.target) ? step.target : [step.target];
+        for (const sel of selectors) {
+          const el = document.querySelector(sel);
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) { targetEl = el; break; }
+        }
+      }
+      const vw = window.innerWidth, vh = window.innerHeight;
+
+      if (targetEl) {
+        const r = targetEl.getBoundingClientRect();
+        const pad = 8;
+        highlight.style.top    = (r.top - pad) + 'px';
+        highlight.style.left   = (r.left - pad) + 'px';
+        highlight.style.width  = (r.width  + pad * 2) + 'px';
+        highlight.style.height = (r.height + pad * 2) + 'px';
+        highlight.classList.add('show');
+
+        // Prefer placing the card below the target; flip above if there's
+        // not enough room, and clamp horizontally so it stays on-screen.
+        const cardW = card.offsetWidth || 300;
+        let top  = r.bottom + pad + 12;
+        if (top + 160 > vh) top = Math.max(12, r.top - pad - 12 - 200);
+        let left = r.left;
+        if (left + cardW > vw - 12) left = vw - cardW - 12;
+        if (left < 12) left = 12;
+        card.style.top  = top + 'px';
+        card.style.left = left + 'px';
+        card.style.transform = 'none';
+      } else {
+        highlight.classList.remove('show');
+        card.style.top  = '50%';
+        card.style.left = '50%';
+        card.style.transform = 'translate(-50%, -50%)';
+      }
+    }
+
+    document.getElementById('tut-next').addEventListener('click', () => {
+      _tutStep++;
+      _renderTutStep();
+    });
+    document.getElementById('tut-skip').addEventListener('click', endTutorial);
+    document.getElementById('help-btn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      startTutorial();
+    });
+
+    // C toggles the log while playing — never while typing in any field.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'c' && e.key !== 'C') return;
+      if (!document.body.classList.contains('playing')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      toggleChatLog();
+    });
+    // Esc closes the log only when nothing modal is up (those own Esc already).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !_logOpen) return;
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return;
+      if (document.getElementById('shop-modal').classList.contains('open')) return;
+      if (document.getElementById('food-modal').classList.contains('open')) return;
+      if (document.getElementById('owner-pwd-modal').classList.contains('open')) return;
+      closeChatLog();
+    });
+
+    // K = the killer's strike (no-op unless you're the killer in a live round).
+    // Same guard stack as the C key: playing, no text field focused, no modifiers.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'k' && e.key !== 'K') return;
+      if (!document.body.classList.contains('playing')) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (_chatOpen || _dmOpen || _rpsUiOpen) return;
+      _roundTryKill();
+    });
+
+    // ── On-screen touch controls (joystick + action/chat buttons) ──────
+    if (IS_TOUCH) {
+      // Send / close buttons in the chat bar (mobile keyboards have no Esc key).
+      document.getElementById('chat-send')?.addEventListener('pointerdown', e => { e.preventDefault(); sendChat(); });
+      document.getElementById('chat-close')?.addEventListener('pointerdown', e => { e.preventDefault(); closeChat(); });
+
+      // DM composer send/close + the floating DM button.
+      document.getElementById('dm-send')?.addEventListener('pointerdown', e => { e.preventDefault(); sendDM(); });
+      document.getElementById('dm-close')?.addEventListener('pointerdown', e => { e.preventDefault(); closeDM(); });
+      document.getElementById('touch-dm')?.addEventListener('pointerdown', e => { e.preventDefault(); openDM(); });
+
+      // Floating chat + action buttons.
+      document.getElementById('touch-chat')?.addEventListener('pointerdown', e => { e.preventDefault(); openChat(); });
+      const actionBtn = document.getElementById('touch-action');
+      actionBtn?.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (!actionBtn.classList.contains('disabled')) touchAction.queued = true;
+      });
+
+      // Virtual joystick → the same up/down/left/right booleans the keyboard sets,
+      // so all existing movement/animation/facing logic (incl. diagonals) is reused.
+      const stick = document.getElementById('touch-joystick');
+      const knob  = document.getElementById('touch-knob');
+      if (stick && knob) {
+        let pid = null;
+        const clearMove = () => { touchMove.up = touchMove.down = touchMove.left = touchMove.right = false; };
+        const center = () => { const r = stick.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+        function apply(dx, dy) {
+          const max  = stick.offsetWidth/2 - knob.offsetWidth/2;
+          const dead = max * 0.32;
+          const mag  = Math.hypot(dx, dy);
+          if (mag < dead) { clearMove(); knob.style.transform = `translate(${dx}px,${dy}px)`; return; }
+          const cl = Math.min(mag, max);
+          knob.style.transform = `translate(${dx/mag*cl}px,${dy/mag*cl}px)`;
+          // 8-way octant: 0=right,1=down-right,2=down,3=down-left,4=left,5=up-left,6=up,7=up-right (y grows down)
+          const deg = (Math.atan2(dy, dx) * 180/Math.PI + 360) % 360;
+          const oct = Math.round(deg/45) % 8;
+          touchMove.right = (oct === 0 || oct === 1 || oct === 7);
+          touchMove.down  = (oct === 1 || oct === 2 || oct === 3);
+          touchMove.left  = (oct === 3 || oct === 4 || oct === 5);
+          touchMove.up    = (oct === 5 || oct === 6 || oct === 7);
+        }
+        stick.addEventListener('pointerdown', e => {
+          e.preventDefault(); pid = e.pointerId;
+          try { stick.setPointerCapture(pid); } catch (_) {}
+          const c = center(); apply(e.clientX - c.x, e.clientY - c.y);
+        });
+        stick.addEventListener('pointermove', e => {
+          if (pid === null || e.pointerId !== pid) return;
+          const c = center(); apply(e.clientX - c.x, e.clientY - c.y);
+        });
+        const release = e => {
+          if (pid !== null && e.pointerId !== pid) return;
+          pid = null; clearMove(); knob.style.transform = 'translate(0px,0px)';
+        };
+        stick.addEventListener('pointerup', release);
+        stick.addEventListener('pointercancel', release);
+        stick.addEventListener('lostpointercapture', release);
+      }
+    }
+
+    // ── Push-to-talk proximity voice ───────────────────────────────────
+    // WebRTC mesh, audio-only, STUN-only: audio streams browser↔browser and
+    // never touches the server, which acts purely as a validating signaling
+    // switchboard (it re-checks range + the After Dark split on EVERY relayed
+    // message — none of the local gating below is trusted). Hold V (or the
+    // 🎙️ touch button) to talk; volume falls off with distance; the 🎙️ HUD
+    // toggle kills the whole feature (all calls dropped, offers ignored).
+    const VOICE_RANGE_PX  = 480;  // dial-in range — matches the server's earshot
+    const VOICE_DROP_PX   = 620;  // hysteresis: pacing at the edge doesn't churn calls
+    const VOICE_FULL_PX   = 130;  // full volume inside this, fading to 0 at RANGE
+    // Cap on the mesh — audio-only pcs are cheap, but not free. ?vmax=N is a
+    // QA hook so tests (and manual poking) can force cap behavior with 3
+    // browsers instead of 11; real players never pass it.
+    const VOICE_MAX_PEERS = Math.max(1, Number(new URLSearchParams(location.search).get('vmax')) || 10);
+    // Relay-capable ICE: /voice-ice mints short-lived TURN credentials
+    // server-side. Without a relay, pairs behind strict/carrier-grade NAT
+    // (common on home ISPs) never connect even though signaling works fine.
+    // Until the fetch succeeds — or whenever it fails — this STUN-only
+    // default keeps voice working exactly as before, minus the relay.
+    let VOICE_ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+    let _voiceIceTimer = null;
+    function _voiceIceRefresh() {
+      clearTimeout(_voiceIceTimer);
+      fetch('/voice-ice', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d && Array.isArray(d.iceServers) && d.iceServers.length) VOICE_ICE = { iceServers: d.iceServers };
+          const ttl = (d && Number(d.ttl)) || 600;                    // seconds
+          _voiceIceTimer = setTimeout(_voiceIceRefresh, Math.min(Math.max(ttl * 750, 600000), 10800000)); // 75% of ttl, 10min..3h
+        })
+        .catch(() => { _voiceIceTimer = setTimeout(_voiceIceRefresh, 60000); });
+    }
+    _voiceIceRefresh();
+    let _voiceOn   = localStorage.getItem('jpo_voice_on') !== '0';  // master switch
+    let _voiceHeld = false;       // PTT physically held
+    let _voiceLive = false;       // actually transmitting (held + mic granted)
+    let _voiceMic  = null;        // master mic stream after first grant; NEVER attached to a pc directly —
+                                  // senders get a fresh per-press CLONE, and no track at all while idle
+    let _voiceMicBusy = false, _voiceMicDenied = false;
+    let _voiceCtx = null;         // shared AudioContext (unlocked by any user gesture)
+    let _voiceResendT = null;     // 4s "still talking" keepalive
+    const _voicePeers = {};       // id → { pc, polite, pendIce, el, src, gain }
+    const _voiceCool  = {};       // id → don't-redial-before ts (failed/broken attempts)
+    const _voiceHealAt = {};      // id → last zombie-heal ts (damper: one rebuild / 20s / peer)
+    window._voiceBadges = {};     // id → { txt, until } — self-expiring Phaser 🎙️ badges
+
+    // In-the-dark from THIS client's view. Only round members hold a roster;
+    // for everyone else this is always false — which is fine, because the
+    // dark member's own client tears down the pair and either end closing
+    // kills the audio both ways. The server refuses new cross-split intros.
+    function _voiceInDark(id) {
+      if (_roundPhase !== 'active') return false;
+      const m = _roundRoster.get(id);
+      return !!(m && m.alive);
+    }
+    function _voiceCrossDark(id) { return _voiceInDark(id) !== _voiceInDark(socket.id); }
+
+    function _voiceKickCtx() {
+      try {
+        if (!_voiceCtx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) _voiceCtx = new AC();
+        }
+        if (_voiceCtx && _voiceCtx.state === 'suspended') _voiceCtx.resume();
+      } catch (_) {}
+    }
+    // Any gesture unlocks audio — the login click alone guarantees one long
+    // before the first peer could possibly connect.
+    document.addEventListener('pointerdown', _voiceKickCtx, true);
+    document.addEventListener('keydown', _voiceKickCtx, true);
+
+    function _voiceSend(id, data) { socket.emit('voiceSignal', { targetId: id, data }); }
+
+    // Voice event ring buffer — every dial / answer / drop (with REASON) /
+    // state flip lands here. `window._voiceLog()` in the console reads it
+    // back; QA tests dump it on failure. 200 entries ≈ minutes of activity.
+    const _voiceLogBuf = [];
+    function _vlog(ev, id, extra) {
+      _voiceLogBuf.push(`${((Date.now() / 1000) % 1000).toFixed(1)} ${ev} ${(id || '').slice(0, 6)}${extra ? ' ' + extra : ''}`);
+      if (_voiceLogBuf.length > 200) _voiceLogBuf.shift();
+    }
+    window._voiceLog = () => _voiceLogBuf.slice();
+
+    // RMS of the last ~11ms an analyser saw. 0-ish = silence, speech ≥ ~0.05.
+    function _voiceRms(an) {
+      try {
+        const b = new Uint8Array(an.fftSize);
+        an.getByteTimeDomainData(b);
+        let s = 0;
+        for (let i = 0; i < b.length; i++) { const x = (b[i] - 128) / 128; s += x * x; }
+        return Math.sqrt(s / b.length);
+      } catch (_) { return -1; }
+    }
+
+    function _voiceAttachMic(P) {
+      // Sync this pc's sender with the PTT state, via replaceTrack on the
+      // pre-declared transceiver (NEVER renegotiates — the whole reason the
+      // transceiver is added up-front in _voiceNewPeer).
+      //   held  → attach a fresh enabled CLONE of the master mic. A stale
+      //           sender wedged into encoding dead air onto a 'connected'
+      //           call cannot survive a brand-new track object per press.
+      //   idle  → no track at all: nothing to wedge, no silence RTP burned.
+      // NO early-return on a missing master: release must ALWAYS drive
+      // replaceTrack(null), even if the mic died (onended nulls _voiceMic)
+      // mid-press — otherwise an ended sender track stays attached.
+      try {
+        const sender = P.pc.getTransceivers()[0].sender;
+        const old = sender.track;
+        const master = _voiceMic && _voiceMic.getAudioTracks()[0];
+        const next = (_voiceHeld && master && master.readyState === 'live') ? master.clone() : null;
+        const done = sender.replaceTrack(next);
+        const bury = () => { if (old && old !== next) { try { old.stop(); } catch (_) {} } };
+        if (done && done.then) done.then(bury).catch(bury); else bury();
+      } catch (_) {}
+    }
+    function _voiceNewPeer(id, polite) {
+      const P = { pc: new RTCPeerConnection(VOICE_ICE), polite, pendIce: [], el: null, src: null, gain: null,
+                  bornAt: Date.now(), up: false };   // up = reached 'connected' at least once
+      // Only the DIALER declares the audio m-line up-front. The answerer must
+      // adopt the transceiver the remote offer creates instead — pre-adding
+      // its own risks the browser not recycling it, which yields a recvonly
+      // answer and one-way silence (no ontrack on the dialer, mic attached to
+      // an orphan transceiver here).
+      if (!polite) { P.pc.addTransceiver('audio', { direction: 'sendrecv' }); _voiceAttachMic(P); }
+      P.pc.onicecandidate = (e) => { if (e.candidate) _voiceSend(id, { k: 'ice', c: e.candidate.toJSON() }); };
+      P.pc.ontrack = (e) => _voiceWireAudio(P, (e.streams && e.streams[0]) || new MediaStream([e.track]));
+      P.pc.onconnectionstatechange = () => {
+        const st = P.pc.connectionState;
+        _vlog('st', id, st);
+        if (st === 'connected') { P.up = true; P.downAt = 0; }   // deadline over; blip recovered
+        if (st === 'disconnected') {
+          // Usually a transient ICE hiccup (wifi blip) that recovers by itself
+          // in a second or two — give it a 4s grace in the roster tick instead
+          // of hard-dropping and forcing a full 8s-cooldown redial.
+          if (P.up && !P.downAt) P.downAt = Date.now();
+          if (!P.up) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id, 'neverup-disc'); }   // never connected → dead dial
+        }
+        if (st === 'failed' || st === 'closed') {
+          _voiceCool[id] = Date.now() + 8000;   // silent per-peer failure: back off, retry later
+          _voiceDrop(id, 'state-' + st);
+        }
+      };
+      _voicePeers[id] = P;
+      return P;
+    }
+    function _voiceWireAudio(P, stream) {
+      if (P.el) return;   // one audio path per peer
+      // Hidden MUTED element: Chrome/Safari won't pump a remote MediaStream
+      // into WebAudio unless a media element is also consuming it. Playback
+      // itself goes through the GainNode (distance falloff).
+      const el = document.createElement('audio');
+      el.autoplay = true; el.muted = true; el.setAttribute('playsinline', '');
+      el.srcObject = stream;
+      document.body.appendChild(el);
+      P.el = el;
+      _voiceKickCtx();
+      if (_voiceCtx) {
+        try {
+          P.src = _voiceCtx.createMediaStreamSource(stream);
+          P.gain = _voiceCtx.createGain();
+          P.gain.gain.value = 0;   // ramped by the falloff tick
+          P.src.connect(P.gain); P.gain.connect(_voiceCtx.destination);
+          // Analyser tap on the RAW stream (pre-gain): _voiceDebug's `lvl`
+          // separates "no audio arriving" from "arriving but volume muted".
+          try { P.an = _voiceCtx.createAnalyser(); P.an.fftSize = 512; P.src.connect(P.an); } catch (_) {}
+          return;
+        } catch (_) {}
+      }
+      el.muted = false;            // WebAudio unavailable → element playback
+      el.volume = 0;
+    }
+
+    // Rebuild ONLY the local WebAudio side (source → gain/analyser) from the
+    // receiver's live track. For the rare wedge where decode is healthy
+    // (energy flows) but our graph reads flat — no need to drop the call.
+    function _voiceRewire(id, P) {
+      try {
+        const rc = P.pc.getReceivers()[0];
+        const rt = rc && rc.track;
+        if (!rt || rt.readyState !== 'live' || !_voiceCtx) return;
+        try { if (P.src) P.src.disconnect(); } catch (_) {}
+        try { if (P.gain) P.gain.disconnect(); } catch (_) {}
+        try { if (P.an) P.an.disconnect(); } catch (_) {}
+        const g = P.gain ? P.gain.gain.value : 0;   // keep falloff volume — no pop
+        P.src = _voiceCtx.createMediaStreamSource(new MediaStream([rt]));
+        P.gain = _voiceCtx.createGain();
+        P.gain.gain.value = g;
+        P.src.connect(P.gain); P.gain.connect(_voiceCtx.destination);
+        try { P.an = _voiceCtx.createAnalyser(); P.an.fftSize = 512; P.src.connect(P.an); } catch (_) {}
+        _vlog('rewire', id);
+      } catch (_) {}
+    }
+    function _voiceDrop(id, why) {
+      const P = _voicePeers[id];
+      if (!P) return;
+      _vlog('drop', id, why || '?');
+      delete _voicePeers[id];
+      // Tell the other end we hung up — otherwise their pc idles 'connecting'
+      // for the full 15s deadline (+8s cooldown) before they even redial.
+      // 'supersede' is the one drop that IS its own replacement: the peer's
+      // fresh offer caused it, so a bye would kill the very pc it's answering.
+      if (why !== 'supersede' && why !== 'bye') { try { _voiceSend(id, { k: 'bye' }); } catch (_) {} }
+      // Stop this pc's clone BEFORE close — closed pcs hide their transceivers.
+      try {
+        const tx = P.pc.getTransceivers()[0];
+        if (tx && tx.sender && tx.sender.track) tx.sender.track.stop();
+      } catch (_) {}
+      try { P.pc.onicecandidate = P.pc.ontrack = P.pc.onconnectionstatechange = null; P.pc.close(); } catch (_) {}
+      try { if (P.src)  P.src.disconnect(); }  catch (_) {}
+      try { if (P.gain) P.gain.disconnect(); } catch (_) {}
+      if (P.el) { try { P.el.srcObject = null; P.el.remove(); } catch (_) {} }
+    }
+    function _voiceDropAll(why) { for (const id of Object.keys(_voicePeers)) _voiceDrop(id, why || 'all'); }
+
+    // Is this player talking right now (per their broadcast badge)? Badges
+    // self-expire and are keepalive-refreshed, so this is current within ~2s.
+    function _voiceTalkNow(id) {
+      const b = window._voiceBadges[id];
+      return !!(b && b.until > Date.now());
+    }
+    // At the peer cap and a pair with a priority claim shows up (they're
+    // talking, or we are): kick the farthest SILENT peer to make room. In a
+    // packed room the slots must follow the conversation, not raw distance —
+    // otherwise a mute bystander can block the person you're listening to.
+    function _voiceEvictForPair(newId) {
+      const newTalks = _voiceTalkNow(newId);
+      if (!newTalks && !_voiceLive) return false;
+      const sc = window._gameScene;
+      const d2Of = (pid) => {
+        const e = sc && sc.otherPlayers[pid];
+        return (e && e.sprite && sc.player)
+          ? (e.sprite.x - sc.player.x) ** 2 + (e.sprite.y - sc.player.y) ** 2
+          : Infinity;
+      };
+      let worst = null, worstD2 = -1;
+      for (const id in _voicePeers) {
+        if (_voiceTalkNow(id)) continue;               // never bump a talker
+        const d2 = d2Of(id);
+        if (d2 > worstD2) { worstD2 = d2; worst = id; }
+      }
+      if (!worst) return false;                        // all ten are talking — genuinely full
+      // A TALKING newcomer always beats a silent peer; a SILENT newcomer only
+      // displaces a clearly farther one (~100px margin), so the equidistant
+      // listeners packed around a talker can't ping-pong its slots.
+      if (!newTalks && !(worstD2 > d2Of(newId) + 10000)) return false;
+      _voiceCool[worst] = Date.now() + 3000;           // short damper so the pair doesn't flap
+      _voiceDrop(worst, 'evict-for-' + (newId || '').slice(0, 6));
+      return true;
+    }
+
+    async function _voiceOffer(id) {
+      _vlog('dial', id);
+      const P = _voiceNewPeer(id, false);
+      try {
+        const offer = await P.pc.createOffer();
+        await P.pc.setLocalDescription(offer);
+        _voiceSend(id, { k: 'offer', sdp: P.pc.localDescription });
+      } catch (_) { _voiceCool[id] = Date.now() + 8000; _voiceDrop(id, 'offer-fail'); }
+    }
+
+    socket.on('voiceSignal', async (msg) => {
+      const { fromId, data } = msg || {};
+      if (!_voiceOn || typeof fromId !== 'string' || !data || !data.k) return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_voiceCrossDark(fromId)) return;
+      let P = _voicePeers[fromId];
+      try {
+        if (data.k === 'offer') {
+          // Deterministic roles kill offer-glare: the LOWER socket id dials,
+          // the higher answers — both sides agree without a tiebreak dance.
+          if (socket.id < fromId) { _vlog('ign-offer', fromId, 'we-dial'); return; }
+          if (!P && Object.keys(_voicePeers).length >= VOICE_MAX_PEERS && !_voiceEvictForPair(fromId)) { _vlog('refuse', fromId, 'cap'); return; }
+          if (P) _voiceDrop(fromId, 'supersede');   // a fresh offer supersedes a stale pc
+          _vlog('answer', fromId);
+          P = _voiceNewPeer(fromId, true);
+          await P.pc.setRemoteDescription(data.sdp);
+          // Adopt the offer's transceiver and make it two-way BEFORE answering.
+          const tx = P.pc.getTransceivers()[0];
+          if (tx) { try { tx.direction = 'sendrecv'; } catch (_) {} }
+          _voiceAttachMic(P);
+          const ans = await P.pc.createAnswer();
+          await P.pc.setLocalDescription(ans);
+          _voiceSend(fromId, { k: 'answer', sdp: P.pc.localDescription });
+          for (const c of P.pendIce.splice(0)) await P.pc.addIceCandidate(c).catch(() => {});
+        } else if (data.k === 'answer') {
+          if (!P || P.polite) return;           // answers only land on our own dials
+          await P.pc.setRemoteDescription(data.sdp);
+          for (const c of P.pendIce.splice(0)) await P.pc.addIceCandidate(c).catch(() => {});
+        } else if (data.k === 'ice') {
+          if (!P) return;
+          if (P.pc.remoteDescription) await P.pc.addIceCandidate(data.c).catch(() => {});
+          else if (P.pendIce.length < 24) P.pendIce.push(data.c);   // pre-SDP buffer; legit flows use <10
+          else { _voiceCool[fromId] = Date.now() + 8000; _voiceDrop(fromId, 'ice-flood'); }   // flood → hang up + back off
+        } else if (data.k === 'bye') {
+          // Peer hung up on purpose — free the slot now instead of waiting out
+          // the ICE 'disconnected' lag. Short cooldown so a redial (if still
+          // wanted) happens on the next tick or two, not in a tight loop.
+          if (P) { _voiceCool[fromId] = Math.max(_voiceCool[fromId] || 0, Date.now() + 2000); _voiceDrop(fromId, 'bye'); }
+        }
+      } catch (e) {
+        _voiceCool[fromId] = Date.now() + 8000;
+        _voiceDrop(fromId, 'sig-err:' + String(e && e.name || e).slice(0, 24));
+      }
+    });
+
+    // Roster tick: dial the nearest few in earshot, hang up on anyone gone,
+    // past the hysteresis edge, over the cap, or across the dark line. The
+    // server can't cut a live P2P stream — on teardown, WE are the enforcement.
+    setInterval(() => {
+      const sc = window._gameScene;
+      const playing = document.body.classList.contains('playing');
+      if (!_voiceOn || !playing || !sc || !sc.player) {
+        // Master off / logged out → hang up everything. But a scene still
+        // BOOTING (playing class set, Phaser player not spawned yet) is NOT a
+        // hang-up: pairs answered during load must survive to first render.
+        if ((!_voiceOn || !playing) && Object.keys(_voicePeers).length) {
+          _voiceDropAll(!_voiceOn ? 'master-off' : 'not-playing');
+        }
+        return;
+      }
+      if (_voiceHeld && _voiceUiBlocked()) _voicePttUp();   // an overlay swallowed the keyup
+      const px = sc.player.x, py = sc.player.y, now = Date.now();
+      // hang-ups first — ranked TALKERS-first, then nearest, so when the cap
+      // bites it sheds silent bystanders and keeps the actual conversation
+      const conn = Object.keys(_voicePeers).map((id) => {
+        const e = sc.otherPlayers[id];
+        if (_voiceCrossDark(id)) return [id, Infinity, 1, 'dark'];
+        if (!e || !e.sprite) return [id, Infinity, 1, 'nopos'];
+        const dx = e.sprite.x - px, dy = e.sprite.y - py;
+        return [id, dx * dx + dy * dy, _voiceTalkNow(id) ? 0 : 1, ''];
+      }).sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
+      conn.forEach(([id, d2, , flag], i) => {
+        // Handshake deadline: a pc that never reached 'connected' within 15s is
+        // a dead dial (peer gone silent, STUN blocked, withheld answer) — kill
+        // it so it can't pile up buffers or block redials forever. A connected
+        // pc that's been in 'disconnected' >4s isn't coming back either.
+        const P = _voicePeers[id];
+        if (P && !P.up && now - P.bornAt > 15000) { _voiceCool[id] = now + 8000; _voiceDrop(id, 'neverup-15s'); return; }
+        if (P && P.downAt && now - P.downAt > 4000) { _voiceCool[id] = now + 8000; _voiceDrop(id, 'down-4s'); return; }
+        // Zombie-pair heal. Their badge says TALKING, the pc is 'connected',
+        // they're well inside earshot — and nothing comes out. Two oracles:
+        //  · totalAudioEnergy — the browser's own CUMULATIVE decoded energy.
+        //    Immune to sampling gaps (word pauses, pulsed tones) and to a
+        //    suspended AudioContext. Flat for ~3.5s of live badge ⇒ the
+        //    transport/decode side is dead ⇒ REBUILD the pair.
+        //  · energy flowing but our analyser flat for 5s ⇒ decode is fine,
+        //    our local WebAudio graph is wedged ⇒ REWIRE it locally, no drop.
+        // Converts "I just can't hear them, for minutes" into a ~2s blip.
+        if (P && P.up && _voiceTalkNow(id) && d2 < VOICE_RANGE_PX * VOICE_RANGE_PX * 0.64) {
+          const Z = P.z || (P.z = { e0: -1, e: -1, t0: now, pending: false, r0: now });
+          if (!Z.pending) {
+            Z.pending = true;
+            P.pc.getStats().then((st) => {
+              Z.pending = false;
+              st.forEach((s) => {
+                if (s.type === 'inbound-rtp' && (s.kind || s.mediaType) === 'audio' && typeof s.totalAudioEnergy === 'number') Z.e = s.totalAudioEnergy;
+              });
+              if (Z.e0 < 0 && Z.e >= 0) { Z.e0 = Z.e; Z.t0 = Date.now(); }
+            }).catch(() => { Z.pending = false; });
+          }
+          if (Z.e0 >= 0 && Z.e - Z.e0 > 3e-4) {
+            Z.e0 = Z.e; Z.t0 = now;                  // real audio decoded — transport is alive
+            const r = P.an ? _voiceRms(P.an) : -1;
+            if (r >= 0.015) Z.r0 = now;              // …and our graph hears it
+            else if (now - Z.r0 > 5000 && (_voiceHealAt[id] || 0) < now - 15000) {
+              _voiceHealAt[id] = now;
+              _voiceRewire(id, P);
+              Z.r0 = now;
+            }
+          } else if (Z.e0 >= 0 && now - Z.t0 > 3500 && (_voiceHealAt[id] || 0) < now - 20000) {
+            _voiceHealAt[id] = now;
+            _voiceCool[id] = now + 1500;
+            _voiceDrop(id, 'zombie-heal');
+            return;
+          }
+        } else if (P) P.z = null;
+        // No sprite for them yet ≠ gone: right after a join, the pc can form a
+        // beat before positions land. Give young pairs 10s to learn where the
+        // other end is; only a STALE unknown means they actually left.
+        if (flag === 'nopos' && P && now - P.bornAt < 10000) return;
+        if (d2 > VOICE_DROP_PX * VOICE_DROP_PX) { _voiceDrop(id, flag || 'range'); return; }
+        if (i >= VOICE_MAX_PEERS) _voiceDrop(id, 'over-cap');
+      });
+      // Pump watchdog: Chrome (background tabs, memory saver) can PAUSE the
+      // hidden <audio> that pumps a remote stream into WebAudio — the call
+      // stays 'connected' but decodes pure silence until nudged. Same for a
+      // suspended AudioContext. Revive both continuously.
+      if (_voiceCtx && _voiceCtx.state === 'suspended') { try { _voiceCtx.resume(); } catch (_) {} }
+      for (const id in _voicePeers) {
+        const el = _voicePeers[id].el;
+        if (el && el.paused) { try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
+      }
+      // then dial-outs — only toward ids ordered after ours (they dial us)
+      const cand = [];
+      for (const id in sc.otherPlayers) {
+        if (_voicePeers[id] || (_voiceCool[id] || 0) > now) continue;
+        const e = sc.otherPlayers[id];
+        if (!e || !e.sprite || _voiceCrossDark(id)) continue;
+        const dx = e.sprite.x - px, dy = e.sprite.y - py, d2 = dx * dx + dy * dy;
+        if (d2 <= VOICE_RANGE_PX * VOICE_RANGE_PX) cand.push([id, d2, _voiceTalkNow(id) ? 0 : 1]);
+      }
+      // talkers first, then nearest — in a crowd, dial the conversation
+      cand.sort((a, b) => (a[2] - b[2]) || (a[1] - b[1]));
+      let room = VOICE_MAX_PEERS - Object.keys(_voicePeers).length;
+      for (const [id, , talk] of cand) {
+        if (!(socket.id && socket.id < id)) continue;   // their side dials this pair
+        if (room <= 0) {
+          // At cap, a pair WITH A TALKER ON EITHER END still gets through by
+          // bumping a silent peer — mirrors the inbound-offer path, otherwise
+          // whichever side happens to be full (or to be the talker) simply
+          // never dials and the pair silently never forms.
+          if ((talk !== 0 && !_voiceLive) || !_voiceEvictForPair(id)) break;
+          room++;
+        }
+        _voiceOffer(id); room--;
+      }
+      // expired / orphaned badges
+      for (const id of Object.keys(window._voiceBadges)) {
+        const b = window._voiceBadges[id];
+        if (b.until < now || (id !== socket.id && !sc.otherPlayers[id])) {
+          try { b.txt.destroy(); } catch (_) {}
+          delete window._voiceBadges[id];
+        }
+      }
+    }, 500);
+
+    // Distance falloff: full inside VOICE_FULL_PX, silent by VOICE_RANGE_PX
+    // (the call itself lingers to VOICE_DROP_PX so edge-pacing stays seamless).
+    setInterval(() => {
+      const sc = window._gameScene;
+      if (!sc || !sc.player) return;
+      for (const id in _voicePeers) {
+        const P = _voicePeers[id], e = sc.otherPlayers[id];
+        if (!e || !e.sprite) continue;
+        const dx = e.sprite.x - sc.player.x, dy = e.sprite.y - sc.player.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        let v = d <= VOICE_FULL_PX ? 1 : 1 - (d - VOICE_FULL_PX) / (VOICE_RANGE_PX - VOICE_FULL_PX);
+        v = Math.max(0, Math.min(1, v)); v *= v;   // squared — natural-feeling rolloff
+        if (P.gain && _voiceCtx) P.gain.gain.setTargetAtTime(v, _voiceCtx.currentTime, 0.12);
+        else if (P.el && !P.el.muted) { try { P.el.volume = v; } catch (_) {} }
+      }
+    }, 150);
+
+    // ── PTT press / release ──
+    function _voiceUiBlocked() {
+      // Mirrors the Tab-guard: any typing surface or blocking overlay wins.
+      if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen) return true;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return true;
+      if (document.getElementById('shop-modal').classList.contains('open')) return true;
+      const food = document.getElementById('food-modal');
+      return !!(food && food.classList.contains('open'));
+    }
+    async function _voicePttDown() {
+      if (_voiceHeld) return;
+      if (!document.body.classList.contains('playing')) return;
+      if (_voiceUiBlocked()) return;
+      if (!_voiceOn) { _rpsToast('Voice is off — click the 🎙️ button up top to turn it on'); return; }
+      _voiceHeld = true;
+      _voiceKickCtx();
+      // Dead-master guard: a mic track can END behind our back (headset
+      // unplugged, Bluetooth profile switch, Zoom/Teams stealing the device).
+      // Cloning an ended track transmits pure silence forever — so if the
+      // warm master isn't live anymore, throw it away and re-acquire.
+      if (_voiceMic && _voiceMic.getAudioTracks()[0]?.readyState !== 'live') {
+        try { _voiceMic.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        _voiceMic = null;
+      }
+      if (!_voiceMic && !_voiceMicBusy) {
+        _voiceMicBusy = true;
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          });
+          // Master stays warm and UNATTACHED — nothing transmits without a
+          // sender track, so no enabled/disabled juggling can leak audio.
+          _voiceMic = s; _voiceMicDenied = false;
+          // If the device dies later, drop the master so the NEXT press
+          // re-acquires instead of cloning a corpse.
+          const mt = s.getAudioTracks()[0];
+          if (mt) mt.onended = () => { if (_voiceMic === s) _voiceMic = null; };
+        } catch (err) {
+          _voiceMicDenied = true;
+          const n = err && err.name;
+          _rpsToast(n === 'NotFoundError' || n === 'DevicesNotFoundError'
+              ? '🎙️ No microphone found — plug one in, then hold V again'
+            : n === 'NotReadableError' || n === 'TrackStartError'
+              ? '🎙️ Another app is using your mic (Zoom/Teams?) — close it, then hold V again'
+              : '🎙️ Mic blocked — allow the microphone in your browser (click the 🔒 by the address bar)');
+        } finally { _voiceMicBusy = false; }
+      }
+      if (!_voiceHeld || !_voiceMic) return;   // released mid-prompt, or denied
+      for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);   // fresh clone to every pair
+      _voiceSetLive(true);
+    }
+    function _voicePttUp() {
+      _voiceHeld = false;
+      // Detach + stop every per-press clone: released means NO sender track
+      // anywhere, not a muted one. The master mic stays warm for next press.
+      for (const id in _voicePeers) _voiceAttachMic(_voicePeers[id]);
+      _voiceSetLive(false);
+    }
+    function _voiceSetLive(on) {
+      if (_voiceLive === on) return;
+      _voiceLive = on;
+      const hud = document.getElementById('voice-btn');
+      if (hud) hud.classList.toggle('live', on);
+      const tv = document.getElementById('touch-voice');
+      if (tv) tv.classList.toggle('held', on);
+      socket.emit('voiceTalking', { on });
+      clearInterval(_voiceResendT); _voiceResendT = null;
+      // Re-assert while held: badges self-expire, so a throttled/dropped
+      // `off` can never wedge someone's badge on permanently.
+      if (on) _voiceResendT = setInterval(() => socket.emit('voiceTalking', { on: true }), 4000);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyV' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      // Typing guard: a "v" in chat/whisper/announcement boxes (or any form)
+      // must never key the mic. Game boards are click-driven, so PTT stays
+      // usable mid-match. keyup stays unguarded — releasing must always work.
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (!document.body.classList.contains('playing')) return;   // no mic prompts on the login screen
+      _voicePttDown();
+    });
+    document.addEventListener('keyup', (e) => { if (e.code === 'KeyV') _voicePttUp(); });
+    window.addEventListener('blur', _voicePttUp);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { _voicePttUp(); return; }
+      // Tab back in view: instantly revive whatever Chrome suspended while
+      // hidden (the 500ms watchdog would catch it anyway — this just beats it).
+      _voiceKickCtx();
+      for (const id in _voicePeers) {
+        const el = _voicePeers[id].el;
+        if (el && el.paused) { try { const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
+      }
+    });
+
+    (function () {
+      const tv = document.getElementById('touch-voice');
+      if (!tv) return;
+      tv.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        try { tv.setPointerCapture(e.pointerId); } catch (_) {}
+        _voicePttDown();
+      });
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) tv.addEventListener(ev, _voicePttUp);
+    })();
+
+    // Master toggle (🎙️ in the coin HUD). Off means OFF: every call dropped,
+    // inbound offers ignored, nothing transmits until it's turned back on.
+    function _voiceHudRender() {
+      const b = document.getElementById('voice-btn');
+      if (!b) return;
+      b.classList.toggle('off', !_voiceOn);
+      b.title = _voiceOn ? 'Voice: on — hold V to talk, click to turn off' : 'Voice: off — click to turn on';
+    }
+    window.toggleVoice = function () {
+      _voiceOn = !_voiceOn;
+      try { localStorage.setItem('jpo_voice_on', _voiceOn ? '1' : '0'); } catch (_) {}
+      if (!_voiceOn) { _voicePttUp(); _voiceDropAll('master-off'); }
+      _voiceHudRender();
+      _rpsToast(_voiceOn ? '🎙️ Voice on — hold V near someone to talk' : '🔇 Voice off');
+    };
+    _voiceHudRender();
+
+    // 🎙️ badges — server-relayed with chat's exact After Dark isolation.
+    socket.on('voiceTalking', (msg) => {
+      const { id, on } = msg || {};
+      const sc = window._gameScene;
+      if (!sc || !sc.add || typeof id !== 'string') return;
+      const B = window._voiceBadges;
+      if (!on) {
+        if (B[id]) { try { B[id].txt.destroy(); } catch (_) {} delete B[id]; }
+        return;
+      }
+      if (window._roundIsHidden && window._roundIsHidden(id)) return;   // ghosts stay unseen
+      const spr = id === socket.id ? sc.player : (sc.otherPlayers[id] && sc.otherPlayers[id].sprite);
+      if (!spr) return;
+      if (!B[id]) {
+        B[id] = { txt: sc.add.text(spr.x, spr.y - 56, '🎙️', { fontSize: '15px', resolution: 2 }).setOrigin(0.5, 1).setDepth(995), until: 0 };
+      }
+      B[id].until = Date.now() + 6500;   // self-expiring
+    });
+
+    // Local capture check: RMS of OUR OWN mic as the audio graph sees it.
+    // Only meaningful while PTT is held — a released (disabled) track is
+    // silent by design. Distinguishes "my mic is dead" from "the pair is".
+    let _voiceMicAn = null;
+    function _voiceMicLvl() {
+      if (!_voiceMic || !_voiceCtx) return -1;
+      try {
+        if (!_voiceMicAn) {
+          _voiceMicAn = _voiceCtx.createAnalyser(); _voiceMicAn.fftSize = 512;
+          _voiceCtx.createMediaStreamSource(_voiceMic).connect(_voiceMicAn);
+        }
+        return _voiceRms(_voiceMicAn);
+      } catch (_) { return -1; }
+    }
+
+    // Debug/test hook (used by the automated browser check).
+    window._voiceDebug = () => ({
+      on: _voiceOn, live: _voiceLive, held: _voiceHeld, micDenied: _voiceMicDenied,
+      ctx: _voiceCtx ? _voiceCtx.state : 'none',
+      peers: Object.keys(_voicePeers).map((id) => {
+        const P = _voicePeers[id];
+        const lvl = P.an ? _voiceRms(P.an) : -1;   // decoded remote stream RMS
+        let rtm = null;   // receiver track muted = browser reports no media arriving on it
+        try { const r = P.pc.getReceivers()[0]; if (r && r.track) rtm = r.track.muted; } catch (_) {}
+        let tx = -1;      // RMS of OUR outgoing sender track (what we actually feed the encoder)
+        try {
+          const sn = P.pc.getTransceivers()[0].sender;
+          if (sn && sn.track && sn.track.readyState === 'live' && _voiceCtx) {
+            if (P.txTrack !== sn.track) {
+              // Fresh clone per press = fresh track: tear down the previous
+              // debug tap or repeated _voiceDebug() polling accumulates nodes.
+              try { if (P.txSrc) P.txSrc.disconnect(); } catch (_) {}
+              try { if (P.txAn) P.txAn.disconnect(); } catch (_) {}
+              P.txTrack = sn.track;
+              P.txAn = _voiceCtx.createAnalyser(); P.txAn.fftSize = 512;
+              P.txSrc = _voiceCtx.createMediaStreamSource(new MediaStream([sn.track]));
+              P.txSrc.connect(P.txAn);
+            }
+            if (P.txAn) tx = _voiceRms(P.txAn);
+          }
+        } catch (_) {}
+        return {
+          id, st: P.pc.connectionState,
+          wired: !!(P.gain || P.el),
+          g: P.gain ? P.gain.gain.value : -1,   // post-falloff volume actually applied
+          lvl, tx,
+          elp: P.el ? P.el.paused : null,   // paused pump = decoded silence
+          rtm,
+          dirs: P.pc.getTransceivers().map((t) => t.currentDirection || t.direction),
+        };
+      }),
+      badges: Object.keys(window._voiceBadges),
+      micLvl: _voiceMicLvl()
+    });
+    // Deep per-peer diagnostics (QA/console use): where is audio dying on
+    // this pair — sender not sending, transport not passing, or track muted?
+    window._voiceStats = async (id) => {
+      const P = _voicePeers[id];
+      if (!P) return null;
+      const out = {
+        st: P.pc.connectionState, ice: P.pc.iceConnectionState,
+        dirs: P.pc.getTransceivers().map((t) => t.currentDirection || t.direction),
+        inBytes: 0, outBytes: 0, sel: null,
+      };
+      try {
+        const rx = P.pc.getReceivers()[0];
+        if (rx && rx.track) { out.trackMuted = rx.track.muted; out.trackState = rx.track.readyState; }
+        const stats = await P.pc.getStats();
+        let selId = null;
+        stats.forEach((s) => {
+          if (s.type === 'transport' && s.selectedCandidatePairId) selId = s.selectedCandidatePairId;
+          if (s.type === 'inbound-rtp'  && s.kind === 'audio') out.inBytes  = s.bytesReceived || 0;
+          if (s.type === 'outbound-rtp' && s.kind === 'audio') out.outBytes = s.bytesSent || 0;
+        });
+        stats.forEach((s) => {
+          if (s.type === 'candidate-pair' && (s.id === selId || (!selId && s.selected))) {
+            const L = stats.get(s.localCandidateId), R = stats.get(s.remoteCandidateId);
+            out.sel = { state: s.state, l: L && L.candidateType, r: R && R.candidateType };
+          }
+        });
+      } catch (e) { out.err = String(e && e.message || e).slice(0, 80); }
+      return out;
+    };
+
+    // ── Rock-Paper-Scissors challenges ─────────────────────────────────
+    // Session-only and fully server-authoritative — the client just renders
+    // phases: wager composing → waiting → (opponent: incoming) → picking →
+    // result. _rpsUiOpen gates movement (update()) + Tab/T + avatar clicks for
+    // the two BLOCKING surfaces (wager modal, match modal). The waiting and
+    // incoming cards intentionally do NOT freeze you: being challenged must
+    // never lock someone's avatar in place (that would be a griefing tool).
+    let _rpsUiOpen = false;
+    let _rpsPhase = null;          // 'wager' | 'waiting' | 'incoming' | 'picking' | 'ttt' | 'qd' | 'result'
+    let _rpsChallengeId = null;
+    let _rpsWagerTargetId = null;
+    let _rpsMyPick = null;
+    let _rpsCountTimer = null;     // the ONE live countdown interval (incoming XOR in-match)
+    let _rpsResultTimer = null;
+    let _rpsToastTimer = null;
+    let _rpsMenuTargetId = null;
+    let _rpsMenuAt = 0;
+    let _rpsGamePick = 'rps';      // game chosen in the wager modal
+    let _rpsArcadeMode = false;    // wager modal doubling as the arcade's game picker
+    let _tttMyMark = '?';
+    let _tttMyTurn = false;
+    let _ibAnswer = null;          // Icebreakers: my answer this round ('a'|'b')
+    let _ibGuess = null;           // Icebreakers: my guess of THEIR answer
+    let _ibLocked = false;         // both chosen → submitted, no take-backs
+    let _trivLocked = false;       // Trivia: answered this round, no take-backs
+    let _c4MyTurn = false;         // Connect Four: my drop?
+    let _c4MyDisc = '?';           // Connect Four: 'R' | 'Y'
+    let _poolMyTurn = false;       // Billiards: my cue, meter running
+    let _poolArmAt = 0;            // performance.now() when my shot was armed (meter epoch)
+    let _poolPeriod = 1150;        // meter sweep ms — server-sent, mirrors POOL_PERIOD_MS
+    let _poolRaf = null;           // marker animation frame
+    let _pongSide = 'left';        // which paddle line is mine
+    let _pongCourt = { w: 100, h: 60, padX: 4, padHalf: 7 };  // server-sent court dims
+    let _pongTargetY = 30;         // where I want my paddle (court units)
+    let _pongLastSent = -1;
+    let _pongSendTimer = null;     // ~25 Hz paddle-intent sender
+    let _pongKeyDir = 0;           // -1 up / 1 down while W·S (or arrows) held
+    const RPS_EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+    // Ids MUST match the server's GAMES allowlist in server.js.
+    const GAME_META = {
+      rps: { icon: '✊✋✌️', label: 'Rock·Paper·Scissors' },
+      ttt: { icon: '❌⭕',   label: 'Tic-Tac-Toe' },
+      qd:  { icon: '🤠',     label: 'Quick Draw' },
+      ib:  { icon: '🧊',     label: 'Icebreakers' },
+      wr:  { icon: '🔤',     label: 'Word Race' },
+      trivia: { icon: '🧠',  label: 'Trivia Duel' },
+      c4:  { icon: '🔴',     label: 'Connect Four' },
+      pool: { icon: '🎱',    label: 'Billiards' },
+      pong: { icon: '🏓',    label: 'Ping Pong' },
+      race: { icon: '🏁',    label: 'Pet Race' },
+    };
+    // Client mirror of the server's RPS_RANGE_PX (the server re-checks anyway).
+    const CHALLENGE_RANGE_PX = 480;
+
+    const rpsMenu = document.getElementById('rps-menu');
+    const rpsEl = (id) => document.getElementById(id);
+
+    function _rpsToast(msg) {
+      const t = rpsEl('rps-toast');
+      t.textContent = msg;
+      t.classList.add('open');
+      clearTimeout(_rpsToastTimer);
+      _rpsToastTimer = setTimeout(() => t.classList.remove('open'), 3500);
+    }
+
+    function _rpsStopCount() { if (_rpsCountTimer) { clearInterval(_rpsCountTimer); _rpsCountTimer = null; } }
+    function _rpsCountdown(el, ms, prefix) {
+      _rpsStopCount();
+      const end = Date.now() + ms;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        el.textContent = prefix + left + 's';
+        if (left <= 0) _rpsStopCount();   // display only — the server enforces the real deadline
+      };
+      tick();
+      _rpsCountTimer = setInterval(tick, 250);
+    }
+
+    // Single teardown for EVERY RPS surface + timer — all rpsCancelled/result/
+    // close paths funnel through here so no countdown interval can leak.
+    function closeAllRps() {
+      _rpsStopCount();
+      clearTimeout(_rpsResultTimer);
+      _rpsPhase = null; _rpsChallengeId = null; _rpsWagerTargetId = null; _rpsMyPick = null;
+      _rpsArcadeMode = false; _tttMyTurn = false;
+      rpsEl('rps-wager-modal').classList.remove('open');
+      rpsEl('rps-wager-fields').style.display = '';
+      rpsEl('rps-waiting').classList.remove('open');
+      rpsEl('rps-incoming').classList.remove('open');
+      rpsEl('rps-match').classList.remove('open');
+      rpsEl('ttt-board').classList.remove('show', 'myturn');
+      rpsEl('qd-panel').classList.remove('show');
+      rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('wr-panel').classList.remove('show');
+      rpsEl('wr-input').blur();   // blur re-enables Phaser key capture
+      rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('c4-board').classList.remove('show', 'myturn');
+      rpsEl('pool-panel').classList.remove('show', 'aiming');
+      rpsEl('pong-panel').classList.remove('show');
+      _ibAnswer = null; _ibGuess = null; _ibLocked = false;
+      _trivLocked = false; _c4MyTurn = false;
+      _poolMyTurn = false; _poolStopRaf();
+      _pongStopSend();
+      _rpsHideMenu();
+      if (_rpsUiOpen) {
+        _rpsUiOpen = false;
+        if (!IS_TOUCH) document.querySelector('canvas')?.focus();
+      }
+    }
+
+    // Context menu on avatar click: 💬 Whisper / ✊ Challenge.
+    function _rpsShowMenu(playerId, px, py) {
+      _rpsMenuTargetId = playerId;
+      _rpsMenuAt = Date.now();
+      rpsMenu.style.left = Math.max(6, Math.min(px, innerWidth - 170)) + 'px';
+      rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 150)) + 'px';
+      rpsMenu.classList.add('open');
+    }
+    function _rpsHideMenu() { rpsMenu.classList.remove('open'); _rpsMenuTargetId = null; }
+    window._rpsShowMenu = _rpsShowMenu;   // called from the Phaser avatar pointerdown
+    document.addEventListener('pointerdown', (e) => {
+      // The SAME canvas pointerdown that opened the menu bubbles up to here —
+      // the timestamp guard keeps it from insta-dismissing itself.
+      if (!rpsMenu.classList.contains('open')) return;
+      if (Date.now() - _rpsMenuAt < 80) return;
+      if (!rpsMenu.contains(e.target)) _rpsHideMenu();
+    });
+    rpsEl('rps-menu-dm').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openDM(id);
+    });
+    rpsEl('rps-menu-challenge').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openRpsWager(id);
+    });
+    rpsEl('rps-menu-profile').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openProfile(id);
+    });
+
+    // ── Send coins + pet trades (July 2026) ─────────────────────────────
+    // Both live in the avatar context menu next to Challenge. Gift = a tiny
+    // amount modal → sendCoins. Trade = composer modal (server sends both
+    // sides' pet lists) → tradeOffer; the other side gets an accept/decline
+    // card like an incoming challenge. Server is authoritative on all of it.
+    const _petLabel = (id) => {
+      const c = PETS.find(p => p.id === id);
+      return c ? `${c.emoji} ${c.species} — ${c.name}` : id;
+    };
+    let _giftTargetId = null, _tradeTargetId = null;
+
+    function openGift(targetId) {
+      _giftTargetId = targetId;
+      const name = _online[targetId]?.name || 'them';
+      rpsEl('gift-sub').textContent = `Send coins to ${name} (you have ${_playerCoins.toLocaleString()})`;
+      rpsEl('gift-error').textContent = '';
+      rpsEl('gift-modal').classList.add('open');
+      const inp = rpsEl('gift-amount-input');
+      inp.value = '100';
+      setTimeout(() => inp.focus(), 0);
+    }
+    function closeGift() { rpsEl('gift-modal').classList.remove('open'); _giftTargetId = null; if (!IS_TOUCH) document.querySelector('canvas')?.focus(); }
+    rpsEl('gift-cancel').addEventListener('click', closeGift);
+    rpsEl('gift-send').addEventListener('click', () => {
+      const amt = parseInt(rpsEl('gift-amount-input').value, 10);
+      if (!Number.isInteger(amt) || amt < 1) { rpsEl('gift-error').textContent = 'Enter at least 1 coin.'; return; }
+      if (amt > _playerCoins) { rpsEl('gift-error').textContent = "You don't have that many coins."; return; }
+      if (!_giftTargetId) { closeGift(); return; }
+      socket.emit('sendCoins', { targetId: _giftTargetId, amount: amt });
+      closeGift();
+    });
+    socket.on('giftResult', ({ ok, message } = {}) => { _rpsToast(message || (ok ? 'Sent!' : 'Sending failed.')); });
+    // ── Lingering gift receipts ── each stays until ITS ✕ is clicked. The
+    // server persists them per-email, so offline recipients see them at next
+    // login and a refresh doesn't clear them. id:null = session-only player
+    // (no email): the card is live-only and ✕ just removes it locally.
+    const _giftWrap = document.createElement('div');
+    _giftWrap.id = 'gift-notices';
+    document.body.appendChild(_giftWrap);
+    function _giftCard({ id, fromName, amount, ts } = {}) {
+      const card = document.createElement('div');
+      card.className = 'gift-notice';
+      let when = '';
+      if (ts) {
+        const d = new Date(ts);
+        if (!isNaN(d)) when = ` · ${d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+      }
+      const msg = document.createElement('span');
+      msg.textContent = `💝 ${fromName || 'Someone'} sent you ${(amount || 0).toLocaleString()} coins!${when}`;
+      const x = document.createElement('button');
+      x.className = 'gift-notice-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss');
+      x.addEventListener('click', () => {
+        if (Number.isInteger(id)) socket.emit('giftNoticeSeen', { id });
+        card.remove();
+      });
+      card.append(msg, x);
+      return card;
+    }
+    socket.on('giftReceived', (n = {}) => { _giftWrap.prepend(_giftCard(n)); });
+
+    // ── 1.5× earnings chip ── shared coffee/pizza buff. The server persists
+    // the expiry, so a refresh re-sends earnBoost and the countdown resumes.
+    const _earnChip = document.createElement('div');
+    _earnChip.id = 'earn-chip';
+    document.body.appendChild(_earnChip);
+    let _earnUntil = 0, _earnTimer = null;
+    function _earnRender() {
+      const left = _earnUntil - Date.now();
+      if (left <= 0) {
+        _earnChip.style.display = 'none';
+        clearInterval(_earnTimer); _earnTimer = null;
+        return;
+      }
+      const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+      _earnChip.textContent = `🍕 1.5× coins · ${m}:${String(s).padStart(2, '0')}`;
+      _earnChip.style.display = 'block';
+    }
+    socket.on('earnBoost', ({ until } = {}) => {
+      if (!Number.isFinite(until)) return;
+      _earnUntil = Math.max(_earnUntil, until);
+      if (!_earnTimer) _earnTimer = setInterval(_earnRender, 1000);
+      _earnRender();
+    });
+    socket.on('giftNotices', ({ notices } = {}) => {
+      _giftWrap.replaceChildren(...(notices || []).map(_giftCard));
+    });
+
+    function openTrade(targetId) {
+      _tradeTargetId = targetId;
+      socket.emit('tradePetsOf', { targetId });   // composer opens when the lists arrive
+    }
+    function closeTrade() { rpsEl('trade-modal').classList.remove('open'); _tradeTargetId = null; if (!IS_TOUCH) document.querySelector('canvas')?.focus(); }
+    rpsEl('trade-cancel').addEventListener('click', closeTrade);
+    socket.on('tradePets', ({ targetId, targetName, mine, theirs } = {}) => {
+      if (targetId !== _tradeTargetId) return;
+      const myPets = (mine || []), theirPets = (theirs || []);
+      if (!myPets.length)   { _rpsToast('You need a pet to trade — adopt one in the shop first!'); _tradeTargetId = null; return; }
+      if (!theirPets.length) { _rpsToast(`${targetName} doesn't have a pet to trade yet.`); _tradeTargetId = null; return; }
+      const fill = (sel, ids, excludeOwned) => {
+        sel.innerHTML = '';
+        ids.forEach(id => {
+          if (excludeOwned && _ownedItems.includes(id)) return;   // can't receive a pet you already own
+          const o = document.createElement('option');
+          o.value = id; o.textContent = _petLabel(id);
+          sel.appendChild(o);
+        });
+      };
+      fill(rpsEl('trade-offer-select'), myPets, false);
+      fill(rpsEl('trade-ask-select'), theirPets, true);
+      if (!rpsEl('trade-ask-select').options.length) {
+        _rpsToast(`You already own every pet ${targetName} has — nothing to trade for.`);
+        _tradeTargetId = null; return;
+      }
+      rpsEl('trade-sub').textContent = `Offer ${targetName} a pet swap`;
+      rpsEl('trade-error').textContent = '';
+      rpsEl('trade-coins-input').value = '0';
+      rpsEl('trade-modal').classList.add('open');
+    });
+    rpsEl('trade-send').addEventListener('click', () => {
+      const offerPet = rpsEl('trade-offer-select').value;
+      const askPet   = rpsEl('trade-ask-select').value;
+      const coins    = parseInt(rpsEl('trade-coins-input').value, 10) || 0;
+      if (!offerPet || !askPet) { rpsEl('trade-error').textContent = 'Pick a pet on both sides.'; return; }
+      if (coins < 0 || coins > _playerCoins) { rpsEl('trade-error').textContent = "You don't have that many coins."; return; }
+      if (!_tradeTargetId) { closeTrade(); return; }
+      socket.emit('tradeOffer', { targetId: _tradeTargetId, offerPet, askPet, coins });
+      closeTrade();
+    });
+    // Keep typing in the composer inputs from steering the avatar.
+    ['gift-amount-input', 'trade-coins-input', 'trade-offer-select', 'trade-ask-select'].forEach(id => {
+      const el = rpsEl(id);
+      el.addEventListener('keydown', (e) => e.stopPropagation());
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    });
+    rpsEl('gift-amount-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') rpsEl('gift-send').click();
+      if (e.key === 'Escape') closeGift();
+    });
+
+    socket.on('tradeSent', ({ toName, offerPet, askPet, coins } = {}) => {
+      _rpsToast(`🐾 Offer sent to ${toName}: your ${_petLabel(offerPet)}${coins ? ` + ${coins.toLocaleString()} coins` : ''} for their ${_petLabel(askPet)}`);
+    });
+    socket.on('tradeIncoming', ({ fromName, offerPet, askPet, coins } = {}) => {
+      rpsEl('trade-incoming-text').textContent =
+        `🐾 ${fromName} offers their ${_petLabel(offerPet)}${coins ? ` + ${coins.toLocaleString()} coins` : ''} for your ${_petLabel(askPet)}`;
+      rpsEl('trade-incoming').classList.add('open');
+    });
+    const _tradeIncomingClose = () => rpsEl('trade-incoming').classList.remove('open');
+    rpsEl('trade-accept').addEventListener('click', () => { socket.emit('tradeAccept'); _tradeIncomingClose(); });
+    rpsEl('trade-decline').addEventListener('click', () => { socket.emit('tradeDecline'); _tradeIncomingClose(); });
+    socket.on('tradeEnded', ({ message } = {}) => { _tradeIncomingClose(); _rpsToast(`🐾 ${message || 'Trade ended.'}`); });
+    socket.on('tradeError', ({ message } = {}) => { _rpsToast(`🐾 ${message || 'Trade failed.'}`); });
+    socket.on('tradeComplete', ({ got, gave, coins, otherName } = {}) => {
+      _tradeIncomingClose();
+      const coinBit = coins ? (coins > 0 ? ` (+${coins.toLocaleString()} coins)` : ` (${coins.toLocaleString()} coins)`) : '';
+      _rpsToast(`🤝 Trade with ${otherName} done! Your ${_petLabel(gave)} → their place, ${_petLabel(got)} is yours${coinBit}`);
+    });
+
+    rpsEl('rps-menu-gift').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openGift(id);
+    });
+    rpsEl('rps-menu-trade').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openTrade(id);
+    });
+    rpsEl('rps-menu-store').addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = _rpsMenuTargetId; _rpsHideMenu();
+      if (id) openStoreOf(id);
+    });
+
+    // ── Bid stores / office market ─────────────────────────────────────
+    // Everything renders from the server's marketState snapshot (textContent
+    // only — bidder/seller names are user data). Coins are escrowed server-
+    // side the moment a bid lands; this panel is just the storefront.
+    let _marketData = [];        // last marketState.listings
+    let _marketFilter = null;    // seller name filter (click-avatar "Their store")
+    function _marketMeta(id) {
+      return COSMETICS.find(c => c.id === id) || PETS.find(c => c.id === id)
+          || PET_ACCESSORIES.find(c => c.id === id) || { id, name: id, emoji: '🎁' };
+    }
+    function _mkGuard(el) {   // keep typing out of Phaser
+      el.addEventListener('keydown', (e) => e.stopPropagation());
+      el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      el.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    }
+    function openStoreOf(targetId) {
+      openShop();
+      _shopTab = 'market'; _shopPage = 0;
+      socket.emit('marketOpen', { targetId });   // reply carries filterName
+      _refreshShopUI();
+    }
+    socket.on('marketState', ({ listings, filterName } = {}) => {
+      _marketData = listings || [];
+      if (filterName !== undefined && filterName !== null) _marketFilter = filterName;
+      if (_shopTab === 'market' && document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+    });
+    // Someone else changed the market — refresh only if we're looking at it.
+    socket.on('marketDirty', () => {
+      if (_shopTab === 'market' && document.getElementById('shop-modal').classList.contains('open'))
+        socket.emit('marketOpen', {});
+    });
+    socket.on('storeOk',    ({ message } = {}) => { if (message) _rpsToast(`🏪 ${message}`); });
+    socket.on('storeError', ({ message } = {}) => { if (message) _rpsToast(`🏪 ${message}`); });
+    // Login mail: outcomes that happened while offline, staggered so none vanish.
+    socket.on('storeToasts', ({ messages } = {}) => {
+      (messages || []).forEach((m, i) => setTimeout(() => _rpsToast(`🏪 ${m}`), i * 3200));
+    });
+    // Won an auction while away (or mid-session): adopt the fresh collection.
+    socket.on('collectionUpdate', ({ cosmetics } = {}) => {
+      if (Array.isArray(cosmetics)) { _ownedItems = cosmetics; _refreshShopUI(); }
+    });
+
+    // ── Admin office banner ─────────────────────────────────────────────
+    // Shows until THIS person dismisses it (per banner id, survives refresh).
+    let _bannerId = null;
+    function _renderBanner(banner) {
+      const el = document.getElementById('admin-banner');
+      if (!banner || String(localStorage.getItem('jpo_banner_dismissed')) === String(banner.id)) {
+        el.style.display = 'none'; _bannerId = null; return;
+      }
+      _bannerId = banner.id;
+      document.getElementById('admin-banner-text').textContent = banner.text;
+      el.style.display = 'flex';
+    }
+    socket.on('bannerUpdate', ({ banner } = {}) => _renderBanner(banner));
+    document.getElementById('admin-banner-x').addEventListener('click', () => {
+      if (_bannerId != null) localStorage.setItem('jpo_banner_dismissed', String(_bannerId));
+      document.getElementById('admin-banner').style.display = 'none';
+    });
+    function ownerPostBanner() {
+      const text = document.getElementById('op-banner-input').value.trim();
+      if (!text) { document.getElementById('op-banner-msg').textContent = 'Type a message first.'; return; }
+      socket.emit('adminBanner', { text });
+      document.getElementById('op-banner-msg').textContent = 'Posted!';
+    }
+    function ownerClearBanner() {
+      socket.emit('adminBanner', { text: '' });
+      document.getElementById('op-banner-input').value = '';
+      document.getElementById('op-banner-msg').textContent = 'Cleared.';
+    }
+    window.ownerPostBanner = ownerPostBanner; window.ownerClearBanner = ownerClearBanner;
+    const _bnIn = document.getElementById('op-banner-input');
+    _bnIn.addEventListener('keydown', (e) => e.stopPropagation());
+    _bnIn.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+    _bnIn.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+
+    // ── Office Bingo ────────────────────────────────────────────────────
+    // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
+    // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line';
+    // Host controls live IN the bingo panel (not just F8) for authed admins.
+    // An admin who didn't join still gets the panel with just the host row.
+    function _bingoHostRefresh() {
+      const show = _bingoActive && _adminAuthed;
+      document.getElementById('bingo-host-row').style.display = show ? 'block' : 'none';
+      if (show) {
+        // "Call next ball" only makes sense once the game is live — during the
+        // join countdown the server refuses to deal, so don't show a dead button.
+        document.getElementById('bingo-host-call').style.display = (_bingoMode === 'manual' && _bingoPhase === 'active') ? 'block' : 'none';
+        document.getElementById('bingo-host-switch').textContent = _bingoMode === 'manual' ? '🤖 Switch to auto-calling' : '🎤 Switch to manual (I call)';
+        document.getElementById('bingo-panel').style.display = 'block';
+      }
+      document.getElementById('bingo-claim-btn').style.display = _bingoCard ? 'block' : 'none';
+    }
+    let _bingoLobbyTimer = null;
+    const _bgEl = (id) => document.getElementById(id);
+    // A client that missed bingoOver (tab asleep / brief disconnect) still
+    // holds the OLD game's card. Any message carrying a NEWER gameId proves
+    // that game is dead — wipe the stale card before handling the new game.
+    function _bingoDropStale(gameId) {
+      if (gameId != null && _bingoGameId != null && gameId > _bingoGameId) _bingoHideAll();
+    }
+    function ownerStartBingo() {
+      const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
+      socket.emit('adminBingoStart', {
+        prize,
+        mode: _bgEl('op-bingo-mode').value,
+        callSecs: Number(_bgEl('op-bingo-secs').value),
+        rule: _bgEl('op-bingo-rule').value,
+      });
+    }
+    window.ownerStartBingo = ownerStartBingo;
+    let _bingoAdminMode = 'auto';
+    function ownerBingoSwitch() {
+      socket.emit('adminBingoMode', { mode: _bingoAdminMode === 'manual' ? 'auto' : 'manual' });
+    }
+    window.ownerBingoSwitch = ownerBingoSwitch;
+    // Inline onclick handlers only see window globals — `socket` lives inside
+    // this script's scope, so raw onclick="socket.emit(...)" silently fails.
+    window.ownerBingoCall   = () => socket.emit('adminBingoCall');
+    window.ownerBingoCancel = () => socket.emit('adminBingoCancel');
+
+    // ── Red Light, Green Light: F8 controls ─────────────────────────────
+    window.ownerStartRlgl = () => {
+      const prize = Math.round(Number(document.getElementById('op-rlgl-prize').value));
+      socket.emit('adminRlglStart', { prize });
+    };
+    window.ownerRlglCancel = () => socket.emit('adminRlglCancel');
+
+    window.ownerStartRace = () => {
+      const prize = Math.max(0, Math.round(Number(document.getElementById('op-race-prize').value) || 0));
+      const msg   = document.getElementById('op-race-msg');
+      socket.emit('ownerStartRace', { prize });
+    };
+    window.ownerRaceCancel = () => socket.emit('ownerRaceCancel');
+    socket.on('ownerMsg', (payload) => {
+      const el = document.getElementById('op-race-msg');
+      if (el) { el.style.color = '#27ae60'; el.textContent = typeof payload === 'string' ? payload : (payload.message || ''); }
+    });
+
+    // ── Pet Race client ────────────────────────────────────────────────────
+    (function () {
+      const MEDAL = ['🥇','🥈','🥉'];
+      const TRACK_L = 10, TRACK_R = 87;
+      let _phase = 'idle';
+      let _entrants = [];
+      let _positions = {};
+      let _animIv = null, _lobbyIv = null, _duelCountdownIv = null;
+      let _frameIdx = {};
+      let _inAction = new Set();   // pets currently playing their special-event sprite
+      let _joinDeadline = 0;
+      let _myPayout = 0;
+      let _totalHeats = 0;
+      // Opt-in gating: nobody gets dragged into the fullscreen race UI unless
+      // they joined, bet, are in a duel, or clicked the corner invite card.
+      let _raceOptIn = false;
+      let _pendingRace = null;   // latest heat/final payload for a late "Watch"
+      let _lastPrize = 0;
+
+      function _ro(id) { return document.getElementById(id); }
+
+      function _showPhase(ph) {
+        _phase = ph;
+        const ov = _ro('race-overlay');
+        if (!ov) return;
+        const on = ph !== 'idle';
+        ov.style.display = on ? 'block' : 'none';
+        ['race-lobby-screen','race-duel-screen','race-scene','race-results-screen'].forEach(id => {
+          const el = _ro(id); if (!el) return;
+          const vis = (id === 'race-lobby-screen'  && ph === 'lobby')  ||
+                      (id === 'race-duel-screen'    && ph === 'duel')   ||
+                      (id === 'race-scene'          && (ph === 'heat' || ph === 'final')) ||
+                      (id === 'race-results-screen' && ph === 'results');
+          const flex = id === 'race-results-screen' || id === 'race-duel-screen';
+          el.style.display = vis ? (flex ? 'flex' : 'block') : 'none';
+        });
+        const cd = _ro('race-countdown'); if (cd) cd.style.display = 'none';
+      }
+
+      function _frames(stem) {
+        return [
+          '/assets/pets/anim/'+stem+'_walk1.png',
+          '/assets/pets/anim/'+stem+'_walk2.png',
+          '/assets/pets/anim/'+stem+'_walk3.png',
+          '/assets/pets/anim/'+stem+'_walk2.png',
+        ];
+      }
+
+      function _renderLobbyList(entrants) {
+        _entrants = entrants;
+        const list = _ro('race-entrant-list');
+        const sel  = _ro('race-bet-select');
+        const cnt  = _ro('race-entrant-count');
+        if (cnt) cnt.textContent = entrants.length;
+        if (list) {
+          if (!entrants.length) {
+            list.innerHTML = '<div style="font-size:12px;color:#3a3870;font-style:italic;">Waiting for pets to enter...</div>';
+          } else {
+            list.innerHTML = entrants.map(e =>
+              '<div style="display:flex;align-items:center;gap:6px;background:#0d0b1e;border:1px solid #1e1b3a;border-radius:8px;padding:6px 10px;">' +
+              '<img src="/assets/pets/anim/'+e.stem+'_walk1.png" style="height:32px;image-rendering:pixelated;">' +
+              '<div><div style="font-size:12px;font-weight:700;color:#fff;">'+e.name+'</div></div></div>'
+            ).join('');
+          }
+        }
+        if (sel) {
+          sel.innerHTML = '<option value="">Pick a pet to bet on...</option>' +
+            entrants.map(e => '<option value="'+e.id+'">'+e.name+'</option>').join('');
+        }
+      }
+
+      function _buildTrack(entrants) {
+        const layer = _ro('race-pets-layer');
+        const laneDivs = _ro('race-lane-divs');
+        if (!layer) return;
+        layer.innerHTML = '';
+        if (laneDivs) laneDivs.innerHTML = '';   // no lane lines — pets can clump
+        const dirtEl = _ro('race-dirt');
+        const trackH = dirtEl ? dirtEl.offsetHeight : 200;
+        // Sprite height scales with stage — s3 looks genuinely bigger on the track
+        const spriteH = e => e.petStage >= 3 ? 84 : e.petStage >= 2 ? 66 : 50;
+        const LANE_H = 62;   // tight pitch — s3 sprites are bigger but can overlap a little
+        const N      = entrants.length || 1;
+        const totalBand = LANE_H * (N - 1);
+        const top0   = trackH / 2 - totalBand / 2;
+        entrants.forEach((e, i) => {
+          const SPR_H = spriteH(e);
+          const cy = Math.round(N === 1 ? trackH / 2 : top0 + i * LANE_H);
+          const wrap = document.createElement('div');
+          wrap.id = 'rpet-'+e.id;
+          wrap.style.cssText = 'position:absolute;left:'+TRACK_L+'%;top:'+cy+'px;transform:translate(0,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left 0.14s linear;z-index:5;';
+          const lbl = document.createElement('div');
+          lbl.style.cssText = 'font-size:10px;font-weight:700;background:rgba(10,8,20,0.82);color:#fff;border-radius:5px;padding:1px 6px;white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis;';
+          lbl.textContent = e.name;
+          const img = document.createElement('img');
+          img.src = '/assets/pets/anim/'+e.stem+'_walk1.png';
+          img.onerror = function() { this.src = '/assets/pets/anim/'+e.stem.replace(/_s[23]$/,'')+'_walk1.png'; };
+          img.style.cssText = 'image-rendering:pixelated;height:'+SPR_H+'px;width:auto;filter:drop-shadow(2px 3px 5px rgba(0,0,0,0.7));';
+          img.dataset.stem = e.stem;
+          const placeTag = document.createElement('div');
+          placeTag.id = 'rplace-'+e.id;
+          placeTag.style.cssText = 'display:none;font-size:18px;margin-top:2px;';
+          wrap.append(lbl, img, placeTag);
+          layer.appendChild(wrap);
+        });
+        _frameIdx = {};
+        _lastPct  = {};   // fresh race — no stale streaks from a prior track
+        entrants.forEach(e => { _frameIdx[e.id] = 0; });
+        // Preload every racer's walk + action frames ONCE so the 130ms frame
+        // swap always hits browser cache instead of the network. Over the
+        // internet a cold fetch per swap is slower than the swap interval —
+        // sprites looked frozen and the request flood lagged the whole page.
+        const seen = new Set();
+        entrants.forEach(e => {
+          if (seen.has(e.stem)) return;
+          seen.add(e.stem);
+          _frames(e.stem).concat('/assets/pets/anim/'+e.stem+'_action.png')
+            .forEach(src => { const im = new Image(); im.src = src; });
+        });
+      }
+
+      function _startAnim() {
+        clearInterval(_animIv);
+        _animIv = setInterval(() => {
+          // Sprite frames ONLY. Position is driven by the racePositions handler
+          // so a bad sprite (missing asset, action lock) can never freeze a pet
+          // on the start line. Each pet is isolated: one throw must not stop the
+          // rest of the field from animating.
+          for (const e of _entrants) {
+            try {
+              if (_inAction.has(e.id)) continue;   // don't clobber a special-event frame
+              const wrap = document.getElementById('rpet-'+e.id);
+              if (!wrap) continue;
+              const img = wrap.querySelector('img');
+              if (!img) continue;
+              const p = _positions[e.id] || {};
+              if (p.finished) continue;
+              const stem = img.dataset.stem || e.stem;
+              _frameIdx[e.id] = ((_frameIdx[e.id]||0)+1) % 4;
+              img.src = _frames(stem)[_frameIdx[e.id]];
+            } catch (err) { /* one bad pet must not stall the whole race */ }
+          }
+        }, 130);
+      }
+
+      function _stopAnim() { clearInterval(_animIv); _animIv = null; _inAction.clear(); }
+
+      // Visible dash trail for a power-up jump: a bright streak from the old
+      // position to the new one, fading out fast. Purely cosmetic — position
+      // itself is server-authoritative.
+      let _lastPct = {};
+      function _boostStreak(wrap, fromPct, toPct) {
+        try {
+          const layer = wrap.parentElement;
+          if (!layer) return;
+          const streak = document.createElement('div');
+          streak.style.cssText = 'position:absolute;left:'+fromPct+'%;top:'+wrap.style.top+
+            ';width:'+Math.max(2,(toPct-fromPct))+'%;height:10px;transform:translate(0,-50%);'+
+            'background:linear-gradient(90deg,transparent,rgba(255,235,130,0.95));'+
+            'border-radius:5px;z-index:4;pointer-events:none;opacity:1;transition:opacity 0.45s ease-out;'+
+            'filter:drop-shadow(0 0 6px rgba(255,220,90,0.8));';
+          layer.appendChild(streak);
+          requestAnimationFrame(() => { streak.style.opacity = '0'; });
+          setTimeout(() => streak.remove(), 500);
+        } catch (e) { /* cosmetic only — never break the race */ }
+      }
+
+      function _updateLB() {
+        const lb = _ro('race-lb-rows');
+        if (!lb) return;
+        const sorted = [..._entrants].sort((a,b) => ((_positions[b.id]||{}).pos||0) - ((_positions[a.id]||{}).pos||0));
+        lb.innerHTML = sorted.slice(0,6).map((e,i) => {
+          const p = _positions[e.id] || {};
+          const col = p.finished ? '#f5c518' : '#fff';
+          return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;">' +
+            '<span style="color:#888;width:12px;font-size:10px;">'+(i+1)+'</span>' +
+            '<span style="color:'+col+';font-weight:'+(p.finished?'700':'400')+';flex:1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;">'+e.name+'</span>' +
+            '<span style="color:#3a6a28;font-size:10px;">'+Math.round(p.pos||0)+'%</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      function _countdown(onDone) {
+        const el = _ro('race-countdown');
+        const num = _ro('race-countdown-num');
+        if (!el || !num) { onDone && onDone(); return; }
+        el.style.display = 'flex';
+        let n = 3;
+        num.textContent = n;
+        num.style.color = '#fff';
+        const iv = setInterval(() => {
+          n--;
+          if (n > 0) { num.textContent = n; }
+          else if (n === 0) { num.textContent = 'GO!'; num.style.color = '#7add60'; }
+          else { clearInterval(iv); el.style.display = 'none'; num.style.color = '#fff'; onDone && onDone(); }
+        }, 900);
+      }
+
+      function _bracketPills(heat, total, isFinal) {
+        const el = _ro('race-bracket-pills');
+        if (!el) return;
+        let html = '';
+        for (let h = 1; h <= total; h++) {
+          const active = !isFinal && h === heat;
+          const done   = !isFinal && h < heat;
+          const col = active ? '#7add60' : (done ? '#3a8a28' : '#2a4a20');
+          html += '<span style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid '+col+';color:'+col+';font-weight:'+(active?'700':'400')+'">Heat '+h+'</span>';
+        }
+        html += '<span style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid '+(isFinal?'#f5c518':'#2a4a20')+';color:'+(isFinal?'#f5c518':'#2a4a20')+';font-weight:'+(isFinal?'700':'400')+'">🏆 Final</span>';
+        el.innerHTML = html;
+      }
+
+      function _startRaceUI(entrants, heat, total, isFinal, advN) {
+        clearInterval(_lobbyIv);
+        _entrants = entrants;
+        _positions = {};
+        _totalHeats = total;
+        _showPhase(isFinal ? 'final' : 'heat');
+        const title = isFinal ? (total > 0 ? '🏆 THE FINAL' : '🏁 PET RACE') : '🏁 HEAT '+heat+' / '+total;
+        const sub   = isFinal ? 'Last race — winner takes all!' : 'Top '+(advN||3)+' advance to the Final';
+        const ht = _ro('race-hud-title'); if (ht) ht.textContent = title;
+        const hs = _ro('race-hud-sub');   if (hs) hs.textContent = sub;
+        _bracketPills(heat, total, isFinal);
+        _buildTrack(entrants);
+        _countdown(() => _startAnim());
+      }
+
+      // ── Socket events ──────────────────────────────────────────────────────
+      socket.on('raceChallenge', ({ opponentName, isDuel, myStem, opponentStem, countdownMs }) => {
+        if (!isDuel) { _rpsToast('🏁 Race vs ' + opponentName + '! Check the track!'); return; }
+        // Duel: show the "VS" countdown screen instead of the lobby.
+        const myPetEl  = _ro('race-duel-my-pet');
+        const oppPetEl = _ro('race-duel-opp-pet');
+        const oppNmEl  = _ro('race-duel-opp-name');
+        const timerEl  = _ro('race-duel-timer');
+        if (myPetEl  && myStem)       myPetEl.src  = '/assets/pets/anim/' + myStem       + '_walk1.png';
+        if (oppPetEl && opponentStem) oppPetEl.src = '/assets/pets/anim/' + opponentStem + '_walk1.png';
+        if (oppNmEl)  oppNmEl.textContent  = opponentName;
+        _showPhase('duel');
+        clearInterval(_duelCountdownIv);
+        let sec = Math.ceil((countdownMs || 6000) / 1000);
+        if (timerEl) timerEl.textContent = sec;
+        _duelCountdownIv = setInterval(() => {
+          sec--;
+          if (timerEl) timerEl.textContent = Math.max(0, sec);
+          if (sec <= 0) clearInterval(_duelCountdownIv);
+        }, 1000);
+      });
+
+      // ── Corner invite card (RLGL-style): announce the race without hijacking
+      //    the screen. Fullscreen race UI only opens for opt-ins. ─────────────
+      function _raceCardEl() {
+        let c = _ro('race-invite-card');
+        if (!c) {
+          c = document.createElement('div');
+          c.id = 'race-invite-card';
+          c.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9100;background:#13112a;'+
+            'border:1px solid #5540c0;border-radius:14px;padding:14px 16px;color:#fff;max-width:270px;'+
+            'box-shadow:0 8px 30px rgba(0,0,0,0.55);font-family:inherit;';
+          document.body.appendChild(c);
+        }
+        return c;
+      }
+      function _raceCardHide() { const c = _ro('race-invite-card'); if (c) c.remove(); }
+      function _showRaceInvite() {
+        const c = _raceCardEl();
+        c.innerHTML =
+          '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">🏁 PET RACE</div>'+
+          '<div style="font-size:12px;color:#aab;margin-bottom:9px;line-height:1.5;">Lobby open! Prize pool: <b style="color:#f5c518;">'+
+            (_lastPrize||0).toLocaleString()+'</b> coins · <span id="race-card-count">0</span> pets in · <span id="race-card-left">--</span>s</div>'+
+          '<div style="display:flex;gap:8px;">'+
+          '<button id="race-card-open" style="flex:1;padding:9px 0;border:none;border-radius:9px;background:linear-gradient(135deg,#5540c0,#4433aa);color:#fff;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;">JOIN / BET</button>'+
+          '<button id="race-card-dismiss" style="padding:9px 13px;border:none;border-radius:9px;background:#2a2550;color:#888;cursor:pointer;font-family:inherit;">✕</button></div>';
+        _ro('race-card-open').onclick    = () => { _raceCardHide(); _showPhase('lobby'); };
+        _ro('race-card-dismiss').onclick = () => _raceCardHide();
+      }
+      function _showRaceOngoing() {
+        const c = _raceCardEl();
+        c.innerHTML =
+          '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">🏁 PET RACE — ON!</div>'+
+          '<div style="font-size:12px;color:#aab;margin-bottom:9px;">The race is running right now.</div>'+
+          '<div style="display:flex;gap:8px;">'+
+          '<button id="race-card-watch" style="flex:1;padding:9px 0;border:none;border-radius:9px;background:linear-gradient(135deg,#5540c0,#4433aa);color:#fff;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;">WATCH</button>'+
+          '<button id="race-card-dismiss" style="padding:9px 13px;border:none;border-radius:9px;background:#2a2550;color:#888;cursor:pointer;font-family:inherit;">✕</button></div>';
+        _ro('race-card-watch').onclick = () => {
+          _raceOptIn = true; _raceCardHide();
+          if (_pendingRace) _startRaceUI(_pendingRace.entrants, _pendingRace.heat, _pendingRace.totalHeats, _pendingRace.isFinal, _pendingRace.advanceN);
+        };
+        _ro('race-card-dismiss').onclick = () => _raceCardHide();
+      }
+
+      socket.on('raceLobby', ({ prize, joinDeadline, entrants }) => {
+        if (_phase === 'duel') return;   // duel VS screen wins — ignore stray lobby events
+        _myPayout = 0;
+        _raceOptIn = false;
+        _pendingRace = null;
+        _lastPrize = prize || 0;
+        _showRaceInvite();
+        const pl = _ro('race-lobby-prize-lbl');
+        if (pl) pl.textContent = '🏆 House prize pool: '+prize.toLocaleString()+' coins';
+        _joinDeadline = joinDeadline;
+        const hasPet = !!(_equippedPet);
+        const jb = _ro('race-join-btn');
+        const ms = _ro('race-my-pet-status');
+        if (hasPet) {
+          if (ms) ms.textContent = 'You have a pet ready to race!';
+          if (jb) jb.style.display = 'inline-block';
+        } else {
+          if (ms) ms.textContent = 'No pet equipped — visit the shop first.';
+          if (jb) jb.style.display = 'none';
+        }
+        const jb2 = _ro('race-joined-badge'); if (jb2) jb2.style.display = 'none';
+        if (jb) jb.style.display = hasPet ? 'inline-block' : 'none';
+        const bm = _ro('race-bet-msg'); if (bm) bm.textContent = '';
+        const pl2 = _ro('race-pot-lbl'); if (pl2) pl2.textContent = '0 🪙';
+        _renderLobbyList(entrants || []);
+        const xb = _ro('race-lobby-close');
+        if (xb) xb.onclick = () => { _showPhase('idle'); if (!_raceOptIn) _showRaceInvite(); };
+        clearInterval(_lobbyIv);
+        _lobbyIv = setInterval(() => {
+          const left = Math.max(0, _joinDeadline - Date.now());
+          const s = Math.ceil(left / 1000);
+          const t = _ro('race-lobby-timer');
+          if (t) t.textContent = Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+          const cl = _ro('race-card-left'); if (cl) cl.textContent = s;
+          if (left <= 0) clearInterval(_lobbyIv);
+        }, 500);
+      });
+
+      socket.on('raceEntrantUpdate', ({ entrants }) => {
+        _renderLobbyList(entrants);
+        const cc = _ro('race-card-count'); if (cc) cc.textContent = (entrants || []).length;
+      });
+      socket.on('racePotUpdate',     ({ pot })      => { const el = _ro('race-pot-lbl'); if (el) el.textContent = pot.toLocaleString()+' 🪙'; });
+
+      socket.on('raceJoinOk', () => {
+        _raceOptIn = true;   // entered a pet — they're a participant now
+        const jb = _ro('race-join-btn');     if (jb)   jb.style.display = 'none';
+        const bd = _ro('race-joined-badge'); if (bd) bd.style.display = 'inline-block';
+      });
+      socket.on('raceJoinErr', msg => { const el = _ro('race-my-pet-status'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
+
+      socket.on('raceBetAck', ({ onId, amount }) => {
+        _raceOptIn = true;   // they have money on this race — they'll want to see it
+        const e   = _entrants.find(x => x.id === onId);
+        const msg = _ro('race-bet-msg');
+        if (msg) { msg.style.color='#7add60'; msg.textContent = '✓ Bet locked: '+amount.toLocaleString()+' coins on '+(e?e.name:'?'); }
+      });
+      socket.on('raceBetErr', msg => { const el = _ro('race-bet-msg'); if (el) { el.style.color='#e74c3c'; el.textContent=msg; } });
+
+      function _raceStage(payload, isFinal) {
+        _pendingRace = { entrants: payload.entrants, heat: payload.heat || 0,
+                         totalHeats: payload.totalHeats, isFinal, advanceN: payload.advanceN || 0 };
+        // Duel participants and opt-ins get the race screen; everyone else
+        // just gets the small "race is on — watch?" card.
+        if (_raceOptIn || _phase === 'duel' || _phase === 'lobby' || _phase === 'heat' || _phase === 'final') {
+          _raceOptIn = true;
+          _startRaceUI(payload.entrants, payload.heat || 0, payload.totalHeats, isFinal, payload.advanceN || 0);
+        } else {
+          _showRaceOngoing();
+        }
+      }
+      // Spectator escape hatch: leave the live race view any time. Keeps the
+      // anim loop running so "WATCH" can resume instantly from the card.
+      const _lv = _ro('race-scene-leave');
+      if (_lv) _lv.onclick = () => { _raceOptIn = false; _showPhase('idle'); _showRaceOngoing(); };
+      socket.on('raceHeatStart',  d => _raceStage(d, false));
+      socket.on('raceFinalStart', d => _raceStage(d, true));
+      socket.on('raceGo',         () => { /* countdown already handles it */ });
+
+      // Spawn emoji/div particles for a special event. Uses Web Animations API
+      // so no extra keyframes needed.
+      function _spawnParticles(wrap, type) {
+        const cfgs = {
+          fire:     { icons: ['🔥','💥','🔥','🔥','💥','🔥','🔥','💥','🔥'], n: 14 },
+          teleport: { icons: ['⚡','💜','⚡','✨','⚡','💜','⚡','✨'],         n: 12 },
+          flop:     { icons: ['💦','💧','💦','💧','💦','💧','🌊'],            n: 12 },
+          pounce:   { icons: ['💨','💨','🐾','💨','💨','🐾','💨'],            n: 10 },
+          hop:      { icons: ['✨','⭐','✨','🌟','✨','⭐','✨'],              n: 12 },
+          magic:    { icons: ['✨','🌟','💫','🌈','💜','✨','🌟','💫'],        n: 14 },
+          power:    { icons: ['⭐','✨','💥','⭐','✨'],                        n: 8  },
+        };
+        const c = cfgs[type] || cfgs.power;
+        for (let i = 0; i < c.n; i++) {
+          const pt = document.createElement('div');
+          pt.textContent = c.icons[i % c.icons.length];
+          const sz = 16 + Math.random() * 18;
+          pt.style.cssText = 'position:absolute;pointer-events:none;z-index:40;font-size:'+sz+'px;line-height:1;';
+          let sx, sy, dx, dy;
+          if (type === 'fire') {
+            // Blast forward from the mouth in a wide cone
+            sx = 75 + Math.random() * 25; sy = 20 + Math.random() * 60;
+            dx =  40 + Math.random() * 80;
+            dy = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 38);
+          } else if (type === 'teleport') {
+            // Explode outward in all directions from centre
+            sx = 20 + Math.random() * 60; sy = 20 + Math.random() * 60;
+            const ang = Math.random() * Math.PI * 2;
+            const r   = 40 + Math.random() * 50;
+            dx = Math.cos(ang) * r; dy = Math.sin(ang) * r;
+          } else if (type === 'hop') {
+            // Shoot upward + sideways
+            sx = 20 + Math.random() * 60; sy = 40 + Math.random() * 40;
+            dx = (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 30);
+            dy = -(20 + Math.random() * 50);
+          } else {
+            sx = 15 + Math.random() * 70; sy = 15 + Math.random() * 70;
+            const ang = Math.random() * Math.PI * 2;
+            const r   = 22 + Math.random() * 32;
+            dx = Math.cos(ang) * r; dy = Math.sin(ang) * r;
+          }
+          pt.style.left = sx + '%'; pt.style.top = sy + '%';
+          wrap.appendChild(pt);
+          const dur = 500 + Math.random() * 450;
+          const del = i * 35;
+          pt.animate([
+            { opacity: 1, transform: 'translate(0,0) scale(1.2)'               },
+            { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(0.1)`   }
+          ], { duration: dur, delay: del, fill: 'forwards', easing: 'ease-out' });
+          setTimeout(() => pt.remove(), dur + del + 60);
+        }
+      }
+
+      // Special event: type-specific visual + floating label
+      // _inAction guards the walk loop so it won't overwrite the action frame mid-play
+      socket.on('raceEvent', ({ id, label, type }) => {
+        const wrap = document.getElementById('rpet-' + id);
+        if (!wrap) return;
+        const img  = wrap.querySelector('img');
+        const stem = img ? (img.dataset.stem || '') : '';
+        const ACTION_MS = 900;   // how long the action frame holds
+
+        // Lock out the walk loop for this pet
+        _inAction.add(id);
+        setTimeout(() => _inAction.delete(id), ACTION_MS);
+
+        // 1. Swap to action sprite
+        if (img && stem) {
+          const actionSrc = '/assets/pets/anim/' + stem + '_action.png';
+          img.onerror = function() { this.onerror = null; };   // silently fail if missing
+          img.src = actionSrc;
+        }
+
+        // 2. Type-specific CSS effect
+        if (type === 'teleport') {
+          // Dog: vanish → reappear with lightning scale pop
+          wrap.style.transition = 'none';
+          if (img) {
+            img.style.opacity = '0';
+            img.style.filter  = 'brightness(3) drop-shadow(0 0 18px #aa88ff)';
+            setTimeout(() => {
+              img.style.opacity = '1';
+              img.style.transform = 'scale(1.5)';
+              setTimeout(() => { img.style.transform = 'scale(1)'; }, 180);
+            }, 110);
+            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; }, ACTION_MS);
+          }
+          setTimeout(() => { wrap.style.transition = 'left 0.14s linear'; }, 380);
+        } else if (type === 'fire') {
+          // Dragon / phoenix: blinding fire glow + brief screen flash
+          if (img) {
+            img.style.filter = 'drop-shadow(0 0 10px #ff2200) drop-shadow(0 0 28px #ff6600) brightness(2)';
+            img.style.transform = 'scale(1.3)';
+            setTimeout(() => { img.style.transform = 'scale(1)'; }, 250);
+            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; }, ACTION_MS);
+          }
+          // Brief orange screen-edge flash
+          const flash = document.createElement('div');
+          flash.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:35;border-radius:0;background:radial-gradient(ellipse at 50% 50%,rgba(255,80,0,0.22) 0%,transparent 70%);';
+          const dirtEl2 = document.getElementById('race-dirt');
+          if (dirtEl2) { dirtEl2.appendChild(flash); setTimeout(() => flash.remove(), 420); }
+        } else if (type === 'pounce') {
+          // Cat: high leap with spin, lands with squash
+          wrap.style.transition = 'transform 0.18s cubic-bezier(0.2,2,0.4,1)';
+          wrap.style.transform  = 'translate(0,-110%) scale(1.35) rotate(-15deg)';
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = 'transform 0.12s ease-in'; }, 300);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-38%) scaleY(0.7) scaleX(1.2)'; }, 440);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = ''; }, 580);
+        } else if (type === 'flop') {
+          // Duck: full barrel roll
+          if (img) {
+            img.style.transition = 'transform 0.32s ease-in-out';
+            img.style.transform  = 'rotate(-180deg) scaleX(-1) scale(1.2)';
+            setTimeout(() => { img.style.transform = 'rotate(-360deg) scaleX(1) scale(1)'; }, 360);
+            setTimeout(() => { img.style.transform = ''; img.style.transition = ''; }, 700);
+          }
+        } else if (type === 'hop') {
+          // Bunny: triple bounce, getting higher each time
+          wrap.style.transition = 'transform 0.16s ease-out';
+          wrap.style.transform  = 'translate(0,-90%)';
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%) scaleY(0.75) scaleX(1.2)'; }, 180);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-120%)'; wrap.style.transition = 'transform 0.14s ease-out'; }, 310);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%) scaleY(0.8)'; }, 460);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-80%)'; wrap.style.transition = 'transform 0.12s ease-out'; }, 560);
+          setTimeout(() => { wrap.style.transform = 'translate(0,-50%)'; wrap.style.transition = ''; }, 700);
+        } else if (type === 'magic') {
+          // Unicorn: full rainbow spin + scale surge
+          if (img) {
+            img.style.transition = 'filter 0.15s, transform 0.2s';
+            img.style.transform  = 'scale(1.4) rotate(20deg)';
+            img.style.filter     = 'hue-rotate(0deg)   brightness(2)   drop-shadow(0 0 14px #ff88ff)';
+            setTimeout(() => { img.style.filter = 'hue-rotate(120deg) brightness(1.8) drop-shadow(0 0 12px #88ffcc)'; }, 200);
+            setTimeout(() => { img.style.filter = 'hue-rotate(240deg) brightness(1.5) drop-shadow(0 0 10px #88aaff)'; img.style.transform = 'scale(1) rotate(-10deg)'; }, 400);
+            setTimeout(() => { img.style.filter = 'drop-shadow(1px 2px 3px rgba(0,0,0,0.6))'; img.style.transform = 'scale(1)'; img.style.transition = ''; }, ACTION_MS);
+          }
+        }
+
+        // 3. Particles
+        _spawnParticles(wrap, type || 'power');
+
+        // 4. Floating label — bigger and bolder
+        const fl = document.createElement('div');
+        fl.textContent = label;
+        fl.style.cssText = 'position:absolute;left:50%;transform:translate(-50%,-44px);background:rgba(0,0,0,0.88);color:#ffe066;font-size:13px;font-weight:900;padding:4px 12px;border-radius:12px;white-space:nowrap;pointer-events:none;z-index:50;border:1px solid rgba(255,220,80,0.35);animation:raceEventPop 1.1s ease-out forwards;';
+        wrap.appendChild(fl);
+        setTimeout(() => fl.remove(), 1200);
+      });
+
+      socket.on('racePositions', posData => {
+        _positions = posData;
+        // Apply ALL positions directly — running and finished — so movement
+        // works even if _startAnim's interval isn't ticking yet.
+        for (const [id, p] of Object.entries(posData)) {
+          const wrap = document.getElementById('rpet-'+id);
+          if (!wrap) continue;
+          if (p.finished) {
+            const pl = document.getElementById('rplace-'+id);
+            if (pl && p.place) { pl.style.display='block'; pl.textContent = MEDAL[p.place-1]||'#'+p.place; }
+            wrap.style.left = TRACK_R+'%';
+          } else {
+            const pct = TRACK_L + (p.pos||0) / 100 * (TRACK_R - TRACK_L);
+            // Power-up boosts arrive as one big position jump. The CSS slide
+            // (0.14s) made them nearly invisible — draw a motion streak from
+            // the old spot so the dash reads as a dash.
+            const lp = _lastPct[id];
+            if (lp !== undefined && pct - lp > 1.0) _boostStreak(wrap, lp, pct);
+            _lastPct[id] = pct;
+            wrap.style.left = pct+'%';
+          }
+        }
+        _updateLB();
+      });
+
+      socket.on('raceHeatEnd', ({ heat, totalHeats, isFinal, results }) => {
+        _stopAnim();
+        if (isFinal) return;
+        const ht = _ro('race-hud-title'); if (ht) ht.textContent = '🏁 Heat '+heat+' done!';
+        const hs = _ro('race-hud-sub');
+        if (hs) {
+          const adv = results.filter(r => r.place && r.place <= 3).map(r => r.name).join(', ');
+          hs.textContent = 'Advancing: '+(adv||'—');
+        }
+      });
+
+      socket.on('racePayout', ({ amount }) => { _myPayout = amount; });
+
+      socket.on('raceResult', ({ results, totalPot, forfeit, forfeitName }) => {
+        _stopAnim();
+        _raceCardHide();
+        _pendingRace = null;
+        // Bystanders who never opted in shouldn't get a fullscreen results
+        // takeover either — unless their bet won (payout deserves a screen).
+        if (!_raceOptIn && _phase !== 'duel' && _myPayout <= 0 && !forfeit) return;
+        _showPhase('results');
+        const list = _ro('race-results-list');
+        if (list) {
+          if (forfeit) {
+            list.innerHTML = '<div style="text-align:center;padding:18px 0;font-size:15px;color:#e74c3c;">🏃 <b>'+(forfeitName||'Opponent')+'</b> disconnected and forfeited the race.</div>';
+          } else {
+            list.innerHTML = results.map((r, i) => {
+              const medal = MEDAL[i] || '#'+(i+1);
+              const pStr  = r.payout ? ' <span style="color:#f5c518;font-weight:700;">+'+r.payout.toLocaleString()+' 🪙</span>' : '';
+              return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1b3a;">' +
+                '<span style="font-size:20px;width:28px;">'+medal+'</span>' +
+                '<div style="font-size:14px;color:#fff;font-weight:'+(i===0?'700':'400')+';">'+r.name+pStr+'</div></div>';
+            }).join('');
+          }
+        }
+        const banner = _ro('race-payout-banner');
+        if (banner) {
+          if (forfeit) {
+            banner.style.color = '#2ecc71';
+            banner.textContent = '🏆 You win by walkover! Wager collected.';
+          } else if (_myPayout > 0) {
+            banner.style.color = '#f5c518';
+            banner.textContent = '🎉 Your bet won! +'+_myPayout.toLocaleString()+' coins!';
+          } else {
+            banner.style.color = '#8880bb';
+            banner.textContent = 'Total pot: '+totalPot.toLocaleString()+' coins';
+          }
+        }
+        const cb = _ro('race-close-btn');
+        if (cb) cb.onclick = () => { _stopAnim(); _showPhase('idle'); };
+      });
+
+      socket.on('raceCancelled', () => {
+        _stopAnim();
+        clearInterval(_lobbyIv);
+        _raceCardHide();
+        _raceOptIn = false;
+        _pendingRace = null;
+        _showPhase('idle');
+      });
+
+      // ── Button wiring (on DOM ready or immediately if already loaded) ──────
+      function _wireButtons() {
+        const jb = _ro('race-join-btn');
+        const bb = _ro('race-bet-btn');
+        const sel = _ro('race-bet-select');
+        const amt = _ro('race-bet-amount');
+        if (jb && !jb._wired) { jb._wired=true; jb.addEventListener('click', () => socket.emit('raceJoin')); }
+        if (bb && !bb._wired) { bb._wired=true; bb.addEventListener('click', () => {
+          const onId  = sel ? sel.value : '';
+          const coins = amt ? Math.round(Number(amt.value)) : 0;
+          const bm = _ro('race-bet-msg');
+          if (!onId) { if(bm){bm.style.color='#e74c3c';bm.textContent='Pick a pet first.';} return; }
+          if (!coins || coins < 50) { if(bm){bm.style.color='#e74c3c';bm.textContent='Min bet is 50 coins.';} return; }
+          socket.emit('raceBet', { onId, amount: coins });
+        }); }
+        [sel, amt].forEach(el => {
+          if (!el || el._kbdGuarded) return;
+          el._kbdGuarded = true;
+          el.addEventListener('focus', () => window._phaserKbd?.disableGlobalCapture());
+          el.addEventListener('blur',  () => window._phaserKbd?.enableGlobalCapture());
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wireButtons);
+      else _wireButtons();
+
+
+    })();
+
+    socket.on('adminRlglResult', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-rlgl-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+    });
+
+    // ── Red Light, Green Light: game client ─────────────────────────────
+    // All UI is built here (no static markup): a top banner, the join card,
+    // and a full-screen red hit-flash. World objects (doll, lines) live on
+    // the Phaser scene and are torn down on every end/cancel/replay path.
+    const _rlgl = { on: false, running: false, joined: false, meAlive: false, meFinished: false,
+                    slippery: false, light: 'green', alive: {}, fallen: new Set(),
+                    doll: null, lineF: null, lineS: null, lobbyTimer: null, pushAt: 0, pushCd: 5000 };
+    window._rlglFrozenMe = false;
+    function _rlglEl(id, css) {
+      let el = document.getElementById(id);
+      if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText = css; document.body.appendChild(el); }
+      return el;
+    }
+    const _RLGL_BANNER_CSS = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+      'padding:10px 22px;border-radius:12px;font-weight:800;font-size:20px;letter-spacing:1px;color:#fff;' +
+      'background:rgba(20,20,28,0.88);border:2px solid rgba(255,255,255,0.25);text-align:center;pointer-events:none;text-shadow:0 2px 6px rgba(0,0,0,0.6);';
+    const _RLGL_CARD_CSS = 'position:fixed;bottom:96px;left:50%;transform:translateX(-50%);z-index:9600;display:none;' +
+      'padding:14px 18px;border-radius:14px;background:rgba(20,20,28,0.92);border:2px solid #e05a7a;color:#fff;' +
+      'font-size:14px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,0.5);';
+    const _RLGL_FLASH_CSS = 'position:fixed;inset:0;z-index:9900;background:rgba(255,0,0,0.45);opacity:0;pointer-events:none;transition:opacity 0.12s;';
+    function _rlglBanner(html, ms) {
+      const el = _rlglEl('rlgl-banner', _RLGL_BANNER_CSS);
+      el.innerHTML = html;
+      el.style.display = 'block';
+      clearTimeout(el._t);
+      if (ms) el._t = setTimeout(() => { el.style.display = 'none'; }, ms);
+    }
+    function _rlglHideBanner() { const el = document.getElementById('rlgl-banner'); if (el) { clearTimeout(el._t); el.style.display = 'none'; } }
+    // Per-round countdown chip (owner rule: the time limit must be VISIBLE).
+    // Top-RIGHT corner — the top-center lane belongs to toasts (#daily-toast,
+    // shove/elimination messages); a centered timer chip sat right on top of them.
+    const _RLGL_TIMER_CSS = 'position:fixed;top:16px;right:16px;z-index:9600;display:none;' +
+      'padding:5px 16px;border-radius:10px;font-weight:800;font-size:17px;letter-spacing:1px;color:#fff;' +
+      'background:rgba(20,20,28,0.88);border:2px solid rgba(255,255,255,0.25);pointer-events:none;font-variant-numeric:tabular-nums;';
+    function _rlglTimerStart(endsAt) {
+      clearInterval(_rlgl.timerIv); _rlgl.timerIv = null;
+      if (!endsAt) return;
+      const el = _rlglEl('rlgl-timer', _RLGL_TIMER_CSS);
+      const tick = () => {
+        const left = Math.max(0, endsAt - Date.now());
+        const s = Math.ceil(left / 1000);
+        el.textContent = `⏱ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        el.style.color = s <= 10 ? '#ff5a5a' : '#fff';
+        if (left <= 0) _rlglTimerStop();
+      };
+      tick();
+      el.style.display = 'block';
+      _rlgl.timerIv = setInterval(tick, 250);
+    }
+    function _rlglTimerStop() {
+      clearInterval(_rlgl.timerIv); _rlgl.timerIv = null;
+      const el = document.getElementById('rlgl-timer'); if (el) el.style.display = 'none';
+    }
+    function _rlglHitFlash() {
+      const el = _rlglEl('rlgl-flash', _RLGL_FLASH_CSS);
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.opacity = '0'; }, 180);
+      window._gameScene?.cameras?.main?.shake(280, 0.012);
+    }
+    function _rlglSpriteOf(id) {
+      const sc = window._gameScene;
+      if (!sc) return null;
+      return id === socket.id ? sc.player : (sc.otherPlayers?.[id]?.sprite || null);
+    }
+    function _rlglFall(id) {
+      const s = _rlglSpriteOf(id);
+      if (s) { s.setAngle(90); s.setTint(0xb0b0b0); }
+      _rlgl.fallen.add(id);
+    }
+    function _rlglUnfallAll() {
+      for (const id of _rlgl.fallen) { const s = _rlglSpriteOf(id); if (s) { s.setAngle(0); s.clearTint(); } }
+      _rlgl.fallen.clear();
+    }
+    function _rlglClearWorld() {
+      for (const k of ['doll', 'lineF', 'lineS', 'strip0', 'strip1']) { try { _rlgl[k]?.destroy(); } catch {} _rlgl[k] = null; }
+      for (const k in _rlgl.coinSprites || {}) {
+        const s = _rlgl.coinSprites[k];
+        try { s?._rlglGlow?.destroy(); } catch {}
+        try { s?.destroy(); } catch {}
+      }
+      _rlgl.coinSprites = {};
+    }
+    function _rlglTeardown() {
+      _rlglUnfallAll(); _rlglClearWorld(); _rlglHideBanner(); _rlglTimerStop();
+      clearInterval(_rlgl.spectIv); _rlgl.spectIv = null; _rlgl.spectOn = null;
+      clearInterval(_rlgl.lobbyTimer); _rlgl.lobbyTimer = null;
+      const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
+      _rlgl.on = _rlgl.running = _rlgl.joined = _rlgl.meAlive = _rlgl.meFinished = _rlgl.slippery = false;
+      _rlgl.alive = {}; window._rlglFrozenMe = false;
+      // Give the camera back: restore pre-game zoom and re-follow the player.
+      const sc = window._gameScene;
+      if (sc?.cameras?.main && _rlgl.preZoom != null) {
+        sc.cameras.main.zoomTo(_rlgl.preZoom, 500, 'Sine.easeInOut');
+        if (sc.player) sc.cameras.main.startFollow(sc.player);
+      }
+      _rlgl.preZoom = null; _rlgl.introAttempt = null;
+    }
+    function _rlglSpawnWorld(d) {
+      const sc = window._gameScene;
+      if (!sc || !sc.add) return;
+      _rlglClearWorld();
+      // Vertical track on the west lawn: horizontal start & finish lines, the
+      // doll waiting at the bottom. Narrow phases draw the legal strip's rope
+      // borders — step past them and you're out.
+      const b = d.bounds || d.arena;
+      const midX = (d.arena.x0 + d.arena.x1) / 2, w = d.arena.x1 - d.arena.x0;
+      _rlgl.lineS = sc.add.rectangle(midX, d.startY,  w, 6, 0xffdd55, 0.5).setDepth(4);
+      _rlgl.lineF = sc.add.rectangle(midX, d.finishY, w, 8, 0x55ff88, 0.65).setDepth(4);
+      if (b.x0 > d.arena.x0 + 1) {
+        const midY = (d.startY + d.finishY) / 2, h = d.finishY - d.startY + 120;
+        _rlgl.strip0 = sc.add.rectangle(b.x0, midY, 5, h, 0xff4a4a, 0.75).setDepth(4);
+        _rlgl.strip1 = sc.add.rectangle(b.x1, midY, 5, h, 0xff4a4a, 0.75).setDepth(4);
+      }
+      // Keyed by the coin's SERVER index (stable across resyncs — a reconnect
+      // mid-attempt only receives unclaimed coins, but claim events still
+      // carry the original idx).
+      _rlgl.coinSprites = {};
+      for (let i = 0; i < (d.coins || []).length; i++) {
+        const c = d.coins[i];
+        // Drawn coin (the 🪙 emoji renders as an empty box in this WebGL font,
+        // per the boss's screenshot): pulsing glow + BRIGHT yellow disc with a
+        // darker rim and a bold "C", bobbing, always on top.
+        const glow = sc.add.circle(c.x, c.y + 2, 20, 0xffee00, 0.35).setDepth(949);
+        const disc = sc.add.circle(0, 0, 13, 0xffee00, 1).setStrokeStyle(3, 0xcc9900, 1);
+        const letter = sc.add.text(0, 0, 'C', { fontSize: '17px', fontFamily: 'Arial Black, Arial, sans-serif', fontStyle: 'bold', color: '#996600', resolution: 2 }).setOrigin(0.5, 0.54);
+        const coin = sc.add.container(c.x, c.y, [disc, letter]).setDepth(950);
+        sc.tweens.add({ targets: coin, y: c.y - 7, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        sc.tweens.add({ targets: glow, alpha: 0.12, scale: 1.35, duration: 550, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        coin._rlglGlow = glow;
+        _rlgl.coinSprites[c.idx ?? i] = coin;
+      }
+      const key = (d.light === 'red') ? 'rlgl_doll_red' : 'rlgl_doll_green';
+      const img = sc.textures.get('rlgl_doll_red')?.getSourceImage();
+      const scale = img ? 300 / img.height : 0.3;
+      _rlgl.doll = sc.add.image(d.doll.x, d.doll.y + 130, key).setOrigin(0.5, 1).setScale(scale).setDepth(9000);
+    }
+    socket.on('rlglLobby', (d = {}) => {
+      _rlgl.on = true;
+      const card = _rlglEl('rlgl-card', _RLGL_CARD_CSS);
+      const deadline = Date.now() + (d.msLeft || 0);
+      card.innerHTML =
+        `<div style="font-size:17px;font-weight:800;margin-bottom:4px;">🚦 RED LIGHT, GREEN LIGHT</div>` +
+        `<div style="margin-bottom:8px;">The doll game! Survivors split <b style="color:#ffd24a;">${(d.prize || 0).toLocaleString()} coins</b> · <span id="rlgl-count">${d.count || 0}</span> in · <span id="rlgl-left">--</span>s</div>` +
+        (_rlgl.joined
+          ? `<div style="color:#7be08a;font-weight:700;">✅ You're in — you'll be teleported to the start line!</div>`
+          : `<button id="rlgl-join-btn" style="padding:10px 26px;border:none;border-radius:10px;background:#e05a7a;color:#fff;font-weight:800;font-size:15px;cursor:pointer;">JOIN THE GAME</button>`);
+      card.style.display = 'block';
+      document.getElementById('rlgl-join-btn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); socket.emit('rlglJoin'); });
+      clearInterval(_rlgl.lobbyTimer);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        const el = document.getElementById('rlgl-left'); if (el) el.textContent = s;
+        if (s <= 0) clearInterval(_rlgl.lobbyTimer);
+      };
+      tick(); _rlgl.lobbyTimer = setInterval(tick, 500);
+    });
+    socket.on('rlglYouIn', () => {
+      _rlgl.joined = true;
+      const card = document.getElementById('rlgl-card');
+      if (card) {
+        const btn = document.getElementById('rlgl-join-btn');
+        if (btn) btn.outerHTML = `<div style="color:#7be08a;font-weight:700;">✅ You're in — you'll be teleported to the start line!</div>`;
+      }
+    });
+    socket.on('rlglTeleport', (d = {}) => {
+      const sc = window._gameScene;
+      if (!sc?.player) return;
+      // Teleported to the start line while SITTING: stand up FIRST — otherwise
+      // the runner arrives still rendered in the chair pose with a disabled
+      // physics body (can't walk), and a later E-press would snap them back to
+      // the office seat they came from. Mirrors the E-press stand-up block,
+      // minus the _preSitPos snap-back (the start line IS the new position).
+      if (sc.sitting) {
+        sc.sitting = false;
+        sc._deskPose = null;
+        sc._preSitPos = null;
+        try { _setWorkChip(false); } catch {}
+        try { sc._clearOccluders(sc._seatOccluders); } catch {}
+        sc._seatOccluders = [];
+        if (sc.playerTexKey) sc.player.setTexture(sc.playerTexKey);
+        if (sc.player.body) sc.player.body.enable = true;
+      }
+      if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y);
+    });
+    socket.on('rlglBegin', (d = {}) => {
+      _rlgl.on = true; _rlgl.running = true; _rlgl.slippery = false;
+      _rlgl.light = d.light || 'green';
+      _rlgl.pushCd = d.pushCooldownMs || 5000;
+      // Shoving is DISARMED for the first seconds of every round (server
+      // enforces the same window) — stops the start-line massacre.
+      _rlgl.pushArmedAt = Date.now() + (d.pushArmMs || 3000);
+      // Pre-GO corral: until GO (~8s in) the start line is a hard wall.
+      _rlgl.goAt = Date.now() + 8000;
+      _rlgl.startY = d.startY;
+      _rlgl.alive = {};
+      let meIn = false;
+      for (const p of d.players || []) { _rlgl.alive[p.id] = p.alive && !p.finished; if (p.id === socket.id) meIn = true; }
+      _rlgl.joined = meIn;
+      _rlgl.meAlive = meIn; _rlgl.meFinished = false;
+      window._rlglFrozenMe = false;
+      clearInterval(_rlgl.lobbyTimer);
+      const card = document.getElementById('rlgl-card'); if (card) card.style.display = 'none';
+      _rlglUnfallAll();
+      _rlglSpawnWorld(d);
+      _rlglTimerStart(d.endsAt);
+      // Cinematic intro: when a new attempt starts, zoom out and fly the
+      // camera down the lawn to the doll, then back to the player, staying a
+      // bit zoomed out for the game (owner preferred this over the per-frame
+      // "always frame the doll" director, which showed the whole office).
+      if (meIn && d.doll && _rlgl.introAttempt !== d.attempt) {
+        _rlgl.introAttempt = d.attempt;
+        const scc = window._gameScene;
+        const cam = scc?.cameras?.main;
+        if (cam && scc.player) {
+          if (_rlgl.preZoom == null) _rlgl.preZoom = cam.zoom || 1;
+          cam.stopFollow();
+          cam.zoomTo(0.45, 700, 'Sine.easeInOut');
+          cam.pan(d.doll.x, d.doll.y - 120, 1100, 'Sine.easeInOut', false, (c, prog) => {
+            if (prog === 1) scc.time.delayedCall(700, () => {
+              cam.pan(scc.player.x, scc.player.y, 900, 'Sine.easeInOut', false, (c2, p2) => {
+                if (p2 === 1) { cam.zoomTo(0.65, 500, 'Sine.easeInOut'); cam.startFollow(scc.player); }
+              });
+            });
+          });
+        }
+      }
+      // 3-2-1 countdown right after the camera pan (owner rule): time to
+      // spread out before the doll's game really begins. Purely visual —
+      // the server holds the first green ~8-9s and disarms shoving to match.
+      if (meIn) {
+        const cdAttempt = d.attempt;
+        // Camera pan takes ~4.5s total — the countdown must wait for it to
+        // FINISH, and the server guarantees green for ≥3s after GO (first
+        // red at 11s+), so nobody dies for obeying "GO".
+        const steps = [[5000, '3️⃣'], [6000, '2️⃣'], [7000, '1️⃣'], [8000, '🏃 GO — SPREAD OUT & RUN!']];
+        for (const [ms, txt] of steps) setTimeout(() => {
+          if (_rlgl.joined && _rlgl.introAttempt === cdAttempt) _rlglBanner(`<span style="font-size:30px;color:#7be08a;">${txt}</span>`, 950);
+        }, ms);
+      }
+      const phaseTag = d.phase ? `PHASE ${d.phase.n} — ${d.phase.name}` : `attempt ${d.attempt}`;
+      const phaseHint = d.phase && d.phase.name === 'NARROW PATH' ? ' ⚠️ Stay INSIDE the red ropes!' :
+                        d.phase && d.phase.name === 'SUDDEN DEATH' ? ' ⚠️ Red ropes + ICE + she FAKES turns!' : '';
+      _rlglBanner(
+        `🚦 RED LIGHT, GREEN LIGHT — <span style="color:#ffd24a;">${phaseTag}</span><br>` +
+        `<span style="font-size:13px;font-weight:600;">${meIn ? 'RUN DOWN on GREEN, freeze on RED. Grab 🪙 on the way. Press <b>F</b> to SHOVE. 😈' + phaseHint : 'Spectating — watch the lawn!'}</span>`,
+        6000);
+    });
+    socket.on('rlglLight', (d = {}) => {
+      if (!_rlgl.running) return;
+      _rlgl.light = d.light;
+      const sc = window._gameScene;
+      if (_rlgl.doll && sc) _rlgl.doll.setTexture(d.light === 'red' ? 'rlgl_doll_red' : 'rlgl_doll_green');
+      if (d.light === 'red') _rlglBanner(`<span style="color:#ff5a5a;">🔴 RED LIGHT — FREEZE!</span>`);
+      else _rlglBanner(`<span style="color:#7be08a;">🟢 GREEN LIGHT — RUN!</span>`);
+    });
+    socket.on('rlglFake', () => {
+      // Sudden-death theater: she twitches but does NOT turn — light stays
+      // green. Anyone who panic-stops just loses ground.
+      if (!_rlgl.running || !_rlgl.doll) return;
+      _rlgl.doll.setTexture('rlgl_doll_red');
+      _rlglBanner(`<span style="color:#ffb84a;">😱 SHE TWITCHED…!</span>`, 700);
+      setTimeout(() => {
+        if (_rlgl.running && _rlgl.doll && _rlgl.light === 'green') _rlgl.doll.setTexture('rlgl_doll_green');
+      }, 350);
+    });
+    socket.on('rlglCoin', (d = {}) => {
+      const s = (_rlgl.coinSprites || {})[d.idx];
+      if (s) { try { s._rlglGlow?.destroy(); } catch {} try { s.destroy(); } catch {} delete _rlgl.coinSprites[d.idx]; }
+      if (d.byId === socket.id) showToast(`🪙 +${d.value} coins — greed pays!`, 2500);
+    });
+    // ── Death cam (owner request): once you're out, the camera stops staring
+    // at your corpse and follows the race leader (the alive runner furthest
+    // down the track). Re-picks every second as people die/finish; every
+    // round-end path restores the normal follow-cam. ──
+    function _rlglSpectateStart() {
+      clearInterval(_rlgl.spectIv);
+      const pick = () => {
+        const sc = window._gameScene;
+        if (!sc || !_rlgl.running) return;
+        let leader = null, bestY = -Infinity;
+        for (const id in _rlgl.alive) {
+          if (!_rlgl.alive[id] || id === socket.id) continue;
+          const s = _rlglSpriteOf(id);
+          if (s && s.y > bestY) { bestY = s.y; leader = s; }
+        }
+        if (leader && _rlgl.spectOn !== leader) { _rlgl.spectOn = leader; sc.cameras.main.startFollow(leader); }
+      };
+      _rlgl.spectOn = null;
+      setTimeout(pick, 1200);   // let the "YOU'RE OUT" flash land first
+      _rlgl.spectIv = setInterval(pick, 1000);
+      _rlglBanner(`<span style="color:#9ad7ff;">🎥 Spectating the survivors…</span>`, 2500);
+    }
+    function _rlglSpectateStop() {
+      clearInterval(_rlgl.spectIv);
+      _rlgl.spectIv = null; _rlgl.spectOn = null;
+      const sc = window._gameScene;
+      if (sc?.player) sc.cameras.main.startFollow(sc.player);
+    }
+    socket.on('rlglOut', (d = {}) => {
+      _rlgl.alive[d.id] = false;
+      if (d.cause !== 'left') _rlglFall(d.id);
+      const causeTxt = d.cause === 'pushed' ? `pushed by ${d.byName}` :
+                       d.cause === 'moved'  ? 'moved on red light' :
+                       d.cause === 'fled'   ? 'ran off the lawn' :
+                       d.cause === 'path'   ? 'stepped off the path' :
+                       d.cause === 'time'   ? "time's up" : 'left';
+      if (d.id === socket.id) {
+        window._rlglFrozenMe = true;
+        _rlgl.meAlive = false;
+        _rlglHitFlash();
+        _rlglBanner(`<span style="color:#ff5a5a;">💀 YOU'RE OUT — ${causeTxt}!</span>`, 5000);
+        if (_rlgl.running) _rlglSpectateStart();
+      } else if (_rlgl.joined || _rlgl.on) {
+        showToast(`💀 ${d.name} is OUT — ${causeTxt}!`, 4000);
+      }
+    });
+    socket.on('rlglPushed', (d = {}) => {
+      if (d.id === socket.id) {
+        const sc = window._gameScene;
+        if (sc?.player) { if (sc.player.body) sc.player.body.reset(d.x, d.y); else sc.player.setPosition(d.x, d.y); }
+        _rlglHitFlash();
+        showToast(`💥 ${d.byName} PUSHED you!`, 4000);
+      }
+    });
+    socket.on('rlglFinished', (d = {}) => {
+      _rlgl.alive[d.id] = false;   // no longer a push target
+      if (d.id === socket.id) {
+        _rlgl.meFinished = true; _rlgl.meAlive = false;
+        _rlglBanner(`<span style="color:#7be08a;">🏁 YOU MADE IT! Wait for the field to clear…</span>`, 5000);
+      } else {
+        showToast(`🏁 ${d.name} made it across!`, 4000);
+      }
+    });
+    socket.on('rlglSlippery', () => {
+      _rlgl.slippery = true;
+      _rlglBanner(`<span style="color:#7ad7ff;">🧊 THE FLOOR IS SLIPPERY — good luck stopping!</span>`, 5000);
+    });
+    socket.on('rlglRound', (d = {}) => {
+      // Round survived by 2+: field is cut, survivors go again. Fallen bodies
+      // get up (the permanently-out become free spectators), floor un-ices.
+      _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
+      _rlglTimerStop();
+      _rlglSpectateStop();
+      _rlglUnfallAll();
+      const names = (d.remaining || []).map((r) => `${String(r.name).replace(/</g, '&lt;')}${r.safe ? ` <span style="opacity:.7;">(safe ×${r.safe})</span>` : ''}`).join(', ');
+      const duo = (d.remaining || []).length === 2
+        ? `<br><span style="font-size:12px;opacity:.8;">Two left — survive ${d.safeNeeded} rounds each and you split the pot!</span>` : '';
+      _rlglBanner(`🏁 ROUND SURVIVED — the field is cut!<br><span style="font-size:14px;">Still in: <span style="color:#ffd24a;">${names}</span> · next round in 5s…</span>${duo}`, 4800);
+    });
+    socket.on('rlglReplay', (d = {}) => {
+      _rlgl.running = false; _rlgl.slippery = false; window._rlglFrozenMe = false;
+      _rlglTimerStop();
+      _rlglSpectateStop();
+      _rlglUnfallAll();
+      _rlglBanner(`<span style="color:#ffd24a;">☠️ NOBODY SURVIVED — AGAIN! (attempt ${d.attempt})</span>`, 4000);
+    });
+    socket.on('rlglEnd', (d = {}) => {
+      const winners = d.winners || [];
+      const names = winners.join(', ').replace(/</g, '&lt;') || 'nobody';
+      _rlglTeardown();
+      if (winners.length === 1) {
+        _rlglBanner(`👑 CHAMPION: <span style="color:#ffd24a;">${names}</span><br>` +
+          `<span style="font-size:14px;">Takes the WHOLE ${(d.prize || 0).toLocaleString()}-coin pot! (${d.attempt} round${d.attempt > 1 ? 's' : ''})</span>`, 9000);
+      } else {
+        _rlglBanner(`🏆 CO-CHAMPIONS: <span style="color:#ffd24a;">${names}</span><br>` +
+          `<span style="font-size:14px;">They split the ${(d.prize || 0).toLocaleString()}-coin pot — ${(d.each || 0).toLocaleString()} each! (${d.attempt} rounds)</span>`, 9000);
+      }
+    });
+    socket.on('rlglCancelled', (d = {}) => {
+      _rlglTeardown();
+      if (d.reason) showToast(`🚦 Doll game cancelled: ${d.reason}`, 5000);
+    });
+    socket.on('rlglOver', () => _rlglTeardown());
+    // Hooks for the Phaser update loop (different scope):
+    window._rlglSlipActive = () => _rlgl.running && _rlgl.slippery && _rlgl.joined && _rlgl.meAlive && !_rlgl.meFinished;
+    window._rlglTryPush = (sc) => {
+      if (!_rlgl.running || !_rlgl.joined || !_rlgl.meAlive || _rlgl.meFinished) return false;
+      const now = Date.now();
+      if (_rlgl.pushArmedAt && now < _rlgl.pushArmedAt) { showToast(`🖐️ Easy! Shoving unlocks in ${Math.ceil((_rlgl.pushArmedAt - now) / 1000)}s…`, 1200); return true; }
+      if (now - _rlgl.pushAt < _rlgl.pushCd) { showToast('🖐️ Shove recharging…', 1200); return true; }
+      let best = null, bestD = 75 * 75;
+      for (const id in _rlgl.alive) {
+        if (!_rlgl.alive[id] || id === socket.id) continue;
+        const s = _rlglSpriteOf(id);
+        if (!s) continue;
+        const dx = s.x - sc.player.x, dy = s.y - sc.player.y, dd = dx * dx + dy * dy;
+        if (dd < bestD) { bestD = dd; best = id; }
+      }
+      if (best) { _rlgl.pushAt = now; socket.emit('rlglPush', { targetId: best }); }
+      else showToast('🖐️ Nobody close enough to shove.', 1500);
+      return true;
+    };
+    socket.on('adminBingoResult', ({ ok, mode, active, phase, message } = {}) => {
+      const msg = _bgEl('op-bingo-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (mode) { _bingoAdminMode = mode; _bingoMode = mode; }
+      if (active) _bingoActive = true;
+      if (phase) _bingoPhase = phase;
+      // The F8 message box is usually closed — surface host feedback as a
+      // toast too, so a rejected/accepted click is never silent.
+      if (message && (!ok || !_bingoCard)) _rpsToast(`🎱 ${message}`);
+      // F8 host controls (mirror of the in-panel ones)
+      _bgEl('op-bingo-host').style.display = active ? 'flex' : 'none';
+      _bgEl('op-bingo-switch').textContent = _bingoAdminMode === 'manual' ? 'Switch to auto' : 'Switch to manual';
+      _bingoHostRefresh();
+    });
+    // Avatar-click gates check this so profile cards / whisper menus can't
+    // layer on top of an active bingo lobby or card.
+    window._bingoUiOpen = () =>
+      _bgEl('bingo-lobby').style.display !== 'none' ||
+      _bgEl('bingo-panel').style.display !== 'none';
+    function _bingoHideAll() {
+      _bgEl('bingo-lobby').style.display = 'none';
+      _bgEl('bingo-panel').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
+      _bingoActive = false; _bingoPhase = null;
+      document.getElementById('bingo-host-row').style.display = 'none';
+      _bingoUnminimize();
+    }
+    // A panel minimized (▸) in a PREVIOUS game keeps #bingo-body display:none
+    // forever — the next game "opens" as just a thin header bar players don't
+    // notice. Always restore the body whenever a game shows the panel.
+    function _bingoUnminimize() {
+      _bgEl('bingo-body').style.display = 'block';
+      _bgEl('bingo-min-btn').textContent = '▾';
+    }
+    function _bingoRenderGrid() {
+      const grid = _bgEl('bingo-grid');
+      grid.replaceChildren();
+      for (const L of 'BINGO'.split('')) {
+        const h = document.createElement('div');
+        h.textContent = L;
+        h.style.cssText = 'text-align:center;font-weight:800;color:#7c5cff;font-size:12px;';
+        grid.appendChild(h);
+      }
+      if (!_bingoCard) return;
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+        const n = _bingoCard[r][c];
+        const b = document.createElement('button');
+        const daubed = n === 0 || _bingoDaubs.has(n);
+        b.textContent = n === 0 ? '★' : n;
+        b.style.cssText = 'padding:14px 0;border-radius:8px;font-size:18px;cursor:pointer;border:1px solid ' +
+          (daubed ? '#ffb400;background:#5a4300;color:#ffd76a;font-weight:700;' : '#4a3d78;background:#2b2250;color:#e8e2ff;');
+        if (n !== 0 && !daubed) b.onclick = () => socket.emit('bingoDaub', { n });
+        grid.appendChild(b);
+      }
+    }
+    socket.on('bingoLobby', ({ gameId, prize, rule, msLeft } = {}) => {
+      _bingoDropStale(gameId);
+      if (_bingoCard) return;   // already joined (resync)
+      _bingoGameId = gameId ?? _bingoGameId;
+      _bingoRule = rule || 'line';
+      _bingoRenderHowto();
+      _bgEl('bingo-lobby').style.display = 'block';
+      let deadline = Date.now() + (msLeft ?? 60000);
+      const ruleTxt = _bingoRule === 'blackout' ? '⬛ BLACKOUT — fill the WHOLE card' : '📏 any line wins';
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _bgEl('bingo-lobby-info').textContent = `Prize: ${(prize ?? 0).toLocaleString()} coins • ${ruleTxt} • starts in ${s}s`;
+        if (s <= 0) { clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null; _bgEl('bingo-lobby').style.display = 'none'; }
+      };
+      clearInterval(_bingoLobbyTimer);
+      _bingoLobbyTimer = setInterval(tick, 500); tick();
+    });
+    _bgEl('bingo-join-btn').addEventListener('click', () => socket.emit('bingoJoin'));
+    // The panel sits over the game world — swallow pointer events so a daub
+    // click can't ALSO hit the avatar/canvas underneath (opened profiles etc).
+    for (const id of ['bingo-panel', 'bingo-lobby']) {
+      const el = _bgEl(id);
+      for (const ev of ['pointerdown', 'pointerup', 'click']) {
+        el.addEventListener(ev, (e) => e.stopPropagation());
+      }
+    }
+    // "How to win" mini-diagrams — rule-aware: line games show row/column/
+    // diagonal; blackout shows one fully-filled card.
+    function _bingoRenderHowto() {
+      const wrap = _bgEl('bingo-howto');
+      wrap.replaceChildren();
+      const title = _bgEl('bingo-howto-title');
+      if (title) title.textContent = _bingoRule === 'blackout'
+        ? 'How to win — fill your WHOLE card (blackout):'
+        : 'How to win — complete any ONE line:';
+      const patterns = _bingoRule === 'blackout'
+        ? [{ label: 'BLACKOUT — fill it ALL', hit: () => true }]
+        : [
+            { label: 'row',      hit: (r, c) => r === 2 },
+            { label: 'column',   hit: (r, c) => c === 2 },
+            { label: 'diagonal', hit: (r, c) => r === c },
+          ];
+      for (const p of patterns) {
+        const box = document.createElement('div');
+        box.style.cssText = 'text-align:center;';
+        const g = document.createElement('div');
+        g.style.cssText = 'display:grid;grid-template-columns:repeat(5,7px);gap:2px;justify-content:center;';
+        for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+          const d = document.createElement('div');
+          d.style.cssText = `width:7px;height:7px;border-radius:2px;background:${p.hit(r, c) ? '#ffb400' : '#3a2f63'};`;
+          g.appendChild(d);
+        }
+        const l = document.createElement('div');
+        l.textContent = p.label;
+        l.style.cssText = 'font-size:9px;color:#8f83b8;margin-top:3px;';
+        box.appendChild(g); box.appendChild(l);
+        wrap.appendChild(box);
+      }
+    }
+    _bingoRenderHowto();
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, msLeft } = {}) => {
+      _bingoDropStale(gameId);
+      _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
+      _bingoMode = mode || _bingoMode;
+      _bingoRule = rule || _bingoRule;
+      _bingoRenderHowto();
+      _bingoGameId = gameId ?? _bingoGameId;
+      _bgEl('bingo-lobby').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bgEl('bingo-prize-label').textContent = `${(prize ?? 0).toLocaleString()} 🪙`;
+      _bgEl('bingo-panel').style.display = 'block';
+      _bingoUnminimize();
+      const last = _bingoCalled[_bingoCalled.length - 1];
+      _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
+      if (state === 'active') {
+        _bgEl('bingo-call-sub').textContent = `call ${_bingoCalled.length}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`;
+      } else {
+        // Joined during the lobby: keep the countdown ticking on the card
+        // itself (the lobby box is gone once you have a card).
+        const deadline = Date.now() + (msLeft ?? 60000);
+        const tick = () => {
+          const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          _bgEl('bingo-call-sub').textContent = s > 0 ? `you're in! game starts in ${s}s…` : 'starting…';
+          if (s <= 0) { clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null; }
+        };
+        _bingoLobbyTimer = setInterval(tick, 500); tick();
+      }
+      _bgEl('bingo-called-list').textContent = _bingoCalled.length ? `Called: ${_bingoCalled.join(', ')}` : '';
+      _bingoPhase = state || _bingoPhase;
+      if (state === 'active') _bingoActive = true;
+      _bingoRenderGrid();
+      _bingoHostRefresh();
+    });
+    socket.on('bingoStart', ({ gameId, playerCount, mode, rule } = {}) => {
+      _bingoDropStale(gameId);
+      _bingoGameId = gameId ?? _bingoGameId;
+      _bgEl('bingo-lobby').style.display = 'none';
+      clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
+      _bingoActive = true; _bingoPhase = 'active'; _bingoMode = mode || _bingoMode;
+      _bingoRule = rule || _bingoRule;
+      _bingoRenderHowto();
+      if (_bingoCard) {
+        _bingoState = 'active';
+        const ruleTag = _bingoRule === 'blackout' ? ' BLACKOUT: fill the WHOLE card!' : '';
+        _bgEl('bingo-call-sub').textContent = (_bingoMode === 'manual'
+          ? `${playerCount} playing — the host is calling the balls!`
+          : `${playerCount} playing — click your numbers as they're called!`) + ruleTag;
+        _rpsToast(_bingoRule === 'blackout' ? '🎱 BLACKOUT Bingo is ON — fill the whole card!' : '🎱 Bingo is ON — watch the calls!');
+      } else if (_adminAuthed) {
+        // hosting without playing: open the panel with just the host controls
+        _bgEl('bingo-call-sub').textContent = `${playerCount} playing — you're hosting!`;
+      }
+      _bingoHostRefresh();
+    });
+    socket.on('bingoCall', ({ n, letter, count } = {}) => {
+      if (!_bingoCard) return;
+      _bingoCalled.push(n);
+      _bgEl('bingo-call').textContent = `${letter}-${n}`;
+      _bgEl('bingo-call-sub').textContent = `call ${count}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`;
+      _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
+    });
+    socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
+    socket.on('bingoError', ({ message } = {}) => { if (message) _rpsToast(`🎱 ${message}`); });
+    _bgEl('bingo-claim-btn').addEventListener('click', () => socket.emit('bingoClaim'));
+    _bgEl('bingo-host-call').addEventListener('click', () => socket.emit('adminBingoCall'));
+    _bgEl('bingo-host-switch').addEventListener('click', () => ownerBingoSwitch());
+    // Live "who's playing" list — shown in the lobby AND inside the card panel.
+    socket.on('bingoNames', ({ gameId, names } = {}) => {
+      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      _bingoDropStale(gameId);
+      const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
+      const a = document.getElementById('bingo-lobby-players'); if (a) a.textContent = label;
+      const b = document.getElementById('bingo-players');       if (b) b.textContent = label;
+    });
+    // Big office-wide winner banner — 30 seconds, everyone sees it.
+    let _bingoWinBannerTimer = null;
+    function _bingoWinBanner(text) {
+      let el = document.getElementById('bingo-win-banner');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'bingo-win-banner';
+        el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:8400;background:linear-gradient(135deg,#3a2a00,#5a4300);color:#ffd76a;border:2px solid #ffb400;border-radius:14px;padding:14px 26px;font-size:18px;font-weight:800;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.55);max-width:92vw;cursor:pointer;';
+        el.title = 'Click to dismiss';
+        el.onclick = () => { el.style.display = 'none'; };
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.display = 'block';
+      clearTimeout(_bingoWinBannerTimer);
+      _bingoWinBannerTimer = setTimeout(() => { el.style.display = 'none'; }, 30000);
+    }
+    socket.on('bingoOver', ({ gameId, message, winnerName, prize } = {}) => {
+      // A late "game over" from an OLD game (e.g. a slow payout) must never
+      // tear down the UI of a newer game we've since joined.
+      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      if (winnerName) _bingoWinBanner(`🎉 BINGO! ${winnerName} wins ${(prize ?? 0).toLocaleString()} coins! 🎱`);
+      else if (message) _rpsToast(`🎱 ${message}`);
+      const lp = document.getElementById('bingo-lobby-players'); if (lp) lp.textContent = '';
+      const pp = document.getElementById('bingo-players');       if (pp) pp.textContent = '';
+      _bingoHideAll();
+      const host = document.getElementById('op-bingo-host');
+      if (host) host.style.display = 'none';   // game over → hide the admin host controls
+    });
+    _bgEl('bingo-min-btn').addEventListener('click', () => {
+      const body = _bgEl('bingo-body');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? 'block' : 'none';
+      _bgEl('bingo-min-btn').textContent = hidden ? '▾' : '▸';
+    });
+
+    // ── Deal or No Deal (The Vince Show) ───────────────────────────────
+    // Server owns cases/values/votes/payouts; this is the studio audience UI.
+    // Only the OWNER can host (server enforces; the F8 section is owner-gated).
+    let _dealGameId = null, _dealState = null, _dealLadder = [], _dealOpened = [], _dealIn = false, _dealMyVote = null, _dealActive = false, _dealTeamCase = null;
+    let _dealLobbyTimer = null, _dealPhaseTimer = null;
+    const _dlEl = (id) => document.getElementById(id);
+    window._dealUiOpen = () =>
+      _dlEl('deal-lobby').style.display !== 'none' ||
+      _dlEl('deal-panel').style.display !== 'none';
+    window.ownerDealStart  = () => socket.emit('ownerDealStart', { jackpot: Math.round(Number(_dlEl('op-deal-jackpot').value)), voteSec: Math.round(Number(_dlEl('op-deal-votesec').value)) });
+    window.ownerDealOffer  = () => socket.emit('ownerDealOffer', { amount: Math.round(Number(_dlEl('op-deal-offer').value)) });
+    window.ownerDealCancel = () => socket.emit('ownerDealCancel');
+    socket.on('ownerDealResult', ({ ok, active, message } = {}) => {
+      const msg = _dlEl('op-deal-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (message && !ok) _rpsToast(`💼 ${message}`);
+      _dealActive = !!active;
+      _dlEl('op-deal-host').style.display = active ? 'flex' : 'none';
+    });
+    function _dealDropStale(gameId) {
+      if (gameId != null && _dealGameId != null && gameId > _dealGameId) _dealHideAll();
+    }
+    function _dealHideAll() {
+      _dlEl('deal-lobby').style.display = 'none';
+      _dlEl('deal-panel').style.display = 'none';
+      clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dealGameId = null; _dealState = null; _dealLadder = []; _dealOpened = [];
+      _dealIn = false; _dealMyVote = null; _dealActive = false; _dealTeamCase = null;
+      _dlEl('deal-body').style.display = 'block';
+      _dlEl('deal-min-btn').textContent = '▾';
+    }
+    // The board: 16 briefcases. Closed = clickable during voting (if joined);
+    // opened = dimmed with its value showing. Vote counts ride on the cases.
+    function _dealRenderGrid(counts) {
+      const grid = _dlEl('deal-grid');
+      grid.replaceChildren();
+      for (let i = 0; i < _dealOpened.length; i++) {
+        const openedV = _dealOpened[i];
+        const b = document.createElement('button');
+        if (openedV != null) {
+          b.textContent = openedV.toLocaleString();
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:11px;border:1px solid #2a3555;background:#0e1322;color:#5d6a8f;text-decoration:line-through;';
+        } else if (i === _dealTeamCase) {
+          // The team's sealed briefcase — it rides to the end.
+          b.textContent = `📌 OURS`;
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:12px;font-weight:900;border:2px solid #ffd76a;background:linear-gradient(135deg,#4a3800,#6b5200);color:#ffd76a;box-shadow:0 0 12px rgba(255,215,106,.35);';
+        } else {
+          const n = counts ? counts[i] : 0;
+          const mine = _dealMyVote === i;
+          b.textContent = `💼${i + 1}` + (n ? ` ·${n}` : '');
+          b.style.cssText = 'padding:12px 0;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid ' +
+            (mine ? '#ffd76a;background:#4a3800;color:#ffd76a;' : '#d4af37;background:#243154;color:#eaf0ff;');
+          if (_dealIn && (_dealState === 'voting' || _dealState === 'pickcase')) {
+            const idx = i;
+            b.onclick = () => { _dealMyVote = idx; socket.emit('dealVoteCase', { i: idx }); _dealRenderGrid(counts); };
+          }
+        }
+        grid.appendChild(b);
+      }
+    }
+    function _dealRenderLadder() {
+      const lad = _dlEl('deal-ladder');
+      lad.replaceChildren();
+      const gone = _dealOpened.filter((v) => v != null);
+      const usedIdx = new Set();
+      for (const v of _dealLadder) {
+        const d = document.createElement('div');
+        // strike each opened VALUE once (values can repeat only if jackpot tiny)
+        const gi = gone.findIndex((g, k) => g === v && !usedIdx.has(k));
+        const isGone = gi >= 0; if (isGone) usedIdx.add(gi);
+        d.textContent = v.toLocaleString();
+        d.style.cssText = 'text-align:center;padding:3px 0;border-radius:5px;font-size:11px;' +
+          (isGone ? 'background:#0e1322;color:#4d5878;text-decoration:line-through;' : 'background:#243154;color:#ffd76a;font-weight:700;');
+        lad.appendChild(d);
+      }
+    }
+    function _dealCountdown(msLeft, label) {
+      clearInterval(_dealPhaseTimer);
+      const deadline = Date.now() + (msLeft ?? 0);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _dlEl('deal-status').textContent = label(s);
+        if (s <= 0) { clearInterval(_dealPhaseTimer); _dealPhaseTimer = null; }
+      };
+      _dealPhaseTimer = setInterval(tick, 500); tick();
+    }
+    // Rebuild the whole panel from a server snapshot (join, phase change, resync).
+    function _dealApplySnap(snap) {
+      if (!snap) return;
+      _dealDropStale(snap.gameId);
+      _dealGameId = snap.gameId ?? _dealGameId;
+      _dealState = snap.state;
+      _dealLadder = snap.ladder || _dealLadder;
+      _dealOpened = snap.opened || _dealOpened;
+      if (snap.teamCase != null) _dealTeamCase = snap.teamCase;
+      _dealActive = true;
+      _dlEl('deal-lobby').style.display = 'none';
+      clearInterval(_dealLobbyTimer); _dealLobbyTimer = null;
+      _dlEl('deal-jackpot-label').textContent = `top case: ${(snap.jackpot ?? 0).toLocaleString()} 🪙`;
+      _dlEl('deal-panel').style.display = 'block';
+      _dlEl('deal-body').style.display = 'block';
+      const offerRow = _dlEl('deal-offer-row');
+      if (snap.state === 'offer') {
+        offerRow.style.display = 'block';
+        const nPlayers = Math.max(1, (snap.names || []).length);
+        const each = Math.floor((snap.offer ?? 0) / nPlayers);
+        _dlEl('deal-offer-text').textContent = `☎️ The Banker offers ${(snap.offer ?? 0).toLocaleString()} coins — split ${nPlayers} ways ≈ ${each.toLocaleString()} each`;
+        _dlEl('deal-offer-tally').textContent = '';
+        _dealCountdown(snap.msLeft, (s) => `DEAL or NO DEAL? Majority decides — ${s}s`);
+      } else {
+        offerRow.style.display = 'none';
+        if (snap.state === 'pickcase') {
+          _dealMyVote = null;
+          _dealCountdown(snap.msLeft, (s) => `📌 First things first: vote for the TEAM's briefcase — ${s}s`);
+        } else if (snap.state === 'voting') {
+          _dealMyVote = null;
+          const nth = (snap.blockSize || 0) - (snap.toOpen || 0) + 1;
+          const blockTxt = snap.blockSize > 1 ? ` (case ${nth} of ${snap.blockSize} this round)` : '';
+          _dealCountdown(snap.msLeft, (s) => `Vote which case opens${blockTxt} — ${s}s`);
+        } else if (snap.state === 'banker') {
+          _dealCountdown(snap.msLeft, (s) => window._ownerAuthed
+            ? `☎️ YOUR phone is ringing, Banker — make an offer or skip! ${s}s`
+            : `☎️ Round over… the Banker is thinking — ${s}s`);
+        } else if (snap.state === 'joining') {
+          _dealCountdown(snap.msLeft, (s) => `🎟️ You're in! The show starts in ${s}s…`);
+        } else {
+          _dlEl('deal-status').textContent = `you're in! the show starts soon…`;
+        }
+      }
+      _dealRenderGrid(null);
+      _dealRenderLadder();
+      // The Banker's desk lives right in the panel — owner eyes only, and the
+      // phone only works during the offer break.
+      const host = _dlEl('deal-host-row');
+      host.style.display = window._ownerAuthed ? 'block' : 'none';
+      const isBreak = snap.state === 'banker';
+      for (const bid of ['deal-host-offer-btn', 'deal-host-skip-btn']) {
+        const b = _dlEl(bid);
+        b.disabled = !isBreak;
+        b.style.opacity = isBreak ? '1' : '.45';
+      }
+    }
+    _dlEl('deal-host-skip-btn').addEventListener('click', () => socket.emit('ownerDealSkip'));
+    _dlEl('deal-host-offer-btn').addEventListener('click', () => {
+      const amt = Math.round(Number(_dlEl('deal-host-amount').value));
+      if (!amt || amt < 1) { _dlEl('deal-host-msg').textContent = 'Type an amount first, Banker.'; return; }
+      socket.emit('ownerDealOffer', { amount: amt });
+    });
+    socket.on('ownerDealResult', ({ ok, message } = {}) => {
+      const m = _dlEl('deal-host-msg');
+      if (m && window._ownerAuthed) { m.style.color = ok ? '#7ddf8a' : '#ff8f8f'; m.textContent = message || ''; }
+    });
+    socket.on('dealLobby', ({ gameId, jackpot, msLeft } = {}) => {
+      _dealDropStale(gameId);
+      if (_dealIn) return;   // already joined (resync path uses dealYouIn)
+      _dealGameId = gameId ?? _dealGameId;
+      _dlEl('deal-lobby').style.display = 'block';
+      const deadline = Date.now() + (msLeft ?? 60000);
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        _dlEl('deal-lobby-info').textContent = `16 briefcases — one holds ${(jackpot ?? 0).toLocaleString()} coins. Vote the cases open, split the winnings! Starts in ${s}s`;
+        if (s <= 0) { clearInterval(_dealLobbyTimer); _dealLobbyTimer = null; _dlEl('deal-lobby').style.display = 'none'; }
+      };
+      clearInterval(_dealLobbyTimer);
+      _dealLobbyTimer = setInterval(tick, 500); tick();
+    });
+    _dlEl('deal-join-btn').addEventListener('click', () => socket.emit('dealJoin'));
+    socket.on('dealYouIn', (snap) => { _dealIn = true; _dealApplySnap(snap); });
+    socket.on('dealPhase', (snap) => {
+      // Spectators without a seat don't get the board — but the hosting owner does.
+      if (!_dealIn && !window._ownerAuthed) return;
+      _dealApplySnap(snap);
+    });
+    socket.on('dealTally', ({ gameId, counts, voters, of } = {}) => {
+      if (gameId !== _dealGameId || _dealState !== 'voting') return;
+      _dealRenderGrid(counts);
+      const st = _dlEl('deal-status');
+      if (st.textContent.includes('vote') || st.textContent.includes('voting')) { /* countdown keeps ticking */ }
+      _dlEl('deal-players').textContent = `🗳️ ${voters}/${of} votes in`;
+    });
+    socket.on('dealTeamCase', ({ gameId, i } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dealTeamCase = i;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dlEl('deal-status').textContent = `📌 Case ${i + 1} is the TEAM's! It stays sealed — now open the rest…`;
+      _dealRenderGrid(null);
+      _rpsToast(`📌 The office chose case ${i + 1} as the team's briefcase!`);
+    });
+    socket.on('dealOpen', ({ gameId, i, v, casesLeft } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dealOpened[i] = v;
+      clearInterval(_dealPhaseTimer); _dealPhaseTimer = null;
+      _dlEl('deal-status').textContent = `💥 Case ${i + 1} had ${v.toLocaleString()} coins! ${casesLeft} case${casesLeft === 1 ? '' : 's'} left…`;
+      _dealRenderGrid(null);
+      _dealRenderLadder();
+      _rpsToast(`💼 Case ${i + 1}: ${v.toLocaleString()} coins — off the board!`);
+    });
+    _dlEl('deal-yes-btn').addEventListener('click', () => socket.emit('dealVoteDeal', { yes: true }));
+    _dlEl('deal-no-btn').addEventListener('click', () => socket.emit('dealVoteDeal', { yes: false }));
+    socket.on('dealDealTally', ({ gameId, yes, no, of } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dlEl('deal-offer-tally').textContent = `🤝 DEAL ${yes} — ${no} NO DEAL (${of} players)`;
+    });
+    socket.on('dealNoDeal', ({ gameId, yes, no, skipped } = {}) => {
+      if (gameId !== _dealGameId) return;
+      _dlEl('deal-offer-row').style.display = 'none';
+      _rpsToast(skipped ? `☎️ No offer this round — the cases keep opening!`
+                        : `🙅 NO DEAL! (${yes}–${no}) The Banker hangs up… the cases keep opening!`);
+    });
+    // Two-strikes rule: miss two votes and the Banker cuts your line.
+    socket.on('dealKicked', ({ gameId, message } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId !== _dealGameId) return;
+      _dealHideAll();
+      _rpsToast(message || '📵 You sat out two votes — the Banker cut your line. You\'re out of the show.');
+    });
+    socket.on('dealBooted', ({ gameId, kicked } = {}) => {
+      if (gameId !== _dealGameId) return;
+      if (kicked && kicked.length) _rpsToast(`📵 Cut by the Banker for not voting: ${kicked.join(', ')}`);
+    });
+    socket.on('dealNames', ({ gameId, names } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;
+      _dealDropStale(gameId);
+      const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
+      const a = _dlEl('deal-lobby-players'); if (a) a.textContent = label;
+      const b = _dlEl('deal-players');       if (b) b.textContent = label;
+    });
+    let _dealBannerTimer = null;
+    function _dealBanner(text) {
+      let el = document.getElementById('deal-win-banner');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'deal-win-banner';
+        el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:8400;background:linear-gradient(135deg,#1a2440,#243154);color:#ffd76a;border:2px solid #d4af37;border-radius:14px;padding:14px 26px;font-size:18px;font-weight:800;text-align:center;box-shadow:0 8px 28px rgba(0,0,0,.55);max-width:92vw;cursor:pointer;';
+        el.title = 'Click to dismiss';
+        el.onclick = () => { el.style.display = 'none'; };
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.display = 'block';
+      clearTimeout(_dealBannerTimer);
+      _dealBannerTimer = setTimeout(() => { el.style.display = 'none'; }, 30000);
+    }
+    socket.on('dealOver', ({ gameId, message, mode, per } = {}) => {
+      if (gameId != null && _dealGameId != null && gameId < _dealGameId) return;
+      if (mode) _dealBanner(message);
+      else if (message) _rpsToast(`💼 ${message}`);
+      _dealHideAll();
+      const host = document.getElementById('op-deal-host');
+      if (host) host.style.display = 'none';
+    });
+    for (const id of ['deal-panel', 'deal-lobby']) {
+      const el = _dlEl(id);
+      for (const ev of ['pointerdown', 'pointerup', 'click']) el.addEventListener(ev, (e) => e.stopPropagation());
+    }
+    _dlEl('deal-min-btn').addEventListener('click', () => {
+      const body = _dlEl('deal-body');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? 'block' : 'none';
+      _dlEl('deal-min-btn').textContent = hidden ? '▾' : '▸';
+    });
+
+    function _mkLine(txt, css) {
+      const d = document.createElement('div');
+      d.style.cssText = css || 'font-size:12px;opacity:.75;margin:8px 2px 2px;';
+      d.textContent = txt;
+      return d;
+    }
+    function _renderMarket() {
+      const box = document.getElementById('shop-market');
+      box.textContent = '';
+
+      if (_marketFilter !== null) {
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 2px 6px;';
+        bar.append(_mkLine(`🏪 ${_marketFilter}'s store`, 'font-weight:bold;'));
+        const all = document.createElement('button');
+        all.className = 'buy-btn'; all.textContent = 'Show all';
+        all.onclick = () => { _marketFilter = null; _renderMarket(); };
+        bar.append(all);
+        box.append(bar);
+      }
+
+      const mineListings  = _marketData.filter(l => l.mine);
+      const otherListings = _marketData.filter(l => !l.mine && (_marketFilter === null || l.sellerName === _marketFilter));
+
+      // ── Your store (hidden while peeking at someone else's stall) ──
+      if (_marketFilter === null) {
+        box.append(_mkLine('Your store — list something and let the bids roll in'));
+        const listedIds = new Set(mineListings.map(l => l.item));
+        const sellable = _ownedItems.filter(id =>
+          !listedIds.has(id) &&
+          (COSMETICS.some(c => c.id === id) || PETS.some(c => c.id === id) || PET_ACCESSORIES.some(c => c.id === id)));
+        const form = document.createElement('div');
+        form.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:2px 2px 6px;';
+        const sel = document.createElement('select');
+        sel.style.cssText = 'flex:1;min-width:130px;padding:5px;border-radius:6px;';
+        if (!sellable.length) {
+          const o = document.createElement('option');
+          o.textContent = 'Nothing left to list'; o.value = '';
+          sel.append(o); sel.disabled = true;
+        } else for (const id of sellable) {
+          const m = _marketMeta(id);
+          const o = document.createElement('option');
+          o.value = id; o.textContent = `${m.emoji} ${m.name}`;
+          sel.append(o);
+        }
+        const min = document.createElement('input');
+        min.type = 'number'; min.min = '1'; min.placeholder = 'Min bid';
+        min.style.cssText = 'width:80px;padding:5px;border-radius:6px;';
+        const btn = document.createElement('button');
+        btn.className = 'buy-btn'; btn.textContent = 'List it';
+        btn.disabled = !sellable.length;
+        btn.onclick = () => {
+          const amount = parseInt(min.value, 10);
+          if (!sel.value || !Number.isInteger(amount) || amount < 1) { _rpsToast('🏪 Pick an item and a minimum bid.'); return; }
+          socket.emit('storeList', { item: sel.value, minBid: amount });
+          min.value = '';
+        };
+        _mkGuard(sel); _mkGuard(min);
+        form.append(sel, min, btn);
+        box.append(form);
+
+        for (const l of mineListings) {
+          const m = _marketMeta(l.item);
+          const row = document.createElement('div');
+          row.style.cssText = 'border:1px solid #ddd;border-radius:8px;padding:6px 8px;margin:4px 0;';
+          const head = document.createElement('div');
+          head.style.cssText = 'display:flex;align-items:center;gap:8px;';
+          head.append(_mkLine(`${m.emoji} ${m.name} — min ${l.minBid.toLocaleString()}`, 'flex:1;font-weight:bold;font-size:13px;'));
+          const un = document.createElement('button');
+          un.className = 'buy-btn'; un.textContent = 'Unlist';
+          un.onclick = () => socket.emit('storeUnlist', { listingId: l.id });
+          head.append(un);
+          row.append(head);
+          if (!(l.bids || []).length) row.append(_mkLine('No bids yet — patience, merchant.', 'font-size:12px;opacity:.6;margin:4px 2px 0;'));
+          for (const b of (l.bids || [])) {
+            const br = document.createElement('div');
+            br.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0 0;';
+            br.append(_mkLine(`${b.name} — ${b.amount.toLocaleString()} coins`, 'flex:1;font-size:12px;'));
+            const acc = document.createElement('button');
+            acc.className = 'buy-btn wear'; acc.textContent = 'Accept 🤝';
+            acc.onclick = () => socket.emit('storeAccept', { listingId: l.id, bidId: b.bidId });
+            br.append(acc);
+            row.append(br);
+          }
+          box.append(row);
+        }
+      }
+
+      // ── Everyone else's stalls ──
+      box.append(_mkLine(_marketFilter === null ? 'Open stalls around the office' : 'Up for bids'));
+      if (!otherListings.length)
+        box.append(_mkLine(_marketFilter === null ? 'No stalls open right now — be the first!' : 'Their store is empty right now.', 'font-size:12px;opacity:.6;margin:4px 2px;'));
+      for (const l of otherListings) {
+        const m = _marketMeta(l.item);
+        const row = document.createElement('div');
+        row.style.cssText = 'border:1px solid #ddd;border-radius:8px;padding:6px 8px;margin:4px 0;';
+        const top = l.topBid ? ` · top bid ${l.topBid.toLocaleString()}` : ' · no bids yet';
+        const mineBit = l.myBid ? ` · yours: ${l.myBid.toLocaleString()} ⏳` : '';
+        row.append(_mkLine(`${m.emoji} ${m.name} — ${l.sellerName}`, 'font-weight:bold;font-size:13px;'));
+        row.append(_mkLine(`min ${l.minBid.toLocaleString()}${top}${mineBit}`, 'font-size:12px;opacity:.75;margin:2px 2px 4px;'));
+        if (_ownedItems.includes(l.item)) {
+          row.append(_mkLine('You already own this one.', 'font-size:12px;opacity:.6;'));
+        } else {
+          const bar = document.createElement('div');
+          bar.style.cssText = 'display:flex;gap:6px;align-items:center;';
+          const inp = document.createElement('input');
+          inp.type = 'number'; inp.min = String(l.minBid);
+          inp.placeholder = String(Math.max(l.minBid, l.topBid + 1));
+          inp.style.cssText = 'width:90px;padding:5px;border-radius:6px;';
+          const bid = document.createElement('button');
+          bid.className = 'buy-btn'; bid.textContent = l.myBid ? 'Raise' : 'Bid';
+          bid.onclick = () => {
+            const amount = parseInt(inp.value, 10);
+            if (!Number.isInteger(amount) || amount < l.minBid) { _rpsToast(`🏪 Bids start at ${l.minBid.toLocaleString()} coins.`); return; }
+            socket.emit('storeBid', { listingId: l.id, amount });
+          };
+          _mkGuard(inp);
+          bar.append(inp, bid);
+          if (l.myBid) {
+            const wd = document.createElement('button');
+            wd.className = 'buy-btn'; wd.textContent = 'Withdraw';
+            wd.onclick = () => socket.emit('storeWithdraw', { listingId: l.id });
+            bar.append(wd);
+          }
+          row.append(bar);
+        }
+        box.append(row);
+      }
+    }
+
+    // ── Player profile card ────────────────────────────────────────────
+    // Non-blocking (movement stays live, like the rps waiting/incoming cards —
+    // it deliberately does NOT join the chatting/_rpsUiOpen mutual-exclusion
+    // seams) and rendered with textContent ONLY — never innerHTML.
+    const pfEl = (id) => document.getElementById(id);
+    function openProfile(targetId) {
+      socket.emit('getProfile', { targetId });
+    }
+    window._openProfile = openProfile;   // called from the Phaser own-avatar click
+    function closeProfile() {
+      pfEl('profile-modal').classList.remove('open');
+    }
+    pfEl('pf-close').addEventListener('click', closeProfile);
+    pfEl('profile-modal').addEventListener('pointerdown', (e) => {
+      if (e.target === pfEl('profile-modal')) closeProfile();
+    });
+
+    // One-time legacy department picker — options from the ONE shared list.
+    (() => {
+      const sel = pfEl('pf-dept-select');
+      const ph = document.createElement('option');
+      ph.value = ''; ph.textContent = 'Select your department…';
+      sel.appendChild(ph);
+      DEPARTMENTS.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d; o.textContent = d;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('keydown', (e) => e.stopPropagation());
+      sel.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      sel.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
+    pfEl('pf-dept-save').addEventListener('click', () => {
+      const dept = pfEl('pf-dept-select').value;
+      if (!DEPARTMENTS.includes(dept)) { pfEl('pf-error').textContent = 'Pick a department first.'; return; }
+      pfEl('pf-error').textContent = '';
+      socket.emit('setDepartment', { department: dept });
+    });
+
+    // Hobby editor — own card only, editable any time (unlike the set-once
+    // department). Same keyboard-capture guards as the dept select so typing
+    // doesn't walk the avatar around.
+    (() => {
+      const inp = pfEl('pf-hobby-input');
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); pfEl('pf-hobby-save').click(); }
+      });
+      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+      pfEl('pf-hobby-save').addEventListener('click', () => {
+        pfEl('pf-hobby-error').textContent = '';
+        socket.emit('setHobby', { hobby: inp.value.trim().slice(0, 40) });
+      });
+    })();
+
+    // Shared win labels: keys match the server's WIN_KEYS (7 duel game ids +
+    // 'dark' for Office After Dark). Unknown keys are ignored on render.
+    const WIN_LABELS = { rps: 'RPS', ttt: 'Tic-Tac-Toe', qd: 'Quick Draw', ib: 'Icebreakers', wr: 'Word Race', trivia: 'Trivia', c4: 'Connect 4', pool: 'Billiards', pong: 'Ping Pong', dark: 'After Dark' };
+    function _winEntries(w) {
+      return Object.entries(w || {})
+        .filter(([k, n]) => WIN_LABELS[k] && Number.isFinite(n) && n > 0)
+        .sort((a, b) => b[1] - a[1]);
+    }
+    function _winsText(w) {
+      const entries = _winEntries(w);
+      const total = entries.reduce((s, [, n]) => s + n, 0);
+      if (!total) return '—';
+      return '🏆 ' + total + ' · ' + entries.map(([k, n]) => WIN_LABELS[k] + ' ' + n).join(' · ');
+    }
+
+    function _pfJoinedText(ts) {
+      if (!ts || !Number.isFinite(ts)) return '—';
+      const dateStr = new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      const days = Math.floor((Date.now() - ts) / 86400000);
+      const ago = days <= 0 ? 'today'
+                : days === 1 ? '1 day'
+                : days < 60 ? days + ' days'
+                : days < 365 ? Math.floor(days / 30) + ' months'
+                : (days / 365).toFixed(1) + ' years';
+      return dateStr + ' · ' + ago;
+    }
+
+    socket.on('profileData', (d) => {
+      if (!d) return;
+      if (!d.ok) { _rpsToast(d.message || "They're not in the office right now."); return; }
+      pfEl('pf-name').textContent = '👤 ' + (d.name || '?') + (d.self ? ' (you)' : '');
+      pfEl('pf-dept').textContent = d.department || '—';
+      pfEl('pf-hobby').textContent = d.hobby || '—';
+      pfEl('pf-coins').textContent = '🪙 ' + (Number.isFinite(d.coins) ? d.coins : 0);
+      pfEl('pf-wins').textContent = _winsText(d.wins);
+      const worn = COSMETICS.find(c => c.id === d.equipped);
+      pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
+      pfEl('pf-joined').textContent = _pfJoinedText(d.joinedAt);
+      pfEl('pf-error').textContent = '';
+      pfEl('pf-hobby-error').textContent = '';
+      // One-time picker: only on YOUR OWN card, only while unset.
+      pfEl('pf-dept-pick').classList.toggle('show', !!d.self && !d.department);
+      // Hobby editor: always on YOUR OWN card (editable any time).
+      pfEl('pf-hobby-edit').classList.toggle('show', !!d.self);
+      if (d.self) pfEl('pf-hobby-input').value = d.hobby || '';
+      pfEl('profile-modal').classList.add('open');
+    });
+    socket.on('departmentSet', (d) => {
+      pfEl('pf-dept-pick').classList.remove('show');
+      if (d && d.department) pfEl('pf-dept').textContent = d.department;
+    });
+    socket.on('hobbySet', (d) => {
+      const h = (d && typeof d.hobby === 'string') ? d.hobby : '';
+      pfEl('pf-hobby').textContent = h || '—';
+      pfEl('pf-hobby-input').value = h;
+      pfEl('pf-hobby-error').textContent = '';
+      _rpsToast(h ? 'Hobby saved!' : 'Hobby cleared.');
+    });
+    socket.on('profileError', (d) => {
+      const msg = (d && d.message) || 'Something went wrong.';
+      // Mirror into both inline error slots — only the visible block shows it.
+      pfEl('pf-error').textContent = msg;
+      pfEl('pf-hobby-error').textContent = msg;
+    });
+
+    // ── Office leaderboard (opened from the profile card's 🏆 button) ──
+    // Rendered with createElement/textContent ONLY — names are user text.
+    pfEl('pf-market-btn').addEventListener('click', () => {
+      closeProfile();
+      _marketFilter = null;
+      openShop();
+      _shopTab = 'market'; _shopPage = 0;
+      socket.emit('marketOpen', {});
+      _refreshShopUI();
+    });
+    pfEl('pf-lb-btn').addEventListener('click', () => socket.emit('getLeaderboard'));
+    function closeLeaderboard() { pfEl('lb-modal').classList.remove('open'); }
+    pfEl('lb-close').addEventListener('click', closeLeaderboard);
+    pfEl('lb-modal').addEventListener('pointerdown', (e) => {
+      if (e.target === pfEl('lb-modal')) closeLeaderboard();
+    });
+    socket.on('leaderboardData', (d) => {
+      const list = pfEl('lb-list');
+      list.textContent = '';
+      const rows = (d && Array.isArray(d.rows)) ? d.rows : [];
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.id = 'lb-empty';
+        empty.textContent = 'No wins yet — go challenge someone! ⚔️';
+        list.appendChild(empty);
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      rows.forEach((r, i) => {
+        const row = document.createElement('div'); row.className = 'lb-row';
+        const rank = document.createElement('span'); rank.className = 'lb-rank';
+        rank.textContent = medals[i] || '#' + (i + 1);
+        const name = document.createElement('span'); name.className = 'lb-name';
+        name.textContent = String(r && r.name || '?');
+        const breakdown = _winEntries(r && r.wins).map(([k, n]) => WIN_LABELS[k] + ' ' + n).join(' · ');
+        if (breakdown) {
+          const games = document.createElement('span'); games.className = 'lb-games';
+          games.textContent = breakdown;
+          name.appendChild(games);
+        }
+        const total = document.createElement('span'); total.className = 'lb-total';
+        total.textContent = '🏆 ' + (r && Number.isFinite(r.total) ? r.total : 0);
+        row.appendChild(rank); row.appendChild(name); row.appendChild(total);
+        list.appendChild(row);
+      });
+      closeProfile();               // the board replaces the card it came from
+      pfEl('lb-modal').classList.add('open');
+    });
+
+    // Game picker (shared by direct challenges and the arcade cabinet).
+    function _rpsSetGame(g) {
+      _rpsGamePick = g;
+      document.querySelectorAll('.rps-game').forEach((b) => b.classList.toggle('picked', b.dataset.game === g));
+      rpsEl('rps-wager-sub').textContent = (GAME_META[g] || GAME_META.rps).label;
+    }
+    document.querySelectorAll('.rps-game').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSetGame(b.dataset.game); });
+    });
+
+    function openRpsWager(targetId) {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      const p = _online[targetId];
+      if (!p) { _rpsToast("They're not in the office right now."); return; }
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      _rpsWagerTargetId = targetId;
+      _rpsPhase = 'wager'; _rpsUiOpen = true;
+      _rpsArcadeMode = false;
+      _rpsSetGame('rps');
+      rpsEl('rps-wager-title').textContent = 'Challenge ' + p.name;
+      rpsEl('rps-wager-error').textContent = '';
+      rpsEl('rps-wager-fields').style.display = '';
+      const inp = rpsEl('rps-wager-input');
+      inp.value = '0';
+      rpsEl('rps-wager-modal').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+      if (!IS_TOUCH) { inp.focus(); inp.select(); }
+    }
+
+    // Arcade cabinet: same modal in picker-only mode (always a friendly 0-wager
+    // match — the wager row is hidden). Sends an interact intent, not rpsChallenge;
+    // the server picks the nearest other player standing at the cabinet.
+    function openArcadePicker() {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      _rpsPhase = 'wager'; _rpsUiOpen = true;
+      _rpsArcadeMode = true;
+      _rpsSetGame('rps');
+      rpsEl('rps-wager-title').textContent = '🕹️ Arcade — pick a game';
+      rpsEl('rps-wager-error').textContent = '';
+      rpsEl('rps-wager-fields').style.display = 'none';
+      rpsEl('rps-wager-modal').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+    }
+    window._openArcadePicker = openArcadePicker;   // called from the Phaser E-press
+
+    // ⚔️ quick challenge: nearest online player within range (the server
+    // re-validates range + busy state — this is just target selection).
+    function quickChallenge() {
+      if (_rpsPhase) { _rpsToast("You're already in a challenge."); return; }
+      const sc = window._gameScene;
+      if (!sc || !sc.player || !sc.otherPlayers) return;
+      let bestId = null, bestD = Infinity;
+      for (const id in sc.otherPlayers) {
+        if (!_online[id]) continue;   // mirrors the DM roster's stale-ghost skip
+        const spr = sc.otherPlayers[id] && sc.otherPlayers[id].sprite;
+        if (!spr) continue;
+        const dx = spr.x - sc.player.x, dy = spr.y - sc.player.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; bestId = id; }
+      }
+      if (!bestId || bestD > CHALLENGE_RANGE_PX * CHALLENGE_RANGE_PX) {
+        _rpsToast('No one close enough — walk up to someone first!');
+        return;
+      }
+      openRpsWager(bestId);
+    }
+    window._quickChallenge = quickChallenge;
+    document.getElementById('touch-challenge')?.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); quickChallenge();
+    });
+
+    // ── Office After Dark (client) ─────────────────────────────────────
+    // The server owns ALL round truth (roles, kills, cooldowns, payout) —
+    // this is presentation only, and every bit of it is session-only.
+    // Darkness rendering: #darkness is one oversized fixed div with a static
+    // radial gradient; _roundFrame (called from the scene's update()) only
+    // moves/scales it with a transform, so per-frame cost is negligible.
+    let _roundPhase = null;          // null | 'lobby' | 'active'
+    let _roundGen = 0;               // bumped by _roundReset; stale async round entries abort on mismatch
+    let _roundRole = null, _roundAlive = true, _roundLobbyCount = 1;
+    let _roundRoster = new Map();    // id -> { name, alive } (server roster mirror)
+    let _roundAccomplices = new Map(); // id -> name (fellow killers; killers only)
+    let _roundKillRange = 200, _roundCoolMs = 12000, _roundKillReadyAt = 0, _roundEndsAt = 0;
+    // Killer-only speed edge, from the PRIVATE roundBegin payload (1 = none).
+    // Never hardcoded here — the server owns the value, like every other
+    // round constant. Crew never receive it and stay at 1.
+    let _roundSpeedMult = 1;
+    let _roundTick = null, _roundInviteTimer = null, _roundEndTimer = null, _roundRoleTimer = null;
+    let _roundInviteMin = 3;
+    const _rnEl = (id) => document.getElementById(id);
+
+    // Ghost hiding: while I'm an ALIVE participant, eliminated players vanish
+    // from MY world (they're spectators — they mustn't be seen shadowing the
+    // killer or bodyguarding crew in the dark). Purely client-side rendering:
+    // the server keeps broadcasting their moves (accepted v1, per task spec).
+    // Spectators and non-participants see everyone normally.
+    const _roundHiddenIds = new Set();
+    function _roundGhostVis(id, visible) {
+      const sc = window._gameScene;
+      const e = sc && sc.otherPlayers && sc.otherPlayers[id];
+      if (!e) return;
+      if (e.sprite) e.sprite.setVisible(visible);
+      if (e.nameTag) e.nameTag.setVisible(visible);
+      if (e.cosmetic) e.cosmetic.setVisible(visible);
+      if (e.wings) e.wings.setVisible(visible);
+      if (e.pet) {
+        e.pet.setVisible(visible);
+        // Hiding mid-trick: purge in-flight particles (🔥/💦/✨) too, or they
+        // finish playing at the hidden player's spot and leak the location.
+        if (!visible && sc._killPetFx) sc._killPetFx(e.pet);
+      }
+      if (e.chatBubble && e.chatBubble.setVisible) e.chatBubble.setVisible(visible);
+      if (e.occluders) for (const o of e.occluders) { if (o && o.setVisible) o.setVisible(visible); }
+    }
+    function _roundShowAllGhosts() {
+      for (const id of _roundHiddenIds) _roundGhostVis(id, true);
+      _roundHiddenIds.clear();
+    }
+    window._roundIsHidden = (id) => _roundHiddenIds.has(id);
+    window._roundGhostVis = _roundGhostVis;
+
+    // ── Killer noclip ──
+    // The killer (only) walks through walls/furniture while the round is live.
+    // Purely client-side: collision is client-only in this game (the server
+    // validates speed/bounds, never walls), and the toggle fires ONLY off the
+    // killer's own private roundBegin payload — nothing broadcast, so it can't
+    // leak who the killer is (crew can still SEE them ghost a wall up close,
+    // but in the dark that's part of the terror). World bounds stay on, and
+    // the _roundFrame guard below keeps them off UNPAINTED void tiles.
+    function _roundWalkableAt(sc, x, y) {
+      // Feet tile (BODY_DY), via getTileAt with TILE coords — the proven
+      // pattern on these 3×-scaled layers (world px / 48).
+      const c = Math.floor(x / 48), r = Math.floor((y + 27) / 48);
+      const f = sc.floorLayer && sc.floorLayer.getTileAt(c, r);
+      if (!f || f.index <= 0 || f.collides) return false;  // void / gid-1237 band
+      const w = sc.wallLayer && sc.wallLayer.getTileAt(c, r);
+      if (w && w.collides) return false;
+      const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
+      if (fu && fu.collides) return false;
+      return true;
+    }
+
+    // Painted-world check at the FEET tile (any layer's art counts — wall
+    // cells usually have no Floor painted under them, so wall/furniture art
+    // must count as "world"). MUST mirror the server's PAINTED mask
+    // (isUnpaintedPosition): the map is FINAL and the west courtyard edge has
+    // no fence, so the border of the drawn art IS the outer wall. Used by the
+    // killer-noclip guard and the all-players void containment below.
+    function _paintedWorldAt(sc, x, y) {
+      const c = Math.floor(x / 48), r = Math.floor((y + 27) / 48);
+      const f = sc.floorLayer && sc.floorLayer.getTileAt(c, r);
+      if (f && f.index > 0) return true;
+      const w = sc.wallLayer && sc.wallLayer.getTileAt(c, r);
+      if (w && w.index > 0) return true;
+      const fu = sc.furnitureLayer && sc.furnitureLayer.getTileAt(c, r);
+      return !!(fu && fu.index > 0);
+    }
+
+    // ── Void containment (EVERYONE, not just noclip killers) ──
+    // The UX half of the fix (the server's isUnpaintedPosition rejection is
+    // the anti-cheat half): stop at the edge of the drawn world instead of
+    // strolling into blackness. Per-axis lookahead so you can slide ALONG the
+    // border; the frame guard is the belt-and-braces snap-back for any path
+    // that skips the clamp (teleports, physics separation pushes).
+    window._voidClampVelocity = (sc, player) => {
+      const v = player.body && player.body.velocity;
+      if (!v || (!v.x && !v.y)) return;
+      const LOOK = 10;   // px ahead of the feet — small enough to hug the edge
+      if (v.x && !_paintedWorldAt(sc, player.x + Math.sign(v.x) * LOOK, player.y)) player.setVelocityX(0);
+      if (v.y && !_paintedWorldAt(sc, player.x, player.y + Math.sign(v.y) * LOOK)) player.setVelocityY(0);
+    };
+    window._voidGuardFrame = (sc) => {
+      const p = sc.player;
+      if (!p || !p.body) return;
+      if (_paintedWorldAt(sc, p.x, p.y)) {
+        sc._lastPaintedPos = { x: p.x, y: p.y };
+      } else if (sc._lastPaintedPos && !sc.sitting) {
+        // Seated players are legitimately parked on odd tiles — never yank
+        // them (same rule as the noclip-off snap).
+        p.body.reset(sc._lastPaintedPos.x, sc._lastPaintedPos.y);
+      }
+    };
+
+    function _roundSetNoclip(on) {
+      const sc = window._gameScene;
+      if (!sc || !sc._noclipColliders || !sc.player) return;
+      on = !!on;
+      if (on === !!sc._noclip) return;
+      for (const c of sc._noclipColliders) if (c) c.active = !on;
+      if (on) {
+        sc._noclipSafe = { x: sc.player.x, y: sc.player.y };
+      } else {
+        // Lights back on: a body left fully inside a wall can't be ejected by
+        // arcade tile separation — snap to the last open spot they crossed.
+        // Seated players are legitimately on colliding furniture tiles, so
+        // never snap while sitting (the stand-up path has its own _preSitPos).
+        if (!sc.sitting && sc._noclipSafe && !_roundWalkableAt(sc, sc.player.x, sc.player.y))
+          sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
+        sc._noclipSafe = null;
+      }
+      sc._noclip = on;
+    }
+
+    // ── Participant list (names + alive/dead only — NEVER roles) ──
+    let _roundRosterSig = '';
+    function _roundRosterRender() {
+      const list = _rnEl('round-roster-list');
+      if (!list) return;
+      const rows = [..._roundRoster].map(([id, m]) => ({ id, name: m.name || '???', alive: !!m.alive }));
+      rows.sort((a, b) => (b.alive - a.alive) || a.name.localeCompare(b.name));
+      const sig = rows.map(r => r.id + (r.alive ? '+' : '-')).join('|');
+      if (sig === _roundRosterSig) return;
+      _roundRosterSig = sig;
+      list.textContent = '';
+      for (const r of rows) {
+        const d = document.createElement('div');
+        d.className = 'rn-row' + (r.alive ? '' : ' dead');
+        d.textContent = (r.alive ? '🟢 ' : '💀 ') + r.name + (r.id === socket.id ? ' (you)' : '');
+        list.appendChild(d);
+      }
+    }
+
+    function _roundChip(msg) {
+      const c = _rnEl('round-chip');
+      c.textContent = msg;
+      c.classList.add('on');
+    }
+    function _roundStopTick() { if (_roundTick) { clearInterval(_roundTick); _roundTick = null; } }
+
+    // Single teardown for EVERY round surface (mirrors closeAllRps) — called
+    // on roundEnd/roundCancelled, socket disconnect, and kick, so a dropped
+    // connection can never strand someone in the dark.
+    function _roundReset() {
+      _roundGen++;   // invalidate any in-flight roundResume retry loop (round ended/cancelled while the scene booted)
+      _roundPhase = null; _roundRole = null; _roundAlive = true; _roundLobbyCount = 1;
+      _roundSpeedMult = 1;
+      _roundSetNoclip(false);
+      _roundShowAllGhosts();
+      _roundRoster.clear();
+      _roundAccomplices.clear();
+      _roundRosterSig = '';
+      _roundStopTick();
+      clearTimeout(_roundInviteTimer); clearTimeout(_roundRoleTimer);
+      document.body.classList.remove('round-dark');
+      _rnEl('round-chip').classList.remove('on');
+      _rnEl('round-roster').classList.remove('on');
+      _rnEl('round-invite').classList.remove('open');
+      _rnEl('round-kill-btn').classList.remove('on');
+      _rnEl('round-role').classList.remove('open');
+    }
+
+    function _roundStart() {
+      if (!document.body.classList.contains('playing')) return;
+      if (_rpsPhase) { _rpsToast('Finish your match first!'); return; }
+      if (_roundPhase) { _rpsToast('A round is already going!'); return; }
+      socket.emit('roundStart');
+    }
+    window._roundStart = _roundStart;
+
+    function _roundLobbyChipStart(count, msLeft) {
+      _roundLobbyCount = count;
+      const end = Date.now() + Math.max(0, msLeft);
+      _roundStopTick();
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        _roundChip(`🌙 Office After Dark — ${_roundLobbyCount} in · lights out in ${left}s`);
+        if (left <= 0) _roundStopTick();   // display only — the server decides
+      };
+      tick();
+      _roundTick = setInterval(tick, 250);
+    }
+
+    // Killer-only helpers. Targeting uses the ROUND ROSTER (not _online / all
+    // sprites), so grace-window ghosts and non-participants can't be targeted.
+    function _roundNearestTarget() {
+      const sc = window._gameScene;
+      if (!sc || !sc.player || !sc.otherPlayers) return null;
+      let bestId = null, bestD = Infinity;
+      for (const [id, m] of _roundRoster) {
+        if (id === socket.id || !m.alive) continue;
+        if (_roundAccomplices.has(id)) continue;   // never target a fellow killer
+        const spr = sc.otherPlayers[id] && sc.otherPlayers[id].sprite;
+        if (!spr) continue;
+        const dx = spr.x - sc.player.x, dy = spr.y - sc.player.y;
+        const dd = dx * dx + dy * dy;
+        if (dd < bestD) { bestD = dd; bestId = id; }
+      }
+      return (bestId && bestD <= _roundKillRange * _roundKillRange) ? bestId : null;
+    }
+    function _roundTryKill() {
+      if (_roundPhase !== 'active' || _roundRole !== 'killer' || !_roundAlive) return;
+      const now = Date.now();
+      if (now < _roundKillReadyAt) { _rpsToast(`Not yet — ${Math.ceil((_roundKillReadyAt - now) / 1000)}s until you can strike.`); return; }
+      const t = _roundNearestTarget();
+      if (!t) { _rpsToast('No one close enough — get closer…'); return; }
+      socket.emit('roundKill', { targetId: t });
+    }
+
+    // 250ms HUD tick while a round is live: countdown chip + kill button state.
+    function _roundHud() {
+      if (_roundPhase !== 'active') return;
+      _roundRosterRender();
+      const total = Math.max(0, Math.round((_roundEndsAt - Date.now()) / 1000));
+      const clock = Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
+      let aliveN = 0, all = 0;
+      for (const m of _roundRoster.values()) { all++; if (m.alive) aliveN++; }
+      // Persistent role indicator: killers see 🔪 in the HUD chip for the
+      // whole round, so a missed role card can never leave them guessing.
+      _roundChip((_roundAlive ? (_roundRole === 'killer' ? '🔪 You\'re a killer · ' : '🌙 ') : '💀 Watching · ') + clock + ' · ' + aliveN + '/' + all + ' still up');
+      // Re-assert ghost hiding every tick: sit-downs, cosmetic/pet changes and
+      // chat bubbles recreate display objects, so a one-shot hide isn't enough.
+      if (_roundAlive) for (const id of _roundHiddenIds) _roundGhostVis(id, false);
+      if (_roundRole === 'killer' && _roundAlive) {
+        const cd = Math.ceil((_roundKillReadyAt - Date.now()) / 1000);
+        const target = cd <= 0 ? _roundNearestTarget() : null;
+        _rnEl('round-kill-btn').classList.toggle('cooling', cd > 0 || !target);
+        _rnEl('round-kill-sub').textContent = cd > 0 ? cd + 's' : (target ? (IS_TOUCH ? 'GO' : 'K') : '…');
+      }
+    }
+
+    // Per-frame darkness positioning, called from the scene's update().
+    // Scale mode is RESIZE (1 game px = 1 CSS px at zoom 1), so screen pos =
+    // (world - cam.worldView) * zoom; scale(zoom) keeps the hole radius true.
+    window._roundFrame = (sc) => {
+      if (_roundPhase !== 'active' || !_roundAlive || !sc.player) return;
+      const cam = sc.cameras.main, z = cam.zoom || 1;
+      const sx = (sc.player.x - cam.worldView.x) * z;
+      const sy = (sc.player.y - cam.worldView.y) * z;
+      _rnEl('darkness').style.transform = `translate(${sx - 4000}px, ${sy - 4000}px) scale(${z})`;
+      // Killer noclip guard: remember the last fully-open spot; if the killer
+      // drifts into the true VOID (no art on ANY layer — wall cells usually
+      // have no Floor painted under them, so wall art must count as "world"),
+      // snap back — a round can never end with someone stranded in blackness.
+      if (sc._noclip) {
+        if (_roundWalkableAt(sc, sc.player.x, sc.player.y)) {
+          sc._noclipSafe = { x: sc.player.x, y: sc.player.y };
+        } else if (sc._noclipSafe) {
+          if (!_paintedWorldAt(sc, sc.player.x, sc.player.y))
+            sc.player.body.reset(sc._noclipSafe.x, sc._noclipSafe.y);
+        }
+      }
+    };
+
+    socket.on('roundInvite', (d) => {
+      d = d || {};
+      if (!document.body.classList.contains('playing')) return;
+      if (_roundPhase) return;                     // already in — ignore stray invites
+      if (d.starterId === socket.id) {             // the starter goes straight to the lobby
+        _roundPhase = 'lobby';
+        _mmClose();   // minimap must never stay up once in a round
+        _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
+        return;
+      }
+      _roundInviteMin = d.minPlayers ?? 3;
+      _rnEl('round-invite-text').textContent = `🌙 ${d.starterName || 'Someone'} wants to play Office After Dark — the lights go out, and someone among you is… not friendly.`;
+      _rnEl('round-invite-count').textContent = `${d.count ?? 1} in so far · needs ${_roundInviteMin}+ to start`;
+      _rnEl('round-invite').classList.add('open');
+      clearTimeout(_roundInviteTimer);
+      _roundInviteTimer = setTimeout(() => _rnEl('round-invite').classList.remove('open'), Math.max(1000, d.joinMs ?? 30000));
+    });
+
+    socket.on('roundJoined', (d) => {
+      d = d || {};
+      _roundPhase = 'lobby';
+      _mmClose();   // minimap must never stay up once in a round
+      _rnEl('round-invite').classList.remove('open');
+      clearTimeout(_roundInviteTimer);
+      _roundLobbyChipStart(d.count ?? 1, d.joinMs ?? 30000);
+    });
+    socket.on('roundLobby', (d) => {
+      if (!d || !d.count) return;
+      _roundLobbyCount = d.count;
+      // Keep the invite card's count fresh for people who haven't joined yet.
+      if (_rnEl('round-invite').classList.contains('open'))
+        _rnEl('round-invite-count').textContent = `${d.count} in so far · needs ${_roundInviteMin}+ to start`;
+    });
+    socket.on('roundCancelled', (d) => { _roundReset(); if (d && d.reason) _rpsToast('🌙 ' + d.reason); });
+    socket.on('roundError', (d) => { if (d && d.message) _rpsToast(d.message); });
+
+    // Shared active-round entry: roundBegin (fresh start) and roundResume
+    // (grace-window rejoin after a refresh/blip — the server rebound our spot
+    // in restorePlayer). On resume: `alive` comes from the payload (we may
+    // have been killed while away), the clock uses endsInMs (remaining, not
+    // full duration), the big role card is swapped for a quiet toast, and
+    // already-dead roster entries get re-hidden (fresh scene = fresh sprites).
+    function _roundEnterActive(d, { resume = false } = {}) {
+      _roundPhase = 'active'; _roundRole = d.role || 'crew';
+      _mmClose();   // minimap must never stay up once in a round
+      _roundAlive = resume ? d.alive !== false : true;
+      // Speed edge arrives only in the killers' payload; sanity-clamp so a
+      // malformed value can never slow the killer below base or go wild.
+      _roundSpeedMult = (_roundRole === 'killer' && Number(d.speedMult) > 1) ? Math.min(Number(d.speedMult), 2) : 1;
+      _roundRoster = new Map((d.players || []).map(p => [p.id, { name: p.name, alive: p.alive !== false }]));
+      _roundAccomplices = new Map((d.accomplices || []).map(a => [a.id, a.name]));
+      _roundKillRange = d.killRangePx || 200;
+      // 0 is a REAL value here (instant kills) — never `|| fallback` it away.
+      _roundCoolMs = Number.isFinite(Number(d.killCooldownMs)) ? Number(d.killCooldownMs) : 12000;
+      _roundKillReadyAt = Date.now() + _roundCoolMs;   // arm delay = one cooldown (0 = armed at once)
+      _roundEndsAt = Date.now() + (resume ? Math.max(0, d.endsInMs || 0) : (d.durationMs || 180000));
+      clearTimeout(_roundInviteTimer);
+      _rnEl('round-invite').classList.remove('open');
+      if (_roundAlive) document.body.classList.add('round-dark');
+      if (resume) {
+        // Re-hide the already-fallen (spectators must stay invisible to the
+        // living); skip when WE are dead — spectators see everyone.
+        if (_roundAlive) {
+          for (const [id, m] of _roundRoster) {
+            if (!m.alive && id !== socket.id) { _roundHiddenIds.add(id); _roundGhostVis(id, false); }
+          }
+        }
+        _rpsToast(!_roundAlive
+          ? '💀 You were got while you were away… stick around and watch how it ends.'
+          : (_roundRole === 'killer' ? '🔪 Welcome back — finish the job.' : '🌙 Welcome back — the round is still on. Survive!'));
+      } else {
+        const _accNames = [..._roundAccomplices.values()];
+        _rnEl('round-role-big').textContent = _roundRole === 'killer'
+          ? (_accNames.length ? '🔪 You are a killer' : '🔪 You are the killer')
+          : '🌙 The lights go out…';
+        _rnEl('round-role-sub').textContent = _roundRole === 'killer'
+          ? ((_accNames.length ? `You're in it together with ${_accNames.join(' and ')} — you can't hurt each other. ` : '')
+             + 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.')
+          : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
+        _rnEl('round-role').classList.add('open');
+        clearTimeout(_roundRoleTimer);
+        _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
+      }
+      if (_roundRole === 'killer' && _roundAlive) { _rnEl('round-kill-btn').classList.add('on'); _roundSetNoclip(true); }
+      _roundRosterSig = '';
+      _roundRosterRender();
+      _rnEl('round-roster').classList.add('on');
+      _roundStopTick();
+      _roundTick = setInterval(_roundHud, 250);
+      _roundHud();
+    }
+
+    socket.on('roundBegin', (d) => { _roundEnterActive(d || {}); });
+
+    // Grace-window rejoin: the server rebound our round spot onto this fresh
+    // socket and sent the full round state. The scene may still be booting
+    // (roundResume arrives right after `approved`) — retry until the player
+    // sprite and the noclip collider list exist, then enter exactly like a
+    // begin. Bounded retries: if the scene never comes up, give up silently
+    // (the round will end without us; grace expiry already handled our spot).
+    socket.on('roundResume', (d) => {
+      d = d || {};
+      if (_roundPhase === 'active') return;   // already in (double resume) — ignore
+      // Generation guard: if the round ends/cancels while the scene is still
+      // booting (roundEnd → _roundReset bumps _roundGen), a late attempt()
+      // must NOT re-enter a dead round — that would re-darken the screen and
+      // wedge _roundPhase='active', blocking every future round until refresh.
+      const gen = _roundGen;
+      let tries = 0;
+      const attempt = () => {
+        if (_roundGen !== gen) return;        // round torn down while we booted — stale resume
+        const sc = window._gameScene;
+        if (!sc || !sc.player || !sc._noclipColliders) {
+          if (tries++ < 25) setTimeout(attempt, 400);
+          return;
+        }
+        _roundEnterActive(d, { resume: true });
+      };
+      attempt();
+    });
+
+    // A participant refreshed mid-round: their spot moved to a new socket id.
+    // Rekey every id-indexed mirror; the HUD tick re-asserts ghost hiding, so
+    // a late-arriving sprite for a hidden (dead) player self-heals.
+    socket.on('roundRebind', (d) => {
+      if (!d || !d.oldId || !d.newId || d.oldId === d.newId) return;
+      const m = _roundRoster.get(d.oldId);
+      if (m) { _roundRoster.delete(d.oldId); _roundRoster.set(d.newId, m); }
+      if (_roundAccomplices.has(d.oldId)) {
+        _roundAccomplices.set(d.newId, _roundAccomplices.get(d.oldId));
+        _roundAccomplices.delete(d.oldId);
+      }
+      if (_roundHiddenIds.has(d.oldId)) {
+        _roundHiddenIds.delete(d.oldId);
+        if (d.newId !== socket.id) { _roundHiddenIds.add(d.newId); _roundGhostVis(d.newId, false); }
+      }
+      _roundRosterSig = '';
+      _roundRosterRender();
+    });
+
+    socket.on('roundKilled', (d) => {
+      d = d || {};
+      const m = _roundRoster.get(d.victimId);
+      if (m) m.alive = false;
+      const sc = window._gameScene;
+      if (d.victimId === socket.id) {
+        if (sc && sc.player) sc._showEmoteBubble(sc.player, '💀', true);
+        _roundAlive = false;
+        document.body.classList.remove('round-dark');   // the fallen see everything…
+        _roundShowAllGhosts();                          // …including the other fallen
+        _rpsToast('💀 You were got! Stick around and watch how it ends…');
+      } else if (_roundPhase === 'active' && _roundAlive) {
+        // I'm still in the round: the fallen vanish from my world instantly.
+        // (Cooldown restart moved to the private roundKillCooldown ping — with
+        // several killers, a teammate's kill must NOT reset MY timer.)
+        _roundHiddenIds.add(d.victimId);
+        _roundGhostVis(d.victimId, false);
+        if (m) _rpsToast(`💀 ${m.name} was eliminated…`);
+      } else if (sc) {
+        // I'm a spectator — I get to watch the kill happen. 💀 flash over the victim.
+        const e = sc.otherPlayers && sc.otherPlayers[d.victimId];
+        if (e && e.sprite) e.chatBubble = sc._showEmoteBubble(e.sprite, '💀', false);
+      }
+    });
+    // Private ping to the killer whose strike landed — restarts only THEIR cooldown.
+    socket.on('roundKillCooldown', (d) => {
+      if (_roundPhase !== 'active' || _roundRole !== 'killer') return;
+      const ms = d && Number.isFinite(Number(d.cooldownMs)) ? Number(d.cooldownMs) : _roundCoolMs;
+      _roundKillReadyAt = Date.now() + ms;   // 0 = ready again immediately
+    });
+    socket.on('roundLeft', (d) => {
+      if (!d || !d.id) return;
+      _roundRoster.delete(d.id);
+      _roundAccomplices.delete(d.id);
+      // A hidden ghost who fully leaves gets un-hidden (their sprite is torn
+      // down by the normal leave flow; a fresh session = fresh socket id).
+      if (_roundHiddenIds.has(d.id)) { _roundGhostVis(d.id, true); _roundHiddenIds.delete(d.id); }
+    });
+
+    socket.on('roundEnd', (d) => {
+      d = d || {};
+      _roundReset();
+      const crew = d.outcome === 'crew';
+      const kn = (d.killerNames && d.killerNames.length) ? d.killerNames : [d.killerName || '???'];
+      const plural = kn.length > 1;
+      _rnEl('round-end-title').textContent = crew ? '☀️ The crew made it!' : (plural ? '🔪 The killers got everyone…' : '🔪 The killer got everyone…');
+      const kList = kn.length > 1 ? kn.slice(0, -1).join(', ') + ' and ' + kn[kn.length - 1] : kn[0];
+      const bits = [(plural ? `The killers were ${kList}.` : `The killer was ${kList}.`)
+        + (d.forfeit ? (plural ? ' (The last of them vanished mid-round — automatic crew win.)' : ' (They vanished mid-round — automatic crew win.)') : '')];
+      if (d.winners && d.winners.length) bits.push(`${d.winners.join(', ')} win${d.winners.length === 1 ? 's' : ''} ${d.prize || 25} 🪙 each!`);
+      else bits.push('No survivors, no payout. Brutal.');
+      _rnEl('round-end-body').textContent = bits.join(' ');
+      _rnEl('round-end').classList.add('open');
+      clearTimeout(_roundEndTimer);
+      _roundEndTimer = setTimeout(() => _rnEl('round-end').classList.remove('open'), 10000);
+    });
+
+    _rnEl('round-join').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase) { _rpsToast('Finish your match first!'); return; }
+      socket.emit('roundJoin');
+    });
+    _rnEl('round-ignore').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      clearTimeout(_roundInviteTimer);
+      _rnEl('round-invite').classList.remove('open');
+    });
+    _rnEl('round-kill-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); _roundTryKill(); });
+    _rnEl('round-end-ok').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      clearTimeout(_roundEndTimer);
+      _rnEl('round-end').classList.remove('open');
+    });
+
+    function _rpsSendChallenge() {
+      if (_rpsArcadeMode) {
+        const g = _rpsGamePick;
+        closeAllRps();
+        socket.emit('interact', { object: 'arcade', game: g });   // server re-checks proximity + partner
+        return;
+      }
+      const inp = rpsEl('rps-wager-input');
+      const err = rpsEl('rps-wager-error');
+      const w = parseInt(inp.value, 10);
+      if (!Number.isInteger(w) || w < 0) { err.textContent = 'Wager must be 0 or more.'; return; }
+      if (w > _playerCoins) { err.textContent = 'You only have ' + _playerCoins + ' 🪙.'; return; }
+      const targetId = _rpsWagerTargetId;
+      const game = _rpsGamePick;
+      closeAllRps();
+      _rpsPhase = 'waiting';   // hold the slot until rpsChallengeSent/Failed answers
+      socket.emit('rpsChallenge', { targetId, wager: w, game });
+    }
+    rpsEl('rps-wager-send').addEventListener('pointerdown', (e) => { e.preventDefault(); _rpsSendChallenge(); });
+    rpsEl('rps-wager-cancel').addEventListener('pointerdown', (e) => { e.preventDefault(); closeAllRps(); });
+    rpsEl('rps-wager-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); _rpsSendChallenge(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeAllRps(); return; }
+      e.stopPropagation();
+    });
+
+    rpsEl('rps-waiting-cancel').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      socket.emit('rpsCancel', { challengeId: _rpsChallengeId });   // server echoes rpsCancelled → closeAllRps
+    });
+    rpsEl('rps-accept').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase !== 'incoming') return;
+      socket.emit('rpsRespond', { challengeId: _rpsChallengeId, accept: true });
+      rpsEl('rps-incoming').classList.remove('open');   // rpsStart (or rpsCancelled) follows
+      _rpsStopCount();
+    });
+    rpsEl('rps-decline').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (_rpsPhase !== 'incoming') return;
+      socket.emit('rpsRespond', { challengeId: _rpsChallengeId, accept: false });
+      closeAllRps();
+    });
+    document.querySelectorAll('.rps-pick').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'picking' || _rpsMyPick) return;   // first pick locks — no take-backs
+        _rpsMyPick = b.dataset.pick;
+        socket.emit('rpsPick', { challengeId: _rpsChallengeId, pick: _rpsMyPick });
+        document.querySelectorAll('.rps-pick').forEach((x) => {
+          x.classList.toggle('picked', x === b);
+          if (x !== b) x.classList.add('disabled');
+        });
+        rpsEl('rps-match-status').textContent = 'Locked in — waiting for opponent…';
+      });
+    });
+    rpsEl('rps-result-ok').addEventListener('pointerdown', (e) => { e.preventDefault(); closeAllRps(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (_rpsPhase === 'wager' || _rpsPhase === 'result') { e.preventDefault(); closeAllRps(); }
+      else if (rpsMenu.classList.contains('open')) _rpsHideMenu();
+    });
+
+    // ── Tic-Tac-Toe board (cells built once; server owns all game logic) ──
+    {
+      const bd = rpsEl('ttt-board');
+      for (let i = 0; i < 9; i++) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'ttt-cell empty';
+        c.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          if (_rpsPhase !== 'ttt' || !_tttMyTurn || c.textContent) return;
+          socket.emit('tttMove', { challengeId: _rpsChallengeId, cell: i });
+        });
+        bd.appendChild(c);
+      }
+    }
+    function _tttPaint(board) {
+      rpsEl('ttt-board').querySelectorAll('.ttt-cell').forEach((c, i) => {
+        const v = Array.isArray(board) ? board[i] : null;
+        c.textContent = v || '';
+        c.className = 'ttt-cell' + (v ? (v === 'X' ? ' x' : ' o') : ' empty');
+      });
+    }
+    function _tttRender(board, myTurn, moveMs) {
+      const bd = rpsEl('ttt-board');
+      bd.classList.add('show');
+      bd.classList.toggle('myturn', myTurn);
+      _tttMyTurn = myTurn;
+      _tttPaint(board);
+      rpsEl('rps-match-status').textContent =
+        (myTurn ? 'Your move' : 'Their move') + ' — you are ' + _tttMyMark;
+      _rpsCountdown(rpsEl('rps-match-count'), moveMs || 20000,
+        myTurn ? 'Your move locks in ' : 'They must move in ');
+    }
+
+    // ── Connect Four board (cells built once; server owns all game logic) ──
+    // 42 buttons in a 7-wide grid; clicking ANY cell in a column drops into
+    // that column (the server finds the landing row).
+    {
+      const bd = rpsEl('c4-board');
+      for (let i = 0; i < 42; i++) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'c4-cell empty';
+        c.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          if (_rpsPhase !== 'c4' || !_c4MyTurn) return;
+          socket.emit('c4Drop', { challengeId: _rpsChallengeId, col: i % 7 });
+        });
+        bd.appendChild(c);
+      }
+    }
+    function _c4Paint(board, lastDrop) {
+      rpsEl('c4-board').querySelectorAll('.c4-cell').forEach((c, i) => {
+        const v = Array.isArray(board) ? board[i] : null;
+        c.className = 'c4-cell' + (v ? (v === 'R' ? ' r' : ' y') : ' empty') +
+                      (Number.isInteger(lastDrop) && i === lastDrop ? ' last' : '');
+      });
+    }
+    function _c4Render(board, myTurn, moveMs, lastDrop) {
+      const bd = rpsEl('c4-board');
+      bd.classList.add('show');
+      bd.classList.toggle('myturn', myTurn);
+      _c4MyTurn = myTurn;
+      _c4Paint(board, lastDrop);
+      rpsEl('rps-match-status').textContent =
+        (myTurn ? 'Your drop' : 'Their drop') + ' — you are ' + (_c4MyDisc === 'R' ? '🔴 Red' : '🟡 Yellow');
+      _rpsCountdown(rpsEl('rps-match-count'), moveMs || 20000,
+        myTurn ? 'Your drop locks in ' : 'They must drop in ');
+    }
+
+    // ── Trivia Duel panel ──
+    function _trivReset() {
+      _trivLocked = false;
+      rpsEl('triv-panel').classList.remove('locked', 'reveal');
+      document.querySelectorAll('.triv-opt').forEach((x) => x.classList.remove('picked', 'correct', 'wrong'));
+    }
+    document.querySelectorAll('.triv-opt').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'trivia' || _trivLocked || !b.textContent) return;
+        _trivLocked = true;
+        b.classList.add('picked');
+        rpsEl('triv-panel').classList.add('locked');
+        socket.emit('trivAnswer', { challengeId: _rpsChallengeId, choice: parseInt(b.dataset.idx, 10) });
+        rpsEl('rps-match-status').textContent = 'Locked in — waiting for them…';
+      });
+    });
+
+    // ── Quick Draw panel ──
+    function _qdFire() {
+      if (_rpsPhase !== 'qd') return;
+      socket.emit('qdTap', { challengeId: _rpsChallengeId });   // server adjudicates early vs live
+    }
+    rpsEl('qd-zone').addEventListener('pointerdown', (e) => { e.preventDefault(); _qdFire(); });
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'qd') return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _qdFire(); }
+    });
+
+    // ── Billiards panel ──
+    // The shooter's marker sweeps via rAF using the SAME triangle-wave formula
+    // as the server's poolMeterPos (period is server-sent); the shot reports
+    // elapsed-ms since the arm, so render lag never skews the position.
+    function _poolStopRaf() { if (_poolRaf) { cancelAnimationFrame(_poolRaf); _poolRaf = null; } }
+    function _poolMeterPos(el) {
+      const phase = (el % _poolPeriod) / _poolPeriod;
+      return (phase < 0.5 ? phase * 2 : 2 - phase * 2) * 100;
+    }
+    function _poolAnimate() {
+      const mk = rpsEl('pool-marker');
+      _poolStopRaf();
+      const tick = () => {
+        if (_rpsPhase !== 'pool' || !_poolMyTurn) { _poolStopRaf(); return; }
+        mk.style.left = 'calc(' + _poolMeterPos(performance.now() - _poolArmAt).toFixed(2) + '% - 1px)';
+        _poolRaf = requestAnimationFrame(tick);
+      };
+      _poolRaf = requestAnimationFrame(tick);
+    }
+    function _poolFire() {
+      if (_rpsPhase !== 'pool' || !_poolMyTurn) return;
+      _poolMyTurn = false;   // optimistic lock; the server is the real gate
+      rpsEl('pool-shoot').disabled = true;
+      socket.emit('poolShot', { challengeId: _rpsChallengeId, elapsedMs: Math.round(performance.now() - _poolArmAt) });
+    }
+    rpsEl('pool-shoot').addEventListener('pointerdown', (e) => { e.preventDefault(); _poolFire(); });
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'pool') return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); _poolFire(); }
+    });
+
+    // ── Ping Pong panel ──
+    // The server sim broadcasts the court ~30×/s; the client just draws the
+    // latest frame and sends a target paddle y (~25×/s, only when it moved).
+    function _pongStopSend() {
+      if (_pongSendTimer) { clearInterval(_pongSendTimer); _pongSendTimer = null; }
+      _pongKeyDir = 0;
+    }
+    function _pongStartSend() {
+      _pongStopSend();
+      _pongSendTimer = setInterval(() => {
+        if (_rpsPhase !== 'pong') { _pongStopSend(); return; }
+        if (_pongKeyDir) {
+          _pongTargetY = Math.max(0, Math.min(_pongCourt.h, _pongTargetY + _pongKeyDir * 3));
+        }
+        if (Math.abs(_pongTargetY - _pongLastSent) > 0.4) {
+          _pongLastSent = _pongTargetY;
+          socket.emit('pongPaddle', { challengeId: _rpsChallengeId, y: _pongTargetY });
+        }
+      }, 40);
+    }
+    function _pongDraw(st) {
+      const cv = rpsEl('pong-court'), ctx = cv.getContext('2d');
+      const sx = cv.width / _pongCourt.w, sy = cv.height / _pongCourt.h;
+      ctx.fillStyle = '#0c1f14'; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(cv.width / 2, 0); ctx.lineTo(cv.width / 2, cv.height); ctx.stroke();
+      ctx.setLineDash([]);
+      const padW = 2.5 * sx, hh = _pongCourt.padHalf * sy;
+      const meLeft = _pongSide === 'left';
+      ctx.fillStyle = meLeft ? '#2ecc71' : '#e8e8e8';
+      ctx.fillRect(_pongCourt.padX * sx - padW / 2, (st.pl || 0) * sy - hh, padW, hh * 2);
+      ctx.fillStyle = meLeft ? '#e8e8e8' : '#2ecc71';
+      ctx.fillRect((_pongCourt.w - _pongCourt.padX) * sx - padW / 2, (st.pr || 0) * sy - hh, padW, hh * 2);
+      ctx.fillStyle = st.frozen ? '#f6c945' : '#ffffff';
+      ctx.beginPath(); ctx.arc((st.bx || 0) * sx, (st.by || 0) * sy, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    (() => {
+      const cv = rpsEl('pong-court');
+      const track = (e) => {
+        if (_rpsPhase !== 'pong') return;
+        const r = cv.getBoundingClientRect();
+        if (!r.height) return;
+        _pongTargetY = Math.max(0, Math.min(_pongCourt.h, ((e.clientY - r.top) / r.height) * _pongCourt.h));
+      };
+      cv.addEventListener('pointermove', track);
+      cv.addEventListener('pointerdown', (e) => { e.preventDefault(); track(e); });
+    })();
+    document.addEventListener('keydown', (e) => {
+      if (_rpsPhase !== 'pong') return;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') { e.preventDefault(); _pongKeyDir = -1; }
+      else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') { e.preventDefault(); _pongKeyDir = 1; }
+    });
+    document.addEventListener('keyup', (e) => {
+      if ((e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') && _pongKeyDir === -1) _pongKeyDir = 0;
+      if ((e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') && _pongKeyDir === 1) _pongKeyDir = 0;
+    });
+
+    // ── Icebreakers panel ──
+    // Pick your own answer AND a guess of theirs; the moment both are chosen
+    // the pair submits and locks (first submit locks server-side too).
+    function _ibResetRound() {
+      _ibAnswer = null; _ibGuess = null; _ibLocked = false;
+      rpsEl('ib-panel').classList.remove('locked', 'reveal');
+      document.querySelectorAll('.ib-opt').forEach((x) => x.classList.remove('picked'));
+    }
+    document.querySelectorAll('.ib-opt').forEach((b) => {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (_rpsPhase !== 'ib' || _ibLocked) return;
+        const kind = b.dataset.kind, choice = b.dataset.choice;
+        if (kind === 'answer') _ibAnswer = choice; else _ibGuess = choice;
+        document.querySelectorAll('.ib-opt[data-kind="' + kind + '"]')
+          .forEach((x) => x.classList.toggle('picked', x === b));
+        if (_ibAnswer && _ibGuess) {
+          _ibLocked = true;
+          rpsEl('ib-panel').classList.add('locked');
+          socket.emit('ibSubmit', { challengeId: _rpsChallengeId, answer: _ibAnswer, guess: _ibGuess });
+          rpsEl('rps-match-status').textContent = 'Locked in — waiting for them…';
+        }
+      });
+    });
+
+    // ── Word Race input ──
+    // Same key isolation as the owner-password input: stop propagation so the
+    // C/Tab/emote hotkeys never fire while typing, and suspend Phaser's global
+    // key capture while focused.
+    {
+      const wrIn = rpsEl('wr-input');
+      wrIn.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (_rpsPhase !== 'wr') return;
+          const w = wrIn.value.trim();
+          if (w) socket.emit('wrSubmit', { challengeId: _rpsChallengeId, word: w });
+        }
+      });
+      wrIn.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      wrIn.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    }
+
+    // ── RPS socket events ──
+    socket.on('rpsChallengeFailed', (payload) => {
+      const { message } = payload || {};
+      closeAllRps();
+      _rpsToast(message || 'Challenge failed.');
+    });
+    socket.on('rpsChallengeSent', (payload) => {
+      const { challengeId, toName, wager, game, arcade } = payload || {};
+      const meta = GAME_META[game] || GAME_META.rps;
+      _rpsChallengeId = challengeId;
+      _rpsPhase = 'waiting';
+      // Station-started invites name the venue (arcade vs Game Room tables).
+      const venue = game === 'pool' ? '🎱 at the pool table' : game === 'pong' ? '🏓 at the ping pong table' : '🕹️ at the arcade';
+      rpsEl('rps-waiting-text').textContent = arcade
+        ? 'Invited ' + (toName || '?') + ' to ' + meta.label + ' ' + venue + ' — waiting…'
+        : meta.label + ' challenge sent to ' + (toName || '?') + (wager ? ' · ' + wager + ' 🪙' : '') + ' — waiting…';
+      rpsEl('rps-waiting').classList.add('open');
+    });
+    socket.on('rpsChallengeIncoming', (payload) => {
+      const { challengeId, fromName, wager, game, timeoutMs, arcade } = payload || {};
+      const meta = GAME_META[game] || GAME_META.rps;
+      // The server's busy-check guarantees we're not mid-match — any RPS UI
+      // still open here (e.g. a half-typed wager) is stale; reset first.
+      closeAllRps();
+      _rpsChallengeId = challengeId;
+      _rpsPhase = 'incoming';
+      const inVenue = game === 'pool' ? 'at the pool table' : game === 'pong' ? 'at the ping pong table' : 'at the arcade';
+      rpsEl('rps-incoming-text').textContent = arcade
+        ? meta.icon + ' ' + (fromName || '?') + ' wants to play ' + meta.label + ' ' + inVenue + '! (friendly)'
+        : (fromName || '?') + ' challenges you to ' + meta.icon + ' ' + meta.label + (wager ? ' — wager ' + wager + ' 🪙' : ' (friendly)');
+      rpsEl('rps-accept').textContent = 'Accept ' + ({ ttt: '⭕', qd: '🤠', ib: '🧊', wr: '🔤', trivia: '🧠', c4: '🔴', pool: '🎱', pong: '🏓' }[game] || '✊');
+      rpsEl('rps-incoming').classList.add('open');
+      _rpsCountdown(rpsEl('rps-incoming-count'), timeoutMs || 30000, 'Auto-declines in ');
+    });
+    socket.on('rpsCancelled', (payload) => {
+      const { reason } = payload || {};
+      closeAllRps();
+      _rpsToast(reason || 'Match cancelled.');
+    });
+    socket.on('rpsStart', (payload) => {
+      const { challengeId, game, opponentName, wager, pickMs, yourMark, yourTurn, moveMs,
+              rounds, scramble, raceMs, yourDisc, target, side, court } = payload || {};
+      closeAllRps();
+      if (_chatOpen) closeChat();
+      if (_dmOpen) closeDM();
+      const g = GAME_META[game] ? game : 'rps';
+      _rpsChallengeId = challengeId;
+      _rpsUiOpen = true; _rpsMyPick = null;
+      rpsEl('rps-match-title').textContent =
+        GAME_META[g].icon + ' vs ' + (opponentName || '?') + (wager ? ' · ' + wager + ' 🪙' : '');
+      rpsEl('rps-result').style.display = 'none';
+      rpsEl('rps-pick-row').style.display = 'none';
+      rpsEl('rps-match-count').textContent = '';
+      rpsEl('rps-match').classList.add('open');
+      touchMove.up = touchMove.down = touchMove.left = touchMove.right = false;
+
+      if (g === 'ttt') {
+        _rpsPhase = 'ttt';
+        _tttMyMark = yourMark || '?';
+        _tttRender(Array(9).fill(null), !!yourTurn, moveMs);
+      } else if (g === 'qd') {
+        _rpsPhase = 'qd';
+        const z = rpsEl('qd-zone');
+        z.classList.remove('live');
+        z.textContent = 'Wait for it…';
+        rpsEl('qd-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent = 'Tap only AFTER it turns green — early = instant loss!';
+      } else if (g === 'ib') {
+        _rpsPhase = 'ib';
+        _ibResetRound();
+        rpsEl('ib-prompt').textContent = 'Get ready…';
+        document.querySelectorAll('.ib-opt').forEach((x) => { x.textContent = ''; });
+        rpsEl('ib-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          'Best of ' + (rounds || 3) + ' — guess THEIR answer to score!';
+      } else if (g === 'wr') {
+        _rpsPhase = 'wr';
+        const wrIn = rpsEl('wr-input');
+        wrIn.value = ''; wrIn.classList.remove('shake');
+        rpsEl('wr-scramble').textContent = scramble || '?';
+        rpsEl('wr-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent = 'Unscramble the office word — first correct answer wins!';
+        _rpsCountdown(rpsEl('rps-match-count'), raceMs || 60000, 'Race ends in ');
+        if (!IS_TOUCH) setTimeout(() => wrIn.focus(), 30);
+      } else if (g === 'trivia') {
+        _rpsPhase = 'trivia';
+        _trivReset();
+        rpsEl('triv-q').textContent = 'Get ready…';
+        document.querySelectorAll('.triv-opt').forEach((x) => { x.textContent = ''; });
+        rpsEl('triv-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          'Best of ' + (rounds || 3) + ' — fastest correct answer scores!';
+      } else if (g === 'c4') {
+        _rpsPhase = 'c4';
+        _c4MyDisc = yourDisc || '?';
+        _c4Render(Array(42).fill(null), !!yourTurn, moveMs, null);
+      } else if (g === 'pool') {
+        _rpsPhase = 'pool';
+        _poolMyTurn = false;
+        rpsEl('pool-score').textContent = 'You 0 · 0 Them — first to ' + (target || 5) + ' sinks';
+        rpsEl('pool-shoot').disabled = true;
+        const pp = rpsEl('pool-panel');
+        pp.classList.add('show'); pp.classList.remove('aiming');
+        rpsEl('rps-match-status').textContent = '🎱 Racking up — stop the slider inside the green zone!';
+      } else if (g === 'pong') {
+        _rpsPhase = 'pong';
+        _pongSide = side === 'right' ? 'right' : 'left';
+        if (court && court.w) _pongCourt = court;
+        _pongTargetY = _pongCourt.h / 2; _pongLastSent = -1; _pongKeyDir = 0;
+        rpsEl('pong-score').textContent = 'You 0 · 0 Them — first to ' + (target || 5);
+        rpsEl('pong-panel').classList.add('show');
+        rpsEl('rps-match-status').textContent =
+          '🏓 You are the GREEN paddle (' + _pongSide + ' side) — don\'t let the ball past!';
+        _pongDraw({ bx: _pongCourt.w / 2, by: _pongCourt.h / 2, pl: _pongCourt.h / 2, pr: _pongCourt.h / 2, frozen: true });
+        _pongStartSend();
+      } else {
+        _rpsPhase = 'picking';
+        rpsEl('rps-match-status').textContent = 'Make your pick!';
+        rpsEl('rps-pick-row').style.display = 'flex';
+        document.querySelectorAll('.rps-pick').forEach((x) => x.classList.remove('picked', 'disabled'));
+        _rpsCountdown(rpsEl('rps-match-count'), pickMs || 20000, 'Picks lock in ');
+      }
+    });
+    socket.on('tttState', (payload) => {
+      const { challengeId, board, yourTurn, yourMark, moveMs } = payload || {};
+      if (_rpsPhase !== 'ttt' || challengeId !== _rpsChallengeId) return;
+      if (yourMark) _tttMyMark = yourMark;
+      _tttRender(board, !!yourTurn, moveMs);
+    });
+    socket.on('c4State', (payload) => {
+      const { challengeId, board, yourTurn, yourDisc, moveMs, lastDrop } = payload || {};
+      if (_rpsPhase !== 'c4' || challengeId !== _rpsChallengeId) return;
+      if (yourDisc) _c4MyDisc = yourDisc;
+      _c4Render(board, !!yourTurn, moveMs, lastDrop);
+    });
+    socket.on('poolState', (payload) => {
+      const { challengeId, yourTurn, scores, spotCenter, spotHalf, periodMs, turnMs, target } = payload || {};
+      if (_rpsPhase !== 'pool' || challengeId !== _rpsChallengeId) return;
+      if (Number.isFinite(periodMs) && periodMs > 0) _poolPeriod = periodMs;
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('pool-score').textContent = 'You ' + sy + ' · ' + st + ' Them — first to ' + (target || 5) + ' sinks';
+      const c = Number.isFinite(spotCenter) ? spotCenter : 50;
+      const h = Number.isFinite(spotHalf) ? spotHalf : 7;
+      const lo = Math.max(0, c - h), hi = Math.min(100, c + h);
+      const spot = rpsEl('pool-spot');
+      spot.style.left = lo + '%'; spot.style.width = (hi - lo) + '%';
+      const panel = rpsEl('pool-panel'), btn = rpsEl('pool-shoot');
+      _poolMyTurn = !!yourTurn;
+      if (yourTurn) {
+        _poolArmAt = performance.now();   // meter epoch — formula mirrors server poolMeterPos
+        panel.classList.add('aiming');
+        btn.disabled = false;
+        rpsEl('rps-match-status').textContent = '🎱 Your shot — stop the slider in the green!';
+        _rpsCountdown(rpsEl('rps-match-count'), turnMs || 9000, 'Shot clock: ');
+        _poolAnimate();
+      } else {
+        panel.classList.remove('aiming');
+        _poolStopRaf();
+        btn.disabled = true;
+        _rpsStopCount(); rpsEl('rps-match-count').textContent = '';
+        rpsEl('rps-match-status').textContent = 'Their shot — watch the table…';
+      }
+    });
+    socket.on('poolShotResult', (payload) => {
+      const { challengeId, yours, pos, hit, scores } = payload || {};
+      if (_rpsPhase !== 'pool' || challengeId !== _rpsChallengeId) return;
+      _poolMyTurn = false; _poolStopRaf();
+      _rpsStopCount(); rpsEl('rps-match-count').textContent = '';
+      rpsEl('pool-shoot').disabled = true;
+      // Freeze the marker where the shot landed so both sides see the result.
+      rpsEl('pool-panel').classList.add('aiming');
+      rpsEl('pool-marker').style.left = 'calc(' + (Number.isFinite(pos) ? pos : 50) + '% - 1px)';
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('pool-score').textContent = 'You ' + sy + ' · ' + st + ' Them';
+      rpsEl('rps-match-status').textContent = hit
+        ? (yours ? '✅ Sunk it! You keep the cue…' : '✅ They sunk it — they shoot again…')
+        : (yours ? '❌ Missed — cue passes.' : '❌ They missed — your shot coming up!');
+    });
+    socket.on('pongState', (payload) => {
+      if (_rpsPhase !== 'pong' || !payload || payload.challengeId !== _rpsChallengeId) return;
+      _pongDraw(payload);
+      const meLeft = _pongSide === 'left';
+      const sy = (meLeft ? payload.sl : payload.sr) || 0, st = (meLeft ? payload.sr : payload.sl) || 0;
+      rpsEl('pong-score').textContent = 'You ' + sy + ' · ' + st + ' Them — first to 5';
+      if (payload.frozen) rpsEl('rps-match-status').textContent = '🏓 Serve incoming…';
+      else rpsEl('rps-match-status').textContent = '';
+    });
+    socket.on('qdSignal', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'qd' || challengeId !== _rpsChallengeId) return;
+      const z = rpsEl('qd-zone');
+      z.classList.add('live');
+      z.textContent = '🔫 DRAW! TAP!';
+      rpsEl('rps-match-status').textContent = 'TAP NOW! (click / Space)';
+    });
+    socket.on('rpsOpponentPicked', () => {
+      if (_rpsPhase !== 'picking') return;
+      rpsEl('rps-match-status').textContent = _rpsMyPick
+        ? 'Both locked in…'
+        : 'Opponent locked in — your turn!';
+    });
+    socket.on('ibRound', (payload) => {
+      const { challengeId, round, rounds, prompt, submitMs, scores } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId) return;
+      _ibResetRound();
+      const a = (prompt && prompt.a) || '?', b = (prompt && prompt.b) || '?';
+      rpsEl('ib-prompt').textContent = a + ' or ' + b + '?';
+      document.querySelectorAll('.ib-opt').forEach((x) => {
+        x.textContent = x.dataset.choice === 'a' ? a : b;
+      });
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('rps-match-status').textContent =
+        'Round ' + (round || 1) + ' of ' + (rounds || 3) + ' · You ' + sy + ' – ' + st + ' Them';
+      _rpsCountdown(rpsEl('rps-match-count'), submitMs || 20000, 'Answers lock in ');
+    });
+    socket.on('ibPeerLocked', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId || _ibLocked) return;
+      rpsEl('rps-match-status').textContent = "They've locked in — your turn!";
+    });
+    socket.on('ibReveal', (payload) => {
+      const { challengeId, prompt, you, them, scores, final } = payload || {};
+      if (_rpsPhase !== 'ib' || challengeId !== _rpsChallengeId) return;
+      _rpsStopCount();
+      rpsEl('rps-match-count').textContent = '';
+      const lab = (c) => (prompt && prompt[c]) || '?';
+      const y = you || {}, t = them || {};
+      rpsEl('ib-reveal-you').textContent =
+        'You: ' + lab(y.answer) + ' · guessed ' + lab(y.guess) + (y.gotPoint ? ' ✅ +1' : ' ❌');
+      rpsEl('ib-reveal-them').textContent =
+        'Them: ' + lab(t.answer) + ' · guessed ' + lab(t.guess) + (t.gotPoint ? ' ✅ +1' : ' ❌');
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('ib-reveal-score').textContent = 'Score: You ' + sy + ' – ' + st + ' Them';
+      rpsEl('ib-panel').classList.add('reveal');
+      rpsEl('rps-match-status').textContent = final ? 'Final tally…' : 'Next round coming up…';
+    });
+    socket.on('trivRound', (payload) => {
+      const { challengeId, round, rounds, q, options, answerMs, scores } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId) return;
+      _trivReset();
+      rpsEl('triv-q').textContent = q || '?';
+      const opts = Array.isArray(options) ? options : [];
+      document.querySelectorAll('.triv-opt').forEach((x, i) => { x.textContent = opts[i] || ''; });
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('rps-match-status').textContent =
+        'Question ' + (round || 1) + ' of ' + (rounds || 3) + ' · You ' + sy + ' – ' + st + ' Them';
+      _rpsCountdown(rpsEl('rps-match-count'), answerMs || 10000, 'Answers lock in ');
+    });
+    socket.on('trivPeerLocked', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId || _trivLocked) return;
+      rpsEl('rps-match-status').textContent = "They've answered — hurry!";
+    });
+    socket.on('trivReveal', (payload) => {
+      const { challengeId, correctIdx, you, them, scores, final } = payload || {};
+      if (_rpsPhase !== 'trivia' || challengeId !== _rpsChallengeId) return;
+      _rpsStopCount();
+      rpsEl('rps-match-count').textContent = '';
+      const y = you || {}, t = them || {};
+      rpsEl('triv-panel').classList.add('reveal');
+      rpsEl('triv-panel').classList.remove('locked');
+      document.querySelectorAll('.triv-opt').forEach((x, i) => {
+        x.classList.toggle('correct', i === correctIdx);
+        x.classList.toggle('wrong', y.choice === i && i !== correctIdx);
+      });
+      const fmt = (r) => r.correct
+        ? ('✅ correct' + (typeof r.ms === 'number' ? ' in ' + (r.ms / 1000).toFixed(1) + 's' : ''))
+        : (r.choice == null ? '⌛ no answer' : '❌ wrong');
+      rpsEl('triv-reveal-you').textContent  = 'You: '  + fmt(y) + (y.gotPoint ? ' · +1 point' : '');
+      rpsEl('triv-reveal-them').textContent = 'Them: ' + fmt(t) + (t.gotPoint ? ' · +1 point' : '');
+      const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+      rpsEl('triv-reveal-score').textContent = 'Score: You ' + sy + ' – ' + st + ' Them';
+      rpsEl('rps-match-status').textContent = final ? 'Final tally…' : 'Next question coming up…';
+    });
+    socket.on('wrWrong', (payload) => {
+      const { challengeId } = payload || {};
+      if (_rpsPhase !== 'wr' || challengeId !== _rpsChallengeId) return;
+      const inp = rpsEl('wr-input');
+      inp.value = '';
+      inp.classList.remove('shake');
+      void inp.offsetWidth;   // restart the CSS animation
+      inp.classList.add('shake');
+      rpsEl('rps-match-status').textContent = 'Nope — keep trying!';
+    });
+    socket.on('rpsResult', (payload) => {
+      const { game, outcome, yourPick, theirPick, coinsDelta, forfeit,
+              board, reactionMs, early, youFiredEarly,
+              scores, word, solveMs, unsolved, left } = payload || {};
+      _rpsStopCount();
+      clearTimeout(_rpsResultTimer);
+      const g = GAME_META[game] ? game : 'rps';
+      _rpsPhase = 'result'; _rpsUiOpen = true;
+      rpsEl('rps-match').classList.add('open');
+      rpsEl('rps-pick-row').style.display = 'none';
+      rpsEl('qd-panel').classList.remove('show');
+      rpsEl('ib-panel').classList.remove('show', 'locked', 'reveal');
+      rpsEl('wr-panel').classList.remove('show');
+      rpsEl('wr-input').blur();
+      rpsEl('triv-panel').classList.remove('show', 'locked', 'reveal');
+      if (g !== 'c4') rpsEl('c4-board').classList.remove('show', 'myturn');
+      rpsEl('pool-panel').classList.remove('show', 'aiming');
+      rpsEl('pong-panel').classList.remove('show');
+      _poolMyTurn = false; _poolStopRaf(); _pongStopSend();
+      rpsEl('rps-match-count').textContent = '';
+
+      let picksLine = '', statusLine = '';
+      if (g === 'ttt') {
+        // Keep the final board on screen under the verdict.
+        if (Array.isArray(board)) {
+          const bd = rpsEl('ttt-board');
+          bd.classList.add('show'); bd.classList.remove('myturn');
+          _tttMyTurn = false;
+          _tttPaint(board);
+        }
+        picksLine = outcome === 'draw' ? 'Board full — dead heat.' : (forfeit ? '' : 'Three in a row!');
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They ran out of time — forfeit.' : 'You ran out of time — forfeit.')
+          : '';
+      } else if (g === 'qd') {
+        if (early) {
+          picksLine = youFiredEarly ? '💥 You fired before the signal!' : '💥 They fired before the signal!';
+          statusLine = 'Firing early is an instant loss.';
+        } else {
+          picksLine = typeof reactionMs === 'number' ? '⚡ Winning reaction: ' + reactionMs + ' ms' : '';
+        }
+      } else if (g === 'ib') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = 'Final score — You ' + sy + ' · Them ' + st;
+        statusLine = forfeit
+          ? (outcome === 'win' ? "They didn't answer in time — forfeit." : "You didn't answer in time — forfeit.")
+          : (outcome === 'draw' ? 'You read each other equally well!' : '');
+      } else if (g === 'wr') {
+        picksLine = word ? 'The word was ' + word : '';
+        if (unsolved) statusLine = 'Nobody solved it in time.';
+        else if (typeof solveMs === 'number') {
+          statusLine = (outcome === 'win' ? '⚡ You solved it in ' : '⚡ They solved it in ') +
+                       (solveMs / 1000).toFixed(1) + 's';
+        }
+      } else if (g === 'trivia') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = 'Final score — You ' + sy + ' · Them ' + st;
+        statusLine = outcome === 'draw' ? 'Evenly matched!' : '';
+      } else if (g === 'c4') {
+        // Keep the final board on screen under the verdict.
+        if (Array.isArray(board)) {
+          const bd = rpsEl('c4-board');
+          bd.classList.add('show'); bd.classList.remove('myturn');
+          _c4MyTurn = false;
+          _c4Paint(board, null);
+        }
+        picksLine = outcome === 'draw' ? 'Board full — dead heat.' : (forfeit ? '' : 'Four in a row!');
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They ran out of time — forfeit.' : 'You ran out of time — forfeit.')
+          : '';
+      } else if (g === 'pool') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = '🎱 Final table — You ' + sy + ' · Them ' + st;
+        statusLine = forfeit
+          ? (outcome === 'win' ? 'They let the shot clock run out — forfeit.' : 'You let the shot clock run out — forfeit.')
+          : '';
+      } else if (g === 'pong') {
+        const sy = (scores && scores.you) || 0, st = (scores && scores.them) || 0;
+        picksLine = '🏓 Final score — You ' + sy + ' · Them ' + st;
+        statusLine = outcome === 'draw' ? 'Time! A dead-even rally.' : '';
+      } else {
+        picksLine =
+          'You: ' + (yourPick ? RPS_EMOJI[yourPick] + ' ' + yourPick : '(no pick)') +
+          '  ·  Them: ' + (theirPick ? RPS_EMOJI[theirPick] + ' ' + theirPick : '(no pick)');
+        statusLine = forfeit
+          ? (outcome === 'win' ? "They didn't pick in time — forfeit." : "You didn't pick in time — forfeit.")
+          : '';
+      }
+      // Leave-forfeit (opponent refreshed/disconnected mid-match) overrides
+      // the per-game lines: no scores/board arrive with it, and the timeout
+      // wording ("ran out of time") would be misleading.
+      if (left) {
+        picksLine = '';
+        statusLine = outcome === 'win'
+          ? 'They left the match — you win by forfeit.'
+          : 'You left the match — forfeit.';
+        // No board ships with a leave-forfeit: make sure a mid-match TTT board
+        // isn't left looking interactive under the verdict.
+        rpsEl('ttt-board').classList.remove('myturn');
+        _tttMyTurn = false;
+      }
+      rpsEl('rps-result-picks').textContent = picksLine;
+      const out = rpsEl('rps-result-outcome');
+      if (outcome === 'draw')     { out.textContent = "It's a draw — no coins moved."; out.className = 'rps-out draw'; }
+      else if (outcome === 'win') { out.textContent = 'You win!'  + (coinsDelta ? ' +' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out win'; }
+      else                        { out.textContent = 'You lose.' + (coinsDelta ? ' ' + coinsDelta + ' 🪙' : ''); out.className = 'rps-out lose'; }
+      rpsEl('rps-match-status').textContent = statusLine;
+      rpsEl('rps-result').style.display = 'block';
+      _rpsResultTimer = setTimeout(() => { if (_rpsPhase === 'result') closeAllRps(); }, 8000);
+    });
+    socket.on('rpsIndicator', (payload) => {
+      if (payload && window._gameScene) window._gameScene._showRpsIndicator(payload);
+    });
+
+    // ── F8 Owner panel ────────────────────────────────────────────────
+    let _adminAuthed    = false;
+    let _ownerPanelOpen = false;
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'F8') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (_ownerPanelOpen) { closeOwnerPanel(); return; }
+        if (!_adminAuthed)   { openOwnerPwd();    return; }
+        openOwnerPanel();
+      }
+      if (e.key === 'Escape') {
+        if (_ownerPanelOpen) { e.preventDefault(); closeOwnerPanel(); }
+        if (document.getElementById('owner-pwd-modal').classList.contains('open')) {
+          e.preventDefault(); closeOwnerPwd();
+        }
+        if (document.getElementById('food-modal').classList.contains('open')) {
+          e.preventDefault(); closeFoodMenu();
+        }
+      }
+    });
+
+    function openOwnerPwd() {
+      document.getElementById('owner-pwd-input').value = '';
+      document.getElementById('owner-pwd-error').textContent = '';
+      document.getElementById('owner-pwd-modal').classList.add('open');
+      setTimeout(() => document.getElementById('owner-pwd-input').focus(), 30);
+    }
+    function closeOwnerPwd() {
+      // Always wipe the typed admin code on close (unlock success, cancel, Esc):
+      // a value left in this always-in-the-DOM field is what triggered the
+      // browser's repeated "Save password?" prompts during normal chatting.
+      document.getElementById('owner-pwd-input').value = '';
+      document.getElementById('owner-pwd-modal').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    // Memory-only stash of the admin code (never persisted anywhere): a socket
+    // reconnect gets a NEW socket id, and the server's `admins` set is keyed by
+    // socket id — so without a silent re-auth, any connection blip made the
+    // admin panel go stale (no more pendingList/playerList pushes) until a full
+    // page refresh + re-unlock. `_adminPwdPending` holds the attempt until the
+    // server confirms it; only a confirmed-good password is kept for re-auth.
+    let _adminPwdPending = '';
+    let _adminPwd = '';
+    function submitOwnerPwd() {
+      _adminPwdPending = document.getElementById('owner-pwd-input').value;
+      socket.emit('adminAuth', { password: _adminPwdPending });
+    }
+    document.getElementById('owner-pwd-input').addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter')  { e.preventDefault(); submitOwnerPwd(); }
+      if (e.key === 'Escape') { e.preventDefault(); closeOwnerPwd(); }
+    });
+    document.getElementById('owner-pwd-input').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+    document.getElementById('owner-pwd-input').addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    // Any input/textarea inside the whole owner panel gets the same treatment —
+    // one delegated listener catches them all so no new field ever breaks typing.
+    document.getElementById('owner-panel').addEventListener('focusin',  e => { if (e.target.matches('input,textarea,select')) _phaserKbd?.disableGlobalCapture(); });
+    document.getElementById('owner-panel').addEventListener('focusout', e => { if (e.target.matches('input,textarea,select')) _phaserKbd?.enableGlobalCapture(); });
+
+    // While the panel is open, poll for fresh lists every few seconds (plus
+    // once on open) — pushes cover the instant case, but a missed push (blip,
+    // zombie socket) must never leave the panel stale until a page refresh.
+    // ── Owner panel tabs + activity log ──
+    let _ownerLogPage = 1;
+    let _ownerTab = 'reg';
+    window.ownerTab = function (tab) {
+      _ownerTab = tab;
+      document.querySelectorAll('#owner-card .owner-section[data-otab]').forEach(s => {
+        s.classList.toggle('otab-show', s.dataset.otab === tab);
+      });
+      document.querySelectorAll('#owner-tabs .o-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.otabBtn === tab);
+      });
+      if (tab === 'log') window.ownerLogGo(_ownerLogPage);
+      if (tab === 'whispers') window.ownerWhisperRefresh();   // fresh pull on every open
+      if (tab === 'roster') socket.emit('adminRegisteredList');   // fresh DB pull on every open
+    };
+    window.ownerLogGo = function (page) {
+      _ownerLogPage = Math.max(1, page || 1);
+      window._ownerLogPage = _ownerLogPage;   // inline onclick handlers read window scope
+      socket.emit('adminLogGet', { page: _ownerLogPage });
+    };
+    window._ownerLogPage = _ownerLogPage;
+    socket.on('adminLogPage', (d) => {
+      if (!d || !Array.isArray(d.rows)) return;
+      _ownerLogPage = d.page; window._ownerLogPage = d.page;
+      const list = document.getElementById('op-log-list');
+      if (!d.rows.length) {
+        list.innerHTML = '<div style="color:#888;font-size:12px;padding:8px 0;">Nothing logged yet — actions taken from this panel will show up here.</div>';
+      } else {
+        const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        list.innerHTML = d.rows.map(r => {
+          const t = new Date(r.ts);
+          const ts = t.toLocaleDateString([], { month:'short', day:'numeric' }) + ' ' + t.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+          return `<div class="op-log-row"><span class="op-log-ts">${ts}</span><span><span class="op-log-who">${esc(r.admin_name)}</span> — <span class="op-log-act">${esc(r.action)}</span>${r.detail ? ` <span class="op-log-detail">${esc(r.detail)}</span>` : ''}</span></div>`;
+        }).join('');
+      }
+      document.getElementById('op-log-pageinfo').textContent = `Page ${d.page} of ${d.pages} (${d.total} entr${d.total === 1 ? 'y' : 'ies'})`;
+      document.getElementById('op-log-prev').disabled = d.page <= 1;
+      document.getElementById('op-log-next').disabled = d.page >= d.pages;
+    });
+
+    window.ownerAdjustCoins = function () {
+      const email = document.getElementById('op-coin-email').value.trim();
+      const delta = Number(document.getElementById('op-coin-amount').value);
+      socket.emit('adminAdjustCoins', { email, delta });
+    };
+    // Rare pet gifting (owner key only — same tier as coin adjustments).
+    window.ownerGrantRarePet = function () {
+      const email = document.getElementById('op-rare-email').value.trim();
+      const pet = document.getElementById('op-rare-pet').value;
+      socket.emit('ownerGrantPet', { email, pet });
+    };
+    socket.on('ownerGrantResult', (d) => {
+      const el = document.getElementById('op-rare-msg');
+      el.textContent = d.message;
+      el.style.color = d.ok ? '#2e9e5b' : '#d33';
+      if (d.ok) document.getElementById('op-rare-email').value = '';
+    });
+    // Recipient-side fanfare when the boss gifts you a rare pet.
+    socket.on('rareGiftToast', (d) => {
+      const msgs = {
+        pet_phoenix: '🐦‍🔥 The boss gifted you a PHOENIX! It\'s at your feet right now.',
+        pet_unicorn: '🦄 The boss gifted you a UNICORN! It\'s at your feet right now.',
+        phoenixwings: '🔥 The boss gifted you PHOENIX WINGS! They\'re on your back right now.',
+      };
+      showToast(msgs[d.pet] || '🎁 The boss gifted you something RARE!');
+    });
+    socket.on('adminCoinResult', (d) => {
+      const m = document.getElementById('op-coin-msg');
+      if (!m || !d) return;
+      m.textContent = d.message || '';
+      m.style.color = d.ok ? '#7fd77f' : '#e77';
+      if (d.ok) document.getElementById('op-coin-amount').value = '';
+    });
+
+    let _adminPollTimer = null;
+    function openOwnerPanel() {
+      _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); _opRenderPrices();
+      window.ownerTab(_ownerTab);
+      socket.emit('adminRefresh');
+      clearInterval(_adminPollTimer);
+      _adminPollTimer = setInterval(() => { if (socket.connected) socket.emit('adminRefresh'); }, 10000);
+    }
+    function closeOwnerPanel() {
+      _ownerPanelOpen = false;
+      document.getElementById('owner-panel').classList.remove('open');
+      clearInterval(_adminPollTimer); _adminPollTimer = null;
+      document.querySelector('canvas')?.focus();
+    }
+
+    socket.on('adminAuthOk', (d) => {
+      // Owner key (OWNER_PASSWORD) unlocks the owner-only tools too.
+      document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
+      document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
+      document.getElementById('op-owner-deal').style.display = (d && d.owner) ? '' : 'none';
+      const whisperTab = document.querySelector('[data-otab-btn="whispers"]');
+      if (whisperTab) whisperTab.style.display = (d && d.owner) ? '' : 'none';
+      const whisperSec = document.querySelector('.owner-section[data-otab="whispers"]');
+      if (whisperSec && !(d && d.owner)) whisperSec.classList.remove('otab-show');
+      window._ownerAuthed = !!(d && d.owner);
+      // Plain admin key: no price tools at all, and game pots are locked to
+      // a fixed 500 coins (the server enforces both regardless of the UI).
+      const isOwner = window._ownerAuthed;
+      const priceTab = document.querySelector('[data-otab-btn="prices"]');
+      if (priceTab) priceTab.style.display = isOwner ? '' : 'none';
+      const priceSec = document.querySelector('.owner-section[data-otab="prices"]');
+      if (priceSec && !isOwner) priceSec.classList.remove('otab-show');
+      for (const id of ['op-bingo-prize', 'op-rlgl-prize', 'op-race-prize']) {
+        const inp = document.getElementById(id);
+        if (!inp) continue;
+        inp.disabled = !isOwner;
+        if (!isOwner) { inp.value = 500; inp.title = 'Admin games run with a fixed 500-coin pot'; }
+        else inp.title = '';
+      }
+      // Silent path = automatic re-auth after a reconnect (pwd modal not open):
+      // refresh the flags but do NOT pop the owner panel open mid-game.
+      const manualUnlock = document.getElementById('owner-pwd-modal').classList.contains('open');
+      if (_adminPwdPending) { _adminPwd = _adminPwdPending; _adminPwdPending = ''; }
+      _adminAuthed = true; _canPostAnnouncements = true; updateBoardCompose();
+      if (manualUnlock) { closeOwnerPwd(); openOwnerPanel(); }
+    });
+    // ── Owner-only: whisper log viewer ───────────────────────────────────
+    window.ownerWhisperRefresh = function () {
+      const msg = document.getElementById('op-whisper-msg');
+      msg.textContent = 'Loading…';
+      socket.emit('ownerWhisperLog', { email: document.getElementById('op-whisper-filter').value.trim() });
+    };
+    socket.on('ownerWhisperLog', ({ ok, rows, message } = {}) => {
+      const list = document.getElementById('op-whisper-list');
+      const msg = document.getElementById('op-whisper-msg');
+      if (!ok) { msg.textContent = message || 'Failed to load.'; return; }
+      msg.textContent = rows.length ? `${rows.length} whisper${rows.length === 1 ? '' : 's'} (newest first, last 200).` : 'No whispers recorded yet.';
+      list.innerHTML = '';
+      for (const r of rows) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:7px 8px;border-bottom:1px solid #23233a;line-height:1.5;';
+        const when = new Date(r.sent_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const head = document.createElement('div');
+        head.style.cssText = 'color:#9aa;';
+        head.textContent = `${when} — ${r.from_name} (${r.from_email}) → ${r.to_name} (${r.to_email})`;
+        row.appendChild(head);
+        if (r.message) {
+          const body = document.createElement('div');
+          body.style.cssText = 'color:#e9d5ff;';
+          body.textContent = `“${r.message}”`;
+          row.appendChild(body);
+        }
+        if (r.img) {
+          const im = document.createElement('img');
+          im.src = r.img; im.alt = 'whispered image';
+          im.style.cssText = 'max-width:180px;max-height:120px;border-radius:6px;margin-top:4px;display:block;cursor:pointer;';
+          im.onclick = () => window.open(r.img, '_blank');
+          row.appendChild(im);
+        }
+        list.appendChild(row);
+      }
+    });
+    // ── Owner-only: HARD red price-change alerts ─────────────────────────
+    // Every price change made with the plain admin password lands here, live
+    // or as a backlog on login. Stays on screen until the owner dismisses it.
+    let _priceAlerts = [];
+    (function () {
+      const st = document.createElement('style');
+      st.textContent = `
+        @keyframes pa-flash { 0%,100% { box-shadow: 0 0 22px 6px rgba(255,40,40,.85); border-color:#ff2f2f; } 50% { box-shadow: 0 0 10px 2px rgba(255,40,40,.35); border-color:#8f1010; } }
+        #price-alert { position:fixed; top:70px; left:50%; transform:translateX(-50%); z-index:10050;
+          background:linear-gradient(180deg,#3a0707,#250404); border:3px solid #ff2f2f; border-radius:12px;
+          padding:14px 18px 12px; min-width:340px; max-width:560px; max-height:60vh; overflow:auto;
+          font-family:monospace; color:#ffd7d7; display:none; animation:pa-flash 1s infinite; }
+        #price-alert h4 { margin:0 0 8px; color:#ff4040; font-size:16px; letter-spacing:2px; text-align:center; }
+        #price-alert .pa-row { background:rgba(255,47,47,.12); border-left:4px solid #ff2f2f; padding:6px 8px; margin:6px 0; font-size:13px; line-height:1.5; }
+        #price-alert .pa-row b { color:#fff; }
+        #price-alert .pa-row .pa-price { color:#ff6b6b; font-weight:bold; }
+        #price-alert .pa-row .pa-who { color:#ffb0b0; }
+        #price-alert button { display:block; margin:10px auto 0; background:#ff2f2f; color:#fff; border:none;
+          border-radius:8px; padding:8px 26px; font-weight:bold; font-family:monospace; cursor:pointer; font-size:13px; }`;
+      document.head.appendChild(st);
+      const el = document.createElement('div');
+      el.id = 'price-alert';
+      el.innerHTML = '<h4>🚨 PRICE CHANGED 🚨</h4><div id="pa-list"></div><button id="pa-dismiss">GOT IT — DISMISS</button>';
+      document.body.appendChild(el);
+      document.getElementById('pa-dismiss').onclick = () => {
+        socket.emit('ownerPriceAlertsSeen', _priceAlerts.map(a => a.id));
+        _priceAlerts = [];
+        el.style.display = 'none';
+      };
+    })();
+    function _renderPriceAlerts() {
+      if (!window._ownerAuthed || !_priceAlerts.length) return;
+      const list = document.getElementById('pa-list');
+      list.innerHTML = _priceAlerts.map(a => {
+        const when = a.at ? new Date(a.at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+        const oldP = (a.oldPrice == null) ? '?' : Number(a.oldPrice).toLocaleString();
+        return `<div class="pa-row"><b>${a.item}</b>: <span class="pa-price">${oldP} → ${Number(a.newPrice).toLocaleString()} coins</span><br>` +
+               `<span class="pa-who">by ${String(a.by || 'Unknown').replace(/</g,'&lt;')}</span> — ${when}</div>`;
+      }).join('');
+      document.getElementById('price-alert').style.display = 'block';
+    }
+    socket.on('ownerPriceAlert', (a) => { if (a && a.id != null) { _priceAlerts.push(a); _renderPriceAlerts(); } });
+    socket.on('ownerPriceAlertBacklog', (list) => {
+      if (!Array.isArray(list)) return;
+      const have = new Set(_priceAlerts.map(x => x.id));
+      for (const a of list) if (a && a.id != null && !have.has(a.id)) _priceAlerts.push(a);
+      _renderPriceAlerts();
+    });
+
+    socket.on('adminAuthFail', () => {
+      _adminPwdPending = ''; _adminPwd = '';
+      // Modal closed = this was a silent reconnect re-auth that failed (e.g.
+      // ADMIN_PASSWORD rotated server-side): drop admin state so the gear/F8
+      // reopens the unlock prompt instead of a stale, push-less panel.
+      if (!document.getElementById('owner-pwd-modal').classList.contains('open')) _adminAuthed = false;
+      document.getElementById('owner-pwd-error').textContent = 'Incorrect password.';
+    });
+    // Re-assert admin status on every (re)connect — the server's admins set is
+    // per-socket-id and in-memory, so both a connection blip and a server
+    // restart silently drop it. Additional 'connect' listener by design
+    // (socket.io multi-listener, same pattern as the resume-token replay).
+    socket.on('connect', () => {
+      if (_adminAuthed && _adminPwd) socket.emit('adminAuth', { password: _adminPwd });
+    });
+    // Stale-client self-heal on RECONNECT: the load-time /stamp check only runs
+    // once, so a tab left open for weeks keeps running an old client forever
+    // (this shipped bugs to users who never closed the game tab). A reconnect
+    // is exactly when the server may have restarted with a new build — re-check
+    // then. Skips the FIRST connect (the load-time check covers it); the
+    // reload-loop guard lives inside _checkStamp. A reload here is safe: the
+    // resume token auto-rejoins the player. Additional 'connect' listener by
+    // design (socket.io multi-listener, same pattern as the admin re-auth above).
+    let _hadFirstConnect = false;
+    socket.on('connect', () => {
+      if (_hadFirstConnect && window._checkStamp) window._checkStamp();
+      _hadFirstConnect = true;
+    });
+
+    // ── Announcement boards ───────────────────────────────────────────
+    let _boardPanelOpen = false;
+    let _announcements  = [];
+    let _canPostAnnouncements = false;
+    let _currentBoard = 'office';       // which individual board (cluster) the player currently has open
+    let _boardLabels  = {};             // boardId -> human label (e.g. "Conference Room · Board 2"), filled when the scene clusters boards
+
+    // Per-board "last read" timestamps, kept in this browser. A board shows an unread
+    // "!" marker when it has an announcement newer than what this player has seen.
+    function _seenMap() { try { return JSON.parse(localStorage.getItem('jpo_seen_boards') || '{}'); } catch { return {}; } }
+    function _saveSeen(m) { try { localStorage.setItem('jpo_seen_boards', JSON.stringify(m)); } catch {} }
+    function boardLabel(id) { return _boardLabels[id] || 'Announcements'; }
+    function boardHasUnread(board) { const seen = _seenMap()[board] || 0; return _announcements.some(a => a.board === board && a.ts > seen); }
+    function markBoardSeen(board) {
+      const m = _seenMap(); let mx = m[board] || 0;
+      _announcements.forEach(a => { if (a.board === board && a.ts > mx) mx = a.ts; });
+      m[board] = mx; _saveSeen(m); refreshBoardMarkers();
+    }
+    // Show/hide the floating "!" over each board based on unread state for that board.
+    function refreshBoardMarkers() {
+      const sc = window._gameScene;
+      if (!sc || !sc.boardMarkers) return;
+      sc.boardMarkers.forEach(m => m.badge.setVisible(boardHasUnread(m.boardId)));
+    }
+
+    function escHtml(str) { const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
+    function annTimeAgo(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return 'just now';
+      const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+    function openBoardPanel(board) {
+      _currentBoard = board || 'office';
+      _boardPanelOpen = true;
+      const nameEl = document.getElementById('board-room-name');
+      if (nameEl) nameEl.textContent = boardLabel(_currentBoard);
+      document.getElementById('board-panel').classList.add('open');
+      renderBoard();
+      updateBoardCompose();
+      markBoardSeen(_currentBoard);   // reading a board clears its unread "!"
+    }
+    function closeBoardPanel() {
+      _boardPanelOpen = false;
+      document.getElementById('board-panel').classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    function renderBoard() {
+      const list = document.getElementById('board-list');
+      if (list) {
+        const items = _announcements.filter(a => a.board === _currentBoard);
+        list.innerHTML = items.length
+          ? items.map(a =>
+              '<div class="board-item"><div class="board-item-text">' + escHtml(a.text) + '</div>' +
+              '<div class="board-item-meta"><span class="board-item-author">' + escHtml(a.name) + '</span> · ' + annTimeAgo(a.ts) +
+              (_adminAuthed ? '<button class="board-item-del" title="Delete announcement" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button>' : '') +
+              '</div></div>'
+            ).join('')
+          : '<div class="board-empty">No announcements yet.</div>';
+      }
+      renderAdminAnnouncements();
+    }
+    function renderAdminAnnouncements() {
+      const el = document.getElementById('op-ann-list');
+      if (!el) return;
+      el.innerHTML = _announcements.length
+        ? _announcements.map(a =>
+            '<div class="op-ann-row"><div class="op-ann-row-text">' + escHtml(a.text) +
+            '<small>📍 ' + escHtml(boardLabel(a.board)) + ' · ' + escHtml(a.name) + ' · ' + annTimeAgo(a.ts) + '</small></div>' +
+            '<button class="o-btn o-btn-reject" onclick="deleteAnnouncement(\'' + a.id + '\')">✕</button></div>'
+          ).join('')
+        : '<div class="op-ann-empty">No announcements yet</div>';
+    }
+    function updateBoardCompose() {
+      const box = document.getElementById('board-compose');
+      if (box) box.style.display = _canPostAnnouncements ? 'block' : 'none';
+    }
+    function postAnnouncementFromBoard() {
+      const inp = document.getElementById('board-ann-input');
+      const text = inp.value.trim();
+      if (!text) return;
+      socket.emit('postAnnouncement', { text, board: _currentBoard });
+      inp.value = '';
+    }
+    function deleteAnnouncement(id) { socket.emit('deleteAnnouncement', { id }); }
+
+    function _onAnnouncements(list) {
+      _announcements = list || [];
+      if (_boardPanelOpen) { renderBoard(); markBoardSeen(_currentBoard); }  // viewing a board = its new posts count as read
+      else                 { renderAdminAnnouncements(); refreshBoardMarkers(); }
+    }
+    socket.on('announcements',       _onAnnouncements);
+    socket.on('announcementsUpdate', _onAnnouncements);
+    socket.on('announcerStatus', ({ canPost }) => { _canPostAnnouncements = !!canPost; updateBoardCompose(); });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _boardPanelOpen) { e.preventDefault(); closeBoardPanel(); }
+    });
+
+    (() => {
+      ['op-ann-input', 'board-ann-input'].forEach(id => {
+        const inp = document.getElementById(id);
+        if (!inp) return;
+        inp.addEventListener('keydown', e => { e.stopPropagation(); });
+        inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+        inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+      });
+    })();
+
+    // Toast the admin when someone NEW shows up in the pending queue (keyed by
+    // email when present — socket ids change on every reconnect and would
+    // false-alarm). null = first list after unlock, never toast on that one.
+    let _knownPendingKeys = null;
+    socket.on('pendingList', (list) => {
+      const keys = new Set(list.map(p => p.email || p.id));
+      if (_knownPendingKeys && document.body.classList.contains('playing')) {
+        const fresh = list.filter(p => !_knownPendingKeys.has(p.email || p.id));
+        if (fresh.length) _rpsToast(`🔔 ${fresh.map(p => p.name).join(', ')} ${fresh.length === 1 ? 'is' : 'are'} waiting for approval`);
+      }
+      _knownPendingKeys = keys;
+      document.getElementById('op-pending-count').textContent = list.length;
+      // Tab badge: pending approvals stay visible even when the owner is on
+      // another tab (the section itself is hidden then).
+      const tb = document.getElementById('op-tab-pending');
+      tb.textContent = list.length;
+      tb.style.display = list.length ? '' : 'none';
+      const tbody = document.getElementById('op-pending-tbody');
+      if (!list.length) { tbody.innerHTML = '<tr><td class="owner-empty" colspan="4">No pending registrations</td></tr>'; return; }
+      tbody.innerHTML = list.map(p => `
+        <tr${p.offline ? ' style="opacity:.65"' : ''}>
+          <td>${esc(p.name)}${p.nickname && p.nickname !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.nickname)}”</span>` : ''}${p.offline ? ' <span style="color:#aaa;font-size:10px;" title="Registered, then closed the tab while waiting. Approve now and they walk in on their next visit.">(offline)</span>' : ''}</td>
+          <td style="font-size:11px;color:#888">${esc(p.email)}</td>
+          <td><span class="char-tag">${esc(p.character)}</span></td>
+          <td>
+            <button class="o-btn o-btn-approve" onclick="ownerApprove('${esc(p.id)}')">✓</button>
+            <button class="o-btn o-btn-reject"  onclick="ownerReject('${esc(p.id)}')">✗</button>
+          </td>
+        </tr>`).join('');
+    });
+
+    let _onlineList = [];
+    socket.on('playerList', (list) => {
+      _onlineList = list;
+      renderOnlinePlayers();
+    });
+    window.renderOnlinePlayers = function () {
+      const list = _onlineList;
+      document.getElementById('op-player-count').textContent = list.length;
+      const q = (document.getElementById('op-online-search')?.value || '').trim().toLowerCase();
+      const shown = !q ? list : list.filter(p =>
+        [p.fullName, p.name, p.email, p.department].some(v => (v || '').toLowerCase().includes(q)));
+      const tbody = document.getElementById('op-player-tbody');
+      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="6">${q ? 'No one matches your search' : 'No players online'}</td></tr>`; return; }
+      tbody.innerHTML = shown.map(p => `
+        <tr>
+          <td><span class="online-dot"></span>${esc(p.fullName || p.name)}${p.fullName && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
+          <td>${esc(p.department || '—')}</td>
+          <td>💰 ${p.coins}</td>
+          <td>${(p.cosmetics||[]).join(', ') || '—'}</td>
+          <td><button class="o-btn ${p.isAnnouncer ? 'o-btn-approve' : 'o-btn-reject'}" ${p.email ? '' : 'disabled'} title="${p.isAnnouncer ? 'Can post announcements — click to revoke' : 'Allow this person to post announcements'}" onclick="ownerToggleAnnouncer('${esc(p.id)}', ${p.isAnnouncer ? 'false' : 'true'})">📢</button></td>
+          <td><button class="o-btn o-btn-reject" title="Reset player (lets them re-register)" onclick="ownerKick('${esc(p.id)}')">⟳</button></td>
+        </tr>`).join('');
+    };
+
+    // ── Registered directory (all approved accounts, online or not) ──
+    let _rosterList = [];
+    socket.on('registeredList', (list) => {
+      _rosterList = Array.isArray(list) ? list : [];
+      renderRoster();
+    });
+    function _lastSeenLabel(iso) {
+      if (!iso) return '—';
+      const ms = Date.now() - new Date(iso).getTime();
+      if (!isFinite(ms) || ms < 0) return '—';
+      const m = Math.floor(ms / 60000);
+      if (m < 2)        return 'just now';
+      if (m < 60)       return `${m}m ago`;
+      if (m < 48 * 60)  return `${Math.floor(m / 60)}h ago`;
+      const d = Math.floor(m / 1440);
+      if (d < 30)       return `${d}d ago`;
+      return new Date(iso).toLocaleDateString();
+    }
+    window.renderRoster = function () {
+      const list = _rosterList;
+      document.getElementById('op-roster-count').textContent = list.length;
+      const q = (document.getElementById('op-roster-search')?.value || '').trim().toLowerCase();
+      const shown = !q ? list : list.filter(p =>
+        [p.fullName, p.name, p.email, p.department].some(v => (v || '').toLowerCase().includes(q)));
+      const tbody = document.getElementById('op-roster-tbody');
+      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="5">${q ? 'No one matches your search' : 'No registered players yet'}</td></tr>`; return; }
+      tbody.innerHTML = shown.map(p => `
+        <tr${p.online ? '' : ' style="opacity:.7"'}>
+          <td>${p.online ? '<span class="online-dot"></span>' : ''}${esc(p.fullName || p.name)}${p.fullName && p.name && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
+          <td>${esc(p.department || '—')}</td>
+          <td style="font-size:11px;color:#888">${esc(p.email || '—')}</td>
+          <td>💰 ${Number(p.coins) || 0}</td>
+          <td style="font-size:11px;color:${p.online ? '#27ae60' : '#888'}">${p.online ? 'online now' : esc(_lastSeenLabel(p.lastActive))}</td>
+        </tr>`).join('');
+    };
+
+    function ownerApprove(id) { socket.emit('approvePlayer', id); }
+    function ownerReject(id)  { socket.emit('rejectPlayer',  id); }
+    function ownerKick(id)    { socket.emit('kickPlayer',    id); }
+    function ownerToggleAnnouncer(id, canPost) { socket.emit('setAnnouncer', { targetId: id, canPost }); }
+
+    function ownerResetPassword() {
+      const inp = document.getElementById('op-reset-email');
+      const msg = document.getElementById('op-reset-msg');
+      const email = inp.value.trim();
+      if (!email || !email.includes('@')) { msg.style.color = '#e74c3c'; msg.textContent = 'Enter a valid email.'; return; }
+      msg.style.color = '#888';
+      msg.textContent = 'Resetting…';
+      socket.emit('adminResetPassword', { email });
+    }
+    socket.on('resetPasswordDone', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-reset-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Done.' : 'Failed.');
+      if (ok) document.getElementById('op-reset-email').value = '';
+    });
+
+    // ── Owner panel: live shop prices ──────────────────────────────────
+    // Defaults are snapshotted at load (the catalogs' shipped costs) BEFORE
+    // any priceList/priceUpdate mutates them, so the Default column stays
+    // honest. Rows re-render on every price broadcast; a row being edited
+    // (focused input) is left alone so typing doesn't get wiped.
+    const _opDefaultCosts = Object.fromEntries(
+      [...COSMETICS, ...PETS, ...PET_ACCESSORIES].map(c => [c.id, c.cost]));
+    function _opRenderPrices() {
+      const tbody = document.getElementById('op-price-tbody');
+      if (!tbody) return;
+      if (tbody.contains(document.activeElement)) return;   // don't wipe an edit in progress
+      const rows = [...COSMETICS.filter(c => !c.rare).map(c => ({ ...c, kind: 'Wearable' })),
+                    // Rare pets have no price — keep them out of the admin
+                    // price panel entirely (server rejects overrides anyway).
+                    ...PETS.filter(c => !c.rare).map(c => ({ ...c, kind: 'Pet' })),
+                    ...PET_ACCESSORIES.map(c => ({ ...c, kind: 'Pet acc.' }))];
+      tbody.innerHTML = rows.map(c => `
+        <tr>
+          <td>${esc(c.emoji)} ${esc(c.name)} <span style="color:#888;font-size:10px;">${esc(c.kind)}</span></td>
+          <td style="color:#888;">${_opDefaultCosts[c.id]}</td>
+          <td style="${(c.baseCost ?? c.cost) !== _opDefaultCosts[c.id] ? 'color:#e67e22;font-weight:bold;' : ''}">💰 ${c.baseCost ?? c.cost}${(c.baseCost ?? c.cost) !== c.cost ? ` <span style="color:#f1c40f;font-size:10px;">🔥${c.cost} on sale</span>` : ''}</td>
+          <td><input type="number" min="1" step="1" id="op-price-${esc(c.id)}" placeholder="${c.baseCost ?? c.cost}"
+                 style="width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" /></td>
+          <td><button class="o-btn o-btn-approve" onclick="ownerSetPrice('${esc(c.id)}')">Set</button></td>
+        </tr>`).join('');
+    }
+    window._opRenderPrices = _opRenderPrices;
+    function ownerSetPrice(item) {
+      const inp = document.getElementById(`op-price-${item}`);
+      const msg = document.getElementById('op-price-msg');
+      const price = parseInt(inp?.value, 10);
+      if (!Number.isInteger(price) || price < 1) { msg.style.color = '#e74c3c'; msg.textContent = 'Enter a whole number of coins (1+).'; return; }
+      msg.style.color = '#888'; msg.textContent = 'Saving…';
+      socket.emit('adminSetPrice', { item, price });
+      inp.value = '';
+      if (document.activeElement === inp) inp.blur();
+    }
+    window.ownerSetPrice = ownerSetPrice;
+    socket.on('adminPriceResult', ({ ok, message } = {}) => {
+      const msg = document.getElementById('op-price-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Saved.' : 'Failed.');
+    });
+    (() => {
+      const inp = document.getElementById('op-reset-email');
+      inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ownerResetPassword(); });
+      inp.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+      inp.addEventListener('blur',  () => _phaserKbd?.enableGlobalCapture());
+    })();
+    function esc(s) {
+      // Single quotes MUST be escaped too: pending-list ids can now be
+      // `email:<address>` (attacker-chosen text at register time) and they're
+      // embedded inside onclick='…' attributes — without &#39; that's stored
+      // XSS in the admin panel.
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // ── Prop Hunt (Hide & Seek): global state + HUD ────────────────────
+    // The boss vanishes and becomes a piece of furniture; joiners gather at
+    // the boss's start spot, then hunt at locked default zoom. All secrecy is
+    // server-side (the hider's position stops broadcasting) — this block is
+    // just presentation. Scene-bound handlers (prop sprite, teleport, vanish)
+    // live inside create(); this state object bridges the two worlds.
+    window._ph = { role: null, phase: null, frozen: false, zoomLock: false, hiderId: null };
+    // Disguise id → confirmed loaded texture. ox = x-origin (punch bag art
+    // fills only the LEFT 16px of its 32px frame, so center on that column).
+    const PH_TEX = {
+      cooler:    { key: 'water_cooler_obj', frame: null, ox: 0.5  },
+      punchbag:  { key: 'punch_bag_idle',   frame: 0,    ox: 0.25 },
+      treadmill: { key: 'anim_treadmill',   frame: 0,    ox: 0.5  },
+      // Map-furniture disguises: drawn from the SAME tileset frames the map
+      // itself uses (interiors firstgid 2017 → frame = GID - 2017), so the
+      // fake is pixel-identical to the real thing. grid = rows of frames,
+      // top→bottom, anchored bottom-center.
+      chair:    { tiles: { sheet: 'interiors_ss', grid: [[214]] } },          // GID 2231 — the office's everywhere-chair
+      computer: { tiles: { sheet: 'interiors_ss', grid: [[242, 243], [258, 259], [274, 275]] } }, // GIDs 2259/2260 + 2275/2276 + 2291/2292 — full PC desk unit (2w×3t on the map)
+      plant:    { tiles: { sheet: 'interiors_ss', grid: [[714, 715], [730, 731], [746, 747]] } }, // GIDs 2731..2764 — FULL 2-wide potted tree
+      cabinet:  { tiles: { sheet: 'interiors_ss', grid: [[1098, 1099], [1114, 1115], [1130, 1131]] } }, // GIDs 3115/3116 + 3131/3132 + 3147/3148 — full bottle shelf (2w×3t)
+      board:    { tiles: { sheet: 'interiors_ss', grid: [[621, 622], [637, 638]] } },  // GIDs 2638/2639 + 2654/2655 — the board is TWO rows tall on the map
+      tree:     { tiles: { sheet: 'ext_ss',       grid: [[4], [16]] } },      // GIDs 8165/8177 — outdoor pine (office edge, ×69)
+      couch:    { tiles: { sheet: 'interiors_ss', grid: [[818, 819], [834, 835]] } }, // GIDs 2835..2852 — orange couch
+    };
+    const PH_LABELS = {
+      chair: '🪑 Office chair', computer: '🖥️ Computer', plant: '🪴 Potted plant',
+      cabinet: '🗄️ Bottle shelf', board: '📌 Wall board', tree: '🌲 Pine tree', couch: '🛋️ Couch',
+      cooler: '🧊 Water cooler', punchbag: '🥊 Punching bag', treadmill: '🏃 Treadmill',
+    };
+    let _phChipTimer = null;
+    function _phChip(label, endsAt) {
+      let el = document.getElementById('ph-chip');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'ph-chip';
+        el.style.cssText = 'position:fixed;top:86px;right:14px;z-index:250;display:none;background:rgba(20,16,40,.92);color:#ffd76a;border:1px solid #c9a227;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;pointer-events:none;';
+        document.body.appendChild(el);
+      }
+      clearInterval(_phChipTimer); _phChipTimer = null;
+      if (!endsAt) { el.style.display = 'none'; return; }
+      const tick = () => {
+        const left = Math.max(0, endsAt - Date.now());
+        el.textContent = `${label} ${Math.floor(left / 60000)}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`;
+        el.style.display = '';
+        if (left <= 0) { clearInterval(_phChipTimer); _phChipTimer = null; el.style.display = 'none'; }
+      };
+      tick(); _phChipTimer = setInterval(tick, 500);
+    }
+    // Shapeshift toggle (hider, hide phase only). Purely local — everyone
+    // else stopped seeing the hider at phStart — but morphing on demand
+    // feels better than insta-transforming, and lets the boss compare
+    // "me vs the furniture" while picking a spot.
+    function _phMorphBtn(show) {
+      let el = document.getElementById('ph-morph');
+      let sel = document.getElementById('ph-swap');
+      if (!el) {
+        el = document.createElement('button'); el.id = 'ph-morph'; el.className = 'o-btn';
+        el.style.cssText = 'position:fixed;top:130px;right:14px;z-index:250;display:none;background:rgba(20,16,40,.92);color:#ffd76a;border:1px solid #c9a227;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;';
+        el.onclick = () => { window._ph.morph = !window._ph.morph; _phMorphBtn(true); };
+        document.body.appendChild(el);
+        // Mid-hide disguise switcher: changed your mind about being a chair?
+        // Server keeps the authoritative pick (the prop everyone hunts).
+        sel = document.createElement('select'); sel.id = 'ph-swap';
+        sel.style.cssText = 'position:fixed;top:172px;right:14px;z-index:250;display:none;background:rgba(20,16,40,.92);color:#ffd76a;border:1px solid #c9a227;border-radius:8px;padding:7px 10px;font-size:13px;cursor:pointer;';
+        for (const [v, label] of Object.entries(PH_LABELS)) {
+          const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o);
+        }
+        sel.onchange = () => {
+          socket.emit('phSetDisguise', { disguise: sel.value });
+          window._ph.disguise = sel.value;
+          if (window._phKillPreview) window._phKillPreview();   // rebuilt next frame in the new shape
+        };
+        document.body.appendChild(sel);
+      }
+      el.textContent = window._ph.morph ? '👤 Back to me (C)' : '🪄 Shapeshift! (C)';
+      el.style.display = show ? '' : 'none';
+      sel.style.display = show ? '' : 'none';
+      if (show && window._ph.disguise) sel.value = window._ph.disguise;
+    }
+
+    // ── HQ-Buddy (secret weekly buddy) ───────────────────────────────────────
+    // Everything here is PRIVATE: the server only ever tells the pair about
+    // each other, and no element leaks the pairing to anyone else's screen.
+    window._buddy = null;     // { buddyName, isNpc, myAnswers, buddyAnswered, quizScore, mult, boost, ... }
+    let _buddyQs = null;      // this week's 3 questions [{a,b}] (server-drawn)
+    function _buddyChipRender() {
+      let el = document.getElementById('buddy-chip');
+      if (!el) {
+        el = document.createElement('button');
+        el.id = 'buddy-chip';
+        // Top-left row is taken: chatlog(14) / logout(64) / help(114) all own
+        // 42px slots at z-300 — the chip sits AFTER them, at left:164.
+        el.style.cssText = 'position:fixed;top:14px;left:164px;z-index:250;display:none;align-items:center;gap:6px;height:42px;background:rgba(0,0,0,.72);color:#fff;border:1px solid #6c63ff;border-radius:10px;padding:0 12px;font-family:monospace;font-size:13px;cursor:pointer;';
+        el.onclick = _buddyOpenPanel;
+        document.body.appendChild(el);
+      }
+      const b = window._buddy;
+      if (!b) { el.style.display = 'none'; return; }
+      el.textContent = '🤝 ' + b.buddyName + (b.boost ? ' · ×' + b.mult + ' 🔥' : '');
+      el.style.background = b.boost ? 'rgba(20,60,30,.85)' : 'rgba(0,0,0,.72)';
+      el.style.display = '';
+    }
+    function _buddyPanelEl() {
+      let m = document.getElementById('buddy-modal');
+      if (m) return m;
+      m = document.createElement('div');
+      m.id = 'buddy-modal';
+      m.style.cssText = 'position:fixed;inset:0;z-index:8000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);';
+      m.innerHTML = '<div id="buddy-card" style="background:#1e1e30;border:1px solid #3a3a5e;border-radius:14px;width:400px;max-width:calc(100vw - 32px);max-height:85vh;overflow-y:auto;font-family:monospace;color:#eee;padding:24px 26px;">' +
+        '<h3 style="font-size:17px;margin-bottom:4px;">🤝 Your HQ-Buddy today</h3>' +
+        '<div id="buddy-body" style="font-size:13px;line-height:1.55;"></div>' +
+        '<div id="buddy-msg" style="font-size:12px;color:#ffd76a;min-height:16px;margin-top:10px;"></div>' +
+        '<button id="buddy-close" style="width:100%;margin-top:14px;padding:9px;background:#2a2a44;border:none;border-radius:8px;color:#ccc;font-family:monospace;font-size:13px;cursor:pointer;">Close</button></div>';
+      m.querySelector('#buddy-close').onclick = () => { m.style.display = 'none'; };
+      m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; });
+      document.body.appendChild(m);
+      return m;
+    }
+    function _buddyQuizRows(mode) {
+      // mode 'answer': "which do YOU prefer?" — mode 'guess': "what did THEY pick?"
+      return _buddyQs.map((q, i) =>
+        '<div style="margin:10px 0;">' +
+          '<div style="color:#aaa;margin-bottom:4px;">' + (i + 1) + '. ' + q.a + ' or ' + q.b + '?</div>' +
+          '<button class="buddy-opt" data-q="' + i + '" data-v="0" style="padding:7px 12px;margin-right:6px;border:1px solid #444;border-radius:7px;background:#22223a;color:#eee;font-family:monospace;cursor:pointer;">' + q.a + '</button>' +
+          '<button class="buddy-opt" data-q="' + i + '" data-v="1" style="padding:7px 12px;border:1px solid #444;border-radius:7px;background:#22223a;color:#eee;font-family:monospace;cursor:pointer;">' + q.b + '</button>' +
+        '</div>').join('') +
+        '<button id="buddy-submit" style="width:100%;margin-top:8px;padding:9px;background:#6c63ff;border:none;border-radius:8px;color:#fff;font-family:monospace;font-size:13px;cursor:pointer;" disabled>' +
+        (mode === 'answer' ? 'Lock in my answers' : 'Lock in my guesses') + '</button>';
+    }
+    function _buddyWireQuiz(body, mode) {
+      const picks = [null, null, null];
+      body.querySelectorAll('.buddy-opt').forEach((btn) => {
+        btn.onclick = () => {
+          const q = +btn.dataset.q;
+          picks[q] = +btn.dataset.v;
+          body.querySelectorAll('.buddy-opt[data-q="' + q + '"]').forEach((o) => { o.style.background = '#22223a'; o.style.borderColor = '#444'; });
+          btn.style.background = '#6c63ff'; btn.style.borderColor = '#6c63ff';
+          body.querySelector('#buddy-submit').disabled = picks.some((v) => v === null);
+        };
+      });
+      body.querySelector('#buddy-submit').onclick = () => {
+        if (picks.some((v) => v === null)) return;
+        socket.emit(mode === 'answer' ? 'buddyQuizAnswer' : 'buddyQuizGuess',
+          mode === 'answer' ? { answers: picks } : { guesses: picks });
+      };
+    }
+    // Buddy names come from player-set nicknames — escape before ANY
+    // innerHTML interpolation (a hostile nickname must not run script here).
+    function _buddyEsc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function _buddyRenderPanel() {
+      const b = window._buddy;
+      const m = _buddyPanelEl();
+      const body = m.querySelector('#buddy-body');
+      if (!b) { body.innerHTML = 'No buddy today.'; return; }
+      const bn = _buddyEsc(b.buddyName);
+      let html = '<div style="font-size:15px;color:#ffd76a;margin:6px 0 10px;">' + (b.isNpc ? '🌱 Huddles (the coach!)' : '⭐ ' + bn) + '</div>' +
+        '<div style="color:#aaa;">Shh — only the two of you know. New buddy every day!</div>' +
+        '<ul style="margin:10px 0 4px 18px;color:#ccc;">' +
+        '<li>Hang out near ' + (b.isNpc ? 'Huddles' : bn) + ' → <b style="color:#4ade80;">×' + b.mult + ' coins</b> (up to 2h/day)</li>' +
+        (b.isNpc ? '' : '<li>Finish a game together → <b style="color:#4ade80;">+' + (b.gameBonus || 50) + ' coins each</b> (5×/day)</li>' +
+        '<li>“Get to know you” quiz → <b style="color:#4ade80;">+' + (b.quizPay || 100) + '/correct guess</b></li>') +
+        '</ul><hr style="border:none;border-top:1px solid #2a2a40;margin:12px 0;">';
+      if (b.isNpc) {
+        html += '<div style="color:#aaa;">Odd one out today — Huddles has your back. Walk with the coach to earn the bonus, and you\'ll get a coworker buddy tomorrow!</div>';
+        body.innerHTML = html; return;
+      }
+      if (b.quizScore !== null && b.quizScore !== undefined) {
+        html += '<div>✅ Quiz done — you knew ' + bn + ' <b>' + b.quizScore + '/3</b>!</div>';
+        body.innerHTML = html; return;
+      }
+      if (!_buddyQs) { html += '<div style="color:#888;">Loading quiz…</div>'; body.innerHTML = html; socket.emit('buddyQuizOpen'); return; }
+      if (!b.myAnswers) {
+        html += '<div style="color:#ffd76a;margin-bottom:2px;">Round 1 — your own picks:</div>' + _buddyQuizRows('answer');
+        body.innerHTML = html; _buddyWireQuiz(body, 'answer'); return;
+      }
+      if (!b.buddyAnswered) {
+        html += '<div style="color:#888;">You answered! Waiting for ' + bn + ' to answer their questions — then you can guess theirs (stand together to play).</div>';
+        body.innerHTML = html; return;
+      }
+      html += '<div style="color:#ffd76a;margin-bottom:2px;">Round 2 — what did ' + bn + ' pick? (stand near them!)</div>' + _buddyQuizRows('guess');
+      body.innerHTML = html; _buddyWireQuiz(body, 'guess');
+    }
+    function _buddyOpenPanel() {
+      const m = _buddyPanelEl();
+      m.style.display = 'flex';
+      _buddyRenderPanel();
+    }
+    socket.on('buddyInfo', (info) => {
+      const boost = window._buddy?.boost || false;
+      window._buddy = { ...info, boost };
+      _buddyChipRender();
+      const m = document.getElementById('buddy-modal');
+      if (m && m.style.display === 'flex') _buddyRenderPanel();
+    });
+    socket.on('buddyQuiz', ({ questions }) => {
+      _buddyQs = questions;
+      const m = document.getElementById('buddy-modal');
+      if (m && m.style.display === 'flex') _buddyRenderPanel();
+    });
+    socket.on('buddyQuizMsg', ({ message }) => {
+      const m = _buddyPanelEl();
+      m.querySelector('#buddy-msg').textContent = message || '';
+    });
+    socket.on('buddyQuizResult', ({ score, pay }) => {
+      if (window._buddy) window._buddy.quizScore = score;
+      const m = _buddyPanelEl();
+      m.querySelector('#buddy-msg').textContent = '';
+      if (m.style.display === 'flex') _buddyRenderPanel();
+      _rpsToast('🤝 You knew your buddy ' + score + '/3' + (pay ? ' — +' + pay + ' coins!' : '!'));
+    });
+    socket.on('buddyBonus', ({ amount }) => {
+      _rpsToast('🤝 Buddy bonus! +' + amount + ' coins for playing together');
+    });
+    function _phReset() {
+      window._ph = { role: null, phase: null, frozen: false, zoomLock: false, hiderId: null, morph: false };
+      _phMorphBtn(false);
+      _phChip('', 0);
+      const inv = document.getElementById('ph-invite'); if (inv) inv.style.display = 'none';
+      if (window._phKillProp) window._phKillProp();   // scene hook (set in create)
+    }
+    window._phReset = _phReset;   // the socket 'disconnect' cleanup (earlier scope) calls this
+    socket.on('phInvite', (d) => {
+      const ph = window._ph;
+      ph.hiderId = d.hiderId; ph.phase = 'hiding';
+      if (d.hiderId === socket.id) { ph.role = 'hider'; _phChip('🙈 Go hide!', d.hideEndsAt); return; }
+      let el = document.getElementById('ph-invite');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'ph-invite';
+        el.style.cssText = 'position:fixed;top:120px;left:50%;transform:translateX(-50%);z-index:255;background:rgba(20,16,40,.96);color:#fff;border:1px solid #c9a227;border-radius:12px;padding:14px 18px;font-size:14px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,.5);max-width:90vw;';
+        document.body.appendChild(el);
+      }
+      el.innerHTML = '';
+      const msg = document.createElement('div');
+      msg.textContent = `🙈 ${d.hiderName} is hiding somewhere in the office! Hide & Seek is ON.`;
+      msg.style.marginBottom = '10px';
+      const join = document.createElement('button');
+      join.textContent = '🔎 Join the hunt'; join.className = 'o-btn o-btn-approve'; join.style.marginRight = '8px';
+      join.onclick = () => { socket.emit('phJoin'); el.style.display = 'none'; };
+      const no = document.createElement('button');
+      no.textContent = 'Keep working'; no.className = 'o-btn';
+      no.onclick = () => { el.style.display = 'none'; };
+      el.append(msg, join, no); el.style.display = '';
+    });
+    socket.on('phResult', (d) => {
+      const el = document.getElementById('op-ph-msg');
+      if (el) { el.textContent = (d && d.message) || ''; el.style.color = d && d.ok ? '#7fdc7f' : '#ff9c9c'; }
+      // Round accepted → remember the chosen disguise so the scene can dress
+      // the hider in it immediately (walking-furniture preview, local only).
+      if (d && d.ok && window._ph.wantDisguise) { window._ph.disguise = window._ph.wantDisguise; window._ph.morph = false; _phMorphBtn(true); }
+    });
+    window.phStartClick = function () {
+      window._ph.wantDisguise = document.getElementById('op-ph-disguise').value;
+      socket.emit('phStart', {
+        disguise: window._ph.wantDisguise,
+        hideSecs: Number(document.getElementById('op-ph-hide').value),
+        huntSecs: Number(document.getElementById('op-ph-hunt').value),
+      });
+    };
+    window.phCancelClick = function () { socket.emit('phCancel'); };
+
+    // ── Phaser scene ──────────────────────────────────────────────────
+    class OfficeScene extends Phaser.Scene {
+      constructor() { super('OfficeScene'); }
+
+      preload() {
+        // All 13 tilesets embedded in JPO_HQ.tmj (TILESET_SHEETS below mirrors
+        // this list with each tileset's firstgid). Every image is ALSO loaded as
+        // a 16×16 spritesheet so a single desk/monitor tile can be redrawn as a
+        // high-depth overlay that occludes a seated body (tuck-under-desk).
+        // Frame index within each sheet == GID - firstgid.
+        for (const [key, file] of Object.entries(TILESET_IMAGES)) {
+          this.load.image(key, `/assets/${file}`);
+          this.load.spritesheet(`${key}_ss`, `/assets/${file}`, { frameWidth: 16, frameHeight: 16 });
+        }
+        // Custom furniture sprite (not part of the Tiled map): the Market water
+        // cooler, drawn against the north wall. 16×32 source px.
+        this.load.image('water_cooler_obj', '/assets/water_cooler_16x32.png');
+        // Red Light Green Light: the doll's two poses (back turned / watching).
+        this.load.image('rlgl_doll_green', '/assets/rlgl_doll_green.png');   // facing away downhill — safe to run
+        this.load.image('rlgl_doll_red',   '/assets/rlgl_doll_red.png');     // back of head + red glow — she's WATCHING
+        // Gym animation strips (LimeZu): bag sway + punch, treadmill belt.
+        // Bag frames are 32px wide but the bag art fills only the LEFT 16px
+        // column (the right half is sway room); treadmill frames carry 2px of
+        // top padding vs the static tile art — see the gym block in create().
+        this.load.spritesheet('punch_bag_idle', '/assets/punch_bag_idle.png', { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('punch_bag_hit',  '/assets/punch_bag_hit.png',  { frameWidth: 32, frameHeight: 32 });
+        this.load.spritesheet('anim_treadmill', '/assets/anim_treadmill.png', { frameWidth: 48, frameHeight: 64 });
+        // Pet companion sprites: one trimmed 64px PNG per PETS catalog id,
+        // drawn facing RIGHT (_stepPet flips toward the walk direction).
+        // Texture key = the pet id; _makePet falls back to the emoji if a
+        // texture is missing, so a failed load never breaks joining.
+        for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
+        // Evolution stage art (approved lines only; species without stage art
+        // fall back to the grow + golden-tint treatment in _makePet). Each
+        // stage also ships its own animation frames — evolved pets move
+        // differently, not just look different.
+        for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
+                          'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
+                          'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire',
+                          'pet_bunny', 'pet_bunny_cocoa', 'pet_frog',
+                          'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian'])
+          for (const s of [2, 3]) {
+            // ?v= cache-bust per id: frog s2/s3 art was mirrored to face
+            // RIGHT (Aug 2026) — bump when stage art is regenerated.
+            const av = { pet_frog: '?v=2' }[id] || '';
+            this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png${av}`);
+            const stem = id.replace(/^pet_/, '');
+            // (mythics load their s3-only art in the loop below)
+            // Choco s3 frames are RECOLORS of the original walk cycle (same
+            // motion the boss liked), palette-mapped to the approved dark
+            // chocolate art — AI redraws kept producing a different dog.
+            for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+              this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png${av}`);
+          }
+        // Mythic gift pets: baby form + s3 FINAL FORM only (no stage 2 art).
+        for (const id of ['pet_unicorn', 'pet_phoenix']) {
+          this.load.image(`${id}_s3`, `/assets/pets/${id}_s3.png`);
+          const stem = id.replace(/^pet_/, '');
+          for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+            this.load.image(`petanim_${stem}_s3_${f}`, `/assets/pets/anim/${stem}_s3_${f}.png`);
+        }
+        // Empty tucked-in shells for the turtle beyblade trick (side view).
+        this.load.image('shell_green',    '/assets/pets/shell_green.png');
+        this.load.image('shell_sapphire', '/assets/pets/shell_sapphire.png');
+        // Wispy smoke puffs for the stage-2 dragon smoke breath.
+        for (const i of [0, 1, 2]) this.load.image(`smoke_puff_${i}`, `/assets/pets/smoke_puff_${i}.png`);
+        // Real pixel ice-crystal clusters for the sapphire FROST STOMP.
+        this.load.image('ice_crystal_0', '/assets/pets/ice_crystal_0.png');
+        this.load.image('ice_crystal_1', '/assets/pets/ice_crystal_1.png');
+        this.load.image('ice_crystal_2', '/assets/pets/ice_crystal_2.png');
+        // Animated pet frames (Aug 2026): per-frame PNGs (64x64, bottom-
+        // aligned, ALL drawn facing RIGHT — including bunnies, unlike the old
+        // static bunny art) swapped via setTexture in _stepPet/_petTrick.
+        // File stem = pet id minus 'pet_' (dragon, dragon_obsidian, …).
+        // A missing/failed frame just means that pet stays static — _makePet
+        // only attaches an anim set when all 5 textures actually loaded.
+        for (const p of PETS) {
+          const stem = p.id.replace(/^pet_/, '');
+          for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
+            this.load.image(`petanim_${stem}_${f}`, `/assets/pets/anim/${stem}_${f}.png`);
+        }
+        // Wearables are 2-frame sheets: frame 0 = front (facing down),
+        // frame 1 = side profile drawn facing RIGHT (flipX handles left).
+        this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 32, frameHeight: 20 });
+        for (const w of ['beewings', 'batwings', 'butterflywings', 'angelwings', 'devilwings', 'jetpackwings', 'goldenwings', 'phoenixwings'])
+          this.load.spritesheet('wear_' + w, `/assets/wear_${w}.png`, { frameWidth: 32, frameHeight: 20 });
+        this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
+        // Rainy-season outfit-slot wearables (Aug 2026).
+        this.load.spritesheet('wear_raincoat',  '/assets/wear_raincoat.png',  { frameWidth: 12, frameHeight: 10 });
+        this.load.spritesheet('wear_rainboots', '/assets/wear_rainboots.png', { frameWidth: 10, frameHeight: 4 });
+        this.load.spritesheet('wear_umbrella',  '/assets/wear_umbrella.png?v=3',  { frameWidth: 14, frameHeight: 9 });
+        this.load.spritesheet('wear_chain',  '/assets/wear_chain.png',  { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_sunglasses',   '/assets/wear_sunglasses.png',   { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_crown',        '/assets/wear_crown.png',        { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_headphones',   '/assets/wear_headphones.png',   { frameWidth: 18, frameHeight: 8 });
+        this.load.spritesheet('wear_beret',        '/assets/wear_beret.png',        { frameWidth: 10, frameHeight: 5 });
+        this.load.spritesheet('wear_chefhat',      '/assets/wear_chefhat.png',      { frameWidth: 10, frameHeight: 8 });
+        this.load.spritesheet('wear_camera',       '/assets/wear_camera.png',       { frameWidth: 8,  frameHeight: 6 });
+        this.load.spritesheet('wear_gamerheadset', '/assets/wear_gamerheadset.png', { frameWidth: 18, frameHeight: 8 });
+        this.load.spritesheet('wear_book',         '/assets/wear_book.png',         { frameWidth: 9,  frameHeight: 4 });
+        this.load.spritesheet('wear_guitar',       '/assets/wear_guitar.png',       { frameWidth: 10, frameHeight: 8 });
+        this.load.spritesheet('wear_spectacles',   '/assets/wear_spectacles.png',   { frameWidth: 8,  frameHeight: 3 });
+        this.load.spritesheet('wear_beanie',       '/assets/wear_beanie.png',       { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_flatcap',      '/assets/wear_flatcap.png',      { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_rangerhat',    '/assets/wear_rangerhat.png',    { frameWidth: 12, frameHeight: 6 });
+        this.load.spritesheet('wear_catears',      '/assets/wear_catears.png',      { frameWidth: 18, frameHeight: 9 });
+        this.load.spritesheet('wear_scifihelmet',  '/assets/wear_scifihelmet.png',  { frameWidth: 12, frameHeight: 12 });
+        this.load.tilemapTiledJSON('map', '/assets/JPO_HQ.tmj');
+        // A flaky connection can silently drop an asset download — Phaser has
+        // no retry, so a missing tileset renders whole furniture/wall layers
+        // blank while everything else looks normal. Track failures so create()
+        // can self-heal with one guarded reload.
+        this._loadErrors = [];
+        this.load.on('loaderror', (file) => this._loadErrors.push(file?.key || '?'));
+
+        CHARACTERS.forEach(char => {
+          this.load.spritesheet(`run_${char}`, CHAR_FILES[char], { frameWidth: 16, frameHeight: 32 });
+        });
+
+        // Seated-sheet pitch is per-sheet, NOT uniform. sit (RIGHT) and sit2 (UP) are 32px per pose
+        // (figure centred with padding; sheet is 384px = 12 frames). sit3 (DOWN) is 16px per pose
+        // (poses packed edge-to-edge; sheet is 192px = 12 frames). Slicing sit3 at 32px merges two
+        // adjacent poses into one frame and renders TWO characters one tile apart. Slice each sheet
+        // at its own true pitch. Every character has its own trio (Adam's are the originals; Alex/
+        // Amelia/Bob are recoloured offline from Adam's — see /tmp/gen_sit.py).
+        CHARACTERS.forEach(char => {
+          const C = char.charAt(0).toUpperCase() + char.slice(1);
+          this.load.spritesheet(`${char}_sit`,  `/assets/${C}_sit_16x16.png`,  { frameWidth: 32, frameHeight: 32 });  // RIGHT (mirror=LEFT), 32px pitch
+          this.load.spritesheet(`${char}_sit2`, `/assets/${C}_sit2_16x16.png`, { frameWidth: 32, frameHeight: 32 });  // UP (back of head), 32px pitch
+          this.load.spritesheet(`${char}_sit3`, `/assets/${C}_sit3_16x16.png`, { frameWidth: 16, frameHeight: 32 });  // DOWN (face), 16px pitch
+        });
+        this.load.spritesheet('adam_phone', '/assets/Adam_phone_16x16.png', { frameWidth: 16, frameHeight: 32 });
+      }
+
+      create() {
+        _phaserKbd = this.input.keyboard;
+
+        // Self-heal from dropped downloads: if any tileset texture (or the map
+        // itself) is missing, auto-reload ONCE; on a second failure show a
+        // clear message instead of a half-empty office.
+        // Only the map + tileset textures are FATAL (the office can't render
+        // without them). Optional art (pets, wearables, anims) already has
+        // graceful fallbacks — a dropped download there must not block entry.
+        const missingAssets = Object.values(TILESET_NAMES).filter((k) => !this.textures.exists(k));
+        if (!this.cache.tilemap.exists('map')) missingAssets.push('map');
+        if (this._loadErrors.length) console.warn('Non-fatal asset load errors:', this._loadErrors);
+        if (missingAssets.length) {
+          console.warn('FATAL asset load failure:', missingAssets);
+          if (!sessionStorage.getItem('jpoAssetRetry')) {
+            sessionStorage.setItem('jpoAssetRetry', '1');
+            document.body.insertAdjacentHTML('beforeend',
+              '<div style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:16px;">Slow connection — reloading the office\u2026</div>');
+            setTimeout(() => location.reload(), 1200);
+            return;
+          }
+          // Terminal overlay — clear the guard so the player's next attempt
+          // (button or manual refresh) gets a fresh auto-retry.
+          sessionStorage.removeItem('jpoAssetRetry');
+          document.body.insertAdjacentHTML('beforeend',
+            '<div id="jpo-asset-fail" style="position:fixed;inset:0;z-index:99999;background:#1a1533;color:#fff;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;font-family:monospace;font-size:15px;padding:20px;">Some office graphics failed to download.<br>Check your connection, then try again.<button onclick="location.reload()" style="padding:10px 22px;font-size:15px;font-family:monospace;background:#7c5cff;color:#fff;border:none;border-radius:8px;cursor:pointer;">↻ Try again</button></div>');
+          return;
+        }
+        sessionStorage.removeItem('jpoAssetRetry');
+
+        const map      = this.make.tilemap({ key: 'map' });
+        this._tileMap  = map;   // minimap reads layer data + dimensions from here
+        // Tiled tileset name → the texture key loaded in preload(). MUST cover
+        // every tileset in JPO_HQ.tmj or its tiles render as black squares.
+        const tilesets = Object.entries(TILESET_NAMES).map(([tiledName, key]) =>
+          map.addTilesetImage(tiledName, key));
+
+        const floorLayer = map.createLayer('Floor', tilesets).setScale(3);
+
+        // Base animations
+        CHARACTERS.forEach(char => this._createDirAnims(`run_${char}`));
+        // Seated anims are per-player (palette-swapped) and created in _buildPlayerTex; no base
+        // sit anims are needed here.
+        this.anims.create({ key: 'phone_adam', frames: this.anims.generateFrameNumbers('adam_phone',{start:0,end:8}), frameRate:8, repeat:-1 });
+
+        // Draw order must match the Tiled stack (bottom->top: Floor, Furniture, Wall).
+        // The Wall layer holds the upper/back parts of desks & chairs, so it must render
+        // ON TOP of Furniture — otherwise chairs float over the desks/computers.
+        const furnitureLayer = map.createLayer('Furniture', tilesets).setScale(3);
+        const wallLayer      = map.createLayer('Wall', tilesets).setScale(3);
+        this.furnitureLayer = furnitureLayer;
+        this.wallLayer      = wallLayer;
+        this.floorLayer     = floorLayer;
+        // The dark wall band at the bottom of the L&D classroom (row 97,
+        // c150-c190) is painted on the FLOOR layer (gid 1237) with no Wall-layer
+        // tile behind it — without this, players walk straight through it onto
+        // the concrete outside. Gid 1237 is used NOWHERE else on the map
+        // (verified: one contiguous run on row 97), so making the index solid
+        // is safe map-wide. The player collider is added with the others in
+        // the approved handler.
+        floorLayer.setCollision(1237);
+        // A tile is a real seat if its GID is in FURN_SEATS. (The old map needed a
+        // special case for classroom chairs buried under structural wall tiles; in
+        // JPO_HQ.tmj seats legitimately share cells with Wall-layer desk/monitor/
+        // table tiles — workstation monitors 2078, conference-table edges — so no
+        // wall-coverage veto applies.)
+        // ...plus the Jail computer-desk chairs, which live on the WALL layer
+        // (WALL_SEATS) — the gid arg is the FURNITURE gid, so those cells probe
+        // the wall tile directly.
+        this.isFurnSeat = (gid, c, r) => FURN_SEATS.has(gid)
+          || WALL_SEATS[wallLayer.getTileAt(c, r)?.index] !== undefined
+          || SEAT_TILE_FACING[c + ',' + r] !== undefined;
+        // COLLISION MODEL — solid furniture blocks you; only seats are steppable.
+        // Seat banks are packed workstations: each chair (Furniture layer) shares its
+        // cell with a monitor drawn on the WALL layer, and has a desk-front on the WALL
+        // layer directly below it. Because the chairs sit shoulder-to-shoulder, every
+        // tile touching a chair is a wall-layer desk piece — which is why the middle
+        // seats used to be unreachable. So:
+        //   1) the Furniture layer is solid by default (you can't walk through a fridge,
+        //      cabinet, plant or desk), EXCEPT the sittable seat tiles (FURN_SEATS),
+        //      which we open so you can step onto / among the chairs,
+        //   2) on the Wall layer we open just the desk pieces that sit ON / directly
+        //      above / directly below a seat, so you can step into a bank and reach the
+        //      centre chairs, while structural room walls stay solid.
+        // This is derived from the loaded map (not a hard-coded GID list), so it keeps
+        // working across the periodic Tiled re-import.
+        wallLayer.setCollisionByExclusion([-1]);        // every wall tile solid first...
+        furnitureLayer.setCollisionByExclusion([-1]);   // ...and every furniture tile too.
+        // Furniture-removal seam (kept from the old map, currently empty): if a
+        // future Tiled re-import ships an unusable piece, list its GIDs here and
+        // they're stripped BEFORE the seat/collision passes below, leaving open floor.
+        const COUCH_REMOVE = new Set([]);
+        if (COUCH_REMOVE.size) {
+          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            const ct = furnitureLayer.getTileAt(c, r);
+            if (ct && COUCH_REMOVE.has(ct.index)) furnitureLayer.removeTileAt(c, r);
+          }
+        }
+        // ── Water cooler sprite (Market, against the north wall) ────────
+        // A custom 16×32 sprite centered on the interaction anchor (1800, 3816)
+        // — MUST stay in lockstep with OFFICE_OBJECTS.water_cooler and the server
+        // OBJECTS.water_cooler anchor (base tile c37 r79, top half over r78).
+        // Split into two images from the same texture so players layer correctly:
+        //  - base (bottom 16 source px = the r26 footprint tile): default depth 0,
+        //    created before any player sprite, so players render in front of it;
+        //  - top (bottle + taps, upper 16 source px): depth 900 (same scheme as the
+        //    seat occluders — sprite-vs-sprite depth IS reliable, tilemap depth is
+        //    not), so a player walking the r25 tile behind it is occluded by it.
+        // A static body over the base tile keeps anyone from walking through the
+        // stand itself (client-side only — the server has no tile collision).
+        const COOLER_X = 1800, COOLER_BOTTOM = 80*48;  // feet of the sprite = bottom of r79
+        const coolerBase = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
+          .setOrigin(0.5, 1).setScale(3);
+        coolerBase.setCrop(0, 16, 16, 16);
+        const coolerTop = this.add.image(COOLER_X, COOLER_BOTTOM, 'water_cooler_obj')
+          .setOrigin(0.5, 1).setScale(3).setDepth(900);
+        coolerTop.setCrop(0, 0, 16, 16);
+        this._coolerBlock = this.add.zone(COOLER_X, 79*48+24, 48, 48);  // the r79 base tile
+        this.physics.add.existing(this._coolerBlock, true);
+
+        // ── Gym animated equipment (LimeZu strips) ──────────────────────
+        // The static Furniture tiles for the 4 hanging bags (bag art r17-18;
+        // the r16 hook stays static) and the 3 treadmills (r33-35) are
+        // REPLACED at runtime by animated sprites: the bag strip's left 16px
+        // column matches the static tile art almost pixel-for-pixel, and the
+        // treadmill strip is the same machine drawn 2 source px lower (hence
+        // the -6 world px offset at scale 3). removeTileAt also drops the
+        // tile's collision, so each footprint gets a static zone (colliders
+        // added with the player's, like _coolerBlock). Insertion order keeps
+        // the sprites above the tile layers and below players (created
+        // later) — same rules as the water cooler. Keyed by server object id
+        // so gymFx can find the right machine.
+        this.anims.create({ key: 'bag_idle',  frames: this.anims.generateFrameNumbers('punch_bag_idle', { start: 0, end: 5 }), frameRate: 6,  repeat: -1 });
+        this.anims.create({ key: 'bag_hit',   frames: this.anims.generateFrameNumbers('punch_bag_hit',  { start: 0, end: 5 }), frameRate: 14, repeat: 0 });
+        this.anims.create({ key: 'tread_run', frames: this.anims.generateFrameNumbers('anim_treadmill', { start: 0, end: 2 }), frameRate: 8,  repeat: -1 });
+        this._gymBlocks = [];
+        this._gymSprites = {};
+        [196, 199, 202, 205].forEach((c, i) => {
+          furnitureLayer.removeTileAt(c, 17);
+          furnitureLayer.removeTileAt(c, 18);
+          const s = this.add.sprite(c*48, 17*48, 'punch_bag_idle', 0).setOrigin(0, 0).setScale(3);
+          s.play({ key: 'bag_idle', startFrame: (i * 2) % 6 });   // stagger the sway
+          this._gymSprites['punch_bag' + (i + 1)] = s;
+          const z = this.add.zone(c*48 + 24, 18*48, 48, 96);      // rows 17-18
+          this.physics.add.existing(z, true);
+          this._gymBlocks.push(z);
+        });
+        [193, 196, 199].forEach((c0, i) => {
+          for (let r = 33; r <= 35; r++)
+            for (let c = c0; c < c0 + 3; c++) furnitureLayer.removeTileAt(c, r);
+          const s = this.add.sprite(c0*48, 33*48 - 6, 'anim_treadmill', 0).setOrigin(0, 0).setScale(3);
+          this._gymSprites['treadmill' + (i + 1)] = s;            // belt parked until a run
+          const z = this.add.zone(c0*48 + 72, 33*48 + 72, 144, 144);  // the 3x3 footprint
+          this.physics.add.existing(z, true);
+          this._gymBlocks.push(z);
+        });
+        const seatGidAt = (c,r) => { const t = furnitureLayer.getTileAt(c,r); return (t && t.index > 0) ? t.index : 0; };
+        const isSeatCell = (c,r) => this.isFurnSeat(seatGidAt(c,r), c, r);
+        for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+          // Open the seat tiles on the Furniture layer so chairs are walkable/steppable.
+          const ft = furnitureLayer.getTileAt(c,r);
+          if (ft && ft.index > 0 && this.isFurnSeat(ft.index, c, r)) ft.setCollision(false, false, false, false);
+          // ...then re-open the workstation desk pieces (Wall layer) around any seat.
+          const t = wallLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
+          // VOID GUARD: a STRUCTURAL wall tile (Room-builder/Walls tilesets,
+          // gid < 2017 — desk pieces all come from Interiors+ tilesets) never
+          // opens when the cell below it is unbuilt VOID (no tile on any layer).
+          // The standalone work-pod chair at (133,125-127) shares its legs cell
+          // with the basement south wall and r128+ is empty — opening that wall
+          // would let players walk off the map. Wall notches with real tiles
+          // below keep opening (players use them, e.g. stepping into the r76
+          // wall row to reach a pod chair from below).
+          if (t.index < 2017) {
+            const empt = (L, cc, rr) => { const tt = L.getTileAt(cc, rr); return !tt || tt.index <= 0; };
+            if (empt(floorLayer, c, r+1) && empt(wallLayer, c, r+1) && empt(furnitureLayer, c, r+1)) continue;
+          }
+          if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
+        }
+
+        // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
+        // JPO_HQ.tmj is regenerated from the user's Tiled project and re-imported
+        // periodically; a manager desk can end up walled off behind structural walls,
+        // making "your desk" impossible to reach. Flood-fill from spawn using the SAME
+        // collision model as gameplay (only solid walls block) and warn so a map
+        // regression shows up as a console message here instead of a bug report.
+        (() => {
+          const W = map.width, Hh = map.height, SPAWN = [110, 46];
+          // Gameplay walkability: a tile blocks if its wall, furniture OR floor tile
+          // still collides after the seat/desk openings above (floor: the gid-1237
+          // dark band at row 97 is the only solid floor art).
+          const walkable = (c,r) => { if (c<0||r<0||c>=W||r>=Hh) return false; const w = wallLayer.getTileAt(c,r); if (w && w.collides) return false; const fl = floorLayer.getTileAt(c,r); if (fl && fl.collides) return false; const f = furnitureLayer.getTileAt(c,r); return !(f && f.collides); };
+          const NB = [[0,1],[0,-1],[-1,0],[1,0]];
+          const reached = new Set([SPAWN.join(',')]), stack = [SPAWN];
+          while (stack.length) { const [c,r] = stack.pop();
+            for (const [dc,dr] of NB) { const nc=c+dc, nr=r+dr, k=nc+','+nr;
+              if (!reached.has(k) && walkable(nc,nr)) { reached.add(k); stack.push([nc,nr]); } } }
+          const hasReachableNbr = (cells) => cells.some(([c,r]) => NB.some(([dc,dr]) =>
+            !cells.some(x => x[0]===c+dc && x[1]===r+dr) && reached.has((c+dc)+','+(r+dr))));
+          let orphans = 0;
+          for (let r=0; r<Hh; r++) for (let c=0; c<W; c++) {
+            const t = furnitureLayer.getTileAt(c,r); if (!t || t.index <= 0) continue;
+            const gid = t.index;
+            // Only act on a manager desk's ORIGIN tile so each desk is checked once.
+            const fam = DESK_FAMILIES.find(f => f.gids[gid] && f.gids[gid][0]===0 && f.gids[gid][1]===0);
+            if (!fam) continue;
+            const cells = [[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]].map(([dc,dr]) => [c+dc, r+dr]);
+            if (!hasReachableNbr(cells)) {
+              orphans++;
+              console.warn(`[reachability] manager desk at (${c},${r}) gid ${gid} is walled off — no reachable adjacent tile in JPO_HQ.tmj`);
+            }
+          }
+          if (orphans) console.warn(`[reachability] ${orphans} manager desk(s) unreachable from spawn — check the Tiled map.`);
+        })();
+
+        this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
+
+        // Cafeteria food spots: one per table, found by the table's top-left
+        // marker gid (2183) on the Furniture layer, scanned row-major. The
+        // server derives its cafeteria_food<N> OBJECTS from the SAME scan of
+        // the same map file, so ids stay in lockstep across a Tiled re-import.
+        // MUST run before the highlight loop below so each spot gets a rect.
+        {
+          let cafN = 0;
+          const lw = furnitureLayer.layer.width, lh = furnitureLayer.layer.height;
+          for (let r = 0; r < lh; r++) for (let c = 0; c < lw; c++) {
+            const t = furnitureLayer.getTileAt(c, r);
+            if (!t || t.index !== 2183) continue;
+            OFFICE_OBJECTS.push({
+              id: `cafeteria_food${cafN++}`, x: (c+1)*48, y: (r+1.5)*48, r: 150,
+              label: 'Grab some food', touch: 'Eat',
+              hl: { x: (c-1)*48, y: r*48, w: 4*48, h: 3*48 },  // the full 4-wide × 3-tall table block
+            });
+          }
+        }
+
+        // Soft pulsing highlight over each interactive office object, shown
+        // only while the local player is in range (see update()).
+        this._objHl = {};
+        for (const o of OFFICE_OBJECTS) {
+          const rect = this.add.rectangle(o.hl.x + o.hl.w/2, o.hl.y + o.hl.h/2, o.hl.w, o.hl.h, 0xffe066, 0.14)
+            .setStrokeStyle(2, 0xffe066, 0.85).setDepth(400).setVisible(false);
+          this.tweens.add({ targets: rect, alpha: { from: 1, to: 0.35 }, duration: 800, yoyo: true, repeat: -1 });
+          this._objHl[o.id] = rect;
+        }
+
+        // Office chore stations: a gently bobbing ✨ over each station while
+        // its chore is available for the local player (window._choreReadyAt,
+        // fed by choreState/choreDone). Visibility is refreshed on a ~1s
+        // throttle in update().
+        this._choreMarks = {};
+        for (const o of OFFICE_OBJECTS) {
+          if (!o.chore) continue;
+          const m = this.add.text(o.hl.x + o.hl.w / 2, o.hl.y - 4, '✨', { fontSize: '16px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(450).setVisible(false).setAlpha(0.95);
+          this.tweens.add({ targets: m, y: m.y - 8, duration: 750, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+          this._choreMarks[o.id] = m;
+        }
+
+
+        this.otherPlayers    = {};
+        this.player          = null;
+        this.localNameTag    = null;
+        this.localCosmetic   = null;
+        this.localBubble     = null;
+        this._seatOccluders  = [];
+        this.sitting         = false;
+        this.lastDir         = 'down';
+        this._moving         = false;
+        this._sendTimer      = 0;
+        this._pendingPlayers = null;
+
+        this.physics.world.setBounds(0,0,WORLD_W,WORLD_H);
+        this.cameras.main.setBounds(0,0,WORLD_W,WORLD_H).setZoom(1);
+        this.input.on('wheel',(_p,_o,_dx,dy)=>{
+          if (window._ph.zoomLock) return;   // Prop Hunt: seekers hunt at the default view
+          const cam=this.cameras.main;
+          cam.setZoom(Phaser.Math.Clamp(cam.zoom+(dy<0?0.1:-0.1),0.5,4));
+        });
+
+        // ── Seasonal weather (client-only, calendar-gated) ──
+        // Aug–Oct = rainy season: subtle drizzle all day plus a synced "full
+        // storm" burst every so often. The storm schedule derives from wall-
+        // clock time (10-minute slots, hashed), so every player sees the same
+        // weather at the same moment with zero server involvement. Overlays
+        // are screen-space (scrollFactor 0) sized 2x the viewport so they
+        // still cover the screen at the minimum zoom (0.5).
+        this._wx = null;
+        // Owner's season calendar: rainy Aug 1–Oct 10 · halloween Oct 10–Nov 4 ·
+        // christmas Nov 5–Dec 26 · new years Dec 27–Jan 15 · valentine's Jan 16–Feb 16.
+        // Only the rainy theme is built so far; the others get their own visuals later.
+        const _wxD = new Date(), _wxM = _wxD.getMonth(), _wxDay = _wxD.getDate();  // month 0-based
+        const wxRainy = (_wxM === 7) || (_wxM === 8) || (_wxM === 9 && _wxDay <= 10);
+        if (wxRainy) {
+          if (!this.textures.exists('rainTex')) {
+            const c = this.textures.createCanvas('rainTex', 128, 128);
+            const ctx = c.context; let s = 42;
+            const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+            ctx.strokeStyle = 'rgba(190,210,235,0.85)'; ctx.lineWidth = 1;
+            for (let i = 0; i < 26; i++) {   // streaks kept off tile edges so the wrap seam stays clean
+              const x = 10 + rnd() * 104, y = 6 + rnd() * 104, len = 7 + rnd() * 11;
+              ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 3, y + len); ctx.stroke();
+            }
+            c.refresh();
+          }
+          const W = this.scale.width, H = this.scale.height;
+          const wxTint  = this.add.rectangle(W/2, H/2, W*2, H*2, 0x33415c).setScrollFactor(0).setDepth(99988).setAlpha(0);
+          const wxFar   = this.add.tileSprite(W/2, H/2, W*2, H*2, 'rainTex').setScrollFactor(0).setDepth(99989).setAlpha(0);
+          const wxNear  = this.add.tileSprite(W/2, H/2, W*2, H*2, 'rainTex').setScrollFactor(0).setDepth(99990).setAlpha(0).setTileScale(1.6);
+          const wxFlash = this.add.rectangle(W/2, H/2, W*2, H*2, 0xf3f6ff).setScrollFactor(0).setDepth(99991).setAlpha(0);
+          this._wx = { far: wxFar, near: wxNear, tint: wxTint, flash: wxFlash, boltAt: 0 };
+          this._weatherTick = (delta) => {
+            const wx = this._wx; if (!wx) return;
+            const dt = delta / 1000;
+            // Decreasing tilePosition scrolls the sampled texture DOWN on screen = falling rain.
+            wx.far.tilePositionY  -= 340 * dt; wx.far.tilePositionX  += 40 * dt;
+            wx.near.tilePositionY -= 520 * dt; wx.near.tilePositionX += 70 * dt;
+            // Synced WEATHER CYCLE (owner request): the rain isn't continuous —
+            // each 10-min slot is hashed into one of three phases, so the sky
+            // clears, then rains, then storms, in a shared schedule every
+            // client derives from the wall clock (no server involvement):
+            //   ~40% dry spell · ~40% rain · ~20% thunderstorm
+            const now = Date.now(), slot = Math.floor(now / 600000);
+            const phase = ((slot * 2654435761) >>> 0) % 5;   // 0-1 dry, 2-3 rain, 4 storm
+            const storm = phase === 4;
+            const t = storm      ? { far: 0.34, near: 0.46, tint: 0.16 }    // thunderstorm
+                    : phase >= 2 ? { far: 0.10, near: 0.16, tint: 0.03 }    // steady rain
+                                 : { far: 0,    near: 0,    tint: 0    };   // dry spell
+            const k = Math.min(1, dt * 1.2);   // ease between the two over ~a second
+            wx.far.alpha  += (t.far  - wx.far.alpha)  * k;
+            wx.near.alpha += (t.near - wx.near.alpha) * k;
+            wx.tint.alpha += (t.tint - wx.tint.alpha) * k;
+            // Lightning: storm-only, a couple of flashes a minute, sometimes a double-strike.
+            if (storm && now > wx.boltAt && Math.random() < dt * 0.06) {
+              wx.boltAt = now + 6000;
+              wx.flash.alpha = 0.55;
+              this.tweens.add({ targets: wx.flash, alpha: 0, duration: 420, ease: 'Cubic.easeOut' });
+              if (Math.random() < 0.5) this.time.delayedCall(140, () => { if (this._wx) wx.flash.alpha = Math.max(wx.flash.alpha, 0.35); });
+            }
+          };
+        }
+
+        // ── Prop Hunt scene handlers ──
+        // Prop cleanup hook for _phReset (which also runs on socket disconnect
+        // — a server restart mid-round must not leave a ghost prop, a frozen
+        // player, or a locked camera behind).
+        window._phKillProp = () => {
+          if (this._phProp) { this._phProp.destroy(); this._phProp = null; }
+          if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; }
+          window._phSelfVis && window._phSelfVis(true);   // never leave the local avatar hidden
+        };
+        // Hider self-view: while disguised, the hider sees the PROP, not their
+        // avatar (tag/pet/cosmetic included) — same picture everyone else gets.
+        window._phSelfVis = (v) => {
+          window._phSelfHiddenNow = !v;   // remembered so cosmetic re-creates can re-assert it
+          this.player && this.player.setVisible(v);
+          this.localNameTag && this.localNameTag.setVisible(v);
+          this.localPet && this.localPet.setVisible && this.localPet.setVisible(v);
+          if (this.localPet && !v) this._killPetFx(this.localPet);   // no trick particles at a disguised hider's spot
+          if (this.localPet && this.localPet._acc) this.localPet._acc.setVisible(v);   // pet's bow/hat rides separately
+          this.localCosmetic && this.localCosmetic.setVisible && this.localCosmetic.setVisible(v);
+          this.localWings && this.localWings.setVisible && this.localWings.setVisible(v);
+        };
+        window._phKillPreview = () => { if (this._phPreview) { this._phPreview.destroy(); this._phPreview = null; } };
+        // Force-stand for teleports: a player who joins the hunt from a chair
+        // must NOT stay in the seated state — sitting zeroes velocity every
+        // frame ("can't move after the countdown") and the normal E-stand
+        // would snap them back to the chair they left across the map. Mirrors
+        // the E-stand cleanup but skips the _preSitPos restore (the teleport
+        // supplies the new position).
+        window._phUnseat = () => {
+          if (!this.sitting) return;
+          this.sitting = false;
+          this._deskPose = null;
+          _setWorkChip(false);
+          this._clearOccluders(this._seatOccluders);
+          this._seatOccluders = [];
+          this._preSitPos = null;
+          if (this.player) {
+            this.player.setTexture(this.playerTexKey);
+            this.player.setFlipX(false);
+            if (this.player.body) this.player.body.enable = true;
+          }
+        };
+        // phJoined: seeker teleports to the gathering base (server already
+        // moved the authoritative position; body.reset keeps physics in sync).
+        socket.on('phJoined', (d) => {
+          const ph = window._ph;
+          window._phUnseat();
+          ph.role = 'seeker';
+          ph.phase = d.phase || 'hiding';
+          if (ph.phase === 'hunting') {
+            // Mid-hunt join (latecomer or refreshed seeker): free to move,
+            // zoom pinned, straight into the chase.
+            ph.frozen = false; ph.zoomLock = true;
+            this.cameras.main.setZoom(1);
+            _phChip('🔎 Find the boss!', d.endsAt);
+          } else {
+            ph.frozen = true;
+            _phChip('🙈 The boss is hiding…', d.hideEndsAt);
+          }
+          if (this.player) { if (this.player.body) this.player.body.reset(d.x, d.y); else this.player.setPosition(d.x, d.y); }
+        });
+        // phVanish: the hider's sprite (and tag/pet/cosmetic) disappears for
+        // everyone — reuses the After Dark ghost-visibility helper.
+        socket.on('phVanish', ({ id } = {}) => {
+          if (!id || id === socket.id) return;
+          window._ph.hiderId = id;
+          if (window._roundGhostVis) window._roundGhostVis(id, false);
+        });
+        // phHunt: the extra piece of furniture appears; seekers unfreeze at
+        // locked default zoom, the hider freezes (furniture doesn't fidget).
+        socket.on('phHunt', (d) => {
+          const ph = window._ph;
+          ph.phase = 'hunting';
+          if (ph.role === 'hider') { ph.frozen = true; _phChip("🪑 Stay still — they're hunting!", d.endsAt); window._phSelfVis(false); _phMorphBtn(false); }
+          else if (ph.role === 'seeker') { ph.frozen = false; ph.zoomLock = true; this.cameras.main.setZoom(1); _phChip('🔎 Find the boss!', d.endsAt); }
+          if (this._phProp) this._phProp.destroy();
+          this._phProp = this._phMakeProp(d.prop.x, d.prop.y, d.prop.disguise);
+        });
+        socket.on('phEnd', (d) => {
+          if (this._phProp) { this._phProp.destroy(); this._phProp = null; }
+          const hid = (d.hider && d.hider.id) || window._ph.hiderId;
+          if (hid && hid !== socket.id) {
+            if (window._roundGhostVis) window._roundGhostVis(hid, true);
+            const e = this.otherPlayers[hid];
+            if (e && d.hider) e.sprite.setPosition(d.hider.x, d.hider.y);   // tag/pet catch up on the next playerMoved
+          }
+          _phReset();
+          if (d.reason !== 'cancelled' && d.reason !== 'nobody joined') {
+            _rpsToast(d.found ? `🎉 ${d.winnerName} found ${d.hiderName}! Office legend.` : `😎 Nobody found ${d.hiderName} — the boss wins!`);
+          }
+        });
+
+        socket.on('currentPlayers', (allPlayers) => {
+          if (!this.player) { this._pendingPlayers = allPlayers; return; }
+          // Reconcile against the authoritative list: add/refresh everyone present,
+          // and drop any local sprite no longer there (e.g. someone left while we
+          // were briefly away during a reconnect).
+          Object.entries(allPlayers).forEach(([id,data]) => { if (id!==socket.id) this._addOtherPlayer(id,data); });
+          Object.keys(this.otherPlayers).forEach((id) => { if (!allPlayers[id]) this._removeOtherPlayer(id); });
+        });
+
+        socket.on('playerJoined', (data) => {
+          if (data.id !== socket.id) this._addOtherPlayer(data.id, data);
+        });
+
+        socket.on('playerMoved', (data) => {
+          const entry = this.otherPlayers[data.id];
+          if (!entry) return;
+          entry.seated = data.anim === 'sit';   // drives the pet's wider stand-off ring
+          entry.sprite.setPosition(data.x, data.y);
+          const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
+          if (data.anim === 'sit') {
+            const dp = this._deskPoseAt(data.x, data.y);
+            if (dp) {
+              // Desk-type seat: monitor workstation -> upright standing DOWN frame (desk hides
+              // the legs); manager-desk chair -> seated sit3 sheet mirrored toward the desk
+              // (see _deskPoseAt).
+              const dsk = `sit_${entry.texKey}_down`;
+              if (dp.pose === 'sit3' && this.anims.exists(dsk)) {
+                entry.sprite.setFlipX(dp.flip === true);
+                if (entry.sprite.anims.currentAnim?.key !== dsk || !entry.sprite.anims.isPlaying) entry.sprite.play(dsk);
+              } else {
+                entry.sprite.setTexture(entry.texKey);
+                entry.sprite.setFlipX(false);
+                entry.sprite.anims.stop();
+                entry.sprite.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']);
+              }
+            } else {
+              const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
+              if (this.anims.exists(sk)) {
+                entry.sprite.setFlipX(rdir === 'left');
+                // isPlaying guard too: a re-sit reuses the stale sit currentAnim.key (see local note).
+                if (entry.sprite.anims.currentAnim?.key !== sk || !entry.sprite.anims.isPlaying) entry.sprite.play(sk);
+              } else {
+                entry.sprite.setFlipX(false);
+                entry.sprite.anims.stop();
+                entry.sprite.setFrame(DIR_START[rdir]);
+              }
+            }
+            if (!entry.occluders) entry.occluders = this._seatOccludersFor(data.x, data.y, rdir);
+          } else if (data.anim === 'walk') {
+            entry.sprite.setFlipX(false);
+            const wk = `walk_${entry.texKey}_${rdir}`;
+            if (entry.sprite.anims.currentAnim?.key !== wk && this.anims.exists(wk)) entry.sprite.play(wk);
+          } else {
+            entry.sprite.setFlipX(false);
+            entry.sprite.anims.stop();
+            // Restore the run/idle sheet first: standing up from a seat leaves the sit texture
+            // active, and its frame count is smaller than DIR_START's idle indexes — setFrame on the
+            // stale sit texture would hit a missing frame (brief __BASE flash) until they next walk.
+            entry.sprite.setTexture(entry.texKey);
+            entry.sprite.setFrame(DIR_START[rdir]);
+          }
+          if (data.anim !== 'sit' && entry.occluders) { this._clearOccluders(entry.occluders); entry.occluders = null; }
+          entry.nameTag.setPosition(data.x, data.y-40);
+          entry.lastDir = rdir;
+          if (entry.cosmetic) {
+            if (entry.cosmeticDef) this._placeWearable(entry.cosmetic, entry.cosmeticDef, data.x, data.y, rdir);
+            else entry.cosmetic.setPosition(data.x, data.y-68);
+          }
+          if (entry.wings && entry.wingsDef) this._placeWearable(entry.wings, entry.wingsDef, data.x, data.y, rdir);
+          for (const k in (entry.slotObjs || {})) {
+            const s = entry.slotObjs[k];
+            if (s && s.obj && s.def) this._placeWearable(s.obj, s.def, data.x, data.y, rdir);
+          }
+          if (entry.chatBubble) entry.chatBubble.setPosition(data.x, data.y-85);
+          const vb = window._voiceBadges && window._voiceBadges[data.id];
+          if (vb) vb.txt.setPosition(data.x, data.y-56);
+          // Round ghost hiding: _placeWearable re-shows sprite wearables and
+          // sit-downs recreate occluders — re-hide on EVERY move update, not
+          // just the 250ms sweep, or a hidden ghost's cosmetic floats visibly.
+          if (window._roundIsHidden && window._roundIsHidden(data.id)) window._roundGhostVis(data.id, false);
+        });
+
+        socket.on('playerLeft', (id) => { this._removeOtherPlayer(id); });
+
+        // ── Huddles the NPC coach: dedicated events — deliberately NOT in
+        // otherPlayers, so whisper rosters, duel menus, rounds and the
+        // click-to-challenge menu never see it. ──
+        socket.on('npcState', (d) => this._npcSpawn(d));
+        socket.on('npcMoved', (d) => {
+          const n = this.npc;
+          if (!n || !d) return;
+          n.sprite.setPosition(d.x, d.y);
+          n.tag.setPosition(d.x, d.y - 40);
+          const rdir = DIR_START[d.dir] !== undefined ? d.dir : 'down';
+          if (d.anim === 'walk') {
+            const wk = `walk_${n.texKey}_${rdir}`;
+            if (n.sprite.anims.currentAnim?.key !== wk && this.anims.exists(wk)) n.sprite.play(wk);
+          } else {
+            n.sprite.anims.stop();
+            n.sprite.setFrame(DIR_START[rdir]);
+          }
+          n.lastDir = rdir;
+        });
+        // Pull the NPC snapshot NOW: on a fresh approval the server's push can
+        // land before this scene registered listeners — pulling at create
+        // makes that ordering irrelevant.
+        socket.emit('npcSync');
+
+        // Ms. Poli, the stationary HR librarian: one snapshot, no movement.
+        socket.on('hrNpcState', (d) => this._hrNpcSpawn(d));
+
+        socket.on('chatMessage', ({id,message}) => {
+          if (id === socket.id) {
+            this._showChatBubble(this.player, message, true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showChatBubble(entry.sprite, message, false);
+            }
+          }
+        });
+
+        // Chat images: the picture itself renders in the chat log — the
+        // in-world bubble just flags that a photo was shared. Hidden players
+        // (Prop Hunt hider, round-hidden ghosts) get no bubble at all — even a
+        // stale sprite position shouldn't sprout a marker while they're unseen.
+        socket.on('chatImage', ({ id }) => {
+          if (window._roundIsHidden && window._roundIsHidden(id)) return;
+          if (window._ph && window._ph.hiderId === id && id !== socket.id) return;
+          if (id === socket.id) {
+            this._showChatBubble(this.player, '📷 shared a photo', true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showChatBubble(entry.sprite, '📷 shared a photo', false);
+            }
+          }
+        });
+
+        // Pet trick relay: someone pressed T — play the trick on their pet
+        // here too. Own id is skipped (already played locally on keypress).
+        // _petTrick itself refuses invisible pets, so round-hidden owners
+        // can't leak their position through a relayed trick.
+        socket.on('petTrick', ({ id }) => {
+          if (id === socket.id) return;
+          const entry = this.otherPlayers[id];
+          const p = entry && entry.pet;
+          if (p && p._lively && !p._trickBusy) this._petTrick(p);
+        });
+
+        socket.on('playerEmote', ({id, emote}) => {
+          const ch = EMOTE_CHARS[emote];
+          if (!ch) return;
+          if (id === socket.id) {
+            this._showEmoteBubble(this.player, ch, true);
+          } else {
+            const entry = this.otherPlayers[id];
+            if (entry) {
+              if (entry.chatBubble) entry.chatBubble.destroy();
+              entry.chatBubble = this._showEmoteBubble(entry.sprite, ch, false);
+            }
+          }
+        });
+
+        window._gameScene = this;
+        _maybeResume();   // scene is ready — safe to auto-rejoin if a token is stored
+
+        // ── Unread "!" markers over boards ────────────────────────────────
+        // Find every board (a cluster of adjacent board tiles on the Furniture
+        // layer) and float a red "!" over it while that room has unread posts.
+        this.boardMarkers = [];
+        this.boardIdByTile = {};   // "c,r" -> boardId, so pressing E at a board tile finds its cluster
+        _boardLabels = {};         // boardId -> human label, shared with the announcement UI
+        {
+          const cells = new Map();
+          // Boards live on BOTH layers in JPO_HQ.tmj: free-standing chalkboards on
+          // Furniture, wall-mounted notice boards painted on Wall.
+          for (const layer of [furnitureLayer, wallLayer]) {
+            for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+              const t = layer.getTileAt(c, r);
+              if (t && t.index > 0 && BOARD_GIDS.has(t.index)) cells.set(c + ',' + r, { c, r });
+            }
+          }
+          const seen = new Set();
+          const clusters = [];
+          for (const [key, cell] of cells) {
+            if (seen.has(key)) continue;
+            const comp = [], stack = [cell];
+            while (stack.length) {
+              const cur = stack.pop(), ck = cur.c + ',' + cur.r;
+              if (seen.has(ck) || !cells.has(ck)) continue;
+              seen.add(ck); comp.push(cur);
+              for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+                const nk = (cur.c + dc) + ',' + (cur.r + dr);
+                if (cells.has(nk) && !seen.has(nk)) stack.push({ c: cur.c + dc, r: cur.r + dr });
+              }
+            }
+            const minC = Math.min(...comp.map(p => p.c)), maxC = Math.max(...comp.map(p => p.c));
+            const minR = Math.min(...comp.map(p => p.r)), maxR = Math.max(...comp.map(p => p.r));
+            clusters.push({ comp, minC, maxC, minR, maxR,
+              room: roomForTile(Math.round((minC + maxC) / 2), Math.round((minR + maxR) / 2)) });
+          }
+          // Deterministic top-to-bottom, left-to-right order so board numbering is stable.
+          clusters.sort((a, b) => (a.minR - b.minR) || (a.minC - b.minC));
+          const perRoomTotal = {};
+          clusters.forEach(cl => { perRoomTotal[cl.room] = (perRoomTotal[cl.room] || 0) + 1; });
+          const perRoomIdx = {};
+          clusters.forEach(cl => {
+            const n = (perRoomIdx[cl.room] = (perRoomIdx[cl.room] || 0) + 1);
+            const boardId = cl.room + '#' + n;
+            // Each board is its own thread; only append "· Board N" when a room has more than one.
+            _boardLabels[boardId] = roomNameById(cl.room) + (perRoomTotal[cl.room] > 1 ? ' · Board ' + n : '');
+            cl.comp.forEach(p => { this.boardIdByTile[p.c + ',' + p.r] = boardId; });
+            const cx = ((cl.minC + cl.maxC) / 2) * 48 + 24;
+            const cy = ((cl.minR + cl.maxR) / 2) * 48 + 24;
+            const badge = this.add.text(cx, cy, '!', {
+              fontSize: '22px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
+              color: '#fff', backgroundColor: '#e23b3b', padding: { x: 8, y: 2 },
+            }).setOrigin(0.5, 0.5).setDepth(900).setVisible(false);
+            this.tweens.add({ targets: badge, y: cy - 8, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+            this.boardMarkers.push({ boardId, badge });
+          });
+          refreshBoardMarkers();   // announcements may already be loaded
+        }
+
+        // ── Office chairs (2231): pin each to face its context ────────────
+        // The same chair GID sits on every side of conference tables, so facing is
+        // resolved per TILE: whichever orthogonal neighbour holds a conference-table
+        // tile (tables live on the WALL layer in JPO_HQ.tmj) is the way that seat
+        // faces. Otherwise, a workstation monitor sharing the chair cell pins it
+        // 'down' (desk-front is directly below). Chairs matching neither are left
+        // out and fall back to the approach direction at sit time.
+        this.seatFacingAt = {};
+        {
+          const NB = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+          for (let r = 0; r < map.height; r++) for (let c = 0; c < map.width; c++) {
+            // Wall-layer computer-desk chairs get their facing pinned here (there
+            // is no Furniture gid at those cells for SEAT_FACING to key off).
+            const wt = wallLayer.getTileAt(c, r);
+            if (wt && WALL_SEATS[wt.index]) { this.seatFacingAt[c + ',' + r] = WALL_SEATS[wt.index]; continue; }
+            const t = furnitureLayer.getTileAt(c, r);
+            if (!t || !CONF_CHAIR_GIDS.has(t.index)) continue;
+            let faced = false;
+            for (const d in NB) {
+              const nt = wallLayer.getTileAt(c + NB[d][0], r + NB[d][1]);
+              if (nt && CONF_TABLE_GIDS.has(nt.index)) { this.seatFacingAt[c + ',' + r] = d; faced = true; break; }
+            }
+            if (!faced && this._isWorkstation(c, r)) this.seatFacingAt[c + ',' + r] = 'down';
+          }
+        }
+        for (const key of Object.keys(SEAT_TILE_FACING)) this.seatFacingAt[key] = SEAT_TILE_FACING[key];
+
+        // ── Floating room-name labels hovering over the centre of each room ──
+        // Default depth (0) + created after the tile layers but before any player
+        // sprite, so labels sit above the map yet players still walk in front of them.
+        ROOMS.forEach(rm => {
+          const lx = ((rm.c0 + rm.c1) / 2) * 48 + 24;
+          const ly = ((rm.r0 + rm.r1) / 2) * 48 + 24;
+          this.add.text(lx, ly, rm.name, {
+            fontFamily: 'Arial, sans-serif', fontSize: '20px', fontStyle: 'bold',
+            color: '#ffffff', stroke: '#10182e', strokeThickness: 4,
+            backgroundColor: 'rgba(16,24,46,0.5)', padding: { x: 10, y: 4 }, align: 'center',
+          }).setOrigin(0.5, 0.5).setAlpha(0.92);
+        });
+
+        if (_approvedQueue) { this._onApproved(_approvedQueue); _approvedQueue = null; }
+      }
+
+      // Create idle + 4 directional walk anims for a texture key (idempotent).
+      _createDirAnims(k) {
+        if (!this.anims.exists(`idle_${k}`)) {
+          this.anims.create({ key:`idle_${k}`, frames:this.anims.generateFrameNumbers(k,{start:DIR_START.down,end:DIR_START.down}), frameRate:1, repeat:-1 });
+        }
+        for (const d in DIR_ROWS) {
+          const wk = `walk_${k}_${d}`;
+          if (this.anims.exists(wk)) continue;
+          this.anims.create({ key:wk, frames:this.anims.generateFrameNumbers(k,{start:DIR_ROWS[d][0],end:DIR_ROWS[d][1]}), frameRate:10, repeat:-1 });
+        }
+      }
+
+      // Build (or retrieve cached) palette-swapped sprite sheet texture for a player.
+      // Returns texture key string.
+      // Bake worn items into a (recoloured) sheet canvas. Draw order: layer
+      // replacements (raincoat) under everything, feet gear next, head gear
+      // last — so a hat draws over the coat's collar, not under it.
+      _bakeWearOnCanvas(cx, char, suffix, frameW, wearIds) {
+        if (!wearIds || !wearIds.length) return;
+        const A = _wearAnchors && _wearAnchors[char];
+        const RUN = A && A.run;
+        const prio = id => WEARABLE_DEFS[id].bakeLayer ? 0 : WEARABLE_DEFS[id].bake === 'feet' ? 1 : 2;
+        const order = [...wearIds].sort((a, b) => prio(a) - prio(b) || (a < b ? -1 : 1));
+        const SHEET_FACING = { sit: 'right', sit2: 'up', sit3: 'down' };
+        for (const id of order) {
+          const def = WEARABLE_DEFS[id];
+          if (def.bakeLayer) {
+            const im = _wearLayerImgs[`${char}_${suffix}_${id}`];
+            if (im) cx.drawImage(im, 0, 0);
+            continue;
+          }
+          if (!A || !A[suffix] || !RUN) continue;
+          const tex = this.textures.get(def.tex);
+          const img = tex && tex.source[0] && tex.source[0].image;
+          if (!img) continue;
+          const afw = img.width / (def.frames || 2), afh = img.height;
+          const F = A[suffix];
+          for (let f = 0; f < F.length; f++) {
+            const facing = suffix === 'run' ? ['right','up','left','down'][Math.floor(f / 6)] : SHEET_FACING[suffix];
+            if (facing === 'up' && !def.showUp) continue;   // face gear hides from the back, same as the overlay path
+            const sideways = facing === 'left' || facing === 'right';
+            const artF = sideways ? 1 : (facing === 'up' && def.backFrame !== undefined ? def.backFrame : 0);
+            const a = F[f], ref = RUN[DIR_START[facing]];
+            if (!a || !ref || a.hy < 0 || ref.hy < 0) continue;
+            // Keep the item's APPROVED offset on the reference standing frame
+            // (defs are world-px at scale 3 → /3 = texels), then shift by this
+            // frame's anchor delta so it tracks the pose.
+            const dyF = (sideways && def.sideDy !== undefined ? def.sideDy : def.dy) / 3;
+            const dxF = facing === 'left' ? -def.side / 3 : facing === 'right' ? def.side / 3 : 0;
+            const aY = def.bake === 'feet' ? a.fy : a.hy;
+            const rY = def.bake === 'feet' ? ref.fy : ref.hy;
+            const artCx = a.hx + (8 + dxF - ref.hx);        // frame-local art centre
+            const artCy = aY + (16 + dyF - rY);
+            cx.save();
+            cx.beginPath(); cx.rect(f * frameW, 0, frameW, 32); cx.clip();   // wide art must not bleed into the next frame
+            if (facing === 'left') {                        // art frame 1 faces RIGHT — mirror it
+              cx.translate(f * frameW + artCx, 0); cx.scale(-1, 1);
+              cx.drawImage(img, artF * afw, 0, afw, afh, Math.round(-afw / 2), Math.round(artCy - afh / 2), afw, afh);
+            } else {
+              cx.drawImage(img, artF * afw, 0, afw, afh, f * frameW + Math.round(artCx - afw / 2), Math.round(artCy - afh / 2), afw, afh);
+            }
+            cx.restore();
+          }
+        }
+      }
+
+      _buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx, wearIds) {
+        const wsig = wearIds && wearIds.length ? `_W${wearIds.join('.')}` : '';
+        const key = `pl_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
+        if (this.textures.exists(key)) return key;
+
+        const srcImg = this.textures.get(`run_${char}`).source[0].image;
+        const sw = srcImg.width, sh = srcImg.height;
+        const cv = document.createElement('canvas');
+        cv.width = sw; cv.height = sh;
+        const cx = cv.getContext('2d');
+        cx.drawImage(srcImg, 0, 0);
+
+        const zones = _charZoneColors[char];
+        if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+          const id = cx.getImageData(0, 0, sw, sh);
+          const L = _cropLayerData(char, 'run', 0, 0, sw, sh);
+          if (L && L.w === sw && L.h === sh) _layeredSwaps(id.data, L, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
+          else {
+            _applySwaps(id.data, zones, hairIdx, skinIdx, shirtIdx, pantsIdx, sw, 16);
+            if (!_layersSettled) _legacyTexBuilds.set(key, { char, suffix: 'run', zones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW: 16, wearIds });
+          }
+          cx.putImageData(id, 0, 0);
+        }
+        this._bakeWearOnCanvas(cx, char, 'run', 16, wearIds);
+
+        this.textures.addSpriteSheet(key, cv, { frameWidth: 16, frameHeight: 32 });
+        this._createDirAnims(key);
+
+        // Build directional sit variants for EVERY character (right/up/down sheets; left mirrors
+        // right). Adam uses his authored zones as-is; Alex/Amelia/Bob use seated-anatomy zone
+        // overrides (see _sitZones), because a folded body's hair/torso/legs sit at different rows
+        // than the standing zones assume — without them, customization would leave patches.
+        for (const [dir, suffix] of Object.entries(SIT_SUFFIX)) {
+          const sheet = `${char}_${suffix}`;
+          const sitKey = `pl_sit_${dir}_${char}_h${hairIdx}_sk${skinIdx}_sh${shirtIdx}_p${pantsIdx}${wsig}`;
+          if (this.textures.exists(sitKey)) continue;
+          const sitSrc = this.textures.get(sheet).source[0].image;
+          const sc = document.createElement('canvas');
+          sc.width = sitSrc.width; sc.height = sitSrc.height;
+          const scx = sc.getContext('2d');
+          scx.drawImage(sitSrc, 0, 0);
+          if (zones && (hairIdx || skinIdx || shirtIdx || pantsIdx)) {
+            const sitZones = char === 'adam' ? zones : _sitZones(char, dir);
+            const frameW = dir === 'down' ? 16 : 32;
+            const sid = scx.getImageData(0, 0, sc.width, sc.height);
+            const SL = _cropLayerData(char, suffix, 0, 0, sc.width, sc.height);
+            if (SL && SL.w === sc.width && SL.h === sc.height) _layeredSwaps(sid.data, SL, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+            else {
+              _applySwaps(sid.data, sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, sc.width, frameW);
+              if (!_layersSettled) _legacyTexBuilds.set(sitKey, { char, suffix, zones: sitZones, hairIdx, skinIdx, shirtIdx, pantsIdx, frameW, wearIds });
+            }
+            scx.putImageData(sid, 0, 0);
+          }
+          this._bakeWearOnCanvas(scx, char, suffix, dir === 'down' ? 16 : 32, wearIds);
+          this.textures.addSpriteSheet(sitKey, sc, { frameWidth: dir === 'down' ? 16 : 32, frameHeight: 32 });
+          this.anims.create({ key: `sit_${key}_${dir}`, frames: this.anims.generateFrameNumbers(sitKey,{start:0,end:5}), frameRate:8, repeat:-1 });
+        }
+
+        return key;
+      }
+
+      _onApproved(data) {
+        // Idempotent: a blip resume re-fires 'approved'. If we already have a local
+        // player (scene survived the socket reconnect), don't build a second sprite.
+        if (this.player) { this.cameras?.main?.startFollow(this.player); return; }
+        // New-registrant spawn = the west-entrance lawn (tile 26,47), matching
+        // the server's GRASS_SPAWN and the DB column defaults — keep in lockstep.
+        const SPAWN_X = 26*48+24, SPAWN_Y = 47*48+24-27;
+        // Server-restored position (refresh / build-stamp reload / auto-rejoin):
+        // spawn THERE, not at the fixed spawn point — the server already restored
+        // us at those coords, and starting anywhere else makes our idle stream
+        // drag the avatar across the office for everyone watching. Fresh rows
+        // carry the spawn coords as their DB default, and the session-only
+        // approve path sends no coords at all, so new players still start at SPAWN.
+        const hasPos = Number.isFinite(data.x) && Number.isFinite(data.y);
+        const startX = hasPos ? data.x : SPAWN_X, startY = hasPos ? data.y : SPAWN_Y;
+
+        const texKey  = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx,
+          _bakedWearIds(_playerChar, _equippedCosmetic, _equippedWings, _equippedSlots));
+        this.playerTexKey = texKey;   // stable run-sheet key; never use player.texture.key
+        this.player   = this.physics.add.sprite(startX, startY, texKey);
+        this.player.setScale(3).setOrigin(0.5,0.5);
+        this.player.body.setSize(12, 10).setOffset(2, 20);   // feet-centered body (fits 48px aisles, matches BODY_DY)
+        this.player.setCollideWorldBounds(true);
+        this.player.play(`idle_${texKey}`);
+        // Every player-blocking collider is kept in _noclipColliders so Office
+        // After Dark can let the KILLER (only) walk through walls/furniture by
+        // flipping .active — collision is entirely client-side in this game
+        // (the server validates speed/bounds, never walls), so no server seam.
+        this._noclipColliders = [
+          this.physics.add.collider(this.player, this.wallLayer),
+          this.physics.add.collider(this.player, this.furnitureLayer),
+        ];
+        if (this._coolerBlock) this._noclipColliders.push(this.physics.add.collider(this.player, this._coolerBlock));
+        if (this._gymBlocks) for (const z of this._gymBlocks) this._noclipColliders.push(this.physics.add.collider(this.player, z));
+        this._noclipColliders.push(this.physics.add.collider(this.player, this.floorLayer));   // solid floor-painted walls (L&D bottom band, gid 1237)
+
+        this.localNameTag = this._makeNameTag(startX, startY, _playerName);
+
+        // Clicking YOUR OWN avatar opens your profile card (others get the
+        // Whisper/Challenge/Profile menu from _addOtherPlayer). Same gate as
+        // the other-avatar click so it never fires under an open panel.
+        this.player.setInteractive({ useHandCursor: true });
+        this.player.on('pointerdown', () => {
+          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !window._bingoUiOpen?.()
+              && !window._dealUiOpen?.()
+              && !document.getElementById('shop-modal').classList.contains('open')) {
+            window._openProfile(socket.id);
+          }
+        });
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd    = this.input.keyboard.addKeys({
+          up:    Phaser.Input.Keyboard.KeyCodes.W,
+          down:  Phaser.Input.Keyboard.KeyCodes.S,
+          left:  Phaser.Input.Keyboard.KeyCodes.A,
+          right: Phaser.Input.Keyboard.KeyCodes.D,
+        });
+        this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.keyF = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);   // Prop Hunt: F = Find
+        this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);   // Prop Hunt: C = shapeshift toggle
+        this.keyP = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);   // P = pet trick (T is taken — it opens chat)
+        this.input.keyboard.addCapture([
+          Phaser.Input.Keyboard.KeyCodes.UP,   Phaser.Input.Keyboard.KeyCodes.DOWN,
+          Phaser.Input.Keyboard.KeyCodes.LEFT,  Phaser.Input.Keyboard.KeyCodes.RIGHT,
+          Phaser.Input.Keyboard.KeyCodes.SPACE,
+        ]);
+
+        this.cameras.main.startFollow(this.player);
+        this._setLocalCosmetic(_equippedCosmetic);   // restore the worn cosmetic on (re)join
+        this._setLocalWings(_equippedWings);         // wings slot rides alongside
+        this._setLocalSlots(_equippedSlots);         // outfit slots (top/bottom/neckwear/held)
+        this._setLocalPet(_equippedPet);             // restore the active pet on (re)join
+
+        if (this._pendingPlayers) {
+          Object.entries(this._pendingPlayers).forEach(([id,pdata]) => {
+            if (id !== socket.id) this._addOtherPlayer(id, pdata);
+          });
+          this._pendingPlayers = null;
+        }
+
+        // The server restored us mid-sit (page refresh, build-stamp force-reload,
+        // auto-rejoin): re-enter the seated pose. Without this the resumed client
+        // stood up at spawn and its 50ms idle stream un-seated the avatar for
+        // every observer — anyone seated came back standing after each deploy.
+        if (hasPos && data.anim === 'sit') this._restoreSeatedPose(startX, startY, data.dir);
+      }
+
+      // Re-enter the seated pose from a server-restored state. Mirrors the E-press
+      // sit branch, but every input derives from the restored position — the exact
+      // derivation remote viewers run in playerMoved/_deskPoseAt — so the restored
+      // local player renders the same pose everyone else already sees. update()'s
+      // `this.sitting` branch takes over rendering + broadcasting from here.
+      _restoreSeatedPose(x, y, dir) {
+        const player = this.player;
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        const seatGid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        const wallGid = this.wallLayer.getTileAt(col, row)?.index || 0;
+        player.setVelocity(0, 0);
+        player.body.enable = false;    // seat tile is solid — same as the sit branch
+        // The pre-sit tile is unknown after a reload; probe the seat's four
+        // neighbours for a walkable cell to stand back up on (below first —
+        // most chairs are approached from below). No hit = stand up in place,
+        // the stand branch's null-_preSitPos guard already handles that.
+        this._preSitPos = null;
+        for (const [dc, dr] of [[0, 1], [0, -1], [-1, 0], [1, 0]]) {
+          const ft = this.furnitureLayer.getTileAt(col + dc, row + dr);
+          const wt = this.wallLayer.getTileAt(col + dc, row + dr);
+          if ((!ft || !ft.collides) && (!wt || !wt.collides)) {
+            this._preSitPos = { x: (col + dc) * 48 + 24, y: (row + dr) * 48 + 24 - BODY_DY };
+            break;
+          }
+        }
+        this._deskPose = this._deskPoseAt(x, y);   // null for plain directional seats
+        this.sitting = true;
+        // Desk poses force their facing; plain seats keep the broadcast dir
+        // (the pin/approach facing we were seated with before the reload).
+        this.lastDir = this._deskPose ? (this._deskPose.pose === 'standup' ? 'up' : 'down')
+                                      : (DIR_START[dir] !== undefined ? dir : 'down');
+        // Same work-bonus rule as the sit branch (server re-derives it anyway).
+        _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskChairAt(seatGid, col, row)
+          || WALL_SEATS[wallGid] !== undefined);
+        this._clearOccluders(this._seatOccluders);
+        this._seatOccluders = this._seatOccludersFor(x, y, dir);
+      }
+
+
+      // ── Desk occlusion ────────────────────────────────────────────────
+      // Map a Tiled GID to the matching 16×16 overlay spritesheet + frame index.
+      _gidToSheet(gid) {
+        const t = TILESET_SHEETS.find(ts => gid >= ts.first);
+        return { key: t.key, frame: gid - t.first };
+      }
+      // A cell is a computer workstation when the office chair (Furniture) shares
+      // it with a monitor/desk-back tile on the Wall layer. Drives the 'stand'
+      // sit pose + wall-tile occluders; conference-table 2231 chairs (which share
+      // their cell with TABLE edge tiles instead) don't match.
+      _isWorkstation(col, row) {
+        if ((this.furnitureLayer.getTileAt(col, row)?.index || 0) !== 2231) return false;
+        return WORKSTATION_WALL_GIDS.has(this.wallLayer.getTileAt(col, row)?.index || 0);
+      }
+      // Redraw the desk/monitor tiles that belong IN FRONT of a seated body as
+      // high-depth overlay images, so the body tucks UNDER the desk instead of
+      // rendering on top of it. Returns the overlay images (caller stores + destroys).
+      _makeSeatOccluders(col, row, facing) {
+        const out = [], cells = [];
+        const seatGid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        const deskFam = DESK_FAMILIES.find(f => f.gids[seatGid]);
+        if (deskFam) {
+          // Manager desk: the whole 2×3 desk (with a baked-in chair) is on the
+          // Furniture layer. Overlay desk tiles at/below the chair row only — the
+          // sprite extends one tile UP, so overlaying rows above would cover the head.
+          for (const rc of Object.values(deskFam.gids)) {
+            const dc = col + (rc[0] - deskFam.chair[0]);
+            const dr = row + (rc[1] - deskFam.chair[1]);
+            if (dr < row) continue;                 // never occlude the head
+            if (dc === col && dr === row) continue; // chair cell stays behind the body
+            cells.push({ layer: this.furnitureLayer, c: dc, r: dr });
+          }
+        } else if (this._isWorkstation(col, row)) {
+          // Workstation: a monitor (Wall 2078) shares the chair cell and a desk-front
+          // (Wall 2094) sits directly BELOW it — fixed geometry in JPO_HQ.tmj, so both
+          // occluder cells are pinned regardless of the sprite's approach facing. Gated
+          // on the monitor tile so conference-table 2231 chairs (which share their cell
+          // with table-edge tiles instead) never get the table redrawn over the body.
+          cells.push({ layer: this.wallLayer, c: col, r: row     });
+          cells.push({ layer: this.wallLayer, c: col, r: row + 1 });
+        } else if (seatGid === 2609) {
+          // Tall HR-desk top cell: SEAT_DY (+24) parks the 2593-chair sitter's feet on
+          // THIS cell's top edge (Furniture 2609 desk top + Wall 2178/2179 desk frame;
+          // derived row 81.5 rounds UP here). Redraw both desk tiles over the feet/legs
+          // so they tuck behind the desk while head+torso stay visible — the chair's tall
+          // backrest (2577, one row above the seat) stays visible above the head. Gated on
+          // the desk-top gid (unique to this desk), NOT on the chair gid: local and remote
+          // both derive this cell from the seated position.
+          cells.push({ layer: this.wallLayer,      c: col, r: row });
+          cells.push({ layer: this.furnitureLayer, c: col, r: row });
+        } else if (seatGid === 2522) {
+          // Red ladder chair beside the HR tall desk: the desk's left-edge frame tile
+          // (Wall 2177/2193) shares the CHAIR's own cell. Redraw it over the body so the
+          // right-facing sitter's legs tuck into the desk edge. Gated on the chair gid —
+          // sofas also share cells with structural walls, and a generic Wall overlay
+          // would draw a wall over the sitter.
+          cells.push({ layer: this.wallLayer, c: col, r: row });
+        } else if (seatGid === 7715) {
+          // Classroom student desk-chair: the 1-wide desk sits in the NEXT column
+          // east (top 7700 above, legs/front 7716 on the seat row). The sitter is
+          // shifted +18 east (SEAT_DX) so his front overlaps the desk column —
+          // redraw the desk's FRONT tile (seat row only) over him so the lap/hands
+          // tuck behind the desk. Deliberately NOT the desk-top tile at row-1:
+          // that would occlude the head/torso (the head must never be covered).
+          cells.push({ layer: this.furnitureLayer, c: col + 1, r: row });
+        } else if (seatGid === 3320 || seatGid === 7645) {
+          // Side-view high-back chairs (tan library armchair 3320 / L&D green
+          // reading chair 7645 — derived cell is always the middle seat tile):
+          // the sitter sinks 12px (SEAT_DY), so redraw the chair's BASE row tile
+          // below over the feet — the legs tuck behind the chair front and it
+          // reads as sitting IN the chair instead of perched on top of it.
+          cells.push({ layer: this.furnitureLayer, c: col, r: row + 1 });
+        } else if (STUDIO_CHAIR_GIDS.has(seatGid)) {
+          // Studio front-desk armchair: the sitter straddles the boundary between the
+          // chair's two columns (SEAT_DX), so redraw BOTH columns of the white control
+          // desk (Wall layer: desk top shares the seat row, desk front is the row
+          // below) over the legs. Do NOT redraw the chair's own Furniture tiles — the
+          // seat-row art includes the chair's lower backrest, which buries the body
+          // (the sitter read as standing BEHIND the chair). The chair back stays on
+          // the base layer behind the sprite, like every other down-facing armchair.
+          // The derived cell is always the RIGHT seat tile (5033) — x lands exactly on
+          // the boundary and Math.round rounds up — but handle 5032 too for safety.
+          const cL = seatGid === 5033 || seatGid === 5017 ? col - 1 : col;
+          cells.push({ layer: this.wallLayer,      c: cL,     r: row     });
+          cells.push({ layer: this.wallLayer,      c: cL + 1, r: row     });
+          cells.push({ layer: this.wallLayer,      c: cL,     r: row + 1 });
+          cells.push({ layer: this.wallLayer,      c: cL + 1, r: row + 1 });
+        } else if (this._upSeatAt(col, row)) {
+          // Pinned-up seat: redraw the chair's OWN tile over the body so the backrest
+          // hides the legs — with the standing UP frame it reads as "seated from behind".
+          // Wall-layer chairs come in two forms: WALL_SEATS gids (Jail desks) and
+          // SEAT_TILE_FACING coordinate pins whose cell has NO Furniture tile but a
+          // non-structural Wall tile (L&D round-table chairs, Wall 2231). Structural
+          // walls (gid < 2017) never qualify, so sofas against real walls stay safe.
+          const wg = this.wallLayer.getTileAt(col, row)?.index || 0;
+          const wallChair = WALL_SEATS[wg] !== undefined
+            || (wg >= 2017 && !(this.furnitureLayer.getTileAt(col, row)?.index > 0));
+          cells.push({ layer: wallChair ? this.wallLayer : this.furnitureLayer, c: col, r: row });
+        }
+        for (const cell of cells) {
+          const t = cell.layer.getTileAt(cell.c, cell.r);
+          if (!t || t.index <= 0) continue;
+          const { key, frame } = this._gidToSheet(t.index);
+          if (!this.textures.exists(key)) continue;
+          out.push(this.add.image(cell.c * 48, cell.r * 48, key, frame)
+            .setOrigin(0, 0).setScale(3).setDepth(900));
+        }
+        // Beds: no tile occluders, but the lying pose gets an animated zZZ that
+        // rides in the occluder array so every stand-up/teardown path destroys
+        // it for free. The repeat -1 tweens are safe because _clearOccluders
+        // kills each object's tweens BEFORE destroying it — no leak per nap.
+        if (BED_GIDS.has(seatGid)) {
+          const bx = col * 48 + 24 + (SEAT_DX[seatGid] || 0);
+          const by = row * 48 + 24 - BODY_DY - 46;
+          const zz = this.add.text(bx, by, '💤', { fontSize: '16px' }).setOrigin(0.5, 1).setDepth(901);
+          this.tweens.add({ targets: zz, y: by - 7, scale: { from: 0.92, to: 1.1 }, alpha: { from: 1, to: 0.65 },
+                            duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          out.push(zz);
+          // Two little z's drift up and fade on a staggered loop — the "zZZ".
+          for (const [dx, delay, size] of [[14, 0, '11px'], [5, 850, '9px']]) {
+            const z = this.add.text(bx + dx, by - 8, 'z', { fontSize: size, fontFamily: 'monospace', color: '#cfe3ff' })
+              .setOrigin(0.5, 1).setDepth(901).setAlpha(0);
+            this.tweens.add({ targets: z, y: by - 34, alpha: { from: 0.9, to: 0 },
+                              duration: 1700, delay, repeat: -1, ease: 'Sine.easeOut' });
+            out.push(z);
+          }
+        }
+        return out;
+      }
+      // Same, but locate the seat cell from a seated sprite's pixel position (remote players).
+      _seatOccludersFor(x, y, facing) {
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        return this._makeSeatOccluders(col, row, facing);
+      }
+      // Desk-type seat pose, detected from the seat cell under a seated sprite's pixel position
+      // (same col/row math as _seatOccludersFor) so local + remote + snapshot render the same pose
+      // regardless of the broadcast approach dir. Returns:
+      //  - { pose:'stand' } for computer workstations (chair 2231 + monitor Wall 2078): upright standing DOWN frame. The
+      //    desk + monitor in front hide the legs, so it reads as seated with the face visible —
+      //    the owner-approved look; do NOT swap it for a sit sheet.
+      //  - { pose:'sit3', flip } for the baked-in manager-desk chairs: the real seated DOWN sheet,
+      //    mirrored so the legs angle TOWARD the desk (blue chair sits LEFT of its desk -> legs
+      //    right, unflipped; green chair sits RIGHT of its desk -> flipped, legs left). These
+      //    chairs are side-on with nothing occluding the body, so a standing frame there reads as
+      //    "standing on the chair" — they need a genuine seated pose.
+      //  - null for every other seat (approach-based directional sit anims).
+      //  - { pose:'lie' } for bed lie cells (BED_GIDS): renders exactly like 'stand' (upright
+      //    front idle frame — laid on the pillow row it reads as lying down) plus the 💤 from
+      //    _makeSeatOccluders. Bed sits snap to the 2-tile bed's horizontal CENTER via SEAT_DX,
+      //    so the rounded col lands on the bed's RIGHT tile — which is why both bed tiles are
+      //    in BED_GIDS.
+      _deskPoseAt(x, y) {
+        const col = Math.round((x - 24) / 48);
+        const row = Math.round((y - 24 + BODY_DY) / 48);
+        if (this._isWorkstation(col, row)) return { pose: 'stand' };
+        const gid = this.furnitureLayer.getTileAt(col, row)?.index || 0;
+        // Tall HR-desk top (2609): SEAT_DY (+24) parks the 2593-chair sitter's feet on
+        // this cell's top edge (row 81.5 rounds UP to here) — render the workstation
+        // 'stand' pose (standing DOWN frame; the desk redraw from _makeSeatOccluders
+        // hides the feet/legs, head+torso stay visible).
+        if (gid === 2609) return { pose: 'stand' };
+        // Studio front-desk armchair (derived cell = the 5033 seat tile; the back
+        // row aliases here via SEAT_DY): workstation treatment — standing DOWN
+        // frame, the desk + chair-front redraws from _makeSeatOccluders hide the
+        // legs so the sitter reads as seated behind the control desk.
+        if (STUDIO_CHAIR_GIDS.has(gid)) return { pose: 'stand' };
+        if (BED_GIDS.has(gid)) return { pose: 'lie' };
+        const desk = deskChairAt(gid, col, row);
+        if (desk) return { pose: 'sit3', flip: desk.facing === 'left' };
+        if (this._upSeatAt(col, row)) return { pose: 'standup' };
+        return null;
+      }
+      // A seat whose facing is PINNED 'up' (wall-layer desk chairs via seatFacingAt,
+      // dining chairs via SEAT_FACING, conference chairs whose table is above).
+      // These render the standing UP frame (real back of head) + the chair's own tile
+      // redrawn over the legs — the sit2 sheet is NOT a back view (it shows a face
+      // profile, verified by skin-pixel counts), so a "sit up" anim never reads as
+      // facing the desk. Pin-based, not broadcast-dir-based, so local/remote/snapshot
+      // agree from coordinates alone; approach-based 'up' sits (poufs) keep the old path.
+      _upSeatAt(col, row) {
+        if (this.seatFacingAt[col + ',' + row] === 'up') return true;
+        return SEAT_FACING[this.furnitureLayer.getTileAt(col, row)?.index || 0] === 'up';
+      }
+      // Kills each occluder's tweens BEFORE destroying it — the bed zZZ loops
+      // (repeat -1) would otherwise keep running against destroyed targets.
+      _clearOccluders(arr) { if (arr) arr.forEach(o => { this.tweens.killTweensOf(o); o.destroy(); }); }
+
+      // Worn-cosmetic overlay: the server's `equipped` field ('' = nothing);
+      // ownership lists don't render anything. Two kinds:
+      //  - emoji cosmetics: ONE emoji floats above the wearer (y-68, depth 1001)
+      //  - sprite wearables (WEARABLE_DEFS): a pixel-art image pinned ON the
+      //    body via _placeWearable. Depth 10: above every player sprite
+      //    (players render at default depth 0 in insertion order — same
+      //    imperfection as overlapping bodies), but BELOW seat occluders
+      //    (900) so desks still crop seated players correctly.
+      // The `cosmeticDef`/`localCosmeticDef` field doubles as the kind flag:
+      // set = sprite wearable (follow the body), null = emoji (float at y-68,
+      // raise the chat bubble).
+      _placeWearable(img, def, x, y, dir) {
+        // Back view: face gear hides, but back-worn gear (wings) shows fully.
+        if (dir === 'up' && !def.showUp) { img.setVisible(false); return; }
+        img.setVisible(true);
+        // Behind-wearables flip sides with the camera: facing up you SEE the
+        // wearer's back, so the wings draw ON TOP of the body; every other
+        // facing they tuck behind it. (_under = wearer sprite, set at make.)
+        if (def.behind && img._under && img._under.active) {
+          if (dir === 'up') this.children.moveAbove(img, img._under);
+          else this.children.moveBelow(img, img._under);
+        }
+        const sideways = dir === 'left' || dir === 'right';
+        // frame 1 = side profile; frame `backFrame` (3-frame sets) = back view
+        img.setFrame(sideways ? 1 : (dir === 'up' && def.backFrame !== undefined ? def.backFrame : 0));
+        img.setFlipX(dir === 'left');
+        const dx = dir === 'left' ? -def.side : dir === 'right' ? def.side : 0;
+        const dy = sideways && def.sideDy !== undefined ? def.sideDy : def.dy;
+        img.setPosition(x + dx, y + dy);
+      }
+
+      // `under` = the wearer's sprite; needed only by behind:true wearables
+      // (wings): the image takes the wearer's depth and is slotted just BELOW
+      // them in the display list (equal depth renders in list order), so it
+      // sits behind the body but above the floor. Behind-wearables also get a
+      // perpetual slow scaleX flap tween (killed with the image on destroy).
+      _makeCosmetic(equipped, x, y, dir, under, charFor) {
+        const wd = WEARABLE_DEFS[equipped];
+        // Baked wearable: it's IN the wearer's texture (see _bakeWearOnCanvas)
+        // — creating the overlay too would double-draw it. charFor tells us
+        // whose texture; without it we can't know bake readiness, so overlay.
+        if (wd && (wd.bake || wd.bakeLayer) && charFor && _wearBakeReady(equipped, charFor)) return null;
+        if (wd) {
+          const sc = wd.scale || 3;                 // per-item fit (default 3)
+          const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(sc).setDepth(10);
+          if (wd.behind && under) {
+            img._under = under;
+            img.setDepth(under.depth);
+            this.children.moveBelow(img, under);
+            this.tweens.add({ targets: img, scaleX: { from: sc, to: sc * 0.77 },
+              duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          }
+          this._placeWearable(img, wd, x, y, dir || 'down');
+          return { obj: img, def: wd };
+        }
+        const emoji = COSMETIC_EMOJI[equipped];
+        if (emoji) {
+          return { obj: this.add.text(x, y-68, emoji,
+            {fontSize:'18px',resolution:2}).setOrigin(0.5,1).setDepth(1001), def: null };
+        }
+        return null;
+      }
+
+      _setLocalCosmetic(equipped) {
+        if (this.localCosmetic) { this.tweens.killTweensOf(this.localCosmetic); this.localCosmetic.destroy(); this.localCosmetic = null; }
+        this.localCosmeticDef = null;
+        if (!this.player) return;
+        const made = this._makeCosmetic(equipped, this.player.x, this.player.y, this.lastDir, this.player, _playerChar);
+        if (made) { this.localCosmetic = made.obj; this.localCosmeticDef = made.def; }
+        this._applyLocalOutfit();   // baked wearables live in the texture — rebuild it
+        // Hidden hider (prop hunt / after-dark): a freshly made sprite starts
+        // visible — re-hide it or the disguise sprouts a visible cosmetic.
+        if (window._phSelfHiddenNow && this.localCosmetic && this.localCosmetic.setVisible) this.localCosmetic.setVisible(false);
+      }
+
+      // Wings slot: a second, independent cosmetic object (same maker) so
+      // wings and a wearable render together on one body.
+      _setLocalWings(wings) {
+        if (this.localWings) { this.tweens.killTweensOf(this.localWings); this.localWings.destroy(); this.localWings = null; }
+        this.localWingsDef = null;
+        if (!this.player) return;
+        const made = this._makeCosmetic(wings, this.player.x, this.player.y, this.lastDir, this.player);
+        if (made) { this.localWings = made.obj; this.localWingsDef = made.def; }
+        if (window._phSelfHiddenNow && this.localWings && this.localWings.setVisible) this.localWings.setVisible(false);
+      }
+
+      // Outfit slots (Aug 2026): up to four MORE independent cosmetic objects
+      // (top / bottom / neckwear / held) rendered alongside the legacy
+      // wearable + wings — the boss's "wear the whole outfit at once" rule.
+      // localSlotObjs: slot → { obj, def }.
+      _setLocalSlots(slots) {
+        for (const k in (this.localSlotObjs || {})) {
+          const s = this.localSlotObjs[k];
+          if (s && s.obj) { this.tweens.killTweensOf(s.obj); s.obj.destroy(); }
+        }
+        this.localSlotObjs = {};
+        if (!this.player) return;
+        for (const [slot, item] of Object.entries(slots || {})) {
+          if (!item) continue;
+          const made = this._makeCosmetic(item, this.player.x, this.player.y, this.lastDir, this.player, _playerChar);
+          if (!made) continue;
+          if (window._phSelfHiddenNow && made.obj.setVisible) made.obj.setVisible(false);
+          this.localSlotObjs[slot] = made;
+        }
+        this._applyLocalOutfit();   // baked wearables live in the texture — rebuild it
+      }
+
+      _updatePlayerCosmetics(id, cosmetics, equipped, wings, slots) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        // Remember what's worn (drives baked-wearable texture rebuilds).
+        entry.wear = { equipped: equipped || '', wings: wings || '', slots: Object.assign({}, slots || {}) };
+        if (entry.cosmetic) { this.tweens.killTweensOf(entry.cosmetic); entry.cosmetic.destroy(); entry.cosmetic = null; }
+        entry.cosmeticDef = null;
+        const made = this._makeCosmetic(equipped, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
+        if (made) { entry.cosmetic = made.obj; entry.cosmeticDef = made.def; }
+        if (entry.wings) { this.tweens.killTweensOf(entry.wings); entry.wings.destroy(); entry.wings = null; }
+        entry.wingsDef = null;
+        const madeW = this._makeCosmetic(wings || '', entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
+        if (madeW) { entry.wings = madeW.obj; entry.wingsDef = madeW.def; }
+        // Outfit slots: rebuild the per-slot overlay set (slot → {obj, def}).
+        for (const k in (entry.slotObjs || {})) {
+          const s = entry.slotObjs[k];
+          if (s && s.obj) { this.tweens.killTweensOf(s.obj); s.obj.destroy(); }
+        }
+        entry.slotObjs = {};
+        for (const [slot, item] of Object.entries(slots || {})) {
+          if (!item) continue;
+          const m = this._makeCosmetic(item, entry.sprite.x, entry.sprite.y, entry.lastDir, entry.sprite, entry.character);
+          if (m) entry.slotObjs[slot] = m;
+        }
+        // Rebuild their texture so baked items appear/disappear with the
+        // change (re-poses the current frame too — seated players included).
+        if (entry.appear) this._applyRemoteOutfit(id, entry.appear);
+        // Freshly made sprites start visible — a hidden round ghost or prop
+        // hunt hider must stay hidden through a cosmetic change.
+        if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
+        if (window._ph && window._ph.hiderId === id && window._roundGhostVis) window._roundGhostVis(id, false);   // prop-hunt hider stays vanished
+      }
+
+      // ── Pets ──────────────────────────────────────────────────────────
+      // An emoji companion that trails its owner. Nothing about the pet is
+      // networked beyond WHICH pet is out (playerPetUpdate / the `pet` field
+      // on join payloads): every client derives the pet's motion locally from
+      // its owner's sprite each frame (see _stepPet in update()), so pets
+      // cost zero movement traffic. Depth 2: above the floor and the player
+      // bodies (default 0) but below seat occluders (900) and nametags (990).
+      _makePet(pet, x, y, acc, stage) {
+        const emoji = PET_EMOJI[pet];
+        if (!emoji) return null;                    // unknown id — not a pet
+        let obj;
+        // Evolution art: dedicated stage sprite when one shipped for this pet.
+        const stageKey = (stage >= 2 && this.textures.exists(`${pet}_s${stage}`)) ? `${pet}_s${stage}` : null;
+        if (stageKey || this.textures.exists(pet)) { // pixel-art sprite (preloaded per PETS id)
+          obj = this.add.image(x - PET_GAP, y + 10, stageKey || pet).setOrigin(0.5, 1).setDepth(2);
+          obj.setScale(PET_PX / Math.max(obj.width, obj.height));
+        } else {
+          // Fallback: texture failed to load — the old emoji companion.
+          obj = this.add.text(x - PET_GAP, y + 10, emoji, { fontSize: '22px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(2);
+        }
+        // Accessory overlay: an emoji riding the pet at depth 3 — above the
+        // pet (2), below seat occluders (900) and nametags (990). Anchored
+        // per species + per-accessory nudge; _placePetAcc owns its position
+        // (called here and every _stepPet frame, so it rides through walks,
+        // the seated ring, and teleport snaps). Torn down via _destroyPet.
+        // Lively pilot bookkeeping: _stepPet's waddle/breathing/tricks need
+        // the pet id, the fitted base scale, and the lively flag.
+        obj._petId = pet;
+        obj._baseScale = Math.abs(obj.scaleX) || 1;
+        obj._lively = PET_LIVELY.has(petSpeciesId(pet));
+        // Animated frames: attach a frame set when every frame texture for
+        // this exact pet id loaded (walk cycle + sit + action). All frames
+        // are 64x64 bottom-aligned, so one setScale fits them all;
+        // setTexture never changes the scale.
+        // Evolved stages use their OWN frame set (…_s2_walk1 etc.) so the
+        // animations evolve along with the art.
+        const stem = pet.replace(/^pet_/, '') + (stageKey ? `_s${stage}` : '');
+        if (obj.setTexture &&
+            ['walk1', 'walk2', 'walk3', 'sit', 'action'].every(f => this.textures.exists(`petanim_${stem}_${f}`))) {
+          obj._animSet = {
+            walk: [`petanim_${stem}_walk1`, `petanim_${stem}_walk2`, `petanim_${stem}_walk3`, `petanim_${stem}_walk2`],
+            // Idle = the real STANDING art when the stage ships one (evolved
+            // stages always do); base pets keep the mid-stride idle because
+            // some old static base art (bunnies) faces the other way.
+            sit: `petanim_${stem}_sit`, action: `petanim_${stem}_action`,
+            idle: stageKey || `petanim_${stem}_walk2`,
+          };
+          obj.setTexture(obj._animSet.idle);
+          obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
+          // Dragons are the ONLY pets allowed to break the size cap (boss
+          // rule: most expensive pet = biggest pet in the office). Stage 2
+          // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
+          if (pet.startsWith('pet_dragon') && (stage || 1) >= 2) {
+            obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
+            obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
+          }
+          // Boss rule: mythic gift pets' FINAL FORM is dragon-final-form
+          // sized — but the baby stays its original baby size.
+          if ((pet === 'pet_unicorn' || pet === 'pet_phoenix') && (stage || 1) >= 3) {
+            obj._baseScale *= (pet === 'pet_phoenix' ? 1.9 : 1.7);   // boss: phoenix a touch bigger
+            obj._gapMult = 1.9;
+          }
+          // Boss note: the grown unicorn is a MAJESTIC being — slow stately
+          // trot, not a scamper. Longer frame time = smooth gliding walk.
+          if (pet === 'pet_unicorn' && (stage || 1) >= 3) obj._gaitFrameMs = 210;
+          obj.setScale(obj._baseScale);
+        }
+        // Evolution stages (fed with cafeteria treats). With real stage art the
+        // sprite itself sells the evolution, so only a mild size bump; without
+        // art, grow harder and gild the final form so status still shows.
+        obj._petStage = stage || 1;   // tricks & body language get more sophisticated per stage
+        // Final-form spirits: each dog line ascends into its own element —
+        // ambient aura + paw trail while walking + a signature howl trick
+        // (see _stepPet/_petTrick + PET_MYTHIC themes).
+        obj._mythic = (stage || 1) >= 3 ? ({
+          pet_dog_husky: 'frost',   // winter spirit — snow, auroras
+          pet_dog: 'blaze',         // sun spirit — embers, solar flare
+          pet_dog_choco: 'cocoa',   // cocoa storm — steam, chocolate swirl
+        }[pet] || null) : null;
+        const evoMult = stageKey ? (stage >= 3 ? 1.6 : 1.3)   // evolutions should visibly GROW
+                                 : (stage >= 3 ? 1.6 : stage === 2 ? 1.3 : 1);
+        if (evoMult !== 1) {
+          obj._baseScale *= evoMult;
+          obj.setScale(obj._baseScale);
+          if (!stageKey && stage >= 3 && obj.setTint) obj.setTint(0xffe9a0);   // final form: golden sheen
+        }
+        const accEmoji = PET_ACC_EMOJI[acc];
+        if (accEmoji) {
+          obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
+            .setOrigin(0.5, 1).setDepth(3);
+          const an = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
+          const fit = PET_ACC_FIT_ALL;
+          obj._accOffX = an.dx * fit.mx;                 // mirrored by flip in _placePetAcc
+          obj._accOffY = an.dy * fit.my + fit.dy;
+          this._placePetAcc(obj);
+        }
+        return obj;
+      }
+
+      // Pin the accessory to its pet: dy up from the feet to the species'
+      // head line (+ per-accessory nudge), dx toward the side the pet faces
+      // (sprites are drawn facing right; flipX mirrors the offset).
+      _placePetAcc(petObj) {
+        const a = petObj._acc;
+        if (!a) return;
+        a.setPosition(petObj.x + (petObj.flipX ? -petObj._accOffX : petObj._accOffX), petObj.y + petObj._accOffY);
+      }
+
+      // A pet and its accessory overlay live and die together.
+      _destroyPet(petObj) {
+        if (!petObj) return;
+        this.tweens.killTweensOf(petObj);           // trick tweens die with the pet
+        this._killPetFx(petObj);                    // in-flight trick particles too
+        if (petObj._acc) petObj._acc.destroy();
+        petObj.destroy();
+      }
+
+      // Destroy any live trick particles (🔥/💦/✨…) a pet has in flight.
+      // killTweensOf does NOT run onComplete (Phaser kills tweens outright),
+      // so particles must be torn down explicitly — otherwise they'd linger
+      // at the old spot after a pet switch, or leak a round-hidden player's
+      // location if the owner vanishes mid-trick.
+      _killPetFx(petObj) {
+        if (!petObj || !petObj._fx) return;
+        for (const o of petObj._fx) { if (o && o.active !== false) { this.tweens.killTweensOf(o); o.destroy(); } }
+        petObj._fx = null;
+      }
+
+      // Register a self-destroying trick particle: tracked on the pet so a
+      // mid-trick destroy/hide can purge it, unregistered when it finishes.
+      _trackPetFx(petObj, obj) {
+        (petObj._fx = petObj._fx || []).push(obj);
+        return () => {
+          obj.destroy();
+          if (petObj._fx) { const i = petObj._fx.indexOf(obj); if (i >= 0) petObj._fx.splice(i, 1); }
+        };
+      }
+
+      // ── Lively pets pilot (Aug 2026) ──────────────────────────────────
+      // Random idle "personality" moment for a lively pet. Only fires while
+      // idle (see _stepPet); _trickBusy parks the procedural waddle/breathing
+      // so the tween owns angle/scale/y until it finishes.
+      _petTrick(petObj) {
+        // Round-hidden owners (_roundGhostVis hides the pet too): a sparkle
+        // burst at an invisible pet's spot would leak a hidden player's
+        // location — no tricks while concealed.
+        if (!petObj.visible) return;
+        const sp = petSpeciesId(petObj._petId || '');
+        // Owner sprite (local player or the remote sprite this pet follows) —
+        // several signature tricks play out AROUND the owner.
+        const ownerOf = () => {
+          if (petObj === this.localPet) return this.player;
+          for (const oid in this.otherPlayers) {
+            if (this.otherPlayers[oid].pet === petObj) return this.otherPlayers[oid].sprite;
+          }
+          return null;
+        };
+        // Animated frames: swap to the action pose for the trick's duration.
+        // No explicit restore needed — once the trick's tween clears
+        // _trickBusy, the next _stepPet frame reasserts walk/idle/sit.
+        if (petObj._animSet) petObj.setTexture(petObj._animSet.action);
+        if (sp === 'pet_unicorn') {
+          // The unicorn has ONE form and FOUR signature moves (boss-approved
+          // storyboard) — it cycles through them so every trick feels fresh:
+          //   0 PRISM BEAM      — horn fires a rainbow laser with sparkles
+          //   1 STARDUST GALLOP — dash with a rainbow trail off the hooves
+          //   2 HALO BLESSING   — rears up; golden ring + raining stars
+          //   3 MOONBOUNCE      — leaps over a crescent moon, glitter landing
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, fwd = (petObj.flipX ? -1 : 1);
+          const x0 = petObj.x, y0 = petObj.y;
+          const scU = Math.max(1, petObj.displayWidth / 64);
+          const RAINBOW = [0xff5f6d, 0xffa93d, 0xffe45c, 0x6ee77a, 0x5cc8ff, 0xb08cff];
+          const mv = petObj._moveIdx = ((petObj._moveIdx ?? -1) + 1) % 4;
+          if (mv === 0) {
+            // PRISM BEAM: head dips, then the horn fires a widening rainbow
+            // beam — layered colored blobs racing forward with star sparkles.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: 8 * fwd, duration: 260, ease: 'Sine.easeOut', hold: 1200 },
+                { angle: 0, duration: 240, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const hx = x0 + fwd * petObj.displayWidth * 0.40;
+              const hy = y0 - petObj.displayHeight * 0.72;
+              const chg = this.add.circle(hx, hy, 1.5 * scU, 0xffffff, 0.9).setDepth(3.2);
+              this.tweens.add({ targets: chg, scale: 4, duration: 320, ease: 'Sine.easeIn',
+                onComplete: this._trackPetFx(petObj, chg) });
+              this.tweens.add({ targets: chg, alpha: 0, delay: 330, duration: 120 });
+              for (let i = 0; i < 24; i++) {
+                this.time.delayedCall(340 + i * 42, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const off = ((i % 6) - 2.5) * 1.6 * scU;   // 6 parallel rainbow strands
+                  const b = this.add.circle(hx + fwd * 4 * scU, hy + off, 2.2 * scU,
+                    RAINBOW[i % 6], 0.9).setDepth(3.2);
+                  this.tweens.add({ targets: b, alpha: 0, scale: 1.9,
+                    x: b.x + fwd * (46 + Math.random() * 20) * scU, y: b.y + off * 2.5,
+                    duration: 430 + Math.random() * 120, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, b) });
+                  if (i % 4 === 0) {
+                    const s = this.add.text(hx + fwd * (18 + Math.random() * 34) * scU,
+                      hy + (Math.random() * 16 - 8), '✨', { fontSize: '10px', resolution: 2 })
+                      .setOrigin(0.5).setAlpha(0.95).setDepth(3.3);
+                    this.tweens.add({ targets: s, alpha: 0, y: s.y - 10, duration: 480,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                  }
+                });
+              }
+            }
+          } else if (mv === 1) {
+            // STARDUST GALLOP: a quick out-and-back dash, hooves throwing
+            // rainbow dust and stars the whole way.
+            const dropTrail = () => {
+              if (!petObj.active || !petObj.visible) return;
+              const c = this.add.circle(petObj.x - fwd * petObj.displayWidth * 0.3,
+                petObj.y - 2 - Math.random() * 6 * scU, 2 * scU,
+                RAINBOW[Math.floor(Math.random() * 6)], 0.85).setDepth(2.5);
+              this.tweens.add({ targets: c, alpha: 0, scale: 1.8, y: c.y - 8 * scU,
+                duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, c) });
+              if (Math.random() < 0.35) {
+                const s = this.add.text(petObj.x - fwd * 10, petObj.y - 8 - Math.random() * 10,
+                  '⭐', { fontSize: '9px', resolution: 2 }).setOrigin(0.5).setAlpha(0.9).setDepth(2.6);
+                this.tweens.add({ targets: s, alpha: 0, y: s.y - 12, duration: 600,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+              }
+            };
+            const trailEv = this.time.addEvent({ delay: 45, repeat: 30, callback: dropTrail });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { x: x0 + fwd * 52 * scU, duration: 620, ease: 'Sine.easeInOut' },
+                { x: x0, duration: 620, ease: 'Sine.easeInOut',
+                  onStart: () => { if (petObj.setFlipX) petObj.setFlipX(!petObj.flipX); } },
+              ],
+              onComplete: () => {
+                trailEv.remove(); petObj.x = x0;
+                if (petObj.setFlipX) petObj.setFlipX(fwd < 0);
+                petObj._trickBusy = false;
+              },
+            });
+          } else if (mv === 2) {
+            // HALO BLESSING: rears up; a golden halo expands around her while
+            // little stars and hearts rain down.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: -12 * fwd, scaleY: bs * 1.08, duration: 320, ease: 'Sine.easeOut', hold: 1050 },
+                { angle: 0, scaleY: bs, duration: 280, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const cy = y0 - petObj.displayHeight * 0.5;
+              const halo = this.add.ellipse(x0, cy, 20 * scU, 8 * scU, 0xffd76a, 0)
+                .setStrokeStyle(2 * scU, 0xffd76a, 0.9).setDepth(3.1);
+              this.tweens.add({ targets: halo, scaleX: 3, scaleY: 3, alpha: 0,
+                delay: 260, duration: 900, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, halo) });
+              for (let i = 0; i < 10; i++) {
+                this.time.delayedCall(360 + i * 110, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const t = this.add.text(x0 + (Math.random() * 56 - 28) * scU,
+                    cy - (14 + Math.random() * 10) * scU,
+                    Math.random() < 0.4 ? '💛' : (Math.random() < 0.5 ? '⭐' : '✨'),
+                    { fontSize: '10px', resolution: 2 }).setOrigin(0.5).setAlpha(0.95).setDepth(3.2);
+                  this.tweens.add({ targets: t, alpha: 0, y: t.y + (22 + Math.random() * 14) * scU,
+                    duration: 800 + Math.random() * 300, ease: 'Sine.easeIn',
+                    onComplete: this._trackPetFx(petObj, t) });
+                });
+              }
+            }
+          } else {
+            // MOONBOUNCE: a crescent moon appears, she arcs clean over it,
+            // and the landing pops a glitter burst.
+            const moon = petObj.visible
+              ? this.add.text(x0 + fwd * 30 * scU, y0 + 2, '🌙', { fontSize: `${Math.round(16 * scU)}px`, resolution: 2 })
+                  .setOrigin(0.5, 1).setAlpha(0).setDepth(1.8)
+              : null;
+            if (moon) this.tweens.add({ targets: moon, alpha: 0.9, duration: 260 });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 0.82, duration: 260, ease: 'Sine.easeIn' },           // crouch
+                { y: y0 - 40 * scU, x: x0 + fwd * 30 * scU, scaleY: bs * 1.05,
+                  angle: -10 * fwd, duration: 340, ease: 'Sine.easeOut' },           // up & over
+                { y: y0, x: x0 + fwd * 60 * scU, angle: 8 * fwd, duration: 320,
+                  ease: 'Quad.easeIn' },                                             // down the far side
+                { angle: 0, scaleY: bs, duration: 180, ease: 'Back.easeOut',
+                  onStart: () => {
+                    if (!petObj.active || !petObj.visible) return;
+
+                    for (let i = 0; i < 9; i++) {                                    // glitter burst
+                      const g = this.add.circle(petObj.x + (Math.random() * 14 - 7) * scU,
+                        petObj.y - 2, 1.6 * scU, RAINBOW[i % 6], 0.95).setDepth(3.1);
+                      this.tweens.add({ targets: g, alpha: 0,
+                        x: g.x + (Math.random() * 30 - 15) * scU,
+                        y: g.y - (8 + Math.random() * 16) * scU, scale: 0.4,
+                        duration: 460 + Math.random() * 180, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, g) });
+                    }
+                  } },
+              ],
+              onComplete: () => {
+                petObj.angle = 0; petObj.setScale(bs); petObj.y = y0;
+                if (moon) this.tweens.add({ targets: moon, alpha: 0, duration: 320,
+                  onComplete: this._trackPetFx(petObj, moon) });
+                petObj._trickBusy = false;
+              },
+            });
+          }
+          return;
+        }
+        if (sp === 'pet_frog') {
+          // Signature trick: the RAIN DANCE 🌧️ — a happy triple hop with a
+          // ribbit note. Tadpole keeps the plain hop; stage 2+ summons a
+          // little rain cloud that drizzles while it dances, and the King
+          // Frog gets a proper storm cloud with lightning flickers.
+          const st = petObj._petStage || 1;
+          petObj._trickBusy = true;
+          const y0 = petObj.y, bs = petObj._baseScale || 1;
+          const hopH = 14 + st * 6;
+          const note = this.add.text(petObj.x, y0 - 34, '🎵', { fontSize: '13px', resolution: 2 })
+            .setOrigin(0.5).setDepth(3.2).setAlpha(0);
+          this.tweens.add({ targets: note, alpha: 1, y: y0 - 56, duration: 700, yoyo: true,
+            onComplete: this._trackPetFx(petObj, note) });
+          // ── the cloud (stage 2+) ─────────────────────────────────────
+          let cloud = null, rainEv = null;
+          const endRain = () => {
+            if (rainEv) { rainEv.remove(); rainEv = null; }
+            if (cloud && cloud.active) {
+              this.tweens.add({ targets: cloud, alpha: 0, y: cloud.y - 6,
+                duration: 380, ease: 'Sine.easeIn', onComplete: cloud._kill });
+            }
+          };
+          if (st >= 2) {
+            const king = st >= 3;
+            const cw = king ? 17 : 12;                       // cloud half-width
+            const tint = king ? 0x5a6478 : 0x9aa4b8;         // storm vs drizzle grey
+            // Hover the cloud clearly ABOVE the head — with headroom for the
+            // hops (hopH) so the frog never bounces into its own cloud.
+            const cx0 = petObj.x, cy0 = y0 - petObj.displayHeight - hopH - 22;
+            cloud = this.add.container(cx0, cy0, [
+              this.add.ellipse(0, 3, cw * 2.4, cw * 0.9, tint, 0.9),
+              this.add.circle(-cw * 0.8, -2, cw * 0.62, tint, 0.9),
+              this.add.circle(cw * 0.1, -5, cw * 0.75, tint, 0.9),
+              this.add.circle(cw * 0.85, -1, cw * 0.55, tint, 0.9),
+            ]).setDepth(3.1).setAlpha(0);
+            cloud._kill = this._trackPetFx(petObj, cloud);
+            this.tweens.add({ targets: cloud, alpha: 1, duration: 250, ease: 'Sine.easeOut' });
+            const groundY = y0 - 1;
+            rainEv = this.time.addEvent({
+              delay: king ? 60 : 120, repeat: Math.floor((king ? 2000 : 1700) / (king ? 60 : 120)),
+              callback: () => {
+                if (!petObj.active || !cloud || !cloud.active) { if (rainEv) rainEv.remove(); return; }
+                // droplet: falls from the cloud, lands as a tiny splash ripple
+                const dxr = (Math.random() * 2 - 1) * cw * 2;
+                const d = this.add.rectangle(cloud.x + dxr, cloud.y + 8, 1.5, king ? 6 : 4, 0x6fb8ff, 0.85).setDepth(3);
+                const dKill = this._trackPetFx(petObj, d);
+                this.tweens.add({ targets: d, y: groundY, duration: king ? 240 : 300, ease: 'Quad.easeIn',
+                  onComplete: () => {
+                    const lx = d.x; dKill();
+                    if (!petObj.active) return;
+                    const r = this.add.ellipse(lx, groundY, 7, 2.6, 0x9fd8ff, 0)
+                      .setDepth(1).setStrokeStyle(1, 0x9fd8ff, 0.5);
+                    this.tweens.add({ targets: r, scaleX: 1.9, scaleY: 1.9, alpha: 0,
+                      duration: 380, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+                  } });
+                // King Frog: the storm cloud FLICKERS with lightning ⚡
+                if (king && Math.random() < 0.14) {
+                  const bolt = this.add.text(cloud.x + (Math.random() * 16 - 8), cloud.y + 10, '⚡',
+                    { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 0).setDepth(3.2).setAlpha(0.95);
+                  this.tweens.add({ targets: bolt, alpha: 0, y: bolt.y + 6, duration: 220,
+                    ease: 'Quad.easeIn', onComplete: this._trackPetFx(petObj, bolt) });
+                  const fl = this.add.circle(cloud.x, cloud.y, cw * 1.6, 0xfff6c9, 0.35).setDepth(3.05);
+                  this.tweens.add({ targets: fl, alpha: 0, duration: 140,
+                    onComplete: this._trackPetFx(petObj, fl) });
+                }
+              },
+            });
+          }
+          // ── the dance: crouch → leap → land, three times ─────────────
+          let hop = 0;
+          const doHop = () => {
+            if (!petObj.active) { petObj._trickBusy = false; endRain(); return; }
+            hop++;
+            this.tweens.add({ targets: petObj, scaleY: bs * 0.8, duration: 70, yoyo: true });
+            this.tweens.add({
+              targets: petObj, y: y0 - hopH, duration: 180, ease: 'Quad.easeOut', yoyo: true,
+              onComplete: () => {
+                if (hop < (st >= 2 ? 4 : 3) && petObj.active) doHop();
+                else {
+                  if (petObj.active) { petObj.y = y0; petObj.setScale(bs); petObj._trickBusy = false; }
+                  else petObj._trickBusy = false;
+                  endRain();
+                }
+              },
+            });
+          };
+          doHop();
+          return;
+        }
+        if (sp === 'pet_dog') {
+          // Body language evolves with the dog: baby = giddy wiggle-hop,
+          // evolved = athletic play-bow into a leaping spin, final form =
+          // a majestic head-back HOWL (no bouncing — wolves have dignity).
+          const st = petObj._petStage || 1;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          if (st >= 3) {
+            petObj._trickBusy = true;
+            const fwd = (petObj.flipX ? -1 : 1);
+            // Each final form performs its OWN signature move — only the
+            // winter spirit actually howls:
+            //   blaze  = SOLAR LEAP: deep crouch, then a powerful skyward
+            //            leap with the flare bursting at the apex.
+            //   cocoa  = COCOA QUAKE: plants its paws and does a huge
+            //            full-body shake, like shaking off molten chocolate.
+            //   frost  = MOONLIT BLINK: dissolve to ice-mist and teleport
+            //            around the owner in a crescent of afterimages.
+            if (petObj._mythic === 'blaze') {
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  { scaleY: bs * 0.72, scaleX: bs * 1.15, duration: 340, ease: 'Sine.easeIn' },   // coil
+                  { y: y0 - 34, scaleY: bs * 1.18, scaleX: bs * 0.9, angle: -8 * fwd,
+                    duration: 380, ease: 'Sine.easeOut' },                                        // launch
+                  { y: y0 - 34, duration: 420 },                                                  // hang at the apex
+                  { y: y0, scaleY: bs, scaleX: bs, angle: 0, duration: 300, ease: 'Bounce.easeOut' },
+                ],
+                onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
+              });
+            } else if (petObj._mythic === 'cocoa') {
+              // COCOA POUNCE: the big lug jumps ON TOP of its owner, perches
+              // there like a smug bear rug, then hops back down. Owner =
+              // whoever this pet follows (local player or a remote sprite).
+              let owner = null;
+              if (petObj === this.localPet) owner = this.player;
+              else for (const oid in this.otherPlayers) {
+                if (this.otherPlayers[oid].pet === petObj) { owner = this.otherPlayers[oid].sprite; break; }
+              }
+              if (!owner) { petObj._trickBusy = false; return; }
+              const x0 = petObj.x, sitTex = petObj._animSet && petObj._animSet.sit;
+              const walkTex = petObj._animSet && petObj._animSet.walk;
+              const d0 = petObj.depth;
+              const ownAngle0 = owner.angle;                   // don't fight RLGL knockdowns etc.
+              const tipDir = (owner.x >= petObj.x ? 1 : -1);   // topple AWAY from the incoming dog
+              const perchX = owner.x, perchY = owner.y - 10;   // standing atop the flattened owner
+              const knocked = () => {                          // the RLGL-style knockdown
+                this.tweens.add({ targets: owner, angle: 90 * tipDir, duration: 190, ease: 'Back.easeIn' });
+                           // THUD.
+              };
+              const getUp = () => {
+                this.tweens.add({ targets: owner, angle: ownAngle0, duration: 260, ease: 'Sine.easeOut' });
+              };
+              petObj.setDepth(5);                              // over the owner (and tags, which sit at 1) while riding
+              // The final form has NO frame set (static approved art), so the
+              // whole leap is sold with body language: wind-up squash, tilted
+              // stretch on launch, a real arc, and a hard belly-flop squash on
+              // impact.
+              const leanDir = (perchX >= x0 ? 1 : -1);         // nose-up toward the jump direction
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  { scaleY: bs * 0.62, scaleX: bs * 1.22, duration: 340, ease: 'Sine.easeIn' },  // deep crouch, winding up
+                  { y: perchY - 46, x: x0 + (perchX - x0) * 0.55,                                // launch: stretch + nose-up tilt
+                    scaleY: bs * 1.24, scaleX: bs * 0.82, angle: -22 * leanDir,
+                    duration: 260, ease: 'Sine.easeOut',
+                    onStart: () => { petObj.flipX = perchX < x0; } },
+                  { y: perchY - 14, x: perchX, angle: 10 * leanDir,                              // arc over, nose tips down
+                    scaleY: bs * 1.05, scaleX: bs * 0.95, duration: 180, ease: 'Sine.easeIn' },
+                  { y: perchY, scaleY: bs * 0.68, scaleX: bs * 1.28, angle: 0,                   // IMPACT: belly-flop squash...
+                    duration: 110, ease: 'Sine.easeIn',
+                    onComplete: knocked },                                                       // ...and the owner goes DOWN
+                  { scaleY: bs, scaleX: bs, duration: 160, ease: 'Back.easeOut' },               // recover from the squash
+                  { y: perchY - 5, scaleY: bs * 1.05, duration: 300, yoyo: true, repeat: 2,
+                    ease: 'Sine.easeInOut' },                                                    // smug bounces on the fallen owner
+                  { y: y0 - 26, x: x0, angle: -12 * leanDir,                                     // hop off with a little flourish
+                    scaleY: bs * 1.12, scaleX: bs * 0.9, duration: 220, ease: 'Sine.easeOut',
+                    onStart: () => { getUp(); petObj.flipX = x0 < perchX; } },                   // owner staggers back up
+                  { y: y0, angle: 0, scaleY: bs, scaleX: bs, duration: 170, ease: 'Bounce.easeOut' },
+                ],
+                onComplete: () => {
+                  petObj.setDepth(d0); petObj.setScale(bs); petObj.y = y0; petObj.angle = 0;
+                  petObj._trickBusy = false;
+                },
+              });
+            } else if (petObj._mythic === 'frost') {
+              // MOONLIT BLINK: the winter wolf is too sophisticated to howl on
+              // command. It shimmers, dissolves into ice-mist, BLINKS around
+              // its owner in a crescent of frosty afterimages, then reappears
+              // at its spot and sits — regal, composed — under a private
+              // aurora before rising again.
+              let owner = (petObj === this.localPet) ? this.player : null;
+              if (!owner) for (const oid in this.otherPlayers) {
+                if (this.otherPlayers[oid].pet === petObj) { owner = this.otherPlayers[oid].sprite; break; }
+              }
+              const x0 = petObj.x, flip0 = petObj.flipX;
+              const sitTex = petObj._animSet && petObj._animSet.sit;
+              const idleTex = petObj._animSet && petObj._animSet.idle;
+              const cx = owner ? owner.x : x0, cy = owner ? owner.y : y0;
+              const mist = (x, y) => {                       // ice-mist puff at each blink point
+                for (let i = 0; i < 5; i++) {
+                  const p = this.add.circle(x + (Math.random() * 18 - 9), y - 6 - Math.random() * 16,
+                    2 + Math.random() * 2, 0xdff4ff, 0.85).setDepth(3);
+                  this.tweens.add({ targets: p, alpha: 0, y: p.y - 12, scale: 2.4,
+                    duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
+                }
+              };
+              const ghost = () => {                          // frosty afterimage left where it stood
+                const g = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                  .setOrigin(petObj.originX, petObj.originY).setScale(petObj.scaleX, petObj.scaleY)
+                  .setFlipX(petObj.flipX).setTint(0x9fd8ff).setAlpha(0.5).setDepth(petObj.depth - 0.1);
+                this.tweens.add({ targets: g, alpha: 0, duration: 460, ease: 'Sine.easeIn',
+                  onComplete: this._trackPetFx(petObj, g) });
+              };
+              // Blink points: a crescent sweeping around the owner, ending home.
+              const side = (x0 >= cx ? 1 : -1);
+              const pts = [
+                { x: cx - side * 36, y: cy + 6 },
+                { x: cx, y: cy + 26 },
+                { x: cx + side * 36, y: cy + 6 },
+                { x: x0, y: y0 },
+              ];
+              let t = 0;
+              this.tweens.add({ targets: petObj, alpha: 0.25, duration: 90,   // shimmer wind-up
+                yoyo: true, repeat: 2, ease: 'Sine.easeInOut' });
+              t += 400;
+              pts.forEach((p, i) => {
+                this.time.delayedCall(t, () => {
+                  if (!petObj.active) return;
+                  ghost(); mist(petObj.x, petObj.y);
+                  petObj.setPosition(p.x, p.y);
+                  petObj.flipX = (i < 3) ? (cx < p.x) : flip0;   // face the owner mid-blink
+                  petObj.setAlpha(1);
+                  this._placePetAcc(petObj);
+                  mist(p.x, p.y);
+                  const s = this.add.text(p.x, p.y - 26, '❄', { fontSize: '11px', resolution: 2 })
+                    .setOrigin(0.5, 1).setAlpha(0.9).setDepth(3);
+                  this.tweens.add({ targets: s, alpha: 0, y: s.y - 18, angle: 40,
+                    duration: 700, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                });
+                t += 260;
+              });
+              // Finale back home: sit with quiet dignity under a private aurora.
+              this.time.delayedCall(t + 40, () => {
+                if (!petObj.active) return;
+                if (sitTex) petObj.setTexture(sitTex);
+                const ring = this.add.circle(petObj.x, petObj.y - 10, 8, 0x9fd8ff, 0)
+                  .setStrokeStyle(2, 0x9fd8ff, 0.8).setDepth(3);
+                this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 900,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                const bandCols = [0x7fffd4, 0xc5a3ff, 0x9fd8ff, 0xa8ffc9];
+                for (let i = 0; i < 4; i++) {
+                  const band = this.add.ellipse(petObj.x - 24 + i * 16, petObj.y - 44 - (i % 2) * 6,
+                    22, 6, bandCols[i], 0).setAngle(-14).setDepth(3);
+                  this.tweens.add({ targets: band, alpha: { from: 0.55, to: 0 }, y: band.y - 14,
+                    x: band.x + 8, scaleX: 1.6, delay: 120 + i * 130, duration: 1300,
+                    ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, band) });
+                }
+              });
+              this.time.delayedCall(t + 1900, () => {        // rise, unhurried
+                if (!petObj.active) return;
+                if (idleTex) petObj.setTexture(idleTex);
+                petObj.setAlpha(1); petObj.flipX = flip0;
+                petObj._trickBusy = false;
+              });
+            } else {
+              this.tweens.add({
+                targets: petObj, angle: -14 * fwd, duration: 260, ease: 'Sine.easeOut',
+                yoyo: true, hold: petObj._mythic ? 1350 : 950,
+                onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+              });
+            }
+            if (petObj._mythic === 'frost') return;   // MOONLIT BLINK stages its own fx — no howl notes
+            if (petObj._mythic) {
+              // SIGNATURE HOWLS — the remaining final forms call their element:
+              //   blaze = SOLAR HOWL (sunfire flare), cocoa = COCOA STORM
+              //   (molten chocolate swirl). Frost blinks instead (see above).
+              const T = {
+                blaze: { rings: [0xffb347, 0xff6b35, 0xffe066], bands: [0xffe066, 0xff6b35, 0xffb347, 0xffd23f],
+                         fx: ['🔥', '☀️', '✦', '🔥', '✨', '☄️', '🔥'] },
+                cocoa: { rings: [0xc08a4e, 0x8b5a2b, 0xf3e5ab], bands: [0xf3e5ab, 0xc08a4e, 0x8b5a2b, 0xdeb887],
+                         fx: ['🍫', '♨', '✨', '🌰', '🍫', '☕', '✨'] },
+              }[petObj._mythic];
+              // Three expanding elemental shockwave rings pulse out of the howl...
+              for (let i = 0; i < 3; i++) {
+                const ring = this.add.circle(petObj.x, petObj.y - 14, 8, T.rings[i], 0)
+                  .setStrokeStyle(2, T.rings[i], 0.8).setDepth(3);
+                this.tweens.add({ targets: ring, scale: 4.5 + i, alpha: 0,
+                  delay: 300 + i * 240, duration: 900, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, ring) });
+              }
+              // ...a shimmering ribbon of its element drifts overhead...
+              for (let i = 0; i < 4; i++) {
+                const band = this.add.ellipse(
+                  petObj.x - 24 + i * 16, petObj.y - 44 - (i % 2) * 6, 22, 6,
+                  T.bands[i], 0.0).setAngle(-14).setDepth(3);
+                this.tweens.add({ targets: band, alpha: { from: 0.55, to: 0 }, y: band.y - 14,
+                  x: band.x + 8, scaleX: 1.6, delay: 380 + i * 130, duration: 1300,
+                  ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, band) });
+              }
+              // ...and a flurry of its element spirals up around the howl.
+              const fx = T.fx;
+              for (let i = 0; i < fx.length; i++) {
+                const a0 = Math.random() * Math.PI * 2, r0 = 10 + Math.random() * 8;
+                const s = this.add.text(petObj.x + Math.cos(a0) * r0, petObj.y - 12,
+                  fx[i], { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                this.tweens.add({ targets: s, alpha: { from: 0.95, to: 0 },
+                  y: s.y - 34 - Math.random() * 16, x: s.x + Math.cos(a0 + 2.5) * 16,
+                  angle: Math.random() * 120 - 60, delay: 260 + i * 140, duration: 1200,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+              }
+              return;
+            }
+            const glyphs = ['🌙', '♪', '✨', '♪', '🌙'];
+            for (let i = 0; i < glyphs.length; i++) {
+              const s = this.add.text(
+                petObj.x + (Math.random() * 26 - 13), petObj.y - 20 - Math.random() * 8,
+                glyphs[i], { fontSize: '11px', resolution: 2 })
+                .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+              this.tweens.add({
+                targets: s, alpha: { from: 0.95, to: 0 }, y: s.y - 26 - Math.random() * 12,
+                x: s.x + (Math.random() * 10 - 5),
+                delay: 260 + i * 160, duration: 900, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, s),
+              });
+            }
+            return;
+          }
+          if (st === 2) {
+            // Tail-chase whirl the way a REAL dog does it: it runs two tight
+            // little circles on the ground. No sprite rotation, no mirror-flip
+            // "card spin" — just position on a small circle, facing wherever
+            // it's currently running, with the walk frames cycling.
+            petObj._trickBusy = true;
+            const x0 = petObj.x, flip0 = petObj.flipX;
+            const r = 9, turns = 2;
+            const spin = { t: 0 };
+            const walkFrames = petObj._animSet ? petObj._animSet.walk : null;
+            this.tweens.add({
+              targets: spin, t: 1, duration: 1700, ease: 'Sine.easeInOut',
+              onUpdate: () => {
+                const a = spin.t * turns * Math.PI * 2;
+                petObj.x = x0 + Math.sin(a) * r;
+                petObj.y = y0 - Math.abs(Math.sin(a * 0.5)) * 2 - (1 - Math.cos(a)) * 1.5;
+                petObj.flipX = Math.cos(a) < 0;                      // face the way it's running
+                if (walkFrames) petObj.setTexture(walkFrames[Math.floor(spin.t * turns * 8) % walkFrames.length]);
+              },
+              onComplete: () => {
+                petObj.x = x0; petObj.y = y0; petObj.flipX = flip0;
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          // Baby: tail-wag wiggle + a happy little hop.
+          petObj._trickBusy = true;
+          this.tweens.add({
+            targets: petObj, angle: { from: -10, to: 10 }, duration: 90,
+            yoyo: true, repeat: 5,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          this.tweens.add({ targets: petObj, y: petObj.y - 8, duration: 150, yoyo: true, ease: 'Sine.easeOut' });
+          return;
+        }
+        if (sp === 'pet_bunny') {
+          const stB = petObj._petStage || 1;
+          if (stB >= 3 && petObj._petId === 'pet_bunny') {
+            // BLIZZARD BINKY (boss's pick): mega-spring so high she vanishes
+            // off-screen, snowflakes swirl where she left, then she drops back
+            // down and lands in a puff of white powder. ❄️
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const actTex = petObj._animSet && petObj._animSet.action;
+            const sitTex = petObj._animSet && petObj._animSet.sit;
+            const flakes = () => {
+              if (!petObj.active || !petObj.visible) return;   // hidden mid-round: no FX leaks
+              for (let i = 0; i < 10; i++) {
+                const f = this.add.text(x0 + (Math.random() * 44 - 22), y0 - 10 - Math.random() * 30,
+                  Math.random() < 0.7 ? '❄' : '✦', { fontSize: `${9 + Math.random() * 4}px`, resolution: 2 })
+                  .setOrigin(0.5, 0.5).setAlpha(0).setDepth(3).setTint(0xdff3ff);
+                this.tweens.add({
+                  targets: f, alpha: { from: 0.95, to: 0 },
+                  y: f.y + 18 + Math.random() * 14, x: f.x + (Math.random() * 16 - 8),
+                  angle: Math.random() * 120 - 60,
+                  delay: i * 70, duration: 900 + Math.random() * 400, ease: 'Sine.easeIn',
+                  onComplete: this._trackPetFx(petObj, f),
+                });
+              }
+            };
+            const powder = () => {
+              if (!petObj.active || !petObj.visible) return;
+              for (let i = 0; i < 12; i++) {
+                const a = (i / 12) * Math.PI * 2;
+                const p = this.add.circle(x0, y0 - 2, 2 + Math.random() * 2.5, 0xffffff, 0.9).setDepth(3);
+                this.tweens.add({
+                  targets: p, alpha: 0,
+                  x: x0 + Math.cos(a) * (14 + Math.random() * 10),
+                  y: y0 - 2 + Math.sin(a) * (7 + Math.random() * 5) - 4,
+                  scale: 2.1, duration: 480, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, p),
+                });
+              }
+            };
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 10, duration: 120, yoyo: true, ease: 'Sine.easeOut' },   // warm-up hop
+                { y: y0 - 10, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+                { scaleY: bs * 0.72, scaleX: bs * 1.2, duration: 130 },            // DEEP crouch
+                { y: y0 - 300, scaleY: bs * 1.2, scaleX: bs * 0.85, alpha: 0.1,    // GONE.
+                  duration: 420, ease: 'Cubic.easeOut',
+                  onStart: () => { if (petObj.active && actTex) petObj.setTexture(actTex); flakes(); } },
+                { y: y0 - 300, duration: 700,                                       // hang time up there
+                  onStart: () => { flakes(); } },
+                { y: y0, alpha: 1, scaleY: bs, scaleX: bs, duration: 460, ease: 'Bounce.easeOut',
+                  onStart: () => { flakes(); },
+                  onComplete: () => {
+                    if (!petObj.active) return;
+                    powder();
+                    if (sitTex) petObj.setTexture(sitTex);
+                  } },
+              ],
+              onComplete: () => {
+                if (!petObj.active) return;
+                petObj.setScale(bs); petObj.y = y0; petObj.setAlpha(1);
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          if (stB >= 3 && petObj._petId === 'pet_bunny_cocoa') {
+            // DRIFT DONUTS (boss's pick): burnout-style spinning donuts around
+            // the owner with dust clouds, screeches to a stop with a wink. 🏎️
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x, flip0 = petObj.flipX;
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0, cy = owner ? owner.y : y0;
+            const r = 30, turns = 2.5;
+            const a0 = Math.atan2(y0 - cy, x0 - cx);
+            const walkFrames = petObj._animSet ? petObj._animSet.walk : null;
+            const spin = { t: 0 };
+            let lastPuff = 0;
+            this.tweens.add({
+              targets: spin, t: 1, duration: 2100, ease: 'Cubic.easeInOut',
+              onUpdate: () => {
+                if (!petObj.active) return;
+                const a = a0 + spin.t * turns * Math.PI * 2;
+                petObj.x = cx + Math.cos(a) * r;
+                petObj.y = cy + Math.sin(a) * (r * 0.55);
+                petObj.flipX = Math.sin(a) > 0;                    // face travel direction
+                if (walkFrames) petObj.setTexture(walkFrames[Math.floor(spin.t * turns * 10) % walkFrames.length]);
+                if (petObj.visible && spin.t - lastPuff > 0.09) {  // dust trail (skip when hidden)
+                  lastPuff = spin.t;
+                  const d = this.add.text(petObj.x, petObj.y + 2, '💨', { fontSize: '10px', resolution: 2 })
+                    .setOrigin(0.5, 0.5).setAlpha(0.8).setDepth(petObj.depth - 0.1);
+                  this.tweens.add({ targets: d, alpha: 0, scale: 1.6, y: d.y - 5,
+                    duration: 430, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                }
+              },
+              onComplete: () => {
+                if (!petObj.active) return;
+                // Screech to a stop back home + big dust cloud + a wink.
+                petObj.x = x0; petObj.y = y0; petObj.flipX = flip0;
+                if (petObj._animSet && petObj._animSet.sit) petObj.setTexture(petObj._animSet.sit);
+                for (let i = 0; i < (petObj.visible ? 6 : 0); i++) {
+                  const d = this.add.circle(x0 + (Math.random() * 20 - 10), y0 - Math.random() * 8,
+                    2.5 + Math.random() * 2, 0xc9a87a, 0.75).setDepth(3);
+                  this.tweens.add({ targets: d, alpha: 0, scale: 2.4, y: d.y - 8,
+                    duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                }
+                if (petObj.visible) {
+                  const w = this.add.text(x0 + (flip0 ? -10 : 10), y0 - 24, '😉',
+                    { fontSize: '13px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                  this.tweens.add({ targets: w, alpha: { from: 1, to: 0 }, y: w.y - 10,
+                    duration: 900, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, w) });
+                }
+                this.time.delayedCall(350, () => { if (petObj.active) petObj._trickBusy = false; });
+              },
+            });
+            return;
+          }
+          // Baby + Stage 2: the classic binky.
+          // Two quick hops then one BIG spring with squash & stretch.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { y: y0 - 10, duration: 130, yoyo: true, ease: 'Sine.easeOut' },
+              { y: y0 - 10, duration: 130, yoyo: true, ease: 'Sine.easeOut' },
+              { scaleY: bs * 0.8, scaleX: bs * 1.12, duration: 90 },          // crouch
+              { y: y0 - 26, scaleY: bs * 1.15, scaleX: bs * 0.92, duration: 200, ease: 'Sine.easeOut' },
+              { y: y0, scaleY: bs, scaleX: bs, duration: 190, ease: 'Bounce.easeOut' },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj._trickBusy = false; },
+          });
+          return;
+        }
+        if (sp === 'pet_dragon') {
+          const st = petObj._petStage || 1;
+          const bsD = petObj._baseScale || 1, yD = petObj.y;
+          const fwdD = (petObj.flipX ? -1 : 1);
+          if (st >= 3 && petObj._petId === 'pet_dragon') {
+            // NEON IGNITION (Violet final form): the queen "ignites" — her
+            // body flashes electric violet, a glowing aura blooms around her,
+            // and she breathes PURPLE smoke laced with violet flame.
+            petObj._trickBusy = true;
+            // The charge-up choreography below owns the scale (inhale puff +
+            // recoil), so this is just the master timer that restores state.
+            this.time.delayedCall(2100, () => {
+              if (!petObj.active) { return; }
+              petObj.setScale(bsD); petObj.clearTint(); petObj._trickBusy = false;
+            });
+            // NEON strobe: short hot flashes so the base art stays visible
+            // between pulses — reads as glowing, not "dipped in purple".
+            for (const t of [250, 620, 990, 1360]) {
+              this.time.delayedCall(t, () => { if (petObj.active) petObj.setTint(0xff9dff); });
+              this.time.delayedCall(t + 140, () => { if (petObj.active) petObj.clearTint(); });
+            }
+            if (petObj.visible) {
+              const cx = petObj.x, cy = yD - petObj.displayHeight * ((petObj.originY || 1) - 0.5);
+              // AURA: subtle — a thin electric rim hugging the body, no big
+              // purple wash drowning the flames.
+              const rim = this.add.ellipse(cx, cy, petObj.displayWidth * 1.02,
+                petObj.displayHeight * 1.02, 0xa64dff, 0.07)
+                .setStrokeStyle(1.5, 0xf0a6ff, 0.85).setDepth(2.9);
+              this.tweens.add({ targets: rim, scaleX: 1.12, scaleY: 1.12,
+                duration: 420, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
+              this.tweens.add({ targets: rim, alpha: 0, delay: 1450, duration: 380,
+                onComplete: this._trackPetFx(petObj, rim) });
+              // CHARGE-UP BREATH (storyboard #12): 1) inhale — chest puffs,
+              // small glow orb grows at the mouth; 2) orb brightens with
+              // radiating lines; 3) ONE big cone blast of neon magenta flame
+              // and purple smoke. Anticipation = drama.
+              const fwdQ = fwdD;
+              // Scale EVERYTHING to her real on-screen size — she's ~1.7x a
+              // normal pet, so lighter-flick-sized effects vanish on her.
+              const scQ = Math.max(1, petObj.displayWidth / 64);
+              // Anchor ON the snout — the beam was floating detached ahead of
+              // her face, so pull it in and up to the open mouth.
+              const mxQ = cx + fwdQ * petObj.displayWidth * 0.15;
+              const myQ = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.34);
+              // 1) inhale: chest puffs out while the orb grows
+              this.tweens.add({ targets: petObj, scaleX: bsD * 1.14, scaleY: bsD * 1.05,
+                delay: 150, duration: 620, ease: 'Sine.easeOut' });
+              const orb = this.add.circle(mxQ, myQ, 2 * scQ, 0xf0b6ff, 0.95).setDepth(3.2);
+              const orbHalo = this.add.circle(mxQ, myQ, 4 * scQ, 0xb46bff, 0.35).setDepth(3.1);
+              this.tweens.add({ targets: orb, scale: 5, delay: 150, duration: 750, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: orbHalo, scale: 5.5, delay: 150, duration: 750, ease: 'Sine.easeIn' });
+              // 2) charge: radiating lines get sucked INTO the orb
+              for (let i = 0; i < 10; i++) {
+                this.time.delayedCall(380 + i * 55, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const a = Math.random() * Math.PI * 2;
+                  const ln = this.add.line(0, 0, mxQ + Math.cos(a) * 26 * scQ, myQ + Math.sin(a) * 22 * scQ,
+                    mxQ + Math.cos(a) * 12 * scQ, myQ + Math.sin(a) * 10 * scQ, 0xe0a6ff, 0.9)
+                    .setOrigin(0).setLineWidth(1.5).setDepth(3.1);
+                  this.tweens.add({ targets: ln, alpha: 0, duration: 240,
+                    ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ln) });
+                });
+              }
+              // 3) RELEASE at ~950ms: orb pops, recoil, one BIG cone blast
+              this.time.delayedCall(950, () => {
+                if (!petObj.active) return;
+                this.tweens.add({ targets: petObj, scaleX: bsD * 0.97, scaleY: bsD * 1.0,
+                  duration: 110, yoyo: true, ease: 'Quad.easeOut' });   // recoil kick
+                const pop = () => { const f1 = this._trackPetFx(petObj, orb), f2 = this._trackPetFx(petObj, orbHalo); f1(); f2(); };
+                this.tweens.add({ targets: [orb, orbHalo], scale: 8, alpha: 0, duration: 180,
+                  ease: 'Quad.easeOut', onComplete: pop });
+                if (!petObj.visible) return;
+
+                // THE TORRENT (per the storyboard): a dense CONTINUOUS beam,
+                // not scattered flakes — for ~700ms, tightly-packed magenta
+                // puffs pour out every 28ms, overlapping into a solid cone
+                // that widens with distance, with a white-hot core streak
+                // down the middle and purple smoke rolling off the edges.
+                for (let i = 0; i < 25; i++) {
+                  this.time.delayedCall(i * 28, () => {
+                    if (!petObj.active || !petObj.visible) return;
+                    const spread = (Math.random() - 0.5) * 2;         // -1..1 across the cone
+                    const reach = (44 + Math.random() * 26) * scQ;
+                    // dense magenta body of the beam
+                    const b = this.add.image(mxQ + fwdQ * 6 * scQ, myQ + spread * 2, `smoke_puff_${i % 3}`)
+                      .setTint([0xff5bff, 0xe84dff, 0xff8dff][i % 3])
+                      .setScale(0.34 * scQ).setAlpha(0.95)
+                      .setFlipX(fwdQ < 0).setAngle(Math.random() * 20 - 10).setDepth(3.2);
+                    this.tweens.add({ targets: b, alpha: 0, scale: (1.15 + Math.random() * 0.35) * scQ,
+                      x: b.x + fwdQ * reach, y: b.y + spread * (5 + reach * 0.22),
+                      angle: b.angle + (Math.random() * 24 - 12),
+                      duration: 380 + Math.random() * 140, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, b) });
+                    // hot pink-white core — small soft blobs riding inside the
+                    // beam, not a solid white bar (looked like a laser glitch)
+                    if (i % 2 === 0) {
+                      const c = this.add.circle(mxQ + fwdQ * 8 * scQ, myQ + spread * 1.5,
+                        2.2 * scQ, 0xffe6ff, 0.7).setDepth(3.3);
+                      this.tweens.add({ targets: c, alpha: 0, scale: 1.8,
+                        x: c.x + fwdQ * reach * 0.85, y: c.y + spread * 3,
+                        duration: 300 + Math.random() * 100, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, c) });
+                    }
+                    // purple smoke curling off the beam edges
+                    if (i % 3 === 0) {
+                      const s = this.add.image(mxQ + fwdQ * (14 + Math.random() * 20) * scQ,
+                        myQ + spread * 6, `smoke_puff_${(i + 1) % 3}`)
+                        .setTint(0xb46bff).setScale(0.3 * scQ).setAlpha(0.55)
+                        .setFlipX(fwdQ < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
+                      this.tweens.add({ targets: s, alpha: 0, scale: (1.2 + Math.random() * 0.4) * scQ,
+                        x: s.x + fwdQ * (24 + Math.random() * 18) * scQ,
+                        y: s.y - (10 + Math.random() * 14),
+                        angle: s.angle + (Math.random() * 30 - 15),
+                        duration: 720 + Math.random() * 240, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  });
+                }
+              });
+            }
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_dragon_crimson') {
+            // INFERNO BREATH (Crimson final form): rears back mid-air and
+            // torches the floor ahead — the blast leaves flame patches that
+            // flicker and burn out on their own.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { angle: -12 * fwdD, scaleX: bsD * 1.06, scaleY: bsD * 1.06, duration: 260, ease: 'Sine.easeOut' },
+                { angle: 6 * fwdD, duration: 140, ease: 'Quad.easeIn', hold: 1100 },
+                { angle: 0, scaleX: bsD, scaleY: bsD, duration: 260, ease: 'Sine.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bsD); petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const scC = Math.max(1, petObj.displayWidth / 64);
+              // Mouth sits LOW on the snout (not the eyes): far forward, ~40% up.
+              const mx = petObj.x + fwdD * petObj.displayWidth * 0.38;
+              const my = yD - petObj.displayHeight * 0.40;
+              // AURA: ember glow hugging the actual body (bounds-anchored).
+              const bdC = petObj.getBounds();
+              const auraC = this.add.ellipse(bdC.centerX, bdC.centerY,
+                bdC.width * 1.08, bdC.height * 1.08, 0xff7a2d, 0.10)
+                .setStrokeStyle(1.2 * scC, 0xffb35c, 0.55).setDepth(1.9);
+              this.tweens.add({ targets: auraC, scaleX: 1.08, scaleY: 1.08,
+                duration: 380, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
+              this.tweens.add({ targets: auraC, alpha: 0, delay: 1500, duration: 350,
+                onComplete: this._trackPetFx(petObj, auraC) });
+              // NEON MARKINGS: molten runes glowing along his spine ridge — not
+              // a whole-body blink. Dots pulse hot while he charges & roars.
+              for (let m = 0; m < 5; m++) {
+                const px = petObj.x + fwdD * petObj.displayWidth * (-0.34 + m * 0.15);
+                const py = yD - petObj.displayHeight * (0.58 + Math.sin((m / 4) * Math.PI) * 0.16);
+                const glow = this.add.circle(px, py, 3.2 * scC, 0xff7a2d, 0.30).setDepth(3.05);
+                const dot = this.add.circle(px, py, 1.5 * scC, 0xffd76a, 0).setDepth(3.1);
+                this.tweens.add({ targets: dot, alpha: 0.95, delay: m * 90,
+                  duration: 300, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, dot) });
+                this.tweens.add({ targets: glow, alpha: 0.05, scale: 1.6, delay: m * 90,
+                  duration: 340, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, glow) });
+              }
+              // CHARGE-UP: orb burns yellow-white at the mouth while he rears
+              // back, then the torrent ROARS out.
+              const orbC = this.add.circle(mx, my, 2 * scC, 0xfff3c9, 0.95).setDepth(3.2);
+              const haloC = this.add.circle(mx, my, 4 * scC, 0xff9a3d, 0.35).setDepth(3.1);
+              this.tweens.add({ targets: orbC, scale: 5, delay: 120, duration: 620, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: haloC, scale: 5.5, delay: 120, duration: 620, ease: 'Sine.easeIn' });
+              this.time.delayedCall(780, () => {
+                const f1 = this._trackPetFx(petObj, orbC), f2 = this._trackPetFx(petObj, haloC);
+                if (!petObj.active) { f1(); f2(); return; }
+                this.tweens.add({ targets: [orbC, haloC], scale: 8, alpha: 0, duration: 160,
+                  ease: 'Quad.easeOut', onComplete: () => { f1(); f2(); } });
+
+              });
+              // THE TORRENT — same dense continuous beam as Violet's, in
+              // furnace colors: packed fire puffs widening into a solid cone,
+              // white-hot blobs riding the core, dark smoke off the edges.
+              for (let i = 0; i < 25; i++) {
+                this.time.delayedCall(800 + i * 28, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const spread = (Math.random() - 0.5) * 2;
+                  const reach = (44 + Math.random() * 26) * scC;
+                  const b = this.add.image(mx + fwdD * 6 * scC, my + spread * 2, `smoke_puff_${i % 3}`)
+                    .setTint([0xff9a3d, 0xff632d, 0xffd76a][i % 3])
+                    .setScale(0.34 * scC).setAlpha(0.95)
+                    .setFlipX(fwdD < 0).setAngle(Math.random() * 20 - 10).setDepth(3.2);
+                  this.tweens.add({ targets: b, alpha: 0, scale: (1.15 + Math.random() * 0.35) * scC,
+                    x: b.x + fwdD * reach, y: b.y + spread * (5 + reach * 0.22),
+                    angle: b.angle + (Math.random() * 24 - 12),
+                    duration: 380 + Math.random() * 140, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, b) });
+                  if (i % 2 === 0) {                    // white-hot core blobs
+                    const c = this.add.circle(mx + fwdD * 8 * scC, my + spread * 1.5,
+                      2.2 * scC, 0xfff3c9, 0.75).setDepth(3.3);
+                    this.tweens.add({ targets: c, alpha: 0, scale: 1.8,
+                      x: c.x + fwdD * reach * 0.85, y: c.y + spread * 3,
+                      duration: 300 + Math.random() * 100, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, c) });
+                  }
+                  if (i % 3 === 0) {                    // dark smoke curling off the flame
+                    const s = this.add.image(mx + fwdD * (14 + Math.random() * 20) * scC,
+                      my + spread * 6, `smoke_puff_${(i + 1) % 3}`)
+                      .setTint(0x5a4038).setAlpha(0.5)
+                      .setScale(0.3 * scC).setFlipX(fwdD < 0)
+                      .setAngle(Math.random() * 24 - 12).setDepth(3);
+                    this.tweens.add({ targets: s, alpha: 0, scale: (1.2 + Math.random() * 0.4) * scC,
+                      x: s.x + fwdD * (24 + Math.random() * 18) * scC,
+                      y: s.y - (10 + Math.random() * 14),
+                      angle: s.angle + (Math.random() * 30 - 15),
+                      duration: 720 + Math.random() * 240, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, s) });
+                  }
+                });
+              }
+              for (let i = 0; i < 3; i++) {             // lingering flame patches
+                this.time.delayedCall(1150 + i * 200, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const px = petObj.x + fwdD * (26 + i * 13 + Math.random() * 5), py = yD + 1;
+                  const patch = this.add.ellipse(px, py, 10, 4, 0xff7a2d, 0.55).setDepth(1);
+                  const flame = this.add.circle(px, py - 3, 2.5, 0xffc94d, 0.9).setDepth(3);
+                  this.tweens.add({ targets: flame, scaleY: { from: 1, to: 1.6 }, y: py - 5,
+                    yoyo: true, repeat: 4, duration: 160, ease: 'Sine.easeInOut' });
+                  this.tweens.add({ targets: [patch, flame], alpha: 0, delay: 1300, duration: 420,
+                    onComplete: this._trackPetFx(petObj, patch) });
+                  this._trackPetFx(petObj, flame);
+                });
+              }
+            }
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_dragon_obsidian') {
+            // VOID SLAM (Obsidian final form): lava cracks flare white-hot,
+            // it DIVES into the ground — dark shockwave, camera thump, embers
+            // erupting from the impact.
+            petObj._trickBusy = true;
+            // CHARGE-UP: a magma orb glows through her chest cracks while the
+            // flare builds — deep orange, like lava under black rock.
+            if (petObj.visible) {
+              const scO = Math.max(1, petObj.displayWidth / 64);
+              const ox = petObj.x, oy = yD - petObj.displayHeight * 0.45;
+              const orbO = this.add.circle(ox, oy, 2 * scO, 0xff5500, 0.75).setDepth(3.1);
+              const haloO = this.add.circle(ox, oy, 4 * scO, 0xffb066, 0.28).setDepth(3.05);
+              this.tweens.add({ targets: orbO, scale: 4.5, duration: 620, ease: 'Sine.easeIn' });
+              this.tweens.add({ targets: haloO, scale: 5, duration: 620, ease: 'Sine.easeIn' });
+              this.time.delayedCall(660, () => {
+                const f1 = this._trackPetFx(petObj, orbO), f2 = this._trackPetFx(petObj, haloO);
+                if (!petObj.active) { f1(); f2(); return; }
+                this.tweens.add({ targets: [orbO, haloO], scale: 7, alpha: 0, duration: 150,
+                  ease: 'Quad.easeOut', onComplete: () => { f1(); f2(); } });
+              });
+              // MOLTEN MARKINGS: lava-vein runes rippling along her spine while
+              // the slam charges (same treatment as Crimson's, in magma colors).
+              for (let m = 0; m < 5; m++) {
+                const px = petObj.x + fwdD * petObj.displayWidth * (-0.34 + m * 0.15);
+                const py = yD - petObj.displayHeight * (0.58 + Math.sin((m / 4) * Math.PI) * 0.16);
+                const glow = this.add.circle(px, py, 3.2 * scO, 0xff5500, 0.30).setDepth(3.05);
+                const dot = this.add.circle(px, py, 1.5 * scO, 0xffb066, 0).setDepth(3.1);
+                this.tweens.add({ targets: dot, alpha: 0.95, delay: m * 90,
+                  duration: 300, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, dot) });
+                this.tweens.add({ targets: glow, alpha: 0.05, scale: 1.6, delay: m * 90,
+                  duration: 340, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+                  onComplete: this._trackPetFx(petObj, glow) });
+              }
+              // AFTERBURN: right after the stomp she rears back up and torches
+              // the air — dark magma fire, orange core, black smoke edges.
+              this.time.delayedCall(1000, () => {
+                if (!petObj.active || !petObj.visible) return;
+                const mxO = petObj.x + fwdD * petObj.displayWidth * 0.38;
+                const myO = yD - petObj.displayHeight * 0.40;
+
+                for (let i = 0; i < 16; i++) {
+                  this.time.delayedCall(i * 30, () => {
+                    if (!petObj.active || !petObj.visible) return;
+                    const spread = (Math.random() - 0.5) * 2;
+                    const reach = (40 + Math.random() * 22) * scO;
+                    const b = this.add.image(mxO + fwdD * 6 * scO, myO + spread * 2, `smoke_puff_${i % 3}`)
+                      .setTint([0xff5500, 0xb0342d, 0xffb066][i % 3])
+                      .setScale(0.32 * scO).setAlpha(0.95)
+                      .setFlipX(fwdD < 0).setAngle(Math.random() * 20 - 10).setDepth(3.2);
+                    this.tweens.add({ targets: b, alpha: 0, scale: (1.1 + Math.random() * 0.3) * scO,
+                      x: b.x + fwdD * reach, y: b.y + spread * (5 + reach * 0.22),
+                      angle: b.angle + (Math.random() * 24 - 12),
+                      duration: 360 + Math.random() * 140, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, b) });
+                    if (i % 2 === 0) {                  // white-hot core
+                      const c = this.add.circle(mxO + fwdD * 8 * scO, myO + spread * 1.5,
+                        2 * scO, 0xffdf9a, 0.75).setDepth(3.3);
+                      this.tweens.add({ targets: c, alpha: 0, scale: 1.7,
+                        x: c.x + fwdD * reach * 0.85, y: c.y + spread * 3,
+                        duration: 300 + Math.random() * 90, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, c) });
+                    }
+                    if (i % 4 === 0) {                  // black smoke off the flame
+                      const s = this.add.image(mxO + fwdD * (14 + Math.random() * 18) * scO,
+                        myO + spread * 6, `smoke_puff_${(i + 1) % 3}`)
+                        .setTint(0x2c2630).setAlpha(0.5).setScale(0.28 * scO)
+                        .setFlipX(fwdD < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
+                      this.tweens.add({ targets: s, alpha: 0, scale: (1.1 + Math.random() * 0.4) * scO,
+                        x: s.x + fwdD * (22 + Math.random() * 16) * scO,
+                        y: s.y - (10 + Math.random() * 12),
+                        angle: s.angle + (Math.random() * 30 - 15),
+                        duration: 700 + Math.random() * 220, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  });
+                }
+              });
+            }
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bsD * 1.05, scaleY: bsD * 1.12, duration: 420, ease: 'Sine.easeOut',
+                  onStart: () => {                      // cracks flare
+                    let n = 0;
+                    const flick = this.time.addEvent({ repeat: 5, delay: 90, callback: () => {
+                      if (!petObj.active) { flick.remove(); return; }
+                      petObj.setTint((n++ % 2) ? 0xffb066 : 0xffffff);
+                    } });
+                  }, hold: 260 },
+                { scaleX: bsD * 1.3, scaleY: bsD * 0.55, duration: 130, ease: 'Quad.easeIn',   // SLAM
+                  onComplete: () => {
+                    if (!petObj.active) return;
+                    petObj.clearTint();
+
+                    if (!petObj.visible) return;
+                    const wave = this.add.ellipse(petObj.x, yD, 26, 9, 0x1a0a1e, 0)
+                      .setStrokeStyle(3, 0xff5500, 0.85).setDepth(3);
+                    this.tweens.add({ targets: wave, scaleX: 3.4, scaleY: 3.4, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, wave) });
+                    const scS = Math.max(1, petObj.displayWidth / 64);
+                    for (let i = 0; i < 10; i++) {      // embers erupt
+                      const e = this.add.circle(petObj.x + (Math.random() * 16 - 8) * scS, yD - 2,
+                        (1.5 + Math.random() * 1.5) * scS, [0xffb066, 0xff5500, 0xffdf9a][i % 3], 0.95).setDepth(3);
+                      this.tweens.add({ targets: e, alpha: 0,
+                        x: e.x + (Math.random() * 44 - 22) * scS, y: e.y - (14 + Math.random() * 26) * scS,
+                        duration: 520 + Math.random() * 300, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, e) });
+                    }
+                    for (let i = 0; i < 7; i++) {       // BLACK SMOKE blast rolling off the impact
+                      const s = this.add.image(petObj.x + (Math.random() * 20 - 10) * scS, yD - 3,
+                        `smoke_puff_${i % 3}`)
+                        .setTint(0x2c2630).setAlpha(0.7).setScale(0.24 * scS)
+                        .setAngle(Math.random() * 360).setDepth(3);
+                      this.tweens.add({ targets: s, alpha: 0, scale: (1 + Math.random() * 0.5) * scS,
+                        x: s.x + (Math.random() * 50 - 25) * scS, y: s.y - (8 + Math.random() * 16) * scS,
+                        angle: s.angle + (Math.random() * 40 - 20),
+                        duration: 900 + Math.random() * 400, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  } },
+                { scaleX: bsD, scaleY: bsD, duration: 340, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bsD); petObj.clearTint(); petObj._trickBusy = false; },
+            });
+            return;
+          }
+          // Baby & stage-2: fire breath — rear back, then a torrent of REAL
+          // flame particles (no emoji) from the MOUTH. Mouth height is
+          // computed from the live display size + hover origin, so it stays
+          // on the snout whether the dragon is grounded (baby) or flying
+          // (stage 2) — it used to hardcode y-14, which on the bigger
+          // hovering bodies put the flames somewhere deeply unfortunate.
+          petObj._trickBusy = true;
+          // Dragon art faces RIGHT unflipped, so the mouth is on the +x side;
+          // flipX mirrors it to -x. Puffs spawn at head height (mouth), not mid-body.
+          const fwd = (petObj.flipX ? -1 : 1);
+          this.tweens.add({
+            targets: petObj, angle: -8 * fwd, duration: 160, yoyo: true, hold: 620,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          if (petObj.visible) {
+            // Mouth anchor: hover origin shifts the sprite up by
+            // (originY-1)*displayHeight, so fold that into the head height.
+            const mx = petObj.x + fwd * petObj.displayWidth * 0.22;
+            const my = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.28);
+            // Boss call: stage 2 breathes SMOKE — a teen dragon still working
+            // up to real fire. Babies DON'T smoke (boss rule): a hatchling just
+            // sputters a few tiny embers — trying his best, no fire yet.
+            if ((petObj._petStage || 1) < 2) {
+              for (let i = 0; i < 6; i++) {
+                this.time.delayedCall(200 + i * 130, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const e = this.add.circle(mx + fwd * (2 + Math.random() * 4),
+                    my + (Math.random() - 0.5) * 3, 1 + Math.random(),
+                    [0xffd76a, 0xff9a3d, 0xff632d][i % 3], 0.9).setDepth(3);
+                  this.tweens.add({ targets: e, alpha: 0,
+                    x: e.x + fwd * (8 + Math.random() * 10),
+                    y: e.y - 2 + Math.random() * 6,
+                    scale: 0.4, duration: 380 + Math.random() * 160,
+                    ease: 'Quad.easeOut', onComplete: this._trackPetFx(petObj, e) });
+                });
+              }
+              return;
+            }
+            for (let i = 0; i < 8; i++) {
+              this.time.delayedCall(180 + i * 95, () => {
+                if (!petObj.active || !petObj.visible) return;
+                const spread = (Math.random() - 0.5) * 4;
+                // REAL wispy smoke art (boss: "not circles") — small budding
+                // puff near the mouth growing into the big trailing wisp,
+                // gently tumbling as it drifts up and away.
+                const key = `smoke_puff_${i < 3 ? 0 : (i < 6 ? 1 : 2)}`;
+                const s = this.add.image(mx, my + spread, key)
+                  .setScale(0.28 + Math.random() * 0.1).setAlpha(0.75)
+                  .setFlipX(fwd < 0).setAngle(Math.random() * 24 - 12).setDepth(3);
+                this.tweens.add({ targets: s, alpha: 0,
+                  scale: 0.8 + Math.random() * 0.3,
+                  angle: s.angle + (Math.random() * 30 - 15),
+                  x: s.x + fwd * (18 + Math.random() * 14),
+                  y: s.y - 8 - Math.random() * 10 + spread * 2,
+                  duration: 780 + Math.random() * 260, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, s) });
+              });
+            }
+            // One little cough-ring at the end — she's trying, okay.
+            this.time.delayedCall(1000, () => {
+              if (!petObj.active || !petObj.visible) return;
+              const ring = this.add.circle(mx + fwd * 10, my - 4, 3, 0x9a93a8, 0)
+                .setStrokeStyle(1.5, 0xbdb7c6, 0.55).setDepth(3);
+              this.tweens.add({ targets: ring, scale: 2.4, alpha: 0, x: ring.x + fwd * 10, y: ring.y - 8,
+                duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+            });
+          }
+          return;
+        }
+        if (sp === 'pet_cat') {
+          const st = petObj._petStage || 1;
+          const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+          if (st >= 3 && petObj._petId === 'pet_cat_black') {
+            // VOID BLINK: the mystic cat dissolves into violet mist and
+            // reappears on the other side of her owner, leaving a trail of
+            // afterimages and floating stars. Spooky. Elegant. Cat.
+            petObj._trickBusy = true;
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0 + 60, cy = owner ? owner.y : y0;
+            const toX = cx + (x0 >= cx ? -1 : 1) * 34;
+            const puff = (x, y) => {
+              for (let i = 0; i < 5; i++) {
+                const p = this.add.circle(x + (Math.random() * 18 - 9), y - 6 - Math.random() * 14,
+                  2 + Math.random() * 2, 0x9b59ff, 0.8).setDepth(3);
+                this.tweens.add({ targets: p, alpha: 0, y: p.y - 12, scale: 2.2,
+                  duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
+              }
+              const s = this.add.text(x, y - 22, Math.random() < 0.5 ? '✦' : '⭐',
+                { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0.9).setDepth(3);
+              this.tweens.add({ targets: s, alpha: 0, y: s.y - 16, angle: 50,
+                duration: 700, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+            };
+            const ghost = () => {
+              const g = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                .setOrigin(petObj.originX, petObj.originY).setScale(petObj.scaleX, petObj.scaleY)
+                .setFlipX(petObj.flipX).setTint(0x9b59ff).setAlpha(0.45).setDepth(petObj.depth - 0.1);
+              this.tweens.add({ targets: g, alpha: 0, duration: 500, ease: 'Sine.easeIn',
+                onComplete: this._trackPetFx(petObj, g) });
+            };
+            this.tweens.add({ targets: petObj, alpha: 0.2, duration: 110, yoyo: true, repeat: 2 });
+            const hops = [{ x: (x0 + cx) / 2, y: cy + 22 }, { x: toX, y: y0 }];
+            hops.forEach((p, i) => {
+              this.time.delayedCall(480 + i * 300, () => {
+                if (!petObj.active) return;
+                ghost(); puff(petObj.x, petObj.y);
+                petObj.setPosition(p.x, p.y); petObj.flipX = p.x > cx;
+                petObj.setAlpha(1); this._placePetAcc(petObj); puff(p.x, p.y);
+              });
+            });
+            this.time.delayedCall(1500, () => {
+              if (!petObj.active) return;
+              petObj.setAlpha(1); petObj._trickBusy = false;
+            });
+            return;
+          }
+          if (st >= 3 && petObj._petId === 'pet_cat_snow') {
+            // FROST CORONATION (throne + crown combo the boss picked): an ice
+            // throne crystallizes out of the floor, the queen LEAPS onto it,
+            // a crown of light materializes above her with silver rays while
+            // frost rings pulse outward and sparkle confetti falls — then the
+            // throne shatters into glitter and she hops down like it's normal.
+            petObj._trickBusy = true;
+            const sitTex = petObj._animSet && petObj._animSet.sit;
+            const actTex = petObj._animSet && petObj._animSet.action;
+            const y0c = petObj.y, x0c = petObj.x, flip0 = petObj.flipX;
+            const fwd = flip0 ? -1 : 1;
+            const tx = x0c + fwd * 26;                 // throne spot, just ahead of her
+            const SEAT = 26;                           // how high the seat lifts her
+            // ── The throne: a cluster of ice spikes + a seat slab, grown from 0.
+            const throne = [];
+            const mk = (dx, w, h, col, alpha) => {
+              const t = this.add.triangle(tx + dx, y0c + 4, 0, 0, w, 0, w / 2, -h, col, alpha)
+                .setOrigin(0.5, 1).setDepth(1).setScale(1, 0);
+              throne.push(t); this._trackPetFx(petObj, t); return t;
+            };
+            mk(-fwd * 12, 10, 34, 0x9fd8ff, 0.9);      // tall backrest spike
+            mk(-fwd * 5, 9, 44, 0xdff2ff, 0.95);       // tallest backrest spike
+            mk(fwd * 3, 8, 26, 0xbfe8ff, 0.9);
+            mk(-fwd * 18, 7, 20, 0x9fd8ff, 0.8);
+            mk(fwd * 10, 7, 16, 0xbfe8ff, 0.85);
+            const slab = this.add.ellipse(tx, y0c - SEAT + 8, 30, 9, 0xdff2ff, 0.9)
+              .setDepth(1).setScale(0);
+            throne.push(slab); this._trackPetFx(petObj, slab);
+            for (const t of throne)
+              this.tweens.add({ targets: t, scaleY: 1, scaleX: 1, duration: 460,
+                delay: 120 + Math.random() * 200, ease: 'Back.easeOut' });
+            // frost burst as it erupts
+            const ring0 = this.add.ellipse(tx, y0c + 2, 20, 7, 0x9fd8ff, 0.5).setDepth(1);
+            this.tweens.add({ targets: ring0, alpha: 0, scaleX: 3, scaleY: 3, duration: 700,
+              ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring0) });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                // crouch while the throne grows
+                { scaleY: bs * 0.82, scaleX: bs * 1.1, duration: 620, ease: 'Sine.easeOut' },
+                // regal LEAP up onto the seat
+                { x: tx, y: y0c - SEAT - 14, scaleY: bs * 1.06, scaleX: bs * 0.96,
+                  angle: fwd * 8, duration: 330, ease: 'Sine.easeOut',
+                  onStart: () => { if (petObj.active && actTex) petObj.setTexture(actTex); } },
+                // settle onto the throne, composed
+                { y: y0c - SEAT, angle: 0, scaleX: bs, scaleY: bs, duration: 160,
+                  ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    if (!petObj.active) return;   // pet destroyed mid-trick (re-equip/leave)
+                    if (sitTex) petObj.setTexture(sitTex);
+                    petObj.setFlipX(flip0);
+                    // ── CORONATION: crown of light + silver rays + frost rings.
+                    const cr = this.add.text(tx, petObj.y - 34, '\u2655', {
+                      fontSize: '16px', color: '#ffe9a8', resolution: 2 })
+                      .setOrigin(0.5, 1).setAlpha(0).setDepth(3).setScale(0.4);
+                    this.tweens.add({ targets: cr, alpha: 0.95, scale: 1, y: cr.y - 4,
+                      duration: 500, ease: 'Back.easeOut' });
+                    this.tweens.add({ targets: cr, alpha: 0, y: cr.y - 14, delay: 1500,
+                      duration: 500, onComplete: this._trackPetFx(petObj, cr) });
+                    for (let i = 0; i < 8; i++) {                       // silver ray burst
+                      const a = -Math.PI / 2 + (i - 3.5) * 0.42;
+                      const ray = this.add.rectangle(tx, petObj.y - 26, 2, 16, 0xffffff, 0.9)
+                        .setAngle(a * 180 / Math.PI + 90).setDepth(3).setScale(1, 0.2);
+                      this.tweens.add({ targets: ray, scaleY: 1.6, alpha: 0,
+                        x: tx + Math.cos(a) * 26, y: petObj.y - 26 + Math.sin(a) * 26,
+                        delay: 250 + i * 45, duration: 620, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, ray) });
+                    }
+                    for (let i = 0; i < 3; i++) {                        // frost shockwave rings
+                      const ring = this.add.ellipse(tx, y0c + 2, 24, 8, 0x9fd8ff, 0.45).setDepth(1);
+                      this.tweens.add({ targets: ring, alpha: 0, scaleX: 3.6, scaleY: 3.6,
+                        delay: 300 + i * 380, duration: 800, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, ring) });
+                    }
+                    for (let i = 0; i < 10; i++) {                       // sparkle confetti rain
+                      const c = this.add.star(tx + (Math.random() * 60 - 30),
+                        petObj.y - 34 - Math.random() * 12, 4, 1.3, 3.6,
+                        i % 2 ? 0xe8f4ff : 0xfff6d8, 0.95).setDepth(3);
+                      this.tweens.add({ targets: c, y: y0c + 2, alpha: 0,
+                        angle: Math.random() * 160 - 80, delay: 350 + i * 120,
+                        duration: 900 + Math.random() * 500, ease: 'Sine.easeIn',
+                        onComplete: this._trackPetFx(petObj, c) });
+                    }
+                                    // the office FEELS it
+                  } },
+                // hold court on the throne
+                { alpha: 1, duration: 2100 },
+                // hop down as the throne shatters behind her
+                { x: x0c, y: y0c, angle: fwd * -6, duration: 340, ease: 'Sine.easeOut',
+                  onStart: () => {
+                    if (petObj.active && actTex) petObj.setTexture(actTex);
+                    for (const t of throne) {
+                      if (!t.active) continue;    // purged mid-trick
+                      this.tweens.add({ targets: t, alpha: 0, y: t.y - 6 - Math.random() * 8,
+                        x: t.x + (Math.random() * 16 - 8), angle: Math.random() * 40 - 20,
+                        scaleX: 0.4, scaleY: 0.4, duration: 480, ease: 'Sine.easeIn' });
+                      const sh = this.add.star(t.x, t.y - 10, 4, 1.2, 3.2, 0xbfe8ff, 0.9).setDepth(3);
+                      this.tweens.add({ targets: sh, alpha: 0, y: sh.y - 14,
+                        x: sh.x + (Math.random() * 20 - 10), angle: 150, duration: 600,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, sh) });
+                    }
+                  } },
+              ],
+              onComplete: () => {
+                if (!petObj.active) return;
+                petObj.x = x0c; petObj.y = y0c; petObj.angle = 0;
+                petObj.setScale(bs); petObj.setFlipX(flip0);
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          if (st >= 3) {
+            // BOSS SLAM (amber tabby): rears up tall... and SLAMS down with a
+            // real thud — camera shake, dust ring, amber sparks. Respect.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 1.28, scaleX: bs * 0.86, angle: petObj.flipX ? 10 : -10,
+                  duration: 380, ease: 'Sine.easeOut', hold: 220 },                       // rear up
+                { scaleY: bs * 0.66, scaleX: bs * 1.32, angle: 0, y: y0 + 2,
+                  duration: 120, ease: 'Sine.easeIn',
+                  onComplete: () => {
+
+                    const ring = this.add.ellipse(petObj.x, y0, 22, 8, 0xffb347, 0)
+                      .setStrokeStyle(2, 0xffb347, 0.8).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    for (let i = 0; i < 6; i++) {
+                      const g = this.add.star(petObj.x + (Math.random() * 30 - 15), y0 - 2,
+                        4, 1.5, 4, 0xffb347, 0.9).setDepth(3);
+                      this.tweens.add({ targets: g, alpha: 0, y: g.y - 14 - Math.random() * 12,
+                        x: g.x + (Math.random() * 16 - 8), angle: 90, duration: 600,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                    }
+                  } },
+                { scaleY: bs, scaleX: bs, y: y0, duration: 240, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st === 2) {
+            // POUNCE: butt-wiggle wind-up (the little hip shimmy cats do),
+            // then a lunge forward and a trot back to the start.
+            petObj._trickBusy = true;
+            const fwd = petObj.flipX ? -1 : 1;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 0.82, scaleX: bs * 1.1, angle: { from: -4, to: 4 },
+                  duration: 90, yoyo: true, repeat: 4 },                                    // wiggle...
+                { x: x0 + fwd * 34, y: y0 - 14, scaleY: bs * 1.12, scaleX: bs * 0.9,
+                  angle: 0, duration: 200, ease: 'Sine.easeOut' },                          // POUNCE
+                { y: y0, scaleY: bs * 0.85, scaleX: bs * 1.15, duration: 110, ease: 'Sine.easeIn' },
+                { scaleY: bs, scaleX: bs, duration: 140, ease: 'Back.easeOut', hold: 200 },
+                { x: x0, duration: 320, ease: 'Sine.easeInOut',
+                  onStart: () => { petObj.flipX = !petObj.flipX; },
+                  onComplete: () => { petObj.flipX = fwd < 0; } },
+              ],
+              onComplete: () => {
+                petObj.setScale(bs); petObj.setPosition(x0, y0); petObj.angle = 0;
+                petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          // Baby: big lazy stretch (long and low), then a little tail-flick shake.
+          petObj._trickBusy = true;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { scaleX: bs * 1.25, scaleY: bs * 0.82, duration: 420, ease: 'Sine.easeInOut', yoyo: true, hold: 260 },
+              { angle: { from: -6, to: 6 }, duration: 110, yoyo: true, repeat: 2 },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          return;
+        }
+        if (sp === 'pet_duck') {
+          const st = petObj._petStage || 1;
+          if (st === 2) {
+            // SHOW-OFF FLAP (2nd form only — the dive is final-form
+            // exclusive): the mallard rears up tall, throws a rapid-fire
+            // wing-beat tantrum with feathers flying, hops a proud little
+            // half-circle... and finishes with a big QUACK!
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const fwd = petObj.flipX ? -1 : 1;
+            for (let i = 0; i < 6; i++) {           // feathers fly off the flapping
+              this.time.delayedCall(260 + i * 130, () => {
+                if (!petObj.active) return;
+                const f = this.add.ellipse(petObj.x + (Math.random() * 20 - 10),
+                  petObj.y - 14 - Math.random() * 10, 7, 3, i % 2 ? 0xffffff : 0x8a6b47, 0.9)
+                  .setAngle(Math.random() * 90 - 45).setDepth(3);
+                this.tweens.add({ targets: f, alpha: 0, y: f.y + 16 + Math.random() * 10,
+                  x: f.x + (Math.random() * 26 - 13), angle: f.angle + 160,
+                  duration: 900, ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, f) });
+              });
+            }
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleY: bs * 1.22, scaleX: bs * 0.88, duration: 200, ease: 'Back.easeOut' },  // rear UP tall
+                { angle: { from: -16, to: 16 }, duration: 60, yoyo: true, repeat: 9 },          // wing-beat tantrum
+                { y: y0 - 10, x: x0 + fwd * 12, angle: 0, duration: 150, yoyo: true, ease: 'Sine.easeOut' }, // hop
+                { y: y0 - 10, x: x0 - fwd * 12, duration: 150, yoyo: true, ease: 'Sine.easeOut',             // hop back
+                  onStart: () => { petObj.flipX = !petObj.flipX; } },
+                { scaleY: bs * 1.3, scaleX: bs * 0.92, duration: 140, ease: 'Back.easeOut', hold: 500,       // big finish...
+                  onStart: () => {
+                    petObj.flipX = fwd < 0;
+                    const q = this.add.text(petObj.x + fwd * 14, petObj.y - 30, 'QUACK!', {
+                      fontSize: '10px', fontStyle: 'bold', color: '#fff', resolution: 2,
+                      backgroundColor: '#2e7d32', padding: { x: 4, y: 2 } }).setOrigin(0.5, 1).setDepth(5);
+                    this.tweens.add({ targets: q, alpha: { from: 1, to: 0 }, y: q.y - 14,
+                      scale: { from: 0.6, to: 1.15 }, duration: 950, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, q) });
+                  } },
+                { scaleY: bs, scaleX: bs, duration: 180, ease: 'Sine.easeIn' },
+              ],
+              onComplete: () => {
+                petObj.setScale(bs); petObj.setPosition(x0, y0); petObj.angle = 0;
+                petObj.flipX = fwd < 0; petObj._trickBusy = false;
+              },
+            });
+            return;
+          }
+          if (st >= 3) {
+            // SPLASH DIVE (the boss's idea — FINAL FORM exclusive): the duck
+            // dives INTO the floor like it's water, swims under the surface
+            // (a moving ripple trail), and bursts back up on the other side
+            // of its owner. Golden drake = golden geyser, swan = frost plume.
+            petObj._trickBusy = true;
+            const bs = petObj._baseScale || 1, y0 = petObj.y, x0 = petObj.x;
+            const snow = petObj._petId === 'pet_duck_snow';
+            const theme = snow
+              ? { c: 0xeaf6ff, drop: '❄', big: true }
+              : { c: 0xffd75e, drop: '✨', big: true };   // golden drake
+            const owner = ownerOf();
+            const cx = owner ? owner.x : x0 + 60;
+            const riseX = cx + (x0 >= cx ? -1 : 1) * 36;   // pop up PAST the owner
+            const splash = (x, big) => {
+              const r = this.add.ellipse(x, y0, big ? 26 : 18, big ? 9 : 6, theme.c, 0)
+                .setStrokeStyle(2, theme.c, 0.85).setDepth(3);
+              this.tweens.add({ targets: r, scaleX: big ? 2.6 : 2, scaleY: big ? 2.6 : 2, alpha: 0,
+                duration: 620, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              for (let i = 0; i < (big ? 6 : 4); i++) {
+                const d = this.add.text(x + (Math.random() * 24 - 12), y0 - 2, theme.drop,
+                  { fontSize: '10px', resolution: 2 }).setOrigin(0.5, 1).setAlpha(0.9).setDepth(3);
+                this.tweens.add({ targets: d, alpha: 0, y: d.y - 16 - Math.random() * 14,
+                  x: d.x + (Math.random() * 12 - 6), duration: 520 + Math.random() * 200,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+              }
+            };
+            const fwd = riseX >= x0 ? 1 : -1;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 22, scaleY: bs * 1.15, scaleX: bs * 0.9, duration: 200, ease: 'Sine.easeOut' }, // hop up
+                { y: y0 + 4, angle: 55 * fwd, scaleY: bs * 1.2, scaleX: bs * 0.8,                          // nose-down DIVE
+                  duration: 190, ease: 'Sine.easeIn',
+                  onComplete: () => { splash(x0, false); petObj.setAlpha(0); petObj.angle = 0; } },
+              ],
+            });
+            // Underwater: a ripple trail "swims" from the dive point to the rise point.
+            for (let i = 1; i <= 3; i++) {
+              this.time.delayedCall(520 + i * 220, () => {
+                if (!petObj.active) return;
+                const rx = x0 + (riseX - x0) * (i / 4);
+                const r = this.add.ellipse(rx, y0, 14, 5, theme.c, 0)
+                  .setStrokeStyle(1, theme.c, 0.6).setDepth(1);
+                this.tweens.add({ targets: r, scaleX: 1.9, scaleY: 1.9, alpha: 0,
+                  duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              });
+            }
+            this.time.delayedCall(1450, () => {     // SURFACE! burst up + shake dry
+              if (!petObj.active) return;
+              petObj.x = riseX; petObj.flipX = riseX > cx;
+              splash(riseX, theme.big);
+              petObj.setAlpha(1);
+              // Final forms surface like ROYALTY: they rocket higher, HANG at
+              // the apex wings-out (action frame) under a burst of their
+              // element, and touch down inside an expanding shockwave ring.
+              const apex = theme.big ? [
+                { y: y0 - 46, scaleY: bs * 1.22, scaleX: bs * 0.84, duration: 260, ease: 'Sine.easeOut',
+                  onStart: () => { if (petObj._animSet) petObj.setTexture(petObj._animSet.action); } },
+                { y: y0 - 46, duration: 420,                                             // wings-out hang
+                  onStart: () => {
+                    if (snow) {
+                      // SWAN: no gold fireworks — a private FLURRY. Mist
+                      // billows off the wings and snowflakes drift DOWN
+                      // around her, falling all the way to the floor.
+                      for (let i = 0; i < 5; i++) {
+                        const m = this.add.circle(petObj.x + (Math.random() * 30 - 15),
+                          petObj.y - 40 - Math.random() * 8, 3 + Math.random() * 3, 0xeaf6ff, 0.55).setDepth(3);
+                        this.tweens.add({ targets: m, alpha: 0, scale: 2.6,
+                          x: m.x + (Math.random() * 20 - 10), delay: i * 70, duration: 700,
+                          ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, m) });
+                      }
+                      for (let i = 0; i < 8; i++) {
+                        const f = this.add.text(petObj.x + (Math.random() * 44 - 22),
+                          petObj.y - 44 - Math.random() * 8, '❄', { fontSize: (8 + Math.random() * 4) + 'px',
+                          resolution: 2 }).setOrigin(0.5).setAlpha(0.95).setDepth(3);
+                        this.tweens.add({ targets: f, y: y0 - 2, x: f.x + (Math.random() * 18 - 9),
+                          angle: Math.random() * 180 - 90, alpha: 0, delay: i * 110,
+                          duration: 1100 + Math.random() * 500, ease: 'Sine.easeIn',
+                          onComplete: this._trackPetFx(petObj, f) });
+                      }
+                    } else {
+                      for (let i = 0; i < 6; i++) {
+                        const g = this.add.star(petObj.x + (Math.random() * 34 - 17),
+                          petObj.y - 40 - Math.random() * 10, 4, 1.5, 4, theme.c, 0.95).setDepth(3);
+                        this.tweens.add({ targets: g, alpha: 0, angle: 120, y: g.y - 14,
+                          x: g.x + (Math.random() * 14 - 7), delay: i * 60, duration: 620,
+                          ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+                      }
+                    }
+                  } },
+                { y: y0, scaleY: bs, scaleX: bs, duration: 240, ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    const ring = this.add.ellipse(petObj.x, y0, 24, 9, theme.c, 0)
+                      .setStrokeStyle(2, theme.c, 0.85).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0,
+                      duration: 750, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  } },
+              ] : [
+                { y: y0 - 24, scaleY: bs * 1.2, scaleX: bs * 0.85, duration: 240, ease: 'Sine.easeOut' },
+                { y: y0, scaleY: bs, scaleX: bs, duration: 260, ease: 'Bounce.easeOut' },
+              ];
+              // A common duck shakes dry. Her Majesty takes a slow ROYAL BOW
+              // under a private aurora, then rises composed.
+              const finale = snow ? [
+                { angle: (riseX >= cx ? -1 : 1) * 16, scaleY: bs * 0.94, duration: 480,
+                  ease: 'Sine.easeInOut', hold: 650, yoyo: true,
+                  onStart: () => {
+                    const bandCols = [0x7fffd4, 0xc5a3ff, 0x9fd8ff, 0xffe9a8];
+                    for (let i = 0; i < 4; i++) {
+                      const band = this.add.ellipse(petObj.x - 24 + i * 16, petObj.y - 46 - (i % 2) * 6,
+                        22, 6, bandCols[i], 0).setAngle(-14).setDepth(3);
+                      this.tweens.add({ targets: band, alpha: { from: 0.5, to: 0 }, y: band.y - 12,
+                        x: band.x + 8, scaleX: 1.6, delay: 120 + i * 140, duration: 1300,
+                        ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, band) });
+                    }
+                  } },
+              ] : [
+                { angle: { from: -14, to: 14 }, duration: 70, yoyo: true, repeat: 4 },  // shake dry
+              ];
+              this.tweens.chain({
+                targets: petObj,
+                tweens: [
+                  ...apex,
+                  ...finale,
+                ],
+                onComplete: () => {
+                  petObj.y = y0; petObj.angle = 0; petObj.setScale(bs); petObj._trickBusy = false;
+                },
+              });
+            });
+            return;
+          }
+          // Baby: flap-flap — fast wing-beat wobble + two stubby hops and a 💦 shake.
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          this.tweens.add({
+            targets: petObj, angle: { from: -12, to: 12 }, duration: 70, yoyo: true, repeat: 7,
+            onComplete: () => { petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { y: y0 - 7, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+              { y: y0 - 7, duration: 120, yoyo: true, ease: 'Sine.easeOut' },
+            ],
+            onComplete: () => { petObj.y = y0; petObj.setScale(bs); },
+          });
+          const d = this.add.text(petObj.x, petObj.y - 14, '💦', { fontSize: '10px', resolution: 2 })
+            .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+          this.tweens.add({
+            targets: d, alpha: { from: 0.9, to: 0 }, y: d.y - 12,
+            delay: 150, duration: 500, onComplete: this._trackPetFx(petObj, d),
+          });
+          return;
+        }
+        if (sp === 'pet_turtle') {
+          const st = petObj._petStage || 1;
+          const bs = petObj._baseScale || 1, y0 = petObj.y;
+          if (st >= 3 && petObj._petId === 'pet_turtle_sapphire') {
+            // FROST STOMP: the guardian rears up and STOMPS (shockwave +
+            // camera shake), exhales a cone of freezing mist, and where the
+            // breath lands, ICE CRYSTALS bloom out of the ground, glint,
+            // and shatter into sparkles.
+            petObj._trickBusy = true;
+            const dir = petObj.flipX ? -1 : 1;             // breath goes where she faces
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                // Rear up...
+                { scaleY: bs * 1.14, scaleX: bs * 0.92, y: y0 - 6, duration: 260, ease: 'Sine.easeOut' },
+                // ...STOMP down.
+                { scaleY: bs * 0.82, scaleX: bs * 1.14, y: y0, duration: 110, ease: 'Quad.easeIn',
+                  onComplete: () => {
+                    if (!petObj.active) return;
+
+                    if (petObj.visible) {
+                      const ring = this.add.ellipse(petObj.x, y0, 22, 8, 0xbfeaff, 0)
+                        .setStrokeStyle(2, 0xbfeaff, 0.9).setDepth(3);
+                      this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                        duration: 500, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    }
+                  } },
+                // Hold the crouch and BLOW: freezing mist streams from the
+                // MOUTH (head height, straight ahead), not the undercarriage.
+                { scaleY: bs * 0.94, scaleX: bs * 1.04, duration: 160, ease: 'Sine.easeOut', hold: 900,
+                  onComplete: () => {
+                    if (!petObj.active || !petObj.visible) return;
+                    const mouthY = y0 - petObj.displayHeight * 0.62;   // head height
+                    const mouthX = petObj.x + dir * petObj.displayWidth * 0.42;
+                    for (let i = 0; i < 12; i++) {
+                      this.time.delayedCall(i * 70, () => {
+                        if (!petObj.active || !petObj.visible) return;
+                        const spread = (Math.random() - 0.5) * 6;
+                        const m = this.add.circle(mouthX, mouthY + spread,
+                          1.5 + Math.random() * 1.5, 0xdff4ff, 0.8).setDepth(3);
+                        // cone: shoots straight AHEAD, widening + sinking to the ground
+                        this.tweens.add({ targets: m, alpha: 0, scale: 2.8,
+                          x: m.x + dir * (34 + Math.random() * 26),
+                          y: mouthY + spread * 3 + 6 + Math.random() * 10,
+                          duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, m) });
+                      });
+                    }
+                    // Where the breath lands: REAL ice-crystal clusters grow
+                    // out of the ground — small, then medium, then the big one.
+                    for (let i = 0; i < 3; i++) {
+                      this.time.delayedCall(480 + i * 220, () => {
+                        if (!petObj.active || !petObj.visible) return;
+                        const cx = petObj.x + dir * (30 + i * 15 + Math.random() * 4);
+                        const cy = y0 + 2 + (Math.random() * 4 - 2);
+                        const c = this.add.image(cx, cy, 'ice_crystal_' + i)
+                          .setOrigin(0.5, 1).setDepth(3).setScale(0);
+                        const targetScale = (14 + i * 7) / c.width;    // grow: 14px → 21px → 28px tall
+                        this.tweens.add({ targets: c, scaleX: targetScale, scaleY: targetScale,
+                          duration: 300, ease: 'Back.easeOut' });
+                        const glint = this.add.star(cx + 2, cy - 10 - i * 5, 4, 0.8, 2.6, 0xffffff, 0.95)
+                          .setDepth(3).setScale(0);
+                        this.tweens.add({ targets: glint, scale: 1, alpha: 0, angle: 90,
+                          delay: 260, duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, glint) });
+                        // linger frozen, then shatter into sparkles
+                        this.tweens.add({ targets: c, alpha: 0, scaleY: targetScale * 0.7, delay: 1400 - i * 150,
+                          duration: 320, ease: 'Sine.easeIn',
+                          onStart: () => {
+                            if (!petObj.active || !petObj.visible) return;
+                            for (let k = 0; k < 4; k++) {
+                              const s = this.add.circle(cx + (Math.random() * 10 - 5), cy - 6 - Math.random() * 8,
+                                1.2, 0xdff4ff, 0.9).setDepth(3);
+                              this.tweens.add({ targets: s, alpha: 0,
+                                x: s.x + (Math.random() * 22 - 11), y: s.y - 6 - Math.random() * 10,
+                                duration: 400, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                            }
+                          },
+                          onComplete: this._trackPetFx(petObj, c) });
+                      });
+                    }
+                  } },
+                // Ease back up, proud of her work.
+                { scaleX: bs, scaleY: bs, y: y0, duration: 320, ease: 'Back.easeOut', delay: 1250 },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st >= 3) {
+            // NATURE'S GROWTH (elder tortoise): rears up, STOMPS the ground,
+            // and a trail of grass and flowers SPROUTS up in a ring around
+            // the old one — blooms, sways, then settles back into the earth.
+            petObj._trickBusy = true;
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                // Rear up...
+                { scaleY: bs * 1.12, scaleX: bs * 0.92, y: y0 - 6, duration: 300, ease: 'Sine.easeOut' },
+                // ...STOMP.
+                { scaleY: bs * 0.8, scaleX: bs * 1.16, y: y0, duration: 120, ease: 'Quad.easeIn',
+                  onComplete: () => {
+                    if (!petObj.active) return;
+
+                    if (!petObj.visible) return;
+                    const ring = this.add.ellipse(petObj.x, y0, 24, 9, 0x9dbf7a, 0)
+                      .setStrokeStyle(2, 0x9dbf7a, 0.85).setDepth(3);
+                    this.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0,
+                      duration: 700, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    // Growth spreads OUTWARD in a ring: grass first, flowers on top.
+                    const sprouts = ['🌱', '🌿', '🌸', '🌼', '🌷', '🌻', '🌿', '🌸', '🌱', '🌼'];
+                    for (let i = 0; i < sprouts.length; i++) {
+                      const a0 = (i / sprouts.length) * Math.PI * 2 + Math.random() * 0.3;
+                      const rr = 20 + (i % 3) * 9 + Math.random() * 5;
+                      this.time.delayedCall(140 + i * 110, () => {
+                        if (!petObj.active || !petObj.visible) return;
+                        const px = petObj.x + Math.cos(a0) * rr;
+                        const py = y0 + Math.sin(a0) * rr * 0.38;   // squashed ring = floor perspective
+                        const s = this.add.text(px, py, sprouts[i],
+                          { fontSize: '11px', resolution: 2 }).setOrigin(0.5, 1).setScale(0).setDepth(3);
+                        // sprout up with a pop, sway gently, then sink away
+                        this.tweens.add({ targets: s, scale: 1, duration: 320, ease: 'Back.easeOut' });
+                        this.tweens.add({ targets: s, angle: { from: -7, to: 7 }, delay: 320,
+                          duration: 420, yoyo: true, repeat: 2, ease: 'Sine.easeInOut' });
+                        this.tweens.add({ targets: s, alpha: 0, scale: 0.4, y: py + 3,
+                          delay: 1900 - i * 60, duration: 420, ease: 'Sine.easeIn',
+                          onComplete: this._trackPetFx(petObj, s) });
+                      });
+                    }
+                  }, hold: 2300 },
+                // Settle back, satisfied. The old ways still work.
+                { scaleX: bs, scaleY: bs, y: y0, duration: 320, ease: 'Back.easeOut' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj.y = y0; petObj._trickBusy = false; },
+            });
+            return;
+          }
+          if (st === 2) {
+            // Shell SPIN, BEYBLADE style: the turtle SHRINKS INTO ITS SHELL
+            // (sprite vanishes, a drawn shell is left behind), then the shell
+            // whirls edge-on and RICOCHETS all over the place in fast random
+            // dashes with dust at every direction change, zips back home, and
+            // the turtle pops back out like nothing happened. LET IT RIP.
+            petObj._trickBusy = true;
+            const flip0 = petObj.flipX, x0 = petObj.x;
+            this.tweens.add({
+              targets: petObj, scaleX: bs * 0.55, scaleY: bs * 0.4, duration: 200, ease: 'Sine.easeIn',
+              onComplete: () => {
+                if (!petObj.active) { petObj._trickBusy = false; return; }
+                const wasVisible = petObj.visible;       // (prop-hunt hidden pets stay hidden)
+                const shW = petObj.displayWidth, shH = petObj.displayHeight; // capture BEFORE hiding
+                petObj.setVisible(false).setScale(bs);   // tucked in — swap to the real shell art
+                const shellKey = (petObj._petId === 'pet_turtle_sapphire' && this.textures.exists('shell_sapphire'))
+                  ? 'shell_sapphire' : 'shell_green';
+                const shell = this.add.image(x0, y0, shellKey).setOrigin(0.5, 1)
+                  .setDepth(petObj.depth).setVisible(wasVisible);
+                // Match the turtle's on-screen bulk: shell art ~56px wide in a 64 box.
+                shell.setScale(Math.max(shW * 0.8, 20) / 56);
+                const killShellFx = this._trackPetFx(petObj, shell);   // pet destroyed → shell goes too
+                const spinTw = this.tweens.addCounter({
+                  from: 0, to: 1, duration: 130, repeat: -1,
+                  onUpdate: (tw) => {
+                    if (!shell.active) { spinTw.stop(); return; }
+                    shell.scaleX = Math.cos(tw.getValue() * Math.PI * 2);  // vertical-axis whirl
+                    shell.angle = Math.sin(tw.getValue() * Math.PI * 2) * 6; // top wobble
+                  },
+                });
+                // Random ricochet path: 5 dashes around home, then back.
+                const pts = [];
+                for (let i = 0; i < 5; i++)
+                  pts.push({ x: x0 + (Math.random() * 76 - 38), y: y0 - 5 + (Math.random() * 30 - 15) });
+                pts.push({ x: x0, y: y0 - 5 });
+                const dashes = pts.map((p) => ({
+                  x: p.x, y: p.y, duration: 210 + Math.random() * 70, ease: 'Sine.easeInOut',
+                  onStart: () => {
+                    if (!shell.active || !shell.visible) return;
+                    for (let i = 0; i < 3; i++) {          // dust burst on every direction change
+                      const d = this.add.circle(shell.x + (Math.random() * 10 - 5), y0 - 1,
+                        1.5 + Math.random() * 1.5, 0xcfc9b8, 0.7).setDepth(3);
+                      this.tweens.add({ targets: d, alpha: 0, scale: 2,
+                        x: d.x + (Math.random() * 16 - 8), y: d.y - 2 - Math.random() * 5,
+                        duration: 340, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                    }
+                  },
+                }));
+                this.tweens.chain({
+                  targets: shell, tweens: dashes,
+                  onComplete: () => {
+                    spinTw.stop();
+                    if (shell.active) { killShellFx(); }   // untrack + destroy the shell
+                    if (!petObj.active) return;
+                    petObj.setVisible(wasVisible).setScale(bs * 0.55, bs * 0.4);
+                    petObj.x = x0; petObj.setFlipX(flip0);
+                    this.tweens.add({
+                      targets: petObj, scaleX: bs, scaleY: bs, duration: 280, ease: 'Back.easeOut',
+                      onComplete: () => {
+                        if (!petObj.active) return;
+                        petObj.setScale(bs); petObj.angle = 0; petObj._trickBusy = false;
+                      },
+                    });
+                  },
+                });
+              },
+            });
+            return;
+          }
+          // Baby: shell tuck — shrink down into the shell, pause... pop back out.
+          petObj._trickBusy = true;
+          this.tweens.chain({
+            targets: petObj,
+            tweens: [
+              { scaleX: bs * 0.72, scaleY: bs * 0.62, duration: 200, ease: 'Sine.easeIn', hold: 900 },
+              { scaleX: bs, scaleY: bs, duration: 260, ease: 'Back.easeOut' },
+            ],
+            onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+          });
+        }
+        if (sp === 'pet_phoenix') {
+          // The phoenix has ONE form and FOUR signature moves (boss-approved
+          // storyboard), cycled per trick:
+          //   0 SOLAR FLARE    — wings wide, blinding ring of golden fire
+          //   1 EMBER DIVE     — comet dive, flame burst on the pull-up
+          //   2 REBIRTH        — bursts to ash, rises reborn from the flame
+          //   3 FIRESTORM WALTZ— corkscrews up in twin flame ribbons
+          petObj._trickBusy = true;
+          const bs = petObj._baseScale || 1, fwd = (petObj.flipX ? -1 : 1);
+          const x0 = petObj.x, y0 = petObj.y;
+          const scP = Math.max(1, petObj.displayWidth / 64);
+          const FIRE = [0xffd76a, 0xff9a3d, 0xff632d];
+          const mv = petObj._moveIdx = ((petObj._moveIdx ?? -1) + 1) % 4;
+          if (mv === 0) {
+            // SOLAR FLARE: rears wide (action frame vibes), a white-gold flash,
+            // then an expanding ring of fire with radial embers.
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { scaleX: bs * 1.18, scaleY: bs * 1.18, duration: 240, ease: 'Sine.easeOut', hold: 950 },
+                { scaleX: bs, scaleY: bs, duration: 240, ease: 'Sine.easeIn' },
+              ],
+              onComplete: () => { petObj.setScale(bs); petObj._trickBusy = false; },
+            });
+            if (petObj.visible) {
+              const cy = y0 - petObj.displayHeight * 0.5;
+              const flash = this.add.circle(x0, cy, 6 * scP, 0xfff3c9, 0.9).setDepth(3.3);
+              this.tweens.add({ targets: flash, scale: 3.4, alpha: 0, delay: 240,
+                duration: 300, ease: 'Quad.easeOut', onComplete: this._trackPetFx(petObj, flash) });
+              const ring = this.add.ellipse(x0, cy, 18 * scP, 12 * scP, 0xff9a3d, 0)
+                .setStrokeStyle(2.4 * scP, 0xffd76a, 0.95).setDepth(3.2);
+              this.tweens.add({ targets: ring, scaleX: 3.4, scaleY: 3.4, alpha: 0,
+                delay: 280, duration: 750, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, ring) });
+              this.time.delayedCall(300, () => {  });
+              for (let i = 0; i < 12; i++) {           // radial embers
+                this.time.delayedCall(300 + (i % 4) * 60, () => {
+                  if (!petObj.active || !petObj.visible) return;
+                  const a = (i / 12) * Math.PI * 2;
+                  const e = this.add.circle(x0, cy, 1.8 * scP, FIRE[i % 3], 0.95).setDepth(3.2);
+                  this.tweens.add({ targets: e, alpha: 0,
+                    x: x0 + Math.cos(a) * 34 * scP, y: cy + Math.sin(a) * 22 * scP,
+                    scale: 0.4, duration: 560 + Math.random() * 160, ease: 'Quad.easeOut',
+                    onComplete: this._trackPetFx(petObj, e) });
+                });
+              }
+            }
+          } else if (mv === 1) {
+            // EMBER DIVE: climbs high, hangs, then comet-dives back down —
+            // ember tail the whole way, flame burst + shake on the pull-up.
+            let trailEv = null;
+            const dropEmber = () => {
+              if (!petObj.active || !petObj.visible) return;
+              const c = this.add.circle(petObj.x + (Math.random() * 6 - 3) * scP,
+                petObj.y - petObj.displayHeight * 0.5, (1.4 + Math.random()) * scP,
+                FIRE[Math.floor(Math.random() * 3)], 0.9).setDepth(2.8);
+              this.tweens.add({ targets: c, alpha: 0, scale: 1.8, y: c.y - 6 * scP,
+                duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, c) });
+            };
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 54 * scP, duration: 520, ease: 'Sine.easeOut', hold: 260,
+                  onStart: () => { trailEv = this.time.addEvent({ delay: 40, repeat: 40, callback: dropEmber }); } },
+                { y: y0, angle: 14 * fwd, duration: 240, ease: 'Quad.easeIn' },   // THE DIVE
+                { angle: 0, duration: 200, ease: 'Back.easeOut',
+                  onStart: () => {
+                    if (!petObj.active) return;
+
+                    if (!petObj.visible) return;
+                    for (let i = 0; i < 10; i++) {                                // flame burst
+                      const f = this.add.circle(petObj.x + (Math.random() * 12 - 6) * scP,
+                        y0 - 2, (1.6 + Math.random() * 1.4) * scP, FIRE[i % 3], 0.95).setDepth(3.1);
+                      this.tweens.add({ targets: f, alpha: 0,
+                        x: f.x + (Math.random() * 40 - 20) * scP,
+                        y: f.y - (10 + Math.random() * 18) * scP,
+                        duration: 480 + Math.random() * 200, ease: 'Quad.easeOut',
+                        onComplete: this._trackPetFx(petObj, f) });
+                    }
+                  } },
+              ],
+              onComplete: () => {
+                if (trailEv) trailEv.remove();
+                petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false;
+              },
+            });
+          } else if (mv === 2) {
+            // REBIRTH: bursts into ash and vanishes — a little flame flickers
+            // where she stood — then she rises reborn, small to full, in a
+            // ring of fire. The classic.
+            const emberPile = [];
+            this.tweens.add({
+              targets: petObj, alpha: 0, scale: bs * 0.6, duration: 380, ease: 'Quad.easeIn',
+              onComplete: () => {
+                if (!petObj.active) { petObj.setAlpha(1); petObj.setScale(bs); petObj._trickBusy = false; return; }
+                if (petObj.visible !== false) {
+                  for (let i = 0; i < 8; i++) {          // ash burst
+                    const a = this.add.image(x0 + (Math.random() * 14 - 7) * scP, y0 - 6 * scP,
+                      `smoke_puff_${i % 3}`).setTint(0x777077).setAlpha(0.7)
+                      .setScale(0.2 * scP).setAngle(Math.random() * 360).setDepth(3);
+                    this.tweens.add({ targets: a, alpha: 0, scale: 0.8 * scP,
+                      x: a.x + (Math.random() * 36 - 18) * scP, y: a.y - (6 + Math.random() * 14) * scP,
+                      duration: 700 + Math.random() * 300, ease: 'Sine.easeOut',
+                      onComplete: this._trackPetFx(petObj, a) });
+                  }
+                  for (let i = 0; i < 3; i++) {          // the wee flame that remains
+                    const f = this.add.circle(x0 + (i - 1) * 3 * scP, y0 - 3, (1.6 + i * 0.5) * scP,
+                      FIRE[i], 0.9).setDepth(3);
+                    emberPile.push(f);
+                    this.tweens.add({ targets: f, scaleY: 1.5, yoyo: true, repeat: 6,
+                      duration: 140, ease: 'Sine.easeInOut' });
+                  }
+                }
+                this.time.delayedCall(1050, () => {      // RISE
+                  for (const f of emberPile) this.tweens.add({ targets: f, alpha: 0, duration: 220,
+                    onComplete: this._trackPetFx(petObj, f) });
+                  if (!petObj.active) { petObj._trickBusy = false; return; }
+                  petObj.setScale(bs * 0.3); petObj.y = y0;
+                  this.tweens.add({ targets: petObj, alpha: 1, scaleX: bs, scaleY: bs,
+                    duration: 620, ease: 'Back.easeOut',
+                    onComplete: () => { petObj.setAlpha(1); petObj.setScale(bs); petObj._trickBusy = false; } });
+                  if (petObj.visible) {
+                    const ring = this.add.ellipse(x0, y0 - petObj.displayHeight * 0.4,
+                      16 * scP, 10 * scP, 0xff9a3d, 0)
+                      .setStrokeStyle(2 * scP, 0xffd76a, 0.9).setDepth(3.1);
+                    this.tweens.add({ targets: ring, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+                      duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                    for (let i = 0; i < 8; i++) {
+                      const s = this.add.circle(x0 + (Math.random() * 20 - 10) * scP,
+                        y0 - Math.random() * 20 * scP, 1.5 * scP, FIRE[i % 3], 0.95).setDepth(3.2);
+                      this.tweens.add({ targets: s, alpha: 0, y: s.y - (12 + Math.random() * 10) * scP,
+                        duration: 520 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  }
+                });
+              },
+            });
+          } else {
+            // FIRESTORM WALTZ: corkscrews upward, twin flame ribbons spiraling
+            // around her, then drifts back down through her own sparks.
+            let t = 0;
+            const spiralEv = this.time.addEvent({ delay: 40, repeat: 34, callback: () => {
+              if (!petObj.active || !petObj.visible) return;
+              t += 0.45;
+              const cy = petObj.y - petObj.displayHeight * 0.5;
+              for (const ph of [0, Math.PI]) {           // twin ribbons
+                const r = this.add.circle(petObj.x + Math.cos(t + ph) * 14 * scP,
+                  cy + Math.sin(t + ph) * 5 * scP, 1.8 * scP,
+                  ph ? 0xff632d : 0xffd76a, 0.9).setDepth(ph ? 2.8 : 3.2);
+                this.tweens.add({ targets: r, alpha: 0, scale: 1.6, y: r.y + 6 * scP,
+                  duration: 460, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              }
+            } });
+            this.tweens.chain({
+              targets: petObj,
+              tweens: [
+                { y: y0 - 44 * scP, angle: -8 * fwd, duration: 780, ease: 'Sine.easeInOut', hold: 220 },
+                { y: y0, angle: 0, duration: 620, ease: 'Sine.easeInOut' },
+              ],
+              onComplete: () => {
+                spiralEv.remove();
+                petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false;
+              },
+            });
+          }
+        }
+      }
+
+      // Follow-at-distance: the pet stands still until its owner is more than
+      // PET_GAP away, then walks to a point PET_GAP behind them — the classic
+      // "pet on a slack leash" feel. A >300px jump (spawn/teleport/grace
+      // restore) snaps instantly so the pet never sprints across the office.
+      // While the owner is SEATED the ring widens to PET_SIT_GAP and the pet
+      // is nudged OUT to it as well — the ~36px walk trail otherwise parks the
+      // emoji ON the seated body (pets render above players at depth 2). A pet
+      // sitting exactly underfoot settles straight DOWN (in front of the chair).
+      _stepPet(petObj, px, py, delta, seated) {
+        // Big evolved dragons keep a wider ring so their bulk (and wingspan)
+        // doesn't park on top of the owner.
+        const gap = (seated ? PET_SIT_GAP : PET_GAP) * (petObj._gapMult || 1);
+        const ty = py + 10;                       // anchor beside the feet
+        let dx = petObj.x - px, dy = petObj.y - ty;
+        let dist = Math.hypot(dx, dy) || 1;
+        const _now = performance.now();
+        // Trick just ended? Open the sprint window BEFORE the snap check below
+        // gets a chance to teleport (it used to fire on this very frame).
+        if (!petObj._trickBusy && petObj._wasTricking) {
+          petObj._wasTricking = false;
+          petObj._sprintUntil = _now + 2500;
+        }
+        let sprinting = petObj._sprintUntil && _now < petObj._sprintUntil;
+        // Keep the sprint alive until the pet has actually closed the gap —
+        // a fixed window expired mid-run for far owners and snapped it home.
+        if (sprinting && dist > 120) petObj._sprintUntil = _now + 800;
+        // No teleport while a trick plays or while sprinting back afterwards.
+        if (dist > 300 && !sprinting && !petObj._trickBusy) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
+        if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
+        // Lively pets pilot: procedural walk waddle / idle breathing / random
+        // idle tricks for PET_LIVELY species. Runs before the follow step so
+        // "walking" is judged on the raw owner distance. Tricks own
+        // angle/scale/y while _trickBusy (tween in flight).
+        if (petObj._lively && !petObj._trickBusy) {
+          petObj._animT = (petObj._animT || 0) + delta;
+          const bs = petObj._baseScale || 1, walking = dist > gap + 1;
+          if (walking) {
+            // Final forms MOVE differently too — each spirit has its own gait:
+            //   blaze (golden wolf) = powerful prowl: barely sways, long deep
+            //     strides, unhurried frame cadence — pure confidence.
+            //   frost (alpha husky 👑) = royal strut: chest-out swagger with a
+            //     proud measured bounce — the king parades, he doesn't scurry.
+            //   cocoa (cocoa storm) = heavy happy lumber: BIG side-to-side
+            //     waddle and a bouncy chonky bound.
+            // Everyone else keeps the classic puppy trot — EXCEPT evolved
+            // ducks/cats/turtles (Aug 2026): every stage of every line walks
+            // differently, keyed by pet id + stage:
+            //   ducks: s2 = busy determined waddle; s3 golden drake = big slow
+            //     parade waddle; s3 SWAN = weightless glide, barely a ripple.
+            //   cats: s2 = low sleek prowl; s3 boss tabby = heavy slow saunter;
+            //     s3 mystic black = silent float; s3 persian queen = measured
+            //     strut with her chin up.
+            //   turtles: s2 = sturdy slow plod; s3 elder = ancient deliberate
+            //     march (longest stride time in the game); s3 crystal = smooth
+            //     gliding shimmer-step.
+            const stageGaits = {
+              duck_s2:            { sway: 10, swayF: 0.024, bounce: 0.045, bounceF: 0.032, frameMs: 115 },
+              duck_s3:            { sway: 13, swayF: 0.013, bounce: 0.065, bounceF: 0.015, frameMs: 175 },
+              duck_snow_s2:       { sway: 6,  swayF: 0.016, bounce: 0.035, bounceF: 0.022, frameMs: 145 },
+              duck_snow_s3:       { sway: 1.5,swayF: 0.007, bounce: 0.012, bounceF: 0.009, frameMs: 210 },
+              cat_s2:             { sway: 2,  swayF: 0.012, bounce: 0.030, bounceF: 0.024, frameMs: 150 },
+              cat_s3:             { sway: 5,  swayF: 0.009, bounce: 0.075, bounceF: 0.013, frameMs: 190 },
+              cat_black_s2:       { sway: 1.5,swayF: 0.013, bounce: 0.025, bounceF: 0.026, frameMs: 145 },
+              cat_black_s3:       { sway: 1,  swayF: 0.008, bounce: 0.018, bounceF: 0.011, frameMs: 165 },
+              cat_snow_s2:        { sway: 3,  swayF: 0.013, bounce: 0.040, bounceF: 0.022, frameMs: 155 },
+              cat_snow_s3:        { sway: 4,  swayF: 0.010, bounce: 0.050, bounceF: 0.015, frameMs: 180 },
+              turtle_s2:          { sway: 4,  swayF: 0.007, bounce: 0.030, bounceF: 0.009, frameMs: 250 },
+              turtle_s3:          { sway: 3,  swayF: 0.005, bounce: 0.050, bounceF: 0.007, frameMs: 320 },
+              turtle_sapphire_s2: { sway: 3,  swayF: 0.008, bounce: 0.028, bounceF: 0.010, frameMs: 235 },
+              turtle_sapphire_s3: { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 280 },
+              // Frogs (rainy seasonal): s2 = springy busy hop; s3 King Frog =
+              // big slow royal bound — heavy, unhurried, landing with weight.
+              frog_s2:            { sway: 8,  swayF: 0.022, bounce: 0.055, bounceF: 0.030, frameMs: 110 },
+              frog_s3:            { sway: 5,  swayF: 0.010, bounce: 0.080, bounceF: 0.014, frameMs: 190 },
+              // Dragons st>=2 FLY: no waddle, wing-flap frame cadence.
+              dragon_s2:          { sway: 1.5,swayF: 0.006, bounce: 0.020, bounceF: 0.009, frameMs: 130 },
+              dragon_s3:          { sway: 1.5,swayF: 0.005, bounce: 0.020, bounceF: 0.007, frameMs: 155 },
+              dragon_crimson_s2:  { sway: 2,  swayF: 0.007, bounce: 0.022, bounceF: 0.010, frameMs: 120 },
+              dragon_crimson_s3:  { sway: 2,  swayF: 0.006, bounce: 0.022, bounceF: 0.008, frameMs: 140 },
+              dragon_obsidian_s2: { sway: 1,  swayF: 0.005, bounce: 0.018, bounceF: 0.008, frameMs: 135 },
+              dragon_obsidian_s3: { sway: 1,  swayF: 0.004, bounce: 0.018, bounceF: 0.006, frameMs: 160 },
+              // Mythic FINAL FORMS: the unicorn GLIDES (boss: "majestical
+              // being", no lumping waddle), the phoenix drifts light-footed.
+              unicorn_s3:         { sway: 0.8, swayF: 0.004, bounce: 0.012, bounceF: 0.005, frameMs: 220 },
+              phoenix_s3:         { sway: 1.5, swayF: 0.006, bounce: 0.020, bounceF: 0.008, frameMs: 170 },
+            };
+            const stageKey = (petObj._petStage >= 2 && petObj._petId)
+              ? `${petObj._petId.replace(/^pet_/, '')}_s${Math.min(petObj._petStage, 3)}` : null;
+            const gait = {
+              blaze: { sway: 2, swayF: 0.011, bounce: 0.085, bounceF: 0.020, frameMs: 165 },
+              frost: { sway: 4, swayF: 0.012, bounce: 0.055, bounceF: 0.018, frameMs: 170 },
+              cocoa: { sway: 10, swayF: 0.017, bounce: 0.075, bounceF: 0.023, frameMs: 150 },
+            }[petObj._mythic] || stageGaits[stageKey]
+              || { sway: 6, swayF: 0.02, bounce: 0.05, bounceF: 0.028, frameMs: 140 };
+            // MOVEMENT STYLES ("movement animation + effects animation",
+            // per the boss): each evolved line has a signature body motion
+            // and a step-synced effect, not just different numbers.
+            //   thump   = footfall squash-and-stretch (heavy walkers)
+            //   slink   = long low stretched prowl (young cats)
+            //   float   = no waddle at all, weightless slow ripple (swan,
+            //             mystic black cat, crystal turtle)
+            //   hop     = sharp bouncy |sin| steps (busy mallard)
+            //   strut   = chest-puff on every step (drake, persian queen)
+            const MOTION = {
+              duck_s2: 'hop',    duck_s3: 'strut', duck_snow_s3: 'float',
+              cat_s2: 'slink',   cat_black_s2: 'slink', cat_snow_s2: 'slink',
+              cat_s3: 'thump',   cat_black_s3: 'float', cat_snow_s3: 'strut',
+              turtle_s2: 'thump', turtle_s3: 'thump', turtle_sapphire_s3: 'float',
+              frog_s2: 'hop',    frog_s3: 'thump',
+              dragon_s2: 'float', dragon_s3: 'float',
+              dragon_crimson_s2: 'float', dragon_crimson_s3: 'float',
+              dragon_obsidian_s2: 'float', dragon_obsidian_s3: 'float',
+              unicorn_s3: 'float', phoenix_s3: 'float',
+            };
+            const motion = petObj._mythic === 'cocoa' ? 'thump' : (MOTION[stageKey] || 'trot');
+            const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
+            petObj.angle = motion === 'float' ? petObj.angle * 0.8
+              : Math.sin(petObj._animT * gait.swayF) * gait.sway;             // waddle
+            if (motion === 'thump') {
+              // Sell each STEP with a footfall thump — squash wide on the
+              // plant, stretch tall on the push-off.
+              petObj.setScale(bs * (1 + 0.14 * (1 - step)), bs * (1 - 0.12 + (gait.bounce + 0.16) * step));
+            } else if (motion === 'slink') {
+              petObj.setScale(bs * 1.14, bs * (0.86 + (gait.bounce + 0.08) * step)); // long + low prowl
+            } else if (motion === 'float') {
+              petObj.setScale(bs, bs * (1 + (gait.bounce + 0.02) * Math.sin(petObj._animT * gait.bounceF * 0.6)));
+            } else if (motion === 'hop') {
+              petObj.setScale(bs * (1 - 0.08 * step), bs * (1 + (gait.bounce + 0.12) * step)); // springy steps
+            } else if (motion === 'strut') {
+              petObj.setScale(bs * (1 + 0.12 * step), bs * (1 + (gait.bounce + 0.05) * step)); // chest puff
+            } else {
+              petObj.setScale(bs, bs * (1 + gait.bounce * Math.sin(petObj._animT * gait.bounceF))); // trot bounce
+            }
+            petObj._gaitFrameMs = gait.frameMs;
+            // Step-synced effects: fire once per footfall (each half-cycle of
+            // the bounce wave). Every effect self-destroys via _trackPetFx.
+            const stepPh = Math.floor(petObj._animT * gait.bounceF / Math.PI);
+            if (stageKey && stepPh !== petObj._stepPh) {
+              petObj._stepPh = stepPh;
+              const fx = {
+                duck_s2:            { kind: 'dust',  color: 0xcbb98e },
+                duck_s3:            { kind: 'glint', color: 0xffd75e },
+                duck_snow_s3:       { kind: 'ripple', color: 0xdff2ff },
+                cat_s3:             { kind: 'dust',  color: 0xd9c6a8 },
+                cat_black_s3:       { kind: 'ghost', color: 0x9b59ff },
+                cat_snow_s3:        { kind: 'glint', color: 0xe8f4ff },
+                turtle_s2:          { kind: 'dust',  color: 0xc9b892 },
+                turtle_s3:          { kind: 'ripple', color: 0x9dbf7a },
+                turtle_sapphire_s3: { kind: 'glint', color: 0x7fe0ff },
+                frog_s2:            { kind: 'ripple', color: 0x7fd8b8 },
+                frog_s3:            { kind: 'glint', color: 0xffd75e },
+              }[stageKey];
+              if (fx && fx.kind === 'dust') {
+                const p = this.add.circle(petObj.x - Math.sign(petObj.flipX ? -1 : 1) * 6,
+                  petObj.y - 1, 4 + Math.random() * 3, fx.color, 0.55).setDepth(1);
+                this.tweens.add({ targets: p, alpha: 0, scale: 2.4, y: p.y - 5,
+                  duration: 420, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, p) });
+              } else if (fx && fx.kind === 'glint') {
+                const g = this.add.star(petObj.x + (Math.random() * 14 - 7), petObj.y - 2 - Math.random() * 6,
+                  4, 1.5, 4, fx.color, 0.85).setDepth(3);
+                this.tweens.add({ targets: g, alpha: 0, angle: 90, scale: 0.3, y: g.y - 8,
+                  duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              } else if (fx && fx.kind === 'ripple') {
+                const r = this.add.ellipse(petObj.x, petObj.y - 1, 16, 6, fx.color, 0).setDepth(1)
+                  .setStrokeStyle(1, fx.color, 0.45);
+                this.tweens.add({ targets: r, scaleX: 2.1, scaleY: 2.1, alpha: 0,
+                  duration: 650, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, r) });
+              } else if (fx && fx.kind === 'ghost') {
+                // Mystic black cat: a fading violet afterimage where she just was.
+                const ghost = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                  .setOrigin(0.5, 1).setScale(petObj.scaleX, petObj.scaleY)
+                  .setFlipX(petObj.flipX).setTint(fx.color).setAlpha(0.28).setDepth(1);
+                this.tweens.add({ targets: ghost, alpha: 0, duration: 480,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ghost) });
+              }
+            }
+            petObj._trickAt = 0;                  // re-roll the trick timer on next stop
+            // Final-form spirits trail a NATURAL aura while trotting — no
+            // emoji, just soft layered glow wisps in the line's element:
+            // frost = cold icy mist hanging low, blaze = warm embers of light
+            // curling upward, cocoa = rich warm steam drifting off the floor.
+            // Non-dog FINAL FORMS (stage 3) trail their own element too:
+            // golden drake = gold sparkle dust, swan = cool white mist,
+            // boss tabby = warm amber motes, mystic black = violet embers,
+            // persian queen = silver shimmer, elder tortoise = mossy green
+            // motes, crystal turtle = cyan glints.
+            const trailTh = {
+              frost: { core: 0xdff4ff, glow: 0x9fd8ff, rise: -3, drift: 6 },
+              blaze: { core: 0xffe9b8, glow: 0xff9a3d, rise: -14, drift: 4 },
+              cocoa: { core: 0xf3e5ab, glow: 0xc08a4e, rise: -8, drift: 5 },
+            }[petObj._mythic] || (petObj._petStage >= 3 && {
+              pet_duck:            { core: 0xfff3c4, glow: 0xffc94d, rise: -10, drift: 5 },
+              pet_duck_snow:       { core: 0xffffff, glow: 0xcfe8ff, rise: -4,  drift: 7 },
+              pet_cat:             { core: 0xffe1b8, glow: 0xff9c55, rise: -8,  drift: 4 },
+              pet_cat_black:       { core: 0xe6c9ff, glow: 0x9b59ff, rise: -12, drift: 5 },
+              pet_cat_snow:        { core: 0xffffff, glow: 0xbfd9e8, rise: -6,  drift: 4 },
+              pet_turtle:          { core: 0xd8f0b8, glow: 0x6faa4e, rise: -6,  drift: 3 },
+              pet_turtle_sapphire: { core: 0xd8f6ff, glow: 0x3fc8f0, rise: -9,  drift: 3 },
+              pet_dragon:          { core: 0xe8c9ff, glow: 0xb45bff, rise: -10, drift: 5 },
+              pet_dragon_crimson:  { core: 0xffd9a8, glow: 0xff7a2d, rise: -12, drift: 4 },
+              pet_dragon_obsidian: { core: 0xffb066, glow: 0xff5500, rise: -8,  drift: 4 },
+              pet_unicorn:         { core: 0xfff0ff, glow: 0xd9a8ff, rise: -10, drift: 6, stars: true },
+              pet_phoenix:         { core: 0xffe9b8, glow: 0xff7a2d, rise: -12, drift: 4 },
+              pet_frog:            { core: 0xd8f0c0, glow: 0x9fd75e, rise: -8,  drift: 4 },
+            }[petObj._petId]) || null;
+            if (trailTh && (!petObj._trailAt || _now >= petObj._trailAt)) {
+              petObj._trailAt = _now + 150 + Math.random() * 90;
+              const th = trailTh;
+              const wx = petObj.x + (Math.random() * 10 - 5), wy = petObj.y - 2 - Math.random() * 3;
+              const r = 2.5 + Math.random() * 2.5;
+              // Two stacked soft circles read as one glowing wisp: a wide
+              // translucent halo with a small bright core.
+              const halo = this.add.circle(wx, wy, r * 2.4, th.glow, 0.18).setDepth(1);
+              const core = this.add.circle(wx, wy, r, th.core, 0.5).setDepth(1);
+              const dx = (Math.random() * 2 - 1) * th.drift;
+              for (const w of [halo, core]) {
+                this.tweens.add({ targets: w, alpha: 0, scale: 0.25,
+                  x: w.x + dx, y: w.y + th.rise + Math.random() * 3,
+                  duration: 950 + Math.random() * 350, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, w) });
+              }
+              // Unicorn (boss ask): the little ✨/⭐ stars from the old trick
+              // now fall out of her trail by DEFAULT while she walks.
+              if (th.stars && Math.random() < 0.5) {
+                const st = this.add.text(wx + (Math.random() * 12 - 6), wy - 4 - Math.random() * 8,
+                  Math.random() < 0.5 ? '✨' : '⭐', { fontSize: '10px', resolution: 2 })
+                  .setOrigin(0.5).setAlpha(0.95).setDepth(1.1);
+                this.tweens.add({ targets: st, alpha: 0, y: st.y - 14 - Math.random() * 10,
+                  duration: 750 + Math.random() * 300, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, st) });
+              }
+            }
+            // Animated-frames pilot: step the walk cycle (~140ms per frame).
+            if (petObj._animSet) {
+              const fr = petObj._animSet.walk[Math.floor(petObj._animT / (petObj._gaitFrameMs || 140)) % petObj._animSet.walk.length];
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+            }
+          } else {
+            petObj.angle *= 0.85;                                                    // settle upright
+            petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
+            if (petObj._animSet) {
+              // Sit frame when the owner is seated, neutral frame otherwise.
+              const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+            }
+            const now = performance.now();
+            // Boss ask: the grown phoenix BURNS while nesting — flames licking
+            // up around the tucked wings, smoke wisps, and a warm glow pulse.
+            if (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3 && seated
+                && petObj.visible && now >= (petObj._nestAt || 0)) {
+              petObj._nestAt = now + 240 + Math.random() * 120;
+              const scN = Math.max(1, petObj.displayWidth / 64);
+              const fx0 = petObj.x + (Math.random() * 22 - 11) * scN;
+              const f = this.add.circle(fx0, petObj.y - 2 - Math.random() * 4,
+                (1.6 + Math.random() * 1.6) * scN,
+                [0xffd75e, 0xffb347, 0xff7a2d][Math.floor(Math.random() * 3)], 0.8).setDepth(2.9);
+              this.tweens.add({ targets: f, alpha: 0, scale: 0.3,
+                y: f.y - (7 + Math.random() * 8) * scN,
+                duration: 480 + Math.random() * 240, ease: 'Sine.easeOut',
+                onComplete: this._trackPetFx(petObj, f) });
+              if (Math.random() < 0.4) {
+                const s = this.add.image(fx0, petObj.y - 8 * scN, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                  .setTint(0x6b6360).setAlpha(0.35).setScale(0.09 * scN)
+                  .setAngle(Math.random() * 360).setDepth(2.85);
+                this.tweens.add({ targets: s, alpha: 0, scale: 0.3 * scN,
+                  y: s.y - 12 - Math.random() * 8, angle: s.angle + 40,
+                  duration: 1100 + Math.random() * 400, ease: 'Sine.easeOut',
+                  onComplete: this._trackPetFx(petObj, s) });
+              }
+              if (Math.random() < 0.3) {
+                const g = this.add.circle(petObj.x, petObj.y - 6 * scN, 15 * scN, 0xffb45e, 0.14).setDepth(1.9);
+                this.tweens.add({ targets: g, alpha: 0, scale: 1.6, duration: 620,
+                  ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              }
+            }
+            // Final-form spirits idle inside their own ambient element:
+            // husky = drifting snow (falls), shiba = rising embers, choco =
+            // curling steam — plus a faint elemental glow pulse at the feet.
+            // Non-dog final forms get an idle element too: gold sparkles for
+            // the drake, drifting snow-feathers for the swan, amber flecks for
+            // the boss tabby, violet stars for the mystic, silver glints for
+            // the queen, falling leaves for the elder, crystal facets for the
+            // sapphire turtle.
+            const auraTh = {
+              frost: { glyphs: ['❄'],       glow: 0x9fd8ff, rise: false },
+              blaze: { glyphs: ['🔥', '✦'], glow: 0xffb347, rise: true },
+              cocoa: { glyphs: ['♨', '🍫'], glow: 0xc08a4e, rise: true },
+            }[petObj._mythic] || (petObj._petStage >= 3 && {
+              pet_duck:            { glyphs: ['✦', '✨'], glow: 0xffc94d, rise: true },
+              pet_duck_snow:       { glyphs: ['❆', '✧'], glow: 0xcfe8ff, rise: false },
+              pet_cat:             { glyphs: ['✦'],       glow: 0xff9c55, rise: true },
+              pet_cat_black:       { glyphs: ['✦', '★'], glow: 0x9b59ff, rise: true },
+              pet_cat_snow:        { glyphs: ['✧', '❄'], glow: 0xbfd9e8, rise: false },
+              pet_turtle:          { glyphs: ['🍃'],      glow: 0x6faa4e, rise: false },
+              pet_turtle_sapphire: { glyphs: ['◆', '✧'], glow: 0x3fc8f0, rise: true },
+              pet_dragon:          { glyphs: ['✦', '✧'], glow: 0xb45bff, rise: true },
+              pet_dragon_crimson:  { glyphs: ['🔥', '✦'], glow: 0xff7a2d, rise: true },
+              pet_dragon_obsidian: { glyphs: ['✦'],       glow: 0xff5500, rise: true },
+              pet_unicorn:         { glyphs: ['✨', '⭐'], glow: 0xd9a8ff, rise: true },
+              pet_frog:            { glyphs: ['💧', '✦'], glow: 0x6fc98e, rise: true },
+            }[petObj._petId]) || null;
+            if (auraTh && (!petObj._auraAt || now >= petObj._auraAt)) {
+              petObj._auraAt = now + 1600 + Math.random() * 1800;
+              const th = auraTh;
+              const glyph = th.glyphs[Math.floor(Math.random() * th.glyphs.length)];
+              const y0 = th.rise ? petObj.y - 8 - Math.random() * 6 : petObj.y - 26 - Math.random() * 10;
+              const fl = this.add.text(petObj.x + (Math.random() * 26 - 13), y0,
+                glyph, { fontSize: `${8 + Math.floor(Math.random() * 4)}px`, resolution: 2 })
+                .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+              this.tweens.add({ targets: fl, alpha: { from: 0.9, to: 0 },
+                y: fl.y + (th.rise ? -22 : 22),
+                x: fl.x + (Math.random() * 12 - 6), angle: Math.random() * 90 - 45,
+                duration: 2200, ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, fl) });
+              if (Math.random() < 0.5) {
+                const g = this.add.ellipse(petObj.x, petObj.y - 1, 26, 9, th.glow, 0.16).setDepth(1);
+                this.tweens.add({ targets: g, alpha: 0, scaleX: 1.7, scaleY: 1.7,
+                  duration: 1400, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, g) });
+              }
+              // Her Majesty the swan: a pale-gold crown shimmers into view
+              // just above her head while she rests. Royalty doesn't ask.
+              if ((petObj._petId === 'pet_duck_snow' || petObj._petId === 'pet_frog') && Math.random() < 0.45) {
+                const cr = this.add.text(petObj.x, petObj.y - 38, '♕', {
+                  fontSize: '12px', color: '#ffe9a8', resolution: 2 })
+                  .setOrigin(0.5, 1).setAlpha(0).setDepth(3);
+                this.tweens.add({ targets: cr, alpha: { from: 0.95, to: 0 },
+                  y: cr.y - 7, scale: { from: 0.8, to: 1.15 },
+                  duration: 1700, ease: 'Sine.easeInOut', onComplete: this._trackPetFx(petObj, cr) });
+                const tw1 = this.add.star(petObj.x - 9, petObj.y - 42, 4, 1.2, 3.2, 0xffe9a8, 0.9).setDepth(3);
+                const tw2 = this.add.star(petObj.x + 9, petObj.y - 44, 4, 1.2, 3.2, 0xffffff, 0.9).setDepth(3);
+                for (const tw of [tw1, tw2]) {
+                  this.tweens.add({ targets: tw, alpha: 0, angle: 100, scale: 0.4,
+                    duration: 1300, delay: Math.random() * 300, ease: 'Sine.easeOut',
+                    onComplete: this._trackPetFx(petObj, tw) });
+                }
+              }
+            }
+            if (!petObj._trickAt) petObj._trickAt = now + 6000 + Math.random() * 10000;
+            else if (now >= petObj._trickAt) {
+              petObj._trickAt = now + 9000 + Math.random() * 14000;
+              this._petTrick(petObj);
+            }
+          }
+          // ── FLIGHT (boss rule, Aug 2026): dragons stage 2+ are AIRBORNE at
+          // all times — hover bob via display origin (never touches x/y, so
+          // follow logic and tricks are untouched) + wings always flapping,
+          // even while idling, + a soft ground-shadow blob so you can read
+          // where they are. They only LAND (sit frame, no shadow) when the
+          // owner sits down.
+          const flying = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
+            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);   // grown phoenix is AIRBORNE like the dragons
+          if (flying && !seated) {
+            const nowF = Date.now();     // idle-block `now` is out of scope here
+            const movingFly = dist > gap + 1;
+            // SWOOP LANDING (storyboard #3) — per-dragon personality:
+            //   Violet   graceful wide arc, soft landing, neat dust ring
+            //   Crimson  steeper faster dive, harder brake, camera bump
+            //   Obsidian drops near-vertical, lands with a THUD + rumble
+            // FINAL FORM ONLY (boss catch): stage 2 flies plain; the whole
+            // personality package (swoop/dust/trails) is a stage-3 flex.
+            const fxT = petObj._petStage >= 3 ? {
+              pet_dragon:          { swoopMs: 560, dive: 0.85, ring: 2.6, shake: 0,      dust: 0xcfc0a8, dustMul: 1 },
+              pet_dragon_crimson:  { swoopMs: 400, dive: 0.95, ring: 2.9, shake: 0.0016, dust: 0xd9a37e, dustMul: 1.15 },
+              pet_dragon_obsidian: { swoopMs: 340, dive: 1.0,  ring: 3.4, shake: 0.0032, dust: 0x8f8880, dustMul: 1.4 },
+              pet_phoenix:         { swoopMs: 480, dive: 0.9,  ring: 2.8, shake: 0,      dust: 0xffb45e, dustMul: 1.05 },
+            }[petObj._petId] : null;
+            if (fxT) {
+              if (petObj._wasFlyMove && !movingFly && !petObj._swoopUntil)
+                { petObj._swoopUntil = nowF + fxT.swoopMs; petObj._swoopDusted = false; }
+              petObj._wasFlyMove = movingFly;
+              if (movingFly) petObj._swoopUntil = 0;    // took off again mid-swoop
+            }
+            let hov = 11 + Math.sin(petObj._animT * 0.0035) * 3;
+            let swooping = false;
+            if (petObj._swoopUntil && fxT) {
+              if (nowF >= petObj._swoopUntil) petObj._swoopUntil = 0;
+              else {
+                swooping = true;
+                const p = 1 - (petObj._swoopUntil - nowF) / fxT.swoopMs;   // 0 → 1
+                hov *= 1 - Math.sin(p * Math.PI) * fxT.dive;               // arc: dive low, rise back
+                if (p > 0.35 && !petObj._swoopDusted && petObj.visible) {
+                  petObj._swoopDusted = true;                        // dust ring at the low point
+                  if (fxT.shake) this.cameras.main.shake(140, fxT.shake);  // THUD
+                  const rr = fxT.ring * fxT.dustMul;
+                  const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, fxT.dust, 0)
+                    .setStrokeStyle(1.5, fxT.dust, 0.6).setDepth(1.1);
+                  this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
+                    duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                }
+              }
+            }
+            petObj.setOrigin(0.5, 1 + hov / Math.max(petObj.displayHeight, 1));
+            // Movement animation: lean the nose INTO the flight direction
+            // while traveling, ease back level when holding position.
+            const leanTgt = movingFly ? (petObj.flipX ? -6 : 6) : 0;
+            petObj.angle += (leanTgt - petObj.angle) * 0.12;
+            if (petObj._animSet) {
+              // Flight rhythm (boss note): not a bat — THREE quick flaps,
+              // then a long wings-level GLIDE, repeat.
+              const fm = petObj._gaitFrameMs || 140;
+              const flapWin = fm * 12;                 // 3 full flap cycles (4 frames each)
+              const t = petObj._animT % (flapWin + 1100);
+              let fr = t < flapWin
+                ? petObj._animSet.walk[Math.floor(t / fm) % petObj._animSet.walk.length]
+                : petObj._animSet.walk[1];             // glide on the wings-level frame
+              if (swooping) fr = petObj._animSet.walk[0];  // flare wings UP to brake
+              if (petObj.texture.key !== fr) petObj.setTexture(fr);
+              // WING-GUST DUST (storyboard #1): each downstroke pushes a
+              // little dust puff off the floor — Violet neat, Crimson
+              // scattery, Obsidian chunky (she's HEAVY).
+              if (fxT && petObj.visible) {
+                const scF = Math.max(1, petObj.displayWidth / 64) * fxT.dustMul;
+                const onDown = fr === petObj._animSet.walk[2];
+                if (onDown && !petObj._gustDown && nowF >= (petObj._gustAt || 0)) {
+                  petObj._gustAt = nowF + 260;
+                  if (petObj._petId === 'pet_phoenix') {
+                    // D: FIRESTORM WINGBEAT — each downstroke throws a wave of
+                    // flame outward plus an expanding ring of smoke.
+                    for (let i = 0; i < 5; i++) {
+                      const ang = Math.PI * (0.15 + 0.7 * (i / 4));          // fan below the wings
+                      const fw = this.add.image(petObj.x, petObj.y - 6 * scF,
+                        `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(i % 2 ? 0xff7a2d : 0xffb347).setAlpha(0.5)
+                        .setScale(0.11 * scF).setAngle(Math.random() * 360).setDepth(1.15);
+                      this.tweens.add({ targets: fw, alpha: 0, scale: 0.26 * scF,
+                        x: fw.x + Math.cos(ang) * (16 + Math.random() * 8) * scF,
+                        y: fw.y + Math.sin(ang) * 8 * scF, angle: fw.angle + 50,
+                        duration: 430 + Math.random() * 150, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, fw) });
+                    }
+                    const ring = this.add.ellipse(petObj.x, petObj.y - 2, 14, 5, 0x9a938c, 0)
+                      .setStrokeStyle(1.5, 0x9a938c, 0.4).setDepth(1.1);
+                    this.tweens.add({ targets: ring, scaleX: 2.6, scaleY: 2.6, alpha: 0,
+                      duration: 560, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                  } else {
+                    const d = this.add.image(petObj.x + (Math.random() * 12 - 6) * scF, petObj.y - 1,
+                      `smoke_puff_${Math.random() < 0.5 ? 0 : 1}`)
+                      .setTint(fxT.dust).setAlpha(0.32).setScale(0.16 * scF)
+                      .setAngle(Math.random() * 360).setDepth(1.1);
+                    this.tweens.add({ targets: d, alpha: 0, scale: 0.45 * scF,
+                      x: d.x + (Math.random() * 18 - 9) * scF, angle: d.angle + 40,
+                      duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                  }
+                }
+                petObj._gustDown = onDown;
+                if (petObj._petId === 'pet_phoenix') {
+                  const gy = petObj.y - 1;
+                  const wy2 = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
+                  // B: RADIANT SUN — pulsing golden halo + warm glow on the
+                  // floor beneath, always while airborne (even hovering).
+                  if (nowF >= (petObj._radiantAt || 0)) {
+                    petObj._radiantAt = nowF + 520;
+                    const halo = this.add.circle(petObj.x, wy2, 16 * scF, 0xffd75e, 0.15).setDepth(1.95);
+                    this.tweens.add({ targets: halo, alpha: 0, scale: 1.8, duration: 700,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, halo) });
+                    const spot = this.add.ellipse(petObj.x, gy, 26 * scF, 9 * scF, 0xffb45e, 0.12).setDepth(1.02);
+                    this.tweens.add({ targets: spot, alpha: 0, scaleX: 1.5, duration: 700,
+                      ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, spot) });
+                  }
+                  if (movingFly) {
+                    // B: heat-shimmer afterimages while traveling.
+                    if (nowF >= (petObj._shimmerAt || 0)) {
+                      petObj._shimmerAt = nowF + 210;
+                      const ghost = this.add.image(petObj.x, petObj.y, petObj.texture.key)
+                        .setOrigin(petObj.originX, petObj.originY).setScale(petObj.scaleX, petObj.scaleY)
+                        .setFlipX(petObj.flipX).setTint(0xffc966).setAlpha(0.18).setDepth(1.9);
+                      this.tweens.add({ targets: ghost, alpha: 0, duration: 380,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ghost) });
+                    }
+                    // A: EMBER WAKE — every stretch of flight leaves flame
+                    // puffs that cool into gray smoke curls that LINGER,
+                    // plus scorch marks along the floor under his path.
+                    if (nowF >= (petObj._wakeAt || 0)) {
+                      petObj._wakeAt = nowF + 130;
+                      const back = petObj.flipX ? 1 : -1;
+                      const px = petObj.x + back * petObj.displayWidth * 0.30;
+                      const py = wy2 + (Math.random() * 8 - 4);
+                      const fl = this.add.image(px, py, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0xff7a2d).setAlpha(0.55).setScale(0.13 * scF)
+                        .setAngle(Math.random() * 360).setDepth(2.85);
+                      this.tweens.add({ targets: fl, alpha: 0, scale: 0.3 * scF,
+                        x: fl.x + back * 8 * scF, y: fl.y - 3, duration: 380,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, fl) });
+                      const sm = this.add.image(px + back * 6 * scF, py - 2,
+                        `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0x6b6360).setAlpha(0).setScale(0.10 * scF)
+                        .setAngle(Math.random() * 360).setDepth(2.8);
+                      this.tweens.add({ targets: sm, alpha: { from: 0.4, to: 0 }, scale: 0.42 * scF,
+                        x: sm.x + back * (10 + Math.random() * 8) * scF,
+                        y: sm.y - 8 - Math.random() * 6, angle: sm.angle + 40,
+                        delay: 240, duration: 1200 + Math.random() * 400,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, sm) });
+                      if (nowF >= (petObj._scorchAt || 0)) {
+                        petObj._scorchAt = nowF + 750;
+                        const ch = this.add.ellipse(petObj.x, gy, 9 * scF, 3 * scF, 0x3a2c22, 0.3).setDepth(1.04);
+                        this.tweens.add({ targets: ch, alpha: 0, duration: 1900,
+                          ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ch) });
+                      }
+                    }
+                  }
+                }
+                // WINGTIP TRAILS (storyboard #5) — per-dragon flavor.
+                if (movingFly && nowF >= (petObj._trailTipAt || 0)) {
+                  petObj._trailTipAt = nowF + 90;
+                  const back = petObj.flipX ? 1 : -1;
+                  const scT = Math.max(1, petObj.displayWidth / 64);
+                  const wy = petObj.y - petObj.displayHeight * ((petObj.originY || 1) - 0.62);
+                  for (const oy of [-3 * scT, 3 * scT]) {
+                    const tx = petObj.x + back * petObj.displayWidth * 0.34;
+                    const tyT = wy + oy + (Math.random() * 4 - 2);
+                    if (petObj._petId === 'pet_dragon_crimson') {
+                      // falling embers: orange sparks that flicker and DROP
+                      const e = this.add.circle(tx, tyT, (1 + Math.random()) * scT,
+                        [0xffd76a, 0xff9a3d, 0xff632d][Math.floor(Math.random() * 3)], 0.95).setDepth(2.9);
+                      this.tweens.add({ targets: e, alpha: 0, scale: 0.4,
+                        x: e.x + back * (8 + Math.random() * 8) * scT,
+                        y: e.y + (8 + Math.random() * 12),          // embers fall
+                        duration: 520 + Math.random() * 260, ease: 'Quad.easeIn',
+                        onComplete: this._trackPetFx(petObj, e) });
+                    } else if (petObj._petId === 'pet_phoenix') {
+                      // C: COMET BURN — white-hot streak ribbon + embers that
+                      // drop off, burst into flame on the floor and char it.
+                      const c = Math.random() < 0.5 ? 0xfff6c8 : 0xffd75e;
+                      const core = this.add.ellipse(tx, tyT, 10 * scT, 2.5 * scT, c, 0.75).setDepth(2.9);
+                      this.tweens.add({ targets: core, alpha: 0, scaleX: 0.2,
+                        x: core.x + back * (14 + Math.random() * 10) * scT,
+                        duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, core) });
+                      if (Math.random() < 0.2) {
+                        const gy = petObj.y - 1;
+                        const e = this.add.circle(tx, tyT, 1.4 * scT, 0xff9a3d, 0.95).setDepth(2.9);
+                        const doneE = this._trackPetFx(petObj, e);
+                        this.tweens.add({ targets: e, y: gy, x: e.x + back * 6 * scT,
+                          duration: 420 + Math.random() * 180, ease: 'Quad.easeIn',
+                          onComplete: () => {
+                            const ex = e.x; doneE();
+                            if (!petObj.active || !petObj.visible) return;
+                            const f = this.add.circle(ex, gy, 2.2 * scT, 0xffb347, 0.85).setDepth(1.2);
+                            this.tweens.add({ targets: f, alpha: 0, scale: 2.2, y: gy - 4,
+                              duration: 300, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, f) });
+                            const ch = this.add.ellipse(ex, gy, 7 * scT, 2.6 * scT, 0x2e2622, 0.4).setDepth(1.05);
+                            this.tweens.add({ targets: ch, alpha: 0, duration: 1600,
+                              ease: 'Sine.easeIn', onComplete: this._trackPetFx(petObj, ch) });
+                          } });
+                      }
+                    } else if (petObj._petId === 'pet_dragon_obsidian') {
+                      // gray-black smoke that LINGERS longest
+                      const s = this.add.image(tx, tyT, `smoke_puff_${Math.floor(Math.random() * 3)}`)
+                        .setTint(0x3a343c).setAlpha(0.5).setScale(0.14 * scT)
+                        .setAngle(Math.random() * 360).setDepth(2.9);
+                      this.tweens.add({ targets: s, alpha: 0, scale: 0.5 * scT,
+                        x: s.x + back * (6 + Math.random() * 6) * scT, y: s.y - 4 - Math.random() * 6,
+                        angle: s.angle + 30, duration: 1100 + Math.random() * 500,
+                        ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, s) });
+                    } else {
+                      // violet: sparkles that twinkle as they fade
+                      const s = this.add.star(tx, tyT, 4, 0.9 * scT, 2.4 * scT,
+                        [0xd7a6ff, 0xf0b6ff, 0xb46bff][Math.floor(Math.random() * 3)], 0.9).setDepth(2.9);
+                      this.tweens.add({ targets: s, alpha: 0, scale: 0.3, angle: 120,
+                        x: s.x + back * (12 + Math.random() * 10) * scT, y: s.y + (Math.random() * 6 - 3),
+                        duration: 480 + Math.random() * 200, ease: 'Sine.easeOut',
+                        onComplete: this._trackPetFx(petObj, s) });
+                    }
+                  }
+                }
+              }
+            }
+            if (!petObj._flyShadow || !petObj._flyShadow.active) {
+              petObj._flyShadow = this.add.ellipse(petObj.x, petObj.y - 1, 20, 6, 0x000000, 0.20).setDepth(1);
+              this._trackPetFx(petObj, petObj._flyShadow);
+            }
+            petObj._flyShadow.setPosition(petObj.x, petObj.y - 1)
+              .setVisible(petObj.visible)
+              .setScale(1 + (hov - 11) * -0.02);   // shadow breathes opposite the bob
+          } else {
+            if (flying) {
+              // SWOOP LANDING on sit-down (boss rule): the dragon doesn't
+              // teleport into its seat — it visibly DESCENDS over ~half a
+              // second, wings flared to brake, then the dust hits on touchdown.
+              const nowL = Date.now();
+              if (petObj.originY > 1.01 && !petObj._landT0 && petObj._petStage >= 3) {   // just left the air (final form only)
+                petObj._landT0 = nowL;
+                petObj._landH0 = (petObj.originY - 1) * Math.max(petObj.displayHeight, 1);
+              }
+              if (petObj._landT0) {
+                const p = Math.min(1, (nowL - petObj._landT0) / 480);
+                const h = petObj._landH0 * (1 - p * p);          // accelerating drop
+                petObj.setOrigin(0.5, 1 + h / Math.max(petObj.displayHeight, 1));
+                if (p < 1) {
+                  // wings flared UP while dropping (overrides the sit frame
+                  // the idle branch already set this tick — last write wins)
+                  if (petObj._animSet) {
+                    const fr = petObj._animSet.walk[0];
+                    if (petObj.texture.key !== fr) petObj.setTexture(fr);
+                  }
+                } else {
+                  petObj._landT0 = 0;                            // touchdown!
+                  if (petObj.visible) {
+                    const lfx = {
+                      pet_dragon:          { ring: 2.6, shake: 0,      dust: 0xcfc0a8, mul: 1 },
+                      pet_dragon_crimson:  { ring: 2.9, shake: 0.0016, dust: 0xd9a37e, mul: 1.15 },
+                      pet_dragon_obsidian: { ring: 3.4, shake: 0.0032, dust: 0x8f8880, mul: 1.4 },
+                    }[petObj._petId];
+                    if (lfx) {
+                      if (lfx.shake) this.cameras.main.shake(140, lfx.shake);
+                      const rr = lfx.ring * lfx.mul;
+                      const ring = this.add.ellipse(petObj.x, petObj.y - 1, 12, 4, lfx.dust, 0)
+                        .setStrokeStyle(1.5, lfx.dust, 0.6).setDepth(1.1);
+                      this.tweens.add({ targets: ring, scaleX: rr, scaleY: rr, alpha: 0,
+                        duration: 480, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, ring) });
+                      const d = this.add.image(petObj.x, petObj.y - 1, 'smoke_puff_0')
+                        .setTint(lfx.dust).setAlpha(0.35).setScale(0.18 * lfx.mul)
+                        .setAngle(Math.random() * 360).setDepth(1.1);
+                      this.tweens.add({ targets: d, alpha: 0, scale: 0.5 * lfx.mul,
+                        duration: 520, ease: 'Sine.easeOut', onComplete: this._trackPetFx(petObj, d) });
+                    }
+                  }
+                }
+              } else petObj.setOrigin(0.5, 1);                   // already landed
+            }
+            if (petObj._flyShadow && petObj._flyShadow.active) petObj._flyShadow.setVisible(false);
+          }
+        }
+        // A trick tween owns x/y while it plays — the follow step dragging the
+        // pet at the same time visually cancelled the whirl when the owner was
+        // walking. Real dogs stop to chase their tail; ours does too, then the
+        // smooth catch-up (or the >300px snap) reels it back in afterwards.
+        if (petObj._trickBusy) { petObj._wasTricking = true; this._placePetAcc(petObj); return; }
+        if (dist > gap || (seated && dist < gap - 2)) {
+          const k = Math.min(1, delta * (sprinting ? 0.022 : 0.008));   // smooth catch-up (fast sprint after tricks)
+          const mx = (px + (dx / dist) * gap - petObj.x) * k;
+          petObj.x += mx;
+          petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;
+          // Flip toward the walk direction so the head leads (idle keeps the
+          // last facing; tiny drifts don't flip). NOTE: most pet art faces
+          // RIGHT unflipped — only the bunnies face LEFT (verified against
+          // the PNGs), so bunnies use the inverted flip.
+          if (petObj.setFlipX && Math.abs(mx) > 0.3) {
+            // All ANIMATED frame art faces RIGHT (bunnies included); only the
+            // old STATIC bunny PNGs face left.
+            const facesLeft = !petObj._animSet && (petObj._petId || petObj.texture?.key || '').startsWith('pet_bunny');
+            petObj.setFlipX(facesLeft ? mx > 0 : mx < 0);
+          }
+        }
+        this._placePetAcc(petObj);   // accessory rides along every frame
+      }
+
+      // One-shot brew animation at a coffee machine (triggered by a machine
+      // coffeeBoost — see the socket handler). Client-only flavor on top of the
+      // idle steam loop: a ☕ pops out of the machine, lingers, floats away;
+      // a few extra steam puffs burst while it brews. All pieces self-destroy
+      // on tween complete, so repeated brews never leak display objects.
+      _brewFx(machineId) {
+        const o = OFFICE_OBJECTS.find(m => m.id === machineId);
+        if (!o || !o.hl) return;
+        const cx = o.hl.x + o.hl.w / 2, cy = o.hl.y + o.hl.h * 0.45;
+        const cup = this.add.text(cx, cy, '☕', { fontSize: '22px', resolution: 2 })
+          .setOrigin(0.5, 1).setScale(0).setDepth(460);
+        this.tweens.add({ targets: cup, scale: 1, duration: 280, ease: 'Back.easeOut' });
+        this.tweens.add({
+          targets: cup, y: cy - 42, alpha: 0, delay: 1400, duration: 900,
+          ease: 'Sine.easeIn', onComplete: () => cup.destroy(),
+        });
+        for (let i = 0; i < 3; i++) {
+          const puff = this.add.text(cx + (i - 1) * 14, cy - 10, '💨', { fontSize: '14px' })
+            .setOrigin(0.5, 1).setAlpha(0.9).setDepth(459);
+          this.tweens.add({
+            targets: puff, y: cy - 52, alpha: 0, delay: i * 240, duration: 1000,
+            ease: 'Sine.easeOut', onComplete: () => puff.destroy(),
+          });
+        }
+      }
+
+      // Gym equipment fx (server gymFx broadcast): a punch plays the bag's
+      // hit strip once then falls back to the idle sway; a treadmill run
+      // spins the belt for a few seconds then parks on frame 0. The stop
+      // timer is per-machine so overlapping runs just extend the spin, and
+      // the hit listener is re-armed per punch (off before once) so rapid
+      // punches never double-fire the fallback.
+      _gymFx(object, kind) {
+        const s = this._gymSprites?.[object];
+        if (!s) return;
+        if (kind === 'punch') {
+          s.off('animationcomplete-bag_hit');
+          s.play('bag_hit');
+          s.once('animationcomplete-bag_hit', () => s.play('bag_idle'));
+        } else if (kind === 'run') {
+          s.play('tread_run');
+          if (s._stopTimer) s._stopTimer.remove();
+          s._stopTimer = this.time.delayedCall(8000, () => {
+            s.anims.stop();
+            s.setTexture('anim_treadmill', 0);
+            s._stopTimer = null;
+          });
+        }
+      }
+
+      _setLocalPet(pet) {
+        if (this.localPet) { this._destroyPet(this.localPet); this.localPet = null; }
+        if (!this.player) return;
+        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc, _evoPreview || _myPetStage(pet));
+        // Your own pet is clickable → opens the pet card (feed / progress).
+        if (this.localPet) {
+          this.localPet.setInteractive({ useHandCursor: true });
+          this.localPet.on('pointerdown', () => window._openPetPanel && window._openPetPanel());
+        }
+      }
+
+      _updatePlayerPet(id, pet, petAcc, petStage) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        if (petStage != null) entry.petStage = petStage;
+        if (entry.pet) { this._destroyPet(entry.pet); entry.pet = null; }
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1);
+      }
+
+      // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
+      // paid outfit change. update() re-derives every anim key from
+      // playerTexKey each frame (walk/sit keys change with it, and the desk
+      // 'stand' pose setTextures every frame), so moving/seated poses
+      // self-correct; only the standing-idle path needs an explicit
+      // setTexture here (its setFrame never swaps the texture).
+      _applyLocalOutfit() {
+        if (!this.player) return;
+        const key = this._buildPlayerTex(_playerChar, _playerHairIdx, _playerSkinIdx, _playerShirtIdx, _playerPantsIdx,
+          _bakedWearIds(_playerChar, _equippedCosmetic, _equippedWings, _equippedSlots));
+        this.playerTexKey = key;
+        if (!this.sitting) {
+          this.player.setTexture(key);
+          this.player.anims.stop();
+          this.player.setFrame(DIR_START[this.lastDir] ?? DIR_START.down);
+        }
+      }
+
+      // Wardrobe: another player changed outfit. Build their new sheets and
+      // swap entry.texKey; the 50ms playerMoved stream re-renders every pose
+      // from entry.texKey (the anim-key guards compare keys built from it,
+      // and the idle / desk-stand branches setTexture unconditionally), so
+      // the new colours appear on the next tick — no re-posing needed here.
+      _applyRemoteOutfit(id, data) {
+        const entry = this.otherPlayers[id];
+        if (!entry) return;
+        // Avatar makeovers can change the base character too — adopt it so
+        // the rebuilt texture (and all future anim keys) use the new sprite.
+        if (data.character) entry.character = data.character;
+        const shirt = data.shirtIdx ?? data.clothesIdx ?? 0;
+        const pants = data.pantsIdx ?? data.clothesIdx ?? 0;
+        entry.appear = { hairIdx: data.hairIdx ?? 0, skinIdx: data.skinIdx ?? 0, shirtIdx: shirt, pantsIdx: pants };
+        const w = entry.wear || {};
+        entry.texKey = this._buildPlayerTex(entry.character, data.hairIdx ?? 0, data.skinIdx ?? 0, shirt, pants,
+          _bakedWearIds(entry.character, w.equipped, w.wings, w.slots));
+        // Re-render the CURRENT pose immediately: a stationary/seated player
+        // sends no playerMoved packets, so without this their old character
+        // would stay on screen until they next move.
+        const sp = entry.sprite, rdir = entry.lastDir || 'down';
+        if (entry.seated) {
+          const dp = this._deskPoseAt(sp.x, sp.y);
+          if (dp) {
+            const dsk = `sit_${entry.texKey}_down`;
+            if (dp.pose === 'sit3' && this.anims.exists(dsk)) {
+              sp.setFlipX(dp.flip === true);
+              sp.play(dsk);
+            } else {
+              sp.setTexture(entry.texKey);
+              sp.setFlipX(false); sp.anims.stop();
+              sp.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']);
+            }
+          } else {
+            const sk = `sit_${entry.texKey}_${SIT_DIR[rdir] || 'down'}`;
+            if (this.anims.exists(sk)) { sp.setFlipX(rdir === 'left'); sp.play(sk); }
+            else { sp.setFlipX(false); sp.anims.stop(); sp.setFrame(DIR_START[rdir]); }
+          }
+        } else {
+          sp.setFlipX(false); sp.anims.stop();
+          sp.setTexture(entry.texKey);
+          sp.setFrame(DIR_START[rdir]);
+        }
+      }
+
+      // ── Huddles the walking coach: rendered like a remote player (same
+      // texture builder + run sheets, insertion-order depth) but kept OUT of
+      // otherPlayers so no player-only interaction ever targets it. ──
+      _npcSpawn(d) {
+        if (!d) return;
+        if (this.npc) { this.npc.sprite.destroy(); this.npc.tag.destroy(); this.npc = null; }
+        const texKey = this._buildPlayerTex(d.character || 'amelia', d.hairIdx || 0, d.skinIdx || 0, d.shirtIdx || 0, d.pantsIdx || 0);
+        const sprite = this.add.sprite(d.x, d.y, texKey);
+        sprite.setScale(3).setOrigin(0.5, 0.5);
+        const dir = DIR_START[d.dir] !== undefined ? d.dir : 'down';
+        if (d.anim === 'walk') {
+          const wk = `walk_${texKey}_${dir}`;
+          sprite.play(this.anims.exists(wk) ? wk : `idle_${texKey}`);
+        } else {
+          sprite.anims.stop();
+          sprite.setFrame(DIR_START[dir]);
+        }
+        const tag = this._makeNameTag(d.x, d.y, '🌱 ' + (d.name || 'Huddles'));
+        tag.setColor('#bbf7d0');
+        tag.setBackgroundColor('#14532dd9');
+        this.npc = { sprite, tag, texKey, lastDir: dir };
+      }
+
+      // Ms. Poli (HR): stationary — same texture pipeline, amber name tag.
+      _hrNpcSpawn(d) {
+        if (!d) return;
+        if (this.hrNpc) { this.hrNpc.sprite.destroy(); this.hrNpc.tag.destroy(); this.hrNpc = null; }
+        const texKey = this._buildPlayerTex(d.character || 'amelia', d.hairIdx || 0, d.skinIdx || 0, d.shirtIdx || 0, d.pantsIdx || 0);
+        const sprite = this.add.sprite(d.x, d.y, texKey);
+        sprite.setScale(3).setOrigin(0.5, 0.5);
+        sprite.anims.stop();
+        sprite.setFrame(DIR_START[d.dir] !== undefined ? DIR_START[d.dir] : DIR_START.down);
+        const tag = this._makeNameTag(d.x, d.y, '📚 ' + (d.name || 'Ms. Poli'));
+        tag.setColor('#fde68a');
+        tag.setBackgroundColor('#78350fd9');
+        this.hrNpc = { sprite, tag, texKey };
+      }
+
+      // Confetti over whoever finished Huddles' mission (the server already
+      // filtered recipients for After Dark light isolation).
+      _missionCheer(d) {
+        const who = d.id === socket.id ? this.player : this.otherPlayers[d.id]?.sprite;
+        if (who) this._groupBurst('confetti', who.x, who.y);
+      }
+
+      // Build a Prop Hunt disguise object anchored bottom-center at (x,y).
+      // Single-texture disguises are one sprite; map-furniture disguises are a
+      // container of the map's own 16px tileset frames (scale 3, like tiles).
+      _phMakeProp(x, y, disguise) {
+        const t = PH_TEX[disguise] || PH_TEX.cooler;
+        if (t.tiles) {
+          const g = t.tiles.grid, cols = g[0].length, rows = g.length, S = 3;
+          const c = this.add.container(x, y);
+          for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+            c.add(this.add.image((k - (cols - 1) / 2) * 16 * S, (r - rows) * 16 * S + 8 * S, t.tiles.sheet, g[r][k]).setScale(S));
+          }
+          return c;
+        }
+        const s = (t.frame === null ? this.add.image(x, y, t.key) : this.add.sprite(x, y, t.key, t.frame));
+        return s.setOrigin(t.ox, 1).setScale(3);
+      }
+
+      _makeNameTag(x, y, name) {
+        return this.add.text(x, y-40, name, {
+          fontSize:'14px', fontFamily:'monospace', color:'#fff',
+          backgroundColor:'#000000bb', padding:{x:5,y:3}, resolution:2,
+        }).setOrigin(0.5,1).setDepth(1);   // BEHIND pets (2), wings (10) etc. — the boss wants sprites to cover the tag, never the reverse
+      }
+
+      _showChatBubble(sprite, message, isLocal, isWhisper) {
+        if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
+        const yOff  = isLocal ? ((this.localCosmetic && !this.localCosmeticDef) ? -95 : -78) : -85;
+        const bubble = this.add.text(sprite.x, sprite.y+yOff, message, {
+          fontSize:'14px', fontFamily:'monospace',
+          color: isWhisper ? '#e9d5ff' : '#111',
+          backgroundColor: isWhisper ? '#2e1b4de6' : '#ffffffee', padding:{x:10,y:7},
+          wordWrap:{width:220}, resolution:2,
+        }).setOrigin(0.5,1).setDepth(1002);
+        this.tweens.add({
+          targets:bubble, alpha:0, delay:3800, duration:500,
+          onComplete:()=>{ bubble.destroy(); if(isLocal&&this.localBubble===bubble) this.localBubble=null; },
+        });
+        if (isLocal) this.localBubble = bubble;
+        return bubble;
+      }
+
+      // Whisper bubble over the SENDER's avatar — only the recipient ever
+      // receives the event, so nothing leaks to bystanders. Reuses the shared
+      // chat-bubble slot so follow-the-player positioning keeps working.
+      _showWhisperBubble(fromId, message) {
+        const entry = this.otherPlayers[fromId];
+        if (!entry) return;
+        if (entry.chatBubble) entry.chatBubble.destroy();
+        entry.chatBubble = this._showChatBubble(entry.sprite, '🤫 ' + message, false, true);
+      }
+
+      // RPS match-result indicator over BOTH heads, visible to bystanders too:
+      // 🏆 winner, 😵 loser, 🤝 both on a draw. Reuses the emote-bubble helper
+      // (and thus the shared chat-bubble slot) so follow-the-player positioning
+      // keeps working unchanged.
+      _showRpsIndicator(d) {
+        const show = (pid, char) => {
+          if (pid === socket.id) {
+            if (this.player) this._showEmoteBubble(this.player, char, true);
+          } else {
+            const entry = this.otherPlayers[pid];
+            if (!entry) return;
+            if (entry.chatBubble) entry.chatBubble.destroy();
+            entry.chatBubble = this._showEmoteBubble(entry.sprite, char, false);
+          }
+        };
+        if (d.draw) { show(d.aId, '🤝'); show(d.bId, '🤝'); }
+        else { show(d.winnerId, '🏆'); show(d.loserId, '😵'); }
+      }
+
+      // Emote bubbles reuse the chat-bubble slot (this.localBubble /
+      // entry.chatBubble), so every existing follow-the-player positioning path
+      // (update() for the local player, playerMoved for others) keeps working,
+      // and an emote simply replaces any bubble already showing.
+      _showEmoteBubble(sprite, char, isLocal) {
+        if (isLocal && this.localBubble) { this.localBubble.destroy(); this.localBubble = null; }
+        const yOff  = isLocal ? ((this.localCosmetic && !this.localCosmeticDef) ? -95 : -78) : -85;
+        const bubble = this.add.text(sprite.x, sprite.y+yOff, char, {
+          fontSize:'26px', padding:{x:9,y:6},
+          backgroundColor:'#ffffffee', resolution:2,
+        }).setOrigin(0.5,1).setDepth(1002);
+        bubble.setScale(0.4);
+        this.tweens.add({ targets:bubble, scaleX:1, scaleY:1, duration:140, ease:'Back.Out' });
+        this.tweens.add({
+          targets:bubble, alpha:0, delay:2600, duration:400,
+          onComplete:()=>{ bubble.destroy(); if(isLocal&&this.localBubble===bubble) this.localBubble=null; },
+        });
+        if (isLocal) this.localBubble = bubble;
+        return bubble;
+      }
+
+      // Smoke break: little 💨 puffs that spawn over the smoker's head and
+      // drift up while fading. Deliberately NOT the shared chat-bubble slot —
+      // a 10s smoke shouldn't eat chat/emote bubbles (or be eaten by them).
+      // The spawner re-resolves the sprite every puff and stops quietly if the
+      // player leaves mid-smoke.
+      _startSmoke(id, durationMs) {
+        const isLocal = id === socket.id;
+        const puffEveryMs = 700;
+        const puffs = Math.max(1, Math.floor(durationMs / puffEveryMs));
+        const ev = this.time.addEvent({
+          delay: puffEveryMs, repeat: puffs - 1, startAt: puffEveryMs - 10,  // first puff ~immediately
+          callback: () => {
+            const sprite = isLocal ? this.player : this.otherPlayers[id]?.sprite;
+            if (!sprite || !sprite.active) { ev.remove(); return; }
+            const puff = this.add.text(
+              sprite.x + Phaser.Math.Between(-4, 12), sprite.y - 52, '💨',
+              { fontSize:'16px', resolution:2 },
+            ).setOrigin(0.5, 1).setDepth(1001).setAlpha(0.9);
+            this.tweens.add({
+              targets: puff, y: puff.y - 34, alpha: 0, scaleX: 1.4, scaleY: 1.4,
+              duration: 1400, ease: 'Sine.Out', onComplete: () => puff.destroy(),
+            });
+          },
+        });
+      }
+
+      // Group consumable visuals: a burst of emoji particles at a world
+      // position. Confetti pops outward and falls; fireworks launch up and
+      // explode high; pizza is a gentle float-up. Purely cosmetic — the
+      // server's groupEffect event carries only {effect, x, y}.
+      _groupBurst(effect, x, y, emoji) {
+        const CFG = {
+          confetti:  { emojis: ['🎉', '🎊', '✨'],       count: 14, up: 90,  spread: 90,  dur: 1600, size: 16 },
+          fireworks: { emojis: ['🎆', '✨', '💥', '🌟'], count: 22, up: 220, spread: 130, dur: 2600, size: 18 },
+          pizza:     { emojis: ['🍕', '🍕', '✨'],       count: 10, up: 70,  spread: 70,  dur: 1800, size: 16 },
+          // Chore bursts ride the server-sent chore emoji plus sparkles.
+          chore:     { emojis: ['✨', '✨', '🪙'],       count: 9,  up: 60,  spread: 60,  dur: 1400, size: 15 },
+        };
+        const cfg = CFG[effect];
+        if (!cfg) return;
+        if (effect === 'chore' && typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) {
+          cfg.emojis = [emoji, '✨', '🪙'];
+        }
+        for (let i = 0; i < cfg.count; i++) {
+          const em = cfg.emojis[Phaser.Math.Between(0, cfg.emojis.length - 1)];
+          const p = this.add.text(
+            x + Phaser.Math.Between(-14, 14), y - 40,
+            em, { fontSize: cfg.size + 'px', resolution: 2 },
+          ).setOrigin(0.5).setDepth(1002).setAlpha(0.95);
+          const rise = cfg.up + Phaser.Math.Between(0, cfg.up * 0.6);
+          const dx = Phaser.Math.Between(-cfg.spread, cfg.spread);
+          const delay = Phaser.Math.Between(0, effect === 'fireworks' ? 900 : 250);
+          // Up-and-out, then fade while drifting down a touch (confetti feel).
+          this.tweens.chain({
+            targets: p,
+            tweens: [
+              { y: p.y - rise, x: p.x + dx, scaleX: 1.3, scaleY: 1.3,
+                duration: cfg.dur * 0.45, delay, ease: 'Sine.Out' },
+              { y: '+=' + Math.round(rise * 0.35), alpha: 0,
+                duration: cfg.dur * 0.55, ease: 'Sine.In' },
+            ],
+            onComplete: () => p.destroy(),
+          });
+        }
+      }
+
+      _removeOtherPlayer(id) {
+        const e = this.otherPlayers[id];
+        if (!e) return;
+        e.sprite.destroy(); e.nameTag.destroy();
+        if (e.cosmetic)   { this.tweens.killTweensOf(e.cosmetic); e.cosmetic.destroy(); }   // flap tween dies with the wings
+        if (e.wings)      { this.tweens.killTweensOf(e.wings); e.wings.destroy(); }
+        if (e.pet)        this._destroyPet(e.pet);
+        if (e.chatBubble) e.chatBubble.destroy();
+        this._clearOccluders(e.occluders);
+        delete this.otherPlayers[id];
+      }
+
+      _addOtherPlayer(id, data) {
+        if (id === socket.id) return;           // never draw ourselves as a remote player
+        // Also skip a STALE copy of ourselves: a fast refresh/reconnect can leave our
+        // previous socket's player on the server for a moment, so currentPlayers /
+        // playerJoined arrives with a second entry carrying OUR email but a different
+        // (old) id — rendering it makes a frozen "ghost twin". Email uniquely identifies
+        // a person, so this never hides a genuinely different player.
+        if (_playerEmail && data && data.email && data.email === _playerEmail) return;
+        // Idempotent: tear down any existing sprite for this id before re-adding.
+        // Skipping this orphans the old sprite + nameTag — a frozen "ghost twin" that
+        // never moves (playerMoved only updates the newest entry). That is the
+        // duplicate-character bug: a second currentPlayers/playerJoined for an
+        // already-known id (e.g. after a socket reconnect) double-added the sprite,
+        // and it froze in whatever pose it held (often mid-sit).
+        this._removeOtherPlayer(id);
+        const char        = data.character  || 'adam';
+        const hairIdx     = data.hairIdx    || 0;
+        const skinIdx     = data.skinIdx    || 0;
+        const shirtIdx    = data.shirtIdx ?? data.clothesIdx ?? 0;
+        const pantsIdx    = data.pantsIdx ?? data.clothesIdx ?? 0;
+
+        const texKey = this._buildPlayerTex(char, hairIdx, skinIdx, shirtIdx, pantsIdx,
+          _bakedWearIds(char, data.equipped, data.wings, data.slots));
+        const sprite = this.add.sprite(data.x, data.y, texKey);
+        sprite.setScale(3).setOrigin(0.5,0.5);
+        const dir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
+        let occluders = null;
+        if (data.anim === 'sit') {
+          const dp = this._deskPoseAt(data.x, data.y);
+          if (dp) {
+            // Desk-type seat: monitor workstation -> standing DOWN frame; manager desk -> sit3 toward the desk.
+            const dsk = `sit_${texKey}_down`;
+            if (dp.pose === 'sit3' && this.anims.exists(dsk)) { sprite.setFlipX(dp.flip === true); sprite.play(dsk); }
+            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dp.pose === 'standup' ? 'up' : 'down']); }
+          } else {
+            const sk = `sit_${texKey}_${SIT_DIR[dir] || 'down'}`;
+            if (this.anims.exists(sk)) { sprite.setFlipX(dir === 'left'); sprite.play(sk); }
+            else { sprite.setFlipX(false); sprite.anims.stop(); sprite.setFrame(DIR_START[dir]); }
+          }
+          occluders = this._seatOccludersFor(data.x, data.y, dir);
+        } else if (data.anim === 'walk') {
+          sprite.setFlipX(false);
+          const wk = `walk_${texKey}_${dir}`;
+          sprite.play(this.anims.exists(wk) ? wk : `idle_${texKey}`);
+        } else {
+          sprite.setFlipX(false);
+          sprite.anims.stop();
+          sprite.setFrame(DIR_START[dir]);
+        }
+
+        // Clicking someone opens a small action menu (💬 Whisper / ✊ Challenge).
+        // Listener dies with the sprite on destroy — no cleanup bookkeeping.
+        sprite.setInteractive({ useHandCursor: true });
+        sprite.on('pointerdown', (pointer) => {
+          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
+              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
+              && !window._bingoUiOpen?.()
+              && !window._dealUiOpen?.()
+              && !document.getElementById('shop-modal').classList.contains('open')) {
+            const ev = pointer && pointer.event;
+            window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
+          }
+        });
+
+        const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
+
+        const made = this._makeCosmetic(data.equipped, data.x, data.y, data.dir, sprite, char);
+        const cosmetic = made ? made.obj : null;
+        const cosmeticDef = made ? made.def : null;
+        const madeW = this._makeCosmetic(data.wings || '', data.x, data.y, data.dir, sprite, char);
+        const wings = madeW ? madeW.obj : null;
+        const wingsDef = madeW ? madeW.def : null;
+        // Outfit slots: build one overlay per worn slot (top/bottom/neckwear/held).
+        const slotObjs = {};
+        for (const [slot, item] of Object.entries(data.slots || {})) {
+          if (!item) continue;
+          const m = this._makeCosmetic(item, data.x, data.y, data.dir, sprite, char);
+          if (m) slotObjs[slot] = m;
+        }
+        const petStage = _petStageFor(data.pet, ((data.petXp || {})[data.pet]) || 0);
+        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
+
+        this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit',
+          appear: { hairIdx, skinIdx, shirtIdx, pantsIdx },
+          wear: { equipped: data.equipped || '', wings: data.wings || '', slots: Object.assign({}, data.slots || {}) } };
+        // Eliminated round players stay hidden even across a sprite re-add
+        // (sit-down re-adds, reconnect re-adds) — the round HUD tick also
+        // re-asserts this, but doing it here avoids a one-frame flash.
+        if (window._roundIsHidden && window._roundIsHidden(id)) window._roundGhostVis(id, false);
+      }
+
+      // Show the pulsing highlight only for the active object id (null = hide all).
+      _setObjHighlight(activeId) {
+        if (!this._objHl) return;
+        for (const o of OFFICE_OBJECTS) {
+          const rect = this._objHl[o.id];
+          if (rect) rect.setVisible(activeId === o.id);
+        }
+      }
+
+      // Keep the on-screen action button's label + enabled state in sync with the "[E]" prompt.
+      _updateTouchActionBtn(interact, forceDisabled) {
+        if (!IS_TOUCH) return;
+        const btn = this._actionBtn || (this._actionBtn = document.getElementById('touch-action'));
+        if (!btn) return;
+        let label = 'E', avail = false;
+        if (forceDisabled)                   { /* keep disabled */ }
+        else if (this.sitting)               { label = 'Stand'; avail = true; }
+        else if (interact?.type === 'board') { label = 'Read';  avail = true; }
+        else if (interact?.type === 'sit')   { label = interact.bed ? 'Lie' : 'Sit'; avail = true; }
+        else if (interact?.type === 'coach') { label = 'Talk';  avail = true; }
+        else if (interact?.type === 'hr')    { label = 'Talk';  avail = true; }
+        else if (interact?.type === 'object'){ label = interact.obj.touch; avail = true; }
+        if (this._taLabel !== label) { btn.textContent = label; this._taLabel = label; }
+        if (this._taAvail !== avail) { btn.classList.toggle('disabled', !avail); this._taAvail = avail; }
+      }
+
+      update(time, delta) {
+        if (!this.player) return;
+        if (this._wx) this._weatherTick(delta);   // seasonal rain overlay (Aug–Oct)
+
+        // Office After Dark darkness overlay follows the player every frame
+        // (transform-only; no-op unless a round is active for us).
+        window._roundFrame?.(this);
+        // Chore "available again" sparkles — cheap, so a 1s throttle is plenty.
+        if (!this._choreMarkAt || time - this._choreMarkAt > 1000) {
+          this._choreMarkAt = time;
+          const ra = window._choreReadyAt || {};
+          const nowTs = Date.now();
+          for (const o of OFFICE_OBJECTS) {
+            if (!o.chore) continue;
+            const m = this._choreMarks && this._choreMarks[o.id];
+            if (m) m.setVisible((ra[o.chore] || 0) <= nowTs);
+          }
+        }
+        // Void containment snap-back: never let anyone stand in the unpainted
+        // nothing outside the drawn map (the velocity clamp below is the
+        // steering half; this catches teleports/separation pushes).
+        window._voidGuardFrame?.(this);
+
+        const { cursors, wasd, player } = this;
+
+        // Use stored run-sheet key — player.texture.key drifts when sit anim plays
+        const texKey  = this.playerTexKey;
+        const idleKey = `idle_${texKey}`;
+
+        if (this.localNameTag) this.localNameTag.setPosition(player.x, player.y-40);
+        if (this.localCosmetic) {
+          if (this.localCosmeticDef) this._placeWearable(this.localCosmetic, this.localCosmeticDef, player.x, player.y, this.lastDir);
+          else this.localCosmetic.setPosition(player.x, player.y-68);
+        }
+        if (this.localWings && this.localWingsDef) this._placeWearable(this.localWings, this.localWingsDef, player.x, player.y, this.lastDir);
+        for (const k in (this.localSlotObjs || {})) {
+          const s = this.localSlotObjs[k];
+          if (s && s.obj && s.def) this._placeWearable(s.obj, s.def, player.x, player.y, this.lastDir);
+        }
+        // Sprite wearables sit ON the body, so they don't raise the bubble —
+        // only a floating emoji cosmetic does.
+        if (this.localBubble)  this.localBubble.setPosition(player.x, player.y+((this.localCosmetic && !this.localCosmeticDef)?-95:-78));
+        const lvb = window._voiceBadges && window._voiceBadges[socket.id];
+        if (lvb) lvb.txt.setPosition(player.x, player.y-56);
+
+        // Pets trail their owners — local pet follows us, remote pets follow
+        // their entry's sprite (whose position the playerMoved stream drives).
+        if (this.localPet) this._stepPet(this.localPet, player.x, player.y, delta, this.sitting);
+        for (const oid in this.otherPlayers) {
+          const oe = this.otherPlayers[oid];
+          if (oe.pet) this._stepPet(oe.pet, oe.sprite.x, oe.sprite.y, delta, oe.seated === true);
+        }
+
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen || window._ph.frozen || window._rlglFrozenMe) {
+          player.setVelocity(0,0);
+          this._moving = false;
+          if (!this.sitting) { player.anims.stop(); player.setFrame(DIR_START[this.lastDir]); }
+          this.eHint.setVisible(false);
+          this._setObjHighlight(null);
+          touchAction.queued = false;
+          this._updateTouchActionBtn(null, true);
+          this._sendTimer += delta;
+          if (this._sendTimer >= 50) {
+            this._sendTimer = 0;
+            socket.emit('playerMove', {x:player.x, y:player.y, dir:this.lastDir, anim:this.sitting?'sit':'idle'});
+          }
+          return;
+        }
+
+        const up    = cursors.up.isDown    || wasd.up.isDown    || touchMove.up;
+        const down  = cursors.down.isDown  || wasd.down.isDown  || touchMove.down;
+        const left  = cursors.left.isDown  || wasd.left.isDown  || touchMove.left;
+        const right = cursors.right.isDown || wasd.right.isDown || touchMove.right;
+
+        // Tile we're standing on, measured from the arcade body (feet), not the
+        // sprite origin (chest) — otherwise the E-scan probes one row too high.
+        const ptx = Math.floor(player.x / 48);
+        const pty = Math.floor((player.y + BODY_DY) / 48);
+
+        // Scan the 4 adjacent tiles (facing first). Boards read; chairs and manager
+        // desks sit. All sit targets (office chair 2231, sofas, and the
+        // baked-in manager-desk chairs) live on the FURNITURE layer; boards can also
+        // be wall-mounted, so the board probe checks BOTH layers.
+        const DIRVEC = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
+        const furnAt = (c,r) => { const t = this.furnitureLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
+        const wallAt = (c,r) => { const t = this.wallLayer.getTileAt(c,r); return (t && t.index>0) ? t.index : 0; };
+        // First interactable neighbour in priority order (facing first) wins. Its
+        // OWN type decides the action; plain solid furniture/walls are skipped so
+        // the scan keeps looking for a genuine seat or board in the other directions.
+        let interact = null;   // { type:'board'|'sit', dir, seat? }
+        if (!this.sitting) {
+          // Seat you're STANDING ON — packed workstation banks are walkable now, so you
+          // reach a middle chair by walking onto it and pressing E right there.
+          const cg = furnAt(ptx, pty);
+          const onDesk = deskChairAt(cg, ptx, pty);
+          if (onDesk)                  { interact = { type:'sit', dir:this.lastDir, seat:onDesk }; }
+          else if (this.isFurnSeat(cg, ptx, pty)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:ptx, row:pty, facing:this.seatFacingAt[ptx+','+pty] || SEAT_FACING[cg] || this.lastDir } }; }
+          else {
+            for (const d of [this.lastDir,'up','down','left','right']) {
+              const v = DIRVEC[d]; if (!v) continue;
+              const nc = ptx+v[0], nr = pty+v[1];
+              const fg = furnAt(nc,nr);
+              if (BOARD_GIDS.has(fg) || BOARD_GIDS.has(wallAt(nc,nr))) { interact = { type:'board', dir:d, bcol:nc, brow:nr }; break; }
+              const desk = deskChairAt(fg, nc, nr);
+              if (desk)               { interact = { type:'sit', dir:d, seat:desk }; break; }
+              if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:d, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || d } }; break; }
+              // any other solid furniture/wall is not interactable
+            }
+            // Diagonal neighbours too — "close to the sofa" should be enough (owner
+            // request July 2026). Seats only (boards keep cardinal-only). Facing for
+            // a diagonal approach falls back to the walk direction, matching the
+            // approach-facing model for unpinned sofas/benches.
+            if (!interact) for (const dv of [[1,1],[1,-1],[-1,1],[-1,-1]]) {
+              const nc = ptx+dv[0], nr = pty+dv[1];
+              const fg = furnAt(nc,nr);
+              const desk = deskChairAt(fg, nc, nr);
+              if (desk) { interact = { type:'sit', dir:this.lastDir, seat:desk }; break; }
+              if (this.isFurnSeat(fg, nc, nr)) { interact = { type:'sit', dir:this.lastDir, seat:{ col:nc, row:nr, facing:this.seatFacingAt[nc+','+nr] || SEAT_FACING[fg] || this.lastDir } }; break; }
+            }
+          }
+        }
+
+        // Interactive office objects: distance-based (not tile-adjacency) so the
+        // whole "stand near it" zone works. Seats/boards win when both apply —
+        // step one tile over if you want the object instead.
+        // Huddles the coach: E-talk when standing close (seats/boards from the
+        // adjacency scan above win — step aside if you want the chair).
+        if (!interact && !this.sitting && this.npc) {
+          const ndx = player.x - this.npc.sprite.x, ndy = player.y - this.npc.sprite.y;
+          if (ndx * ndx + ndy * ndy < 150 * 150) interact = { type: 'coach' };
+        }
+        // Ms. Poli the HR librarian: same E-talk zone as Huddles.
+        if (!interact && !this.sitting && this.hrNpc) {
+          const hdx = player.x - this.hrNpc.sprite.x, hdy = player.y - this.hrNpc.sprite.y;
+          if (hdx * hdx + hdy * hdy < 150 * 150) interact = { type: 'hr' };
+        }
+        let objNear = null;
+        if (!this.sitting && !interact) {
+          for (const o of OFFICE_OBJECTS) {
+            const odx = player.x - o.x, ody = player.y - o.y;
+            if (odx*odx + ody*ody <= o.r*o.r) { objNear = o; break; }
+          }
+          if (objNear) interact = { type:'object', obj: objNear };
+        }
+        this._setObjHighlight(objNear && objNear.id);
+
+        // Prop Hunt: the suspicious furniture is E-checkable for seekers.
+        // Prop Hunt hider self-view: while sneaking to a spot, the hider sees
+        // THEMSELF as the chosen disguise (local only — nobody else can see
+        // them at all). The furniture slides around; comedy is a feature.
+        // Ghost mode: the hider phases through walls/furniture while sneaking
+        // (owner request). Collision only re-engages on a walkable tile, so
+        // the phase flipping back can never seal you inside a wall.
+        if (player.body && player.body.checkCollision) {
+          const phGhost = window._ph.role === 'hider' && window._ph.phase === 'hiding';
+          const cc = player.body.checkCollision;
+          if (phGhost) cc.none = true;
+          else if (cc.none) {
+            const gc = Math.floor(player.x / 48), gr = Math.floor(player.y / 48);
+            const solid = [this.wallLayer, this.furnitureLayer, this.floorLayer]
+              .some(L => { const t = L && L.getTileAt(gc, gr); return t && t.collides; });
+            if (!solid) cc.none = false;
+          }
+        }
+        // C toggles the shapeshift (same as the button) while sneaking.
+        if (window._ph.role === 'hider' && window._ph.phase === 'hiding' &&
+            Phaser.Input.Keyboard.JustDown(this.keyC) &&
+            !_chatOpen && !_dmOpen && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen) {
+          window._ph.morph = !window._ph.morph; _phMorphBtn(true);
+        }
+        if (window._ph.role === 'hider' && window._ph.phase === 'hiding' && window._ph.morph) {
+          if (!this._phPreview) {
+            this._phPreview = this._phMakeProp(player.x, player.y, window._ph.disguise);
+            window._phSelfVis && window._phSelfVis(false);
+          }
+          this._phPreview.setPosition(player.x, player.y);
+          if (this._phPreview.setDepth) this._phPreview.setDepth(player.depth || 0);
+        } else if (this._phPreview) {
+          this._phPreview.destroy(); this._phPreview = null;
+          // Toggled back to human mid-hide → show the avatar again. (Never
+          // during the hunt — there the hider stays hidden behind the prop.)
+          if (window._ph.phase !== 'hunting') window._phSelfVis && window._phSelfVis(true);
+        }
+
+        if (!interact && !this.sitting && this._phProp && window._ph.role === 'seeker' && window._ph.phase === 'hunting') {
+          const gdx = player.x - this._phProp.x, gdy = player.y - this._phProp.y;
+          if (gdx * gdx + gdy * gdy < 120 * 120) interact = { type: 'phGuess' };
+        }
+
+
+        // Beds get their own verb — the seat mechanics are identical, only the
+        // labels and the rendered pose differ (see BED_GIDS / pose 'lie').
+        if (interact?.type === 'sit') interact.bed = BED_GIDS.has(furnAt(interact.seat.col, interact.seat.row));
+
+        if (this.sitting)                    this.eHint.setVisible(false);
+        else if (interact?.type === 'board') this.eHint.setText('[ E ] Read board').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'coach') this.eHint.setText('[ E ] Talk to Huddles').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'hr') this.eHint.setText('[ E ] Talk to Ms. Poli').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'sit')   this.eHint.setText(interact.bed ? '[ E ] Lie down' : '[ E ] Sit').setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'object')this.eHint.setText('[ E ] ' + interact.obj.label).setVisible(true).setPosition(player.x, player.y-58);
+        else if (interact?.type === 'phGuess') this.eHint.setText('[ F ] Find the boss?').setVisible(true).setPosition(player.x, player.y-58);
+        else                                 this.eHint.setVisible(false);
+        this._updateTouchActionBtn(interact);
+
+        // F is the advertised "Find" key (owner request — E stays for sit/read/
+        // objects); touch users still go through the action button below.
+        if (interact?.type === 'phGuess' && Phaser.Input.Keyboard.JustDown(this.keyF)) socket.emit('phGuess');
+        // Red Light Green Light: F = SHOVE the nearest runner (game only —
+        // outside a doll game F keeps its Prop Hunt meaning above). NOTE: the
+        // shared `_typing` const is declared BELOW this line — reading it here
+        // is a TDZ crash, so this check must stay inline.
+        else if (Phaser.Input.Keyboard.JustDown(this.keyF) && window._rlglTryPush
+                 && !(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')))
+          window._rlglTryPush(this);
+        // P = pet trick on demand (NOT T — T opens the chat box): play it
+        // locally right away, and tell the server so everyone else's client
+        // plays it on this pet too. Only for lively pets, only while visible
+        // (round-hidden players stay silent), and never while a trick tween
+        // already owns the pet.
+        const _typing = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+        if (Phaser.Input.Keyboard.JustDown(this.keyP) && !_typing) {
+          const p = this.localPet;
+          if (p && p._lively && !p._trickBusy && p.visible) {
+            this._petTrick(p);
+            p._trickAt = 0;                          // re-roll the idle timer
+            socket.emit('petTrick');
+          }
+        }
+        const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
+        touchAction.queued = false;
+        if (doAction) {
+          if (this.sitting) {
+            this.sitting = false;
+            this._deskPose = null;
+            _setWorkChip(false);
+            this._clearOccluders(this._seatOccluders);
+            this._seatOccluders = [];
+            player.setTexture(this.playerTexKey);   // restore run sheet before update() reads texKey
+            // body.reset re-syncs the body + its prev position (plain setPosition can
+            // leave the body stale for a tick); _preSitPos is the walkable tile we
+            // stood on before sitting, so re-enabling collision there is safe.
+            if (this._preSitPos) { player.body.reset(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
+            player.body.enable = true;
+          } else if (interact?.type === 'board') {
+            this.lastDir = interact.dir;
+            openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
+          } else if (interact?.type === 'coach') {
+            socket.emit('coachInteract');
+          } else if (interact?.type === 'hr') {
+            socket.emit('hrInteract');
+          } else if (interact?.type === 'phGuess') {
+            socket.emit('phGuess');
+          } else if (interact?.type === 'object') {
+            // The arcade opens the game picker first; the modal then sends
+            // interact {object:'arcade', game}. Everything else fires directly.
+            if (interact.obj.id === 'arcade' && window._openArcadePicker) window._openArcadePicker();
+            else socket.emit('interact', { object: interact.obj.id });
+          } else if (interact?.type === 'sit') {
+            const s = interact.seat;
+            this._preSitPos = { x: player.x, y: player.y };            // walkable tile to stand back up on
+            player.setVelocity(0,0);
+            // Snap so the body (feet) lands on the seat tile centre; the sprite
+            // origin sits BODY_DY above it, so the character rests IN the chair.
+            // 2-tile-wide seats (armchairs/beds) also shift by SEAT_DX so either
+            // tile lands the avatar on the piece's horizontal center. The snap
+            // stays well inside the server's SEAT_SNAP_ALLOWANCE (160px).
+            const seatGid = furnAt(s.col, s.row);
+            player.setPosition(s.col*48+24 + (SEAT_DX[seatGid] || 0), s.row*48+24 - BODY_DY + (SEAT_DY[seatGid] || 0));
+            player.body.enable = false;             // seat tile is solid — disable body so we rest on it
+            // Desk-type seats face the desk: monitor workstations render the standing DOWN
+            // frame, manager-desk chairs the seated sit3 sheet mirrored toward the desk (see the
+            // sitting block below — detection matches _deskPoseAt so remote viewers render the
+            // same pose). Beds render the lying pose. Every other seat keeps the approach
+            // facing you walked in with.
+            const deskInfo = deskChairAt(seatGid, s.col, s.row);
+            this._deskPose = this._isWorkstation(s.col, s.row) ? { pose: 'stand' }
+                           : seatGid === 2593 ? { pose: 'stand' }  // tall HR-desk chair: workstation look (SEAT_DY parks the feet on the 2609 desk-top cell — matches _deskPoseAt's derived-cell branch)
+                           : STUDIO_CHAIR_GIDS.has(seatGid) ? { pose: 'stand' }  // studio front-desk armchair: workstation look (matches _deskPoseAt's derived-cell branch on the 5033 seat tile)
+                           : BED_GIDS.has(seatGid) ? { pose: 'lie' }
+                           : deskInfo ? { pose: 'sit3', flip: deskInfo.facing === 'left' }
+                           : this._upSeatAt(s.col, s.row) ? { pose: 'standup' }
+                           : null;
+            // Work-bonus chairs (office chairs + manager desks + wall-layer
+            // computer-desk chairs) earn the +3/min bonus — same rule as the
+            // server's WORK_SEAT_GIDS / WALL_WORK_SEAT_GIDS check.
+            _setWorkChip(WORK_CHAIR_GIDS.has(seatGid) || !!deskInfo
+              || WALL_SEATS[this.wallLayer.getTileAt(s.col, s.row)?.index] !== undefined);
+            // Pinned seats face their pin (s.facing is seatFacingAt || SEAT_FACING || approach
+            // dir — using the raw approach dir here sat players SIDEWAYS on pinned chairs when
+            // they walked in from the side). Desk poses broadcast their forced facing.
+            this.lastDir = this._deskPose ? (this._deskPose.pose === 'standup' ? 'up' : 'down')
+                                          : (s.facing || interact.dir);
+            this.sitting = true;
+            this._clearOccluders(this._seatOccluders);
+            // Derive the occluder cell from the FINAL seated position (not the seat cell) —
+            // exactly what remote viewers do in _seatOccludersFor. For every dy=0 seat the
+            // derived cell IS the seat cell; for SEAT_DY seats (tall HR-desk chairs) it's the
+            // desk-top cell the feet landed on, which carries the occluder branch.
+            this._seatOccluders = this._seatOccludersFor(player.x, player.y, s.facing);
+          }
+        }
+
+        if (this.sitting) {
+          player.setVelocity(0,0);
+          if (this._deskPose) {
+            // Desk-type seat: monitor workstations show the upright standing DOWN idle frame — the
+            // desk + monitor hide the legs so it reads as seated with the face visible (the
+            // approved look). Manager-desk chairs are side-on with nothing occluding the body, so
+            // they play the real seated sit3 sheet mirrored toward the desk instead.
+            const deskSit = `sit_${texKey}_down`;
+            if (this._deskPose.pose === 'sit3' && this.anims.exists(deskSit)) {
+              player.setFlipX(this._deskPose.flip === true);
+              if (player.anims.currentAnim?.key !== deskSit || !player.anims.isPlaying) player.play(deskSit);
+            } else {
+              // 'stand'/'lie' -> standing DOWN frame; 'standup' (pinned-up seats) -> standing UP
+              // frame (real back of head — the sit2 sheet is a face profile, not a back view).
+              player.setTexture(this.playerTexKey);
+              player.setFlipX(false);
+              player.anims.stop();
+              player.setFrame(DIR_START[this._deskPose.pose === 'standup' ? 'up' : 'down']);
+            }
+          } else {
+            // Every character has real directional sit animations (left mirrors the right sheet).
+            const sitAnim = `sit_${texKey}_${SIT_DIR[this.lastDir] || 'down'}`;
+            if (this.anims.exists(sitAnim)) {
+              player.setFlipX(this.lastDir === 'left');
+              // Re-play the seated anim whenever it isn't ACTIVELY playing — not just when the key
+              // differs. Standing up calls setTexture() without clearing currentAnim, and the idle
+              // path calls anims.stop(), so currentAnim.key can still equal sitAnim while the anim is
+              // STOPPED and the sprite is showing the standing run frame. A key-only guard then thinks
+              // "already seated" and leaves the character frozen facing the way you last walked — the
+              // "sit faces the wrong way until you sit again" bug. Checking isPlaying forces it to start.
+              if (player.anims.currentAnim?.key !== sitAnim || !player.anims.isPlaying) player.play(sitAnim);
+            } else {
+              player.setFlipX(false);
+              player.anims.stop();
+              player.setFrame(DIR_START[this.lastDir]);
+            }
+          }
+        } else {
+          player.setVelocity(0,0);
+          // Coffee boost: walk faster while it's live. The server's movement
+          // budget is widened by the same multiplier for the same window, so
+          // boosted steps aren't rejected as speed hacks.
+          // Office After Dark overrides (MUST mirror the server's playerMove
+          // budget rule): alive killers use the LARGER of their private edge
+          // and a live coffee boost (never the product); alive crew are
+          // clamped to base speed — any boost timer resumes after the round.
+          let spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
+          // Prop Hunt hider zooms at 2× while sneaking (MUST mirror the
+          // server's playerMove budget rule above).
+          if (window._ph.role === 'hider' && window._ph.phase === 'hiding') spd = Math.max(spd, SPEED * 2);
+          if (_roundPhase === 'active' && _roundAlive) {
+            spd = _roundRole === 'killer'
+              ? SPEED * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)
+              : SPEED;
+          }
+          // Red Light Green Light: ANY speed boost is banned on the lawn
+          // (MUST mirror the server's playerMove budget rule — the server
+          // gives runners NO boosted budget, so a client still moving at
+          // boost speed gets every step silently rejected and looks frozen
+          // to the whole office).
+          if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished) spd = SPEED;
+          if (left)       player.setVelocityX(-spd);
+          else if (right) player.setVelocityX( spd);
+          if (up)         player.setVelocityY(-spd);
+          else if (down)  player.setVelocityY( spd);
+          // Pre-GO corral (mirrors the server): before GO you may only move
+          // ALONG the start line — the line itself is a hard wall. Kills any
+          // downward velocity at the line so you can't even visually cross it.
+          if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished &&
+              _rlgl.goAt && Date.now() < _rlgl.goAt && _rlgl.startY != null) {
+            if (player.body.velocity.y > 0 && player.y >= _rlgl.startY - 2) player.setVelocityY(0);
+            if (player.y > _rlgl.startY) player.body.reset(player.x, _rlgl.startY);
+          }
+          // Slippery floor (Red Light Green Light endgame): velocity chases the
+          // input instead of obeying it — you glide into speed and, crucially,
+          // glide long after you let go. Sliding during red light is moving. 🧊
+          if (window._rlglSlipActive?.()) {
+            if (!this._rlglSlideV) this._rlglSlideV = { x: 0, y: 0 };
+            const tv = player.body.velocity, k = 1 - Math.pow(0.92, delta / 16.7);
+            this._rlglSlideV.x += (tv.x - this._rlglSlideV.x) * k;
+            this._rlglSlideV.y += (tv.y - this._rlglSlideV.y) * k;
+            player.setVelocity(this._rlglSlideV.x, this._rlglSlideV.y);
+          } else if (this._rlglSlideV) {
+            this._rlglSlideV = null;
+          }
+          if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
+          // Void containment: zero any velocity axis that would carry the
+          // feet onto an unpainted tile (per-axis, so you slide along the
+          // world's edge). Mirrors the server's isUnpaintedPosition reject.
+          window._voidClampVelocity?.(this, player);
+
+          player.setFlipX(false);
+          const moving = left || right || up || down;
+          if (moving) {
+            // vertical sets facing, horizontal overrides so diagonals show a side view
+            let dir = this.lastDir;
+            if (up) dir = 'up'; else if (down) dir = 'down';
+            if (left) dir = 'left'; else if (right) dir = 'right';
+            this.lastDir = dir;
+            const walkKey = `walk_${texKey}_${dir}`;
+            if (player.anims.currentAnim?.key !== walkKey && this.anims.exists(walkKey)) player.play(walkKey);
+          } else {
+            player.anims.stop();
+            player.setFrame(DIR_START[this.lastDir]);
+          }
+          this._moving = moving;
+        }
+
+        this._sendTimer += delta;
+        if (this._sendTimer >= 50) {
+          this._sendTimer = 0;
+          const animState = this.sitting ? 'sit' : (this._moving ? 'walk' : 'idle');
+          socket.emit('playerMove', {x:player.x, y:player.y, dir:this.lastDir, anim:animState});
+        }
+      }
+    }
+
+    new Phaser.Game({
+      type:   Phaser.AUTO,
+      width:  window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: '#1a1a2e',
+      physics: { default: 'arcade', arcade: { debug: false } },
+      scene:  OfficeScene,
+      scale:  { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+    });

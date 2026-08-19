@@ -223,6 +223,7 @@ app.post("/admin/purge", express.json(), async (req, res) => {
     for (const [id, p] of Object.entries(players)) {
       if (p.email === keep) continue;
       cancelMatchFor(id, "Match cancelled — no coins moved.");
+      petBattleForfeitForLeave(id);   // active pet battle → forfeit (mirrors the rps seam)
       // Round-leave seam, same as disconnect/kickPlayer/dropLiveByEmail —
       // without it a purge mid-round leaves unkillable ghost members and the
       // round zombie-runs to the timer. Keyed off round.members, so calling
@@ -1497,6 +1498,116 @@ async function feedPetTreat(io, socket, p) {
   console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// ── Pet Battle (Aug 2026): server-authoritative 1v1 pet combat for XP ──────
+// ══════════════════════════════════════════════════════════════════════════
+// A SECOND, wholly separate lifecycle from the rps/race duel roster: battles
+// never touch coins and never share rpsBySocket. State lives in battleBySocket
+// keyed by human socket id; the training bot has NO socket (its "id" is the
+// opaque string BOT_ID). Match ids are server-generated opaque uuids, so a
+// client can never forge/guess another match — every handler cross-checks the
+// caller's socket owns the match it names.
+//
+// SECURITY INVARIANTS (why the client can't cheat):
+//   • The server NEVER accepts client hp / stage / xp / crit / damage. It only
+//     accepts a move name from {attack,guard,special,ultimate} and re-derives
+//     everything from the START snapshot (pet id + stage + build), which is
+//     frozen when the match starts and never re-read from the live player.
+//   • Stats come from the snapshot's build (validated & persisted separately),
+//     NOT from whatever the client claims at pick time.
+//   • XP is awarded in ONE atomic transaction that first claims an idempotency
+//     row (jpo_pet_battles), so reconnect/retry can't double-award. No client
+//     receipt is ever trusted.
+const BOT_ID          = "__petbot__";      // sentinel opponent id (no real socket)
+const PB_BOT_REWARD_ID = "training-bot@jpo.system"; // durable pair-ledger identity for bot cooldowns
+const PB_MOVES        = new Set(["attack", "guard", "special", "ultimate"]);
+const PB_ACCEPT_MS    = 30_000;            // challenged player's accept/decline window
+const PB_PICK_MS      = 15_000;            // per-round pick clock (short; no-pick = guard)
+const PB_MAX_ROUNDS   = 6;                 // hard cap — a stalemate at round 6 = higher-HP wins
+const PB_RANGE_PX     = 480;               // "walk up to someone" — same reach as RPS_RANGE_PX (defined later)
+const PB_BOT_MIN_MS   = 500;               // bot "thinks" for a natural beat before it picks…
+const PB_BOT_MAX_MS   = 1_400;             // …somewhere in [min,max]
+const PB_XP_WIN       = 3;                 // completed match: winner +3
+const PB_XP_LOSE      = 1;                 // completed match: loser  +1
+const PB_XP_FF_WIN    = 2;                 // forfeit: the remaining side +2
+const PB_XP_FF_LOSE   = 0;                 // forfeit: the leaver +0
+const PB_DAILY_CAP    = 10;                // rewarded battles per pet per UTC day
+const PB_REMATCH_MS   = 5 * 60_000;        // same-opponent reward cooldown (5 min)
+const PB_SPECIAL_CD   = 2;                 // 'special' unusable again for this many rounds
+const PB_ULT_CHARGE   = 3;                 // 'ultimate' needs this much charge (built by attack/guard)
+
+// Build attribute allowlist. Client can only ever spend into these; anything
+// else in a submitted build is rejected. All non-negative, bounded by budget.
+const PB_ATTRS = ["power", "vitality", "speed", "critical", "focus"];
+
+// Training budget: points a pet may allocate across PB_ATTRS. Grows with
+// feed-XP and stage so an evolved, well-fed pet is meaningfully stronger — but
+// BOUNDED so form is an edge, not a runaway. Budget is derived server-side
+// from authoritative pet_xp + stage; the client never sends it.
+function petBattleBudget(pet, xp) {
+  const stage = petStageOfPet(pet, xp);
+  // 2 base + 1 per stage above 1 + 1 per 25 feed-XP, capped at 12.
+  return Math.min(12, 2 + (stage - 1) + Math.floor((xp || 0) / 25));
+}
+
+// Coerce/validate a submitted build to a clean {attr:int>=0} object and confirm
+// the total spent fits the pet's budget. Returns null on any violation (unknown
+// attr, negative, non-int, over budget) — callers reject rather than clamp.
+function sanitizePetBuild(raw, budget) {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {}; let spent = 0;
+  for (const k of Object.keys(raw)) {
+    if (!PB_ATTRS.includes(k)) return null;            // unknown attribute → reject
+    const v = raw[k];
+    if (!Number.isInteger(v) || v < 0) return null;    // must be a non-negative int
+    out[k] = v; spent += v;
+  }
+  if (spent > budget) return null;                     // over budget → reject
+  for (const a of PB_ATTRS) if (!(a in out)) out[a] = 0; // fill zeros for a stable shape
+  return out;
+}
+
+// The build actually IN EFFECT for a pet right now (stored allocations, or all
+// zeros if none). Read only from the authoritative in-memory copy the DB
+// hydrated; never from client input.
+function effectivePetBuild(p, pet) {
+  const stored = (p.petBuilds || {})[pet];
+  const clean = sanitizePetBuild(stored, petBattleBudget(pet, ((p.petXp || {})[pet]) || 0));
+  return clean || { power: 0, vitality: 0, speed: 0, critical: 0, focus: 0 };
+}
+
+// ── Combat math (pure; identical rules for every species — see fairness note)
+// FORM FAIRNESS: raw combat is derived ONLY from stage + build. Species differ
+// on the CLIENT (pixel art/animation) but share one rule set here, so no pet is
+// mechanically stronger for its look. Higher stage grants a bounded baseline
+// and better multipliers, so evolving matters materially without being a
+// guaranteed win.
+function petBattleStats(stage, build) {
+  const b = build || {};
+  const p = b.power || 0, v = b.vitality || 0, sp = b.speed || 0, cr = b.critical || 0, fo = b.focus || 0;
+  // Stage baseline (bounded): stage 1/2/3 → these anchors before build tuning.
+  const hpBase   = [0, 50, 62, 74][stage] || 50;
+  const atkBase  = [0, 10, 12, 14][stage] || 10;
+  const formMult = [0, 1.00, 1.10, 1.22][stage] || 1.0;  // stage improves multipliers
+  return {
+    maxHp:    Math.round((hpBase + v * 6) * formMult),
+    attack:   Math.round((atkBase + p * 3) * formMult),
+    // guard mitigation fraction (higher vitality + focus = tougher block), capped.
+    guardCut: Math.min(0.75, 0.45 + v * 0.03 + fo * 0.02),
+    // crit chance & multiplier from the critical attribute (bounded).
+    critChance: Math.min(0.6, 0.05 + cr * 0.05),
+    critMult:   1.5 + Math.min(0.5, cr * 0.05),
+    // Speed is an actual combat choice: quicker pets can cleanly evade a blow.
+    // It is capped well below certainty so form/build never guarantees a dodge.
+    dodgeChance: Math.min(0.3, sp * 0.025),
+    speed:      sp,
+    focus:      fo,
+    // special = a bigger, cooldown-gated hit; ultimate = charge-gated finisher.
+    special:  Math.round((atkBase + p * 3) * formMult * (1.6 + fo * 0.05)),
+    ultimate: Math.round((atkBase + p * 3) * formMult * (2.4 + fo * 0.06)),
+  };
+}
+
 const FOOD_MENUS = {
   sweets: { title: "🍬 Candy Stand", items: [
     { id: "lollipop",  name: "Lollipop",             icon: "🍭", price: 3 },
@@ -2463,6 +2574,10 @@ function rowToPlayerState(row) {
     petAcc:    row.equipped_pet_acc || "",
     petXp:     row.pet_xp || {},
     petNames:  row.pet_names || {},
+    // Pet Battle training builds (Aug 2026): per-pet stat allocations, keyed by
+    // pet id ({"pet_cat": {power:2,vitality:1,...}}). Server-owned; the only
+    // mutation path is petBattleSetBuild, which re-validates ownership/budget.
+    petBuilds: row.pet_builds || {},
     items:     row.items || {},
     avatarChanges: row.avatar_changes ?? 0,
     // Shared-treat earnings buff survives refreshes/restarts (epoch ms, 0 = none).
@@ -2588,6 +2703,7 @@ function dropLiveByEmail(email, exceptId) {
     // fires this anyway, but if the socket object is already gone there is
     // no disconnect event — this call is the safety net.
     forfeitMatchForLeave(id);
+    petBattleForfeitForLeave(id);   // same anti-dodge for an active pet battle
     // Same grace as a disconnect: the successor session for this email is
     // about to restore (login/resume/register all call restorePlayer next),
     // which rebinds the round spot. Paths with NO successor restore must call
@@ -2659,6 +2775,7 @@ async function restorePlayer(socket, row) {
     petAcc:    state.petAcc || "",
     petXp:     state.petXp || {},      // without these, a refresh rendered an
     petNames:  state.petNames || {},   // evolved pet as a nameless baby again
+    petBuilds: state.petBuilds || {},  // per-pet Pet Battle training allocations
     items:     state.items || {},
     avatarChanges: state.avatarChanges ?? 0,
     x:         state.x,
@@ -3098,6 +3215,13 @@ function forfeitMatchForLeave(id) {
 function startRpsChallenge(challengerId, targetId, wager, viaArcade = false, game = "rps") {
   const me = players[challengerId], target = players[targetId];
   if (!me || !target) return;
+  // Pet battles occupy the same person even though their state map is
+  // intentionally separate. Re-check here because station/direct callers
+  // historically only knew about rpsBySocket.
+  if (battleBySocket.has(challengerId) || battleBySocket.has(targetId)) {
+    io.to(challengerId).emit("rpsChallengeFailed", { message: "Finish the active pet battle first." });
+    return;
+  }
   const m = {
     id: ++rpsSeq, challengerId, targetId, wager, game,
     state: "pending", picks: {}, pickTimer: null,
@@ -3112,6 +3236,490 @@ function startRpsChallenge(challengerId, targetId, wager, viaArcade = false, gam
     challengeId: m.id, toId: targetId, toName: target.name, wager, game, arcade: viaArcade,
   });
   console.log(`${GAME_NAMES[game]} challenge${viaArcade ? " (arcade)" : ""}: ${me.name} → ${target.name} (${wager} coins)`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ── Pet Battle engine ──────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// battleBySocket maps a HUMAN socket id → the shared battle object. A bot match
+// stores only the challenger under their id (the bot has no socket). One active
+// battle per human socket is enforced by battleBySocket.has() at challenge time.
+const battleBySocket = new Map();
+let petBattleSeq = 0;   // human-readable counter for logs only; the real id is a uuid
+function inAnyMatch(id) { return rpsBySocket.has(id) || battleBySocket.has(id); }
+
+// Clear every timer a battle object can own so no orphaned callback fires on a
+// dead battle. Mirrors clearMatchTimers for the rps roster.
+function clearBattleTimers(b) {
+  clearTimeout(b.acceptTimer);
+  clearTimeout(b.pickTimer);
+  clearTimeout(b.botTimer);
+}
+
+function petBattleOtherId(b, id) { return id === b.challengerId ? b.opponentId : b.challengerId; }
+function petBattleIsBot(b) { return b.opponentId === BOT_ID; }
+
+// Delete a battle from the map for both sides (the bot slot is never in the map).
+function petBattleUnmap(b) {
+  battleBySocket.delete(b.challengerId);
+  if (b.opponentId !== BOT_ID) battleBySocket.delete(b.opponentId);
+}
+
+// Build the SAFE, client-ready view of a combatant. NEVER leaks server-only
+// internals (RNG seeds, the other side's pending pick, cooldown timers). The
+// bot is deliberately anonymized: no socket id, no player identity — a fixed
+// display name and id so a modified client can't target/track it as a player.
+function petBattleCombatantView(b, side) {
+  const c = b.sides[side];
+  return {
+    id:       c.isBot ? "bot" : c.id,
+    name:     c.name,
+    petId:    c.petId,
+    stage:    c.stage,
+    build:    { ...c.build },
+    hp:       c.hp,
+    maxHp:    c.stats.maxHp,
+    charge:   c.charge,
+    isBot:    !!c.isBot,
+  };
+}
+
+// The full pair of combatant views, from the perspective label the client wants.
+function petBattleView(b) {
+  return { challenger: petBattleCombatantView(b, "challenger"),
+           opponent:   petBattleCombatantView(b, "opponent") };
+}
+
+// Snapshot one side's immutable battle build at START. After this the live
+// player object is never consulted again for combat — the frozen snapshot is
+// the single source of truth (so evolving/retraining mid-battle can't change
+// an in-flight fight, and a client can't inject stats).
+function petBattleSnapshot(id, name, petId, stage, build, isBot) {
+  const stats = petBattleStats(stage, build);
+  return {
+    id, name, petId, stage, build: { ...build }, isBot: !!isBot,
+    stats,
+    hp: stats.maxHp,        // both sides start at form-scaled full HP
+    charge: 0,              // ultimate charge, built by attack/guard
+    specialCd: 0,           // rounds remaining before 'special' is usable again
+    pick: null,             // this round's chosen move (server-locked)
+  };
+}
+
+// Legal-move check for a side THIS round (server-authoritative gating):
+//   attack — always legal (reliable).
+//   guard  — always legal.
+//   special— legal only when off cooldown.
+//   ultimate—legal only when fully charged.
+function petBattleMoveLegal(side, move) {
+  if (move === "attack" || move === "guard") return true;
+  if (move === "special")  return side.specialCd <= 0;
+  if (move === "ultimate") return side.charge >= PB_ULT_CHARGE;
+  return false;
+}
+
+// The bot's server-side move choice. Scales to the challenger's form/training
+// (it fights at the human's own snapshot build/stage), and plays a simple but
+// sane policy: ultimate when charged, special when off cooldown and healthy,
+// occasional guard when low, else attack. Deterministic-ish with light RNG so
+// it isn't fully predictable.
+function petBattleBotMove(bot, foe) {
+  if (petBattleMoveLegal(bot, "ultimate")) return "ultimate";
+  const lowHp = bot.hp <= bot.stats.maxHp * 0.35;
+  if (lowHp && Math.random() < 0.5) return "guard";
+  if (petBattleMoveLegal(bot, "special") && Math.random() < 0.6) return "special";
+  if (Math.random() < 0.15) return "guard";
+  return "attack";
+}
+
+// Resolve ONE round from both locked picks. Returns the per-side resolved
+// results (move, damage dealt to the OTHER side, crit flag, whether the
+// attacker's blow was guarded) plus post-round hp/charge. Simultaneous
+// resolution: both damages are computed against pre-round HP, then applied —
+// so a mutual finisher can KO both (→ higher-remaining-HP / draw logic in the
+// caller). All RNG is server-side.
+function petBattleResolveRound(b) {
+  const A = b.sides.challenger, D = b.sides.opponent;
+  const picks = { challenger: A.pick, opponent: D.pick };
+
+  // Compute the outgoing blow from one attacker against a defender's stance.
+  function blow(atk, def) {
+    const move = atk.pick;
+    if (move === "guard") return { move, damage: 0, crit: false, guarded: false, dodged: false };
+    // Guard and dodge are distinct defensive choices. A guarding pet plants
+    // its feet and mitigates the hit; otherwise Speed may evade it completely.
+    const guarded = def.pick === "guard";
+    const dodged = !guarded && Math.random() < def.stats.dodgeChance;
+    if (dodged) return { move, damage: 0, crit: false, guarded: false, dodged: true };
+    let base = move === "attack" ? atk.stats.attack
+             : move === "special" ? atk.stats.special
+             : atk.stats.ultimate;
+    // server RNG crit
+    const crit = Math.random() < atk.stats.critChance;
+    if (crit) base = Math.round(base * atk.stats.critMult);
+    // guard mitigation if the defender chose to guard this round
+    let dmg = base;
+    if (guarded) dmg = Math.round(base * (1 - def.stats.guardCut));
+    // small ±10% variance so identical builds aren't perfectly deterministic
+    dmg = Math.round(dmg * (0.9 + Math.random() * 0.2));
+    return { move, damage: Math.max(guarded ? 0 : 1, dmg), crit, guarded, dodged: false };
+  }
+
+  const aBlow = blow(A, D);   // challenger hits opponent
+  const dBlow = blow(D, A);   // opponent hits challenger
+
+  // Apply simultaneously against pre-round HP.
+  D.hp = Math.max(0, D.hp - aBlow.damage);
+  A.hp = Math.max(0, A.hp - dBlow.damage);
+
+  // Charge/cooldown bookkeeping, per side, from THIS round's move.
+  for (const [side, blowRes] of [[A, aBlow], [D, dBlow]]) {
+    if (side.pick === "attack") side.charge = Math.min(PB_ULT_CHARGE, side.charge + 1);
+    else if (side.pick === "guard") side.charge = Math.min(PB_ULT_CHARGE, side.charge + 1);
+    else if (side.pick === "special") side.specialCd = PB_SPECIAL_CD;
+    else if (side.pick === "ultimate") side.charge = 0;   // spent
+    if (side.specialCd > 0 && side.pick !== "special") side.specialCd -= 1;
+  }
+
+  return {
+    picks,
+    challenger: { move: aBlow.move, damageDealt: aBlow.damage, crit: aBlow.crit, guarded: aBlow.guarded, dodged: aBlow.dodged,
+                  hp: A.hp, charge: A.charge },
+    opponent:   { move: dBlow.move, damageDealt: dBlow.damage, crit: dBlow.crit, guarded: dBlow.guarded, dodged: dBlow.dodged,
+                  hp: D.hp, charge: D.charge },
+  };
+}
+
+// Emit a semantic event to both human sides of a battle (bot side is skipped).
+function petBattleEmitBoth(b, event, payloadFor) {
+  for (const side of ["challenger", "opponent"]) {
+    const id = b.sides[side].id;
+    if (id === BOT_ID) continue;
+    io.to(id).emit(event, payloadFor(side));
+  }
+}
+
+// Award battle XP idempotently and (for account players) persist it in ONE
+// atomic transaction: claim the (match_id, email) ledger row AND increment
+// jpo_players.pet_xp together, so a retry after an ambiguous COMMIT can never
+// double-award. Also enforces the persistent per-pet daily cap and the
+// same-opponent rematch cooldown (both make the award 0 without failing the
+// match). Session-only (no email) players get an in-memory bump, no ledger.
+// Returns the pet's post-award xp (or null if nothing to show), and emits
+// evolution/update if a stage boundary was crossed. Never trusts a client.
+async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
+  const p = players[side.id];
+  const pet = side.petId;
+  if (!p || !pet) return;
+  if (amount <= 0) {
+    petBattleEmitNoXp(p, side.id, pet, "forfeit");
+    return;
+  }
+  // Battles are restricted to approved email-backed accounts. Keep this guard
+  // here too so an old/in-flight session-only battle can never bypass the
+  // durable cap, cooldown, and idempotency ledgers.
+  if (!p.email) {
+    petBattleEmitNoXp(p, side.id, pet, "accountRequired");
+    return null;
+  }
+  const day = new Date().toISOString().slice(0, 10);   // UTC YYYY-MM-DD
+  let cl;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      cl = await pool.connect();
+      await cl.query("BEGIN");
+      // Idempotency claim: if this (match_id, email) already settled, skip.
+      const claim = await cl.query(
+        `INSERT INTO jpo_pet_battles (match_id, email, pet, xp, outcome)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING 1`,
+        [matchId, p.email, pet, amount, amount === PB_XP_WIN || amount === PB_XP_FF_WIN ? "win" : "lose"]);
+      if (!claim.rows[0]) { await cl.query("ROLLBACK"); return null; }   // already awarded
+
+      // Same-opponent rematch cooldown. Bot matches pass a stable synthetic
+      // identity, so repeatedly rematching Training Bot cannot farm XP either.
+      let overCooldown = false;
+      let pairEmails = null;
+      if (opponentEmail) {
+        const a = p.email < opponentEmail ? p.email : opponentEmail;
+        const bEm = p.email < opponentEmail ? opponentEmail : p.email;
+        pairEmails = [a, bEm];
+        const pr = await cl.query(
+          `SELECT last_at, last_match_id FROM jpo_pet_battle_pairs WHERE email_a=$1 AND email_b=$2`, [a, bEm]);
+        // Both participants settle separately. The second credit from THIS
+        // match must remain eligible; only a different recent match is cooled.
+        if (pr.rows[0] && pr.rows[0].last_match_id !== matchId
+            && (Date.now() - new Date(pr.rows[0].last_at).getTime()) < PB_REMATCH_MS) {
+          overCooldown = true;
+        }
+      }
+
+      // A cooldown-blocked rematch is not a rewarded battle and therefore must
+      // not consume one of today's cap slots.
+      if (overCooldown) {
+        await cl.query(
+          `UPDATE jpo_pet_battles SET xp=0, outcome='rematch_cooldown'
+            WHERE match_id=$1 AND email=$2`, [matchId, p.email]);
+        await cl.query("COMMIT");
+        petBattleEmitNoXp(p, side.id, pet, "rematchCooldown");
+        return null;
+      }
+
+      // Daily per-pet cap: bump only reward-eligible battles. If it now exceeds
+      // the cap, this match remains claimed but its ledger records zero XP.
+      const cap = await cl.query(
+        `INSERT INTO jpo_pet_battle_caps (day, email, pet, n) VALUES ($1,$2,$3,1)
+         ON CONFLICT (day, email, pet) DO UPDATE SET n = jpo_pet_battle_caps.n + 1
+         RETURNING n`, [day, p.email, pet]);
+      const overCap = (cap.rows[0]?.n || 0) > PB_DAILY_CAP;
+      if (overCap) {
+        await cl.query(
+          `UPDATE jpo_pet_battles SET xp=0, outcome='daily_cap'
+            WHERE match_id=$1 AND email=$2`, [matchId, p.email]);
+        await cl.query("COMMIT");
+        petBattleEmitNoXp(p, side.id, pet, "dailyCap");
+        return null;
+      }
+
+      // Record the pair only after this match has actually earned a reward.
+      // last_match_id lets the second participant's separate settlement from
+      // this same match pass while a different recent rematch is blocked.
+      if (pairEmails) {
+        await cl.query(
+          `INSERT INTO jpo_pet_battle_pairs (email_a, email_b, last_at, last_match_id)
+           VALUES ($1,$2, now(),$3)
+           ON CONFLICT (email_a, email_b) DO UPDATE SET last_at = now(), last_match_id = $3`,
+          [pairEmails[0], pairEmails[1], matchId]);
+      }
+
+      const { rows } = await cl.query(
+        `UPDATE jpo_players
+            SET pet_xp = jsonb_set(coalesce(pet_xp, '{}'::jsonb), ARRAY[$2::text],
+                         to_jsonb(coalesce((pet_xp->>$2)::int, 0) + $3::int)),
+                updated_at = now()
+          WHERE email = $1
+          RETURNING (pet_xp->>$2)::int AS xp`,
+        [p.email, pet, amount]);
+      await cl.query("COMMIT");
+      const xp = (rows[0] && rows[0].xp) || 0;
+      const prev = xp - amount;
+      // Sync the live copy only after a confirmed commit (never before).
+      if (players[side.id] && players[side.id].email === p.email) {
+        players[side.id].petXp = players[side.id].petXp || {};
+        players[side.id].petXp[pet] = xp;
+      }
+      petBattleEmitXpAndEvolve(players[side.id] || p, side.id, pet, prev, xp, amount);
+      return xp;
+    } catch (err) {
+      try { await cl?.query("ROLLBACK"); } catch {}
+      console.error(`pet battle XP award attempt ${attempt}/3 failed:`, err.message || err);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 400 * attempt));
+    } finally { cl?.release(); cl = null; }
+  }
+  return null;
+}
+
+// Emit the safe petBattleXp event plus the standard evolution/update broadcasts
+// if a feed-XP stage boundary was crossed (reuses the same events the cafeteria
+// feed path uses, so the client's stage rendering stays consistent everywhere).
+function petBattleEmitXpAndEvolve(p, sid, pet, prevXp, xp, delta) {
+  io.to(sid).emit("petBattleXp", {
+    pet, xp, delta, stage: petStageOfPet(pet, xp),
+    next: PET_MYTHIC.has(pet)
+      ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
+      : (PET_EVOLVE_XP.find((t) => t > xp) ?? null),
+  });
+  const stage = petStageOfPet(pet, xp), prevStage = petStageOfPet(pet, prevXp);
+  if (stage > prevStage && p) {
+    io.emit("playerPetUpdate", { id: sid, pet: p.pet, petAcc: p.petAcc, petStage: petStageFor(p) });
+    io.emit("petEvolved", { id: sid, name: p.name, pet, stage,
+                            petName: ((p.petNames || {})[pet]) || "" });
+    console.log(`${p.name}'s ${pet} evolved to stage ${stage} (battle XP, now ${xp})`);
+  }
+}
+
+function petBattleEmitNoXp(p, sid, pet, reason) {
+  const xp = ((p?.petXp || {})[pet]) || 0;
+  io.to(sid).emit("petBattleXp", {
+    pet, xp, delta: 0, reason, stage: petStageOfPet(pet, xp),
+    next: PET_MYTHIC.has(pet)
+      ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
+      : (PET_EVOLVE_XP.find((t) => t > xp) ?? null),
+  });
+}
+
+// Finish a battle: decide the winner from remaining HP (or an explicit
+// forfeit), award XP, emit the safe petBattleResult to both humans, and tear
+// the battle down. `reason` is one of "ko" | "rounds" | "forfeit" | "draw".
+// SETTLE-ONCE: guarded by the state flip so a timer + a pick racing to finish,
+// or a disconnect mid-settle, resolve exactly once.
+async function petBattleFinish(b, { reason, winnerSide = null, forfeit = false } = {}) {
+  if (b.state === "settling" || b.state === "done") return;
+  b.state = "settling";
+  clearBattleTimers(b);
+
+  const A = b.sides.challenger, D = b.sides.opponent;
+  // Decide winner if not dictated by a forfeit.
+  if (!winnerSide && !forfeit) {
+    if (A.hp <= 0 && D.hp <= 0) winnerSide = null;                 // mutual KO → draw
+    else if (A.hp <= 0) winnerSide = "opponent";
+    else if (D.hp <= 0) winnerSide = "challenger";
+    else winnerSide = A.hp === D.hp ? null : (A.hp > D.hp ? "challenger" : "opponent");  // rounds cap
+  }
+  const draw = !winnerSide;
+  const winner = winnerSide ? b.sides[winnerSide] : null;
+  const loser  = winnerSide ? b.sides[petBattleOtherId2(winnerSide)] : null;
+
+  // XP amounts. Forfeit: winner +2, leaver +0. Completed: winner +3, loser +1.
+  // Draw (rounds cap tie / mutual KO): both get the loser reward (they fought).
+  const matchId = b.matchId;
+  const chEmail = players[A.id]?.email || null;
+  const opEmail = D.isBot ? PB_BOT_REWARD_ID : (players[D.id]?.email || null);
+  const awards = [];
+  if (draw) {
+    if (!A.isBot) awards.push([A, PB_XP_LOSE, opEmail]);
+    if (!D.isBot) awards.push([D, PB_XP_LOSE, chEmail]);
+  } else {
+    const wEmail = winner.id === A.id ? opEmail : chEmail;   // OPPONENT email for the winner
+    const lEmail = loser.id === A.id ? opEmail : chEmail;
+    const wAmt = forfeit ? PB_XP_FF_WIN  : PB_XP_WIN;
+    const lAmt = forfeit ? PB_XP_FF_LOSE : PB_XP_LOSE;
+    if (!winner.isBot) awards.push([winner, wAmt, wEmail]);
+    if (!loser.isBot)  awards.push([loser,  lAmt, lEmail]);
+  }
+  // Await awards so evolution/xp events precede the result card's teardown, but
+  // never let a DB hiccup block the result from being sent.
+  for (const [side, amt, oppEmail] of awards) {
+    try { await petBattleAwardXp(matchId, side, amt, oppEmail); }
+    catch (err) { console.error("pet battle award failed:", err); }
+  }
+
+  const winnerId = winner ? (winner.isBot ? "bot" : winner.id) : null;
+  petBattleEmitBoth(b, "petBattleResult", (side) => ({
+    matchId, reason, forfeit, draw,
+    winnerId,
+    youWon: !draw && b.sides[side].id === winner.id,
+    combatants: petBattleView(b),
+  }));
+  b.state = "done";
+  petBattleUnmap(b);
+  console.log(`Pet Battle #${b.seq} done (${reason})${draw ? " — draw" : ` — winner ${winner?.name}`}`);
+}
+function petBattleOtherId2(side) { return side === "challenger" ? "opponent" : "challenger"; }
+
+// Both picks are in (or the pick timer fired / a no-pick defaulted to guard):
+// resolve the round, emit petBattleRound, then either finish (KO or round cap)
+// or advance to the next pick phase.
+async function petBattleResolve(b) {
+  if (b.state !== "picking") return;   // double-fire guard (pick race vs timer)
+  const A = b.sides.challenger, D = b.sides.opponent;
+  // No-pick defaults to guard (safe, non-punishing) so a stalled client doesn't
+  // hang the match; illegal picks were already rejected at intake.
+  if (!A.pick) A.pick = "guard";
+  if (!D.pick) D.pick = "guard";
+  b.state = "resolving";
+
+  const result = petBattleResolveRound(b);
+  b.round += 1;
+
+  petBattleEmitBoth(b, "petBattleRound", (side) => ({
+    matchId: b.matchId, round: b.round, maxRounds: PB_MAX_ROUNDS,
+    result, combatants: petBattleView(b),
+  }));
+
+  // Reset picks for the next round.
+  A.pick = null; D.pick = null;
+
+  if (A.hp <= 0 || D.hp <= 0) {
+    await petBattleFinish(b, { reason: "ko" });
+    return;
+  }
+  if (b.round >= PB_MAX_ROUNDS) {
+    await petBattleFinish(b, { reason: "rounds" });
+    return;
+  }
+  petBattleBeginPick(b);
+}
+
+// Open a fresh pick phase: arm the short pick timer, tell both humans it's time
+// to pick (with each side's currently-legal moves), and let the bot choose
+// after a natural small delay.
+function petBattleBeginPick(b) {
+  b.state = "picking";
+  clearTimeout(b.pickTimer);
+  b.pickTimer = setTimeout(() => {
+    petBattleResolve(b).catch((err) => console.error("pet battle resolve failed:", err));
+  }, PB_PICK_MS);
+  petBattleEmitBoth(b, "petBattlePickStatus", (side) => {
+    const me = b.sides[side], foe = b.sides[petBattleOtherId2(side)];
+    return {
+      matchId: b.matchId, round: b.round + 1, maxRounds: PB_MAX_ROUNDS, pickMs: PB_PICK_MS,
+      legal: [...PB_MOVES].filter((mv) => petBattleMoveLegal(me, mv)),
+      charge: me.charge, ultCharge: PB_ULT_CHARGE, specialCd: me.specialCd,
+      you: petBattleCombatantView(b, side),
+      foe: petBattleCombatantView(b, petBattleOtherId2(side)),
+    };
+  });
+  // Bot picks after a natural beat.
+  if (petBattleIsBot(b)) {
+    clearTimeout(b.botTimer);
+    const delay = PB_BOT_MIN_MS + Math.floor(Math.random() * (PB_BOT_MAX_MS - PB_BOT_MIN_MS + 1));
+    b.botTimer = setTimeout(() => {
+      if (b.state !== "picking") return;
+      const bot = b.sides.opponent, foe = b.sides.challenger;
+      bot.pick = petBattleBotMove(bot, foe);
+      if (bot.pick && b.sides.challenger.pick) {
+        petBattleResolve(b).catch((err) => console.error("pet battle resolve failed:", err));
+      }
+    }, delay);
+  }
+}
+
+// Start a battle once both sides are locked: freeze snapshots, emit the safe
+// petBattleStart to both humans, and open round 1's pick phase.
+function petBattleStart(b) {
+  b.state = "starting";
+  b.round = 0;
+  petBattleEmitBoth(b, "petBattleStart", (side) => ({
+    matchId: b.matchId, maxRounds: PB_MAX_ROUNDS, pickMs: PB_PICK_MS,
+    you: side, combatants: petBattleView(b),
+  }));
+  petBattleBeginPick(b);
+}
+
+// A human LEFT (disconnect / kick / dropLiveByEmail) with a battle at stake.
+// A pending challenge just cancels; an ACTIVE battle settles as a FORFEIT by
+// the leaver (winner +2, leaver +0) — same anti-dodge policy as the rps roster.
+// Called BEFORE players[id] is deleted so the winner's snapshot email is still
+// resolvable for the XP award.
+function petBattleForfeitForLeave(id) {
+  const b = battleBySocket.get(id);
+  if (!b) return;
+  if (b.state === "pending") {
+    petBattleCancel(id, "They left the office — battle cancelled.");
+    return;
+  }
+  if (b.state !== "picking" && b.state !== "resolving" && b.state !== "starting") return;  // settling/done stands
+  const leaverSide = b.sides.challenger.id === id ? "challenger" : "opponent";
+  const winnerSide = petBattleOtherId2(leaverSide);
+  petBattleFinish(b, { reason: "forfeit", winnerSide, forfeit: true })
+    .catch((err) => console.error("pet battle leave-forfeit failed:", err));
+}
+
+// Cancel a pending/active battle with a message to both humans and no XP moved
+// (mutual no-show / explicit cancel of a not-yet-started fight). An active
+// fight that a caller wants to END as a forfeit uses petBattleFinish instead.
+function petBattleCancel(id, reason) {
+  const b = battleBySocket.get(id);
+  if (!b || (b.state === "settling" || b.state === "done")) return;
+  b.state = "done";
+  clearBattleTimers(b);
+  petBattleUnmap(b);
+  const msg = reason || "Battle cancelled.";
+  // Pending challenges do not have combat snapshots yet, so emit by the two
+  // known socket ids instead of going through petBattleEmitBoth(b.sides).
+  io.to(b.challengerId).emit("petBattleCancelled", { matchId: b.matchId, reason: msg });
+  if (b.opponentId !== BOT_ID)
+    io.to(b.opponentId).emit("petBattleCancelled", { matchId: b.matchId, reason: msg });
 }
 
 // Move the wager loser→winner. Email players settle in SQL with the same
@@ -4864,6 +5472,7 @@ io.on("connection", (socket) => {
   const postBucket  = makeBucket(3, 1000);  // guards announcement spam
   const emoteBucket = makeBucket(4, 900);   // ~1 emote/s sustained, burst of 4
   const rpsBucket   = makeBucket(3, 2000);  // guards challenge spam (~1 per 2s sustained)
+  const petBattleBucket = makeBucket(4, 1500); // Pet Battle challenges/picks/build ops (~1 per 1.5s sustained)
   const wrBucket    = makeBucket(6, 500);   // Word Race guesses (~2/s sustained, burst of 6)
   const itemBucket  = makeBucket(3, 1500);  // guards item-use spam (~1 per 1.5s sustained)
   const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
@@ -6218,6 +6827,8 @@ io.on("connection", (socket) => {
     // match cleanup would not fire — settle their match explicitly (an active
     // match is a forfeit: being kicked mid-match pays the opponent).
     forfeitMatchForLeave(targetId);
+    petBattleForfeitForLeave(targetId);   // active pet battle → forfeit
+    
     roundHandleLeave(targetId);
     rlglHandleLeave(targetId);
     delete players[targetId];
@@ -6907,8 +7518,8 @@ io.on("connection", (socket) => {
     }
     const target = players[targetId];
     if (!target) { socket.emit("rpsChallengeFailed", { message: "They're not in the office right now." }); return; }
-    if (rpsBySocket.has(socket.id)) { socket.emit("rpsChallengeFailed", { message: "You're already in a challenge." }); return; }
-    if (rpsBySocket.has(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is busy in another match.` }); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("rpsChallengeFailed", { message: "You're already in a challenge." }); return; }
+    if (inAnyMatch(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is busy in another match.` }); return; }
     // ANY round membership blocks duels — joining too, or a duel accepted
     // during the 30s lobby would still be running when the lights go out.
     if (inRound(socket.id)) { socket.emit("rpsChallengeFailed", { message: "No duels during Office After Dark!" }); return; }
@@ -7158,6 +7769,245 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ════════════════════════════════════════════════════════════════════════
+  // ── Pet Battle handlers ──────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════
+  // SECURITY: every handler cross-checks that THIS socket owns the match it
+  // names (battleBySocket keyed by socket id + a matchId equality check), and
+  // no handler ever reads combat numbers from the payload — only a move name.
+
+  // Shared validation for both the human and bot challenge paths. Confirms the
+  // challenger is online, owns & has equipped a battle-ready pet, and isn't
+  // already in a battle. Returns the player object, or null after emitting the
+  // failure reason.
+  function petBattleReadyChallenger() {
+    const me = players[socket.id];
+    if (!me) return null;
+    if (!takeToken(petBattleBucket)) { socket.emit("petBattleFail", { message: "Slow down a moment." }); return null; }
+    if (!me.email)                    { socket.emit("petBattleFail", { message: "Sign in with an approved account to battle." }); return null; }
+    if (battleBySocket.has(socket.id)) { socket.emit("petBattleFail", { message: "You're already in a battle." }); return null; }
+    if (rpsBySocket.has(socket.id))    { socket.emit("petBattleFail", { message: "Finish your current match first." }); return null; }
+    if (inRound(socket.id))            { socket.emit("petBattleFail", { message: "No battles during Office After Dark!" }); return null; }
+    if (!me.pet)                       { socket.emit("petBattleFail", { message: "Equip a pet to battle." }); return null; }
+    // Roster/ownership: an equipped pet you no longer own can't fight (defends
+    // against a stale equipped_pet after a trade).
+    if (me.email && Array.isArray(me.cosmetics) && !me.cosmetics.includes(me.pet)) {
+      socket.emit("petBattleFail", { message: "You don't own that pet anymore." }); return null;
+    }
+    return me;
+  }
+
+  // Freeze one side's snapshot from the AUTHORITATIVE live player (pet id +
+  // stage from server XP + effective build). Never from client input.
+  function petBattleSnapshotForPlayer(id, isBot) {
+    const p = players[id];
+    const pet = p.pet;
+    const xp = ((p.petXp || {})[pet]) || 0;
+    const stage = petStageOfPet(pet, xp);
+    const build = effectivePetBuild(p, pet);
+    return petBattleSnapshot(id, p.name, pet, stage, build, isBot);
+  }
+
+  // Challenge another online player to a pet battle.
+  socket.on("petBattleChallenge", (payload) => {
+    const { targetId } = payload || {};
+    const me = petBattleReadyChallenger();
+    if (!me) return;
+    if (typeof targetId !== "string" || targetId === socket.id) {
+      socket.emit("petBattleFail", { message: "Pick someone to battle." }); return;
+    }
+    const target = players[targetId];
+    if (!target) { socket.emit("petBattleFail", { message: "They're not in the office right now." }); return; }
+    if (!target.email) { socket.emit("petBattleFail", { message: `${target.name} needs a saved account to battle.` }); return; }
+    if (battleBySocket.has(targetId)) { socket.emit("petBattleFail", { message: `${target.name} is already battling.` }); return; }
+    if (rpsBySocket.has(targetId))    { socket.emit("petBattleFail", { message: `${target.name} is busy in another match.` }); return; }
+    if (inRound(targetId))            { socket.emit("petBattleFail", { message: `${target.name} is playing Office After Dark.` }); return; }
+    if (!target.pet)                  { socket.emit("petBattleFail", { message: `${target.name} needs a pet equipped to battle.` }); return; }
+    if (target.email && Array.isArray(target.cosmetics) && !target.cosmetics.includes(target.pet)) {
+      socket.emit("petBattleFail", { message: `${target.name} needs to equip a pet they own.` }); return;
+    }
+    // Range: walk up to them (same reach as duels).
+    const dx = (me.x ?? 0) - (target.x ?? 0), dy = (me.y ?? 0) - (target.y ?? 0);
+    if (dx * dx + dy * dy > PB_RANGE_PX * PB_RANGE_PX) {
+      socket.emit("petBattleFail", { message: "Walk closer to battle them." }); return;
+    }
+    const matchId = globalThis.crypto.randomUUID();   // opaque, server-generated
+    const b = {
+      matchId, seq: ++petBattleSeq, challengerId: socket.id, opponentId: targetId,
+      state: "pending", round: 0, sides: null,
+      acceptTimer: setTimeout(() => petBattleCancel(socket.id, "Battle challenge expired."), PB_ACCEPT_MS),
+    };
+    battleBySocket.set(socket.id, b);
+    battleBySocket.set(targetId, b);
+    io.to(targetId).emit("petBattleChallengeIncoming", {
+      matchId, fromId: socket.id, fromName: me.name, fromPet: me.pet,
+      fromStage: petStageFor(me), timeoutMs: PB_ACCEPT_MS,
+    });
+    io.to(socket.id).emit("petBattleChallengeSent", {
+      matchId, toId: targetId, toName: target.name, toPet: target.pet,
+    });
+    console.log(`Pet Battle challenge: ${me.name} → ${target.name}`);
+  });
+
+  // Challenge the training bot: an instant, no-partner battle vs a server-run
+  // opponent that scales to the challenger's own form/training.
+  socket.on("petBattleBotChallenge", () => {
+    const me = petBattleReadyChallenger();
+    if (!me) return;
+    const matchId = globalThis.crypto.randomUUID();
+    const b = {
+      matchId, seq: ++petBattleSeq, challengerId: socket.id, opponentId: BOT_ID,
+      state: "starting", round: 0, sides: null,
+    };
+    battleBySocket.set(socket.id, b);
+    // Both snapshots: the bot mirrors the challenger's pet/stage/build so the
+    // fight is close (non-player identity in the payload — see the view helper).
+    const challengerSnap = petBattleSnapshotForPlayer(socket.id, false);
+    const botSnap = petBattleSnapshot(BOT_ID, "Training Bot", challengerSnap.petId,
+                                      challengerSnap.stage, challengerSnap.build, true);
+    b.sides = { challenger: challengerSnap, opponent: botSnap };
+    console.log(`Pet Battle (bot): ${me.name} vs Training Bot`);
+    petBattleStart(b);
+  });
+
+  // Accept / decline an incoming challenge. Only the named target, on a
+  // still-pending match, can accept; stale/forged responses are dropped.
+  socket.on("petBattleRespond", (payload) => {
+    const { matchId, accept } = payload || {};
+    const b = battleBySocket.get(socket.id);
+    if (!b || b.matchId !== matchId || b.state !== "pending" || socket.id !== b.opponentId) return;
+    if (!accept) { petBattleCancel(socket.id, "Battle declined."); return; }
+    const ch = players[b.challengerId], tg = players[b.opponentId];
+    if (!ch || !tg) { petBattleCancel(socket.id, "Battle cancelled — someone left."); return; }
+    if (!ch.email || !tg.email) { petBattleCancel(socket.id, "Battle cancelled — a saved account is required."); return; }
+    // Re-validate both sides still have their equipped pets (a trade/unequip
+    // could have happened during the accept window).
+    if (!ch.pet || !tg.pet) { petBattleCancel(socket.id, "Battle cancelled — a pet was unequipped."); return; }
+    if ((ch.email && Array.isArray(ch.cosmetics) && !ch.cosmetics.includes(ch.pet))
+        || (tg.email && Array.isArray(tg.cosmetics) && !tg.cosmetics.includes(tg.pet))) {
+      petBattleCancel(socket.id, "Battle cancelled — an equipped pet is no longer owned."); return;
+    }
+    clearTimeout(b.acceptTimer);
+    // Freeze BOTH snapshots at accept time (the start-of-battle moment).
+    b.sides = {
+      challenger: petBattleSnapshotForPlayer(b.challengerId, false),
+      opponent:   petBattleSnapshotForPlayer(b.opponentId, false),
+    };
+    petBattleStart(b);
+  });
+
+  // A per-round move intent. Validates ownership of the match, that it's the
+  // picking phase, that the move is a legal string, and that the move is
+  // currently allowed (cooldown/charge). First pick locks — no take-backs.
+  socket.on("petBattlePick", (payload) => {
+    const { matchId, move } = payload || {};
+    const b = battleBySocket.get(socket.id);
+    if (!b || b.matchId !== matchId || b.state !== "picking") return;
+    if (typeof move !== "string" || !PB_MOVES.has(move)) return;   // never accept anything but a legal move name
+    const side = b.sides.challenger.id === socket.id ? b.sides.challenger
+               : b.sides.opponent.id  === socket.id ? b.sides.opponent : null;
+    if (!side || side.pick) return;   // not a combatant, or already locked
+    if (!petBattleMoveLegal(side, move)) {
+      socket.emit("petBattleFail", { message: "That move isn't ready." }); return;
+    }
+    side.pick = move;
+    // Only the FACT of a pick leaks to the foe — never the move itself.
+    const foeId = petBattleOtherId(b, socket.id);
+    if (foeId !== BOT_ID) io.to(foeId).emit("petBattlePickStatus", { matchId: b.matchId, foePicked: true });
+    if (b.sides.challenger.pick && b.sides.opponent.pick) {
+      petBattleResolve(b).catch((err) => console.error("pet battle resolve failed:", err));
+    }
+  });
+
+  // Explicit cancel of a not-yet-started challenge you own. An ACTIVE battle
+  // can't be freely cancelled (that would be a dodge) — leaving forfeits it.
+  socket.on("petBattleCancel", (payload) => {
+    const { matchId } = (payload || {});
+    const b = battleBySocket.get(socket.id);
+    if (!b || (matchId && b.matchId !== matchId)) return;
+    if (b.state !== "pending") return;   // active battles settle via forfeit, not cancel
+    petBattleCancel(socket.id, "Battle cancelled.");
+  });
+
+  // A deliberate mid-battle surrender. Unlike pending cancellation, this is a
+  // settled forfeit: the opponent receives the smaller forfeit reward and the
+  // surrendering pet receives zero. The caller must own this active match.
+  socket.on("petBattleForfeit", (payload) => {
+    const { matchId } = payload || {};
+    const b = battleBySocket.get(socket.id);
+    if (!b || b.matchId !== matchId) return;
+    if (b.state !== "picking" && b.state !== "resolving" && b.state !== "starting") return;
+    const leaverSide = b.sides.challenger.id === socket.id ? "challenger" : "opponent";
+    const winnerSide = petBattleOtherId2(leaverSide);
+    petBattleFinish(b, { reason: "forfeit", winnerSide, forfeit: true })
+      .catch((err) => console.error("pet battle surrender failed:", err));
+  });
+
+  // Return the current stored build (and derived budget/stats) for one of the
+  // caller's pets. Read-only.
+  socket.on("petBattleGetBuild", (payload) => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(petBattleBucket)) return;
+    const pet = (payload || {}).pet;
+    if (typeof pet !== "string" || !Object.hasOwn(PETS, pet)) return;
+    if (p.email && Array.isArray(p.cosmetics) && !p.cosmetics.includes(pet)) return;   // ownership
+    const xp = ((p.petXp || {})[pet]) || 0;
+    const build = effectivePetBuild(p, pet);
+    socket.emit("petBattleBuild", {
+      pet, build, budget: petBattleBudget(pet, xp),
+      spent: PB_ATTRS.reduce((s, a) => s + (build[a] || 0), 0),
+      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS, stats: petBattleStats(petStageOfPet(pet, xp), build),
+    });
+  });
+
+  // Persist a training build for one of the caller's pets. Validates ownership,
+  // that every allocation is a non-negative int in the allowlist, and that the
+  // total spent fits the pet's XP/stage budget. Rejected builds are NOT clamped
+  // — a bad payload leaves the stored build untouched.
+  socket.on("petBattleSetBuild", async (payload) => {
+    const p = players[socket.id];
+    if (!p) return;
+    if (!takeToken(petBattleBucket)) { socket.emit("petBattleFail", { message: "Slow down a moment." }); return; }
+    const { pet, build } = (payload || {});
+    if (typeof pet !== "string" || !Object.hasOwn(PETS, pet)) {
+      socket.emit("petBattleFail", { message: "Unknown pet." }); return;
+    }
+    if (Array.isArray(p.cosmetics) && !p.cosmetics.includes(pet)) {
+      socket.emit("petBattleFail", { message: "You don't own that pet." }); return;
+    }
+    const xp = ((p.petXp || {})[pet]) || 0;
+    const budget = petBattleBudget(pet, xp);
+    const clean = sanitizePetBuild(build, budget);
+    if (!clean) { socket.emit("petBattleFail", { message: "Invalid training allocation." }); return; }
+    // Persist: JSONB per-pet, keyed by pet id. Account players → DB; session
+    // players → memory only.
+    if (p.email) {
+      try {
+        await pool.query(
+          `UPDATE jpo_players
+              SET pet_builds = jsonb_set(coalesce(pet_builds, '{}'::jsonb), ARRAY[$2::text], $3::jsonb),
+                  updated_at = now()
+            WHERE email = $1`,
+          [p.email, pet, JSON.stringify(clean)]);
+      } catch (err) {
+        console.error("petBattleSetBuild persist failed:", err);
+        socket.emit("petBattleFail", { message: "Couldn't save your build — try again." });
+        return;
+      }
+    }
+    // Update the live authoritative copy only after durable persistence
+    // succeeds; a failed save must not silently affect the next battle.
+    p.petBuilds = p.petBuilds || {};
+    p.petBuilds[pet] = clean;
+    socket.emit("petBattleBuild", {
+      pet, build: clean, budget,
+      spent: PB_ATTRS.reduce((s, a) => s + (clean[a] || 0), 0),
+      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS, stats: petBattleStats(petStageOfPet(pet, xp), clean),
+    });
+    console.log(`${p.name} set ${pet} battle build (spent ${PB_ATTRS.reduce((s, a) => s + (clean[a] || 0), 0)}/${budget})`);
+  });
+
   // Tic-Tac-Toe move intent. All board/turn validation is server-side; a bad
   // move is silently dropped (same policy as a bad rpsPick).
   socket.on("tttMove", (payload) => {
@@ -7393,7 +8243,7 @@ io.on("connection", (socket) => {
     // No spending while in an RPS challenge/match: this is what keeps the
     // accept-time wager check exact all the way to settlement (the coin tick
     // only ever ADDS coins).
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
@@ -7456,7 +8306,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(buyBucket)) return;
-    if (rpsBySocket.has(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
     if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
     await feedPetTreat(io, socket, p);
   });
@@ -7475,7 +8325,7 @@ io.on("connection", (socket) => {
     if (typeof station !== "string" || typeof item !== "string") return;
     // hasOwn so "__proto__"/"constructor" can't match (same as interact).
     if (!Object.hasOwn(FOOD_STATIONS, station)) return;
-    if (rpsBySocket.has(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
     if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
     const obj = OBJECTS[station];
     const dx = (p.x ?? 0) - obj.x, dy = (p.y ?? 0) - obj.y;
@@ -7576,7 +8426,7 @@ io.on("connection", (socket) => {
     if (SEASONAL_PETS[item] && seasonNow() !== SEASONAL_PETS[item]) { socket.emit("shopError", "That pet is seasonal — it's out of season right now! 📅"); return; }
     if (!cost) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
@@ -7692,7 +8542,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id], cost = salePrice(PET_ACCESSORIES[item]);
     if (!p || !cost) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
@@ -7800,8 +8650,8 @@ io.on("connection", (socket) => {
     // no-coin-movement-mid-match rule simple and absolute (a gift landing
     // mid-settle is harmless — coins only ADD — but "nobody's balance moves
     // during a match except the wager" is easier to reason about and test).
-    if (rpsBySocket.has(socket.id)) { fail("Finish your match first!"); return; }
-    if (rpsBySocket.has(targetId)) { fail(`${target.name} is mid-match — wait for it to finish.`); return; }
+    if (inAnyMatch(socket.id)) { fail("Finish your match first!"); return; }
+    if (inAnyMatch(targetId)) { fail(`${target.name} is mid-match — wait for it to finish.`); return; }
     if (inActiveRound(socket.id)) { fail("The lights are out — no gifting until the round ends!"); return; }
     const amt = Math.round(Number(amount));
     if (!Number.isInteger(amt) || amt < 1) { fail("Enter an amount of at least 1 coin."); return; }
@@ -7873,7 +8723,7 @@ io.on("connection", (socket) => {
     if (!takeToken(buyBucket)) return;
     if (!target || targetId === socket.id) { fail("They're not in the office right now."); return; }
     if (!p.email || !target.email) { fail("Trades need saved accounts on both sides."); return; }
-    if (rpsBySocket.has(socket.id) || rpsBySocket.has(targetId)) { fail("No trading mid-match!"); return; }
+    if (inAnyMatch(socket.id) || inAnyMatch(targetId)) { fail("No trading mid-match!"); return; }
     if (inActiveRound(socket.id) || inActiveRound(targetId)) { fail("The lights are out — no trading until the round ends!"); return; }
     if (tradeBySocket.has(socket.id)) { fail("You already have a trade open."); return; }
     if (tradeBySocket.has(targetId)) { fail(`${target.name} is already in a trade.`); return; }
@@ -8109,7 +8959,7 @@ io.on("connection", (socket) => {
     if (!p || !Number.isFinite(listingId)) return;
     if (!takeToken(buyBucket)) return;
     if (!p.email) { storeFail("Sign in with your email to bid."); return; }
-    if (rpsBySocket.has(socket.id)) { storeFail("Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { storeFail("Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { storeFail("The lights are out — no bidding until the round ends!"); return; }
     if (!Number.isFinite(amt) || amt < STORE_BID_MIN || amt > STORE_BID_MAX) { storeFail("That's not a valid bid."); return; }
     const client = await pool.connect();
@@ -8188,7 +9038,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p?.email || !Number.isFinite(listingId) || !Number.isFinite(bidId)) return;
     if (!takeToken(buyBucket)) return;
-    if (rpsBySocket.has(socket.id)) { storeFail("Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { storeFail("Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { storeFail("The lights are out — no deals until the round ends!"); return; }
     const client = await pool.connect();
     let done = null;
@@ -8327,7 +9177,7 @@ io.on("connection", (socket) => {
     if (!Number.isInteger(shirtIdx) || shirtIdx < 0 || shirtIdx > CLOTH_MAX) return;
     if (!Number.isInteger(pantsIdx) || pantsIdx < 0 || pantsIdx > CLOTH_MAX) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
     if (shirtIdx === p.shirtIdx && pantsIdx === p.pantsIdx) {
       socket.emit("shopError", "You're already wearing those colours!");
@@ -8385,7 +9235,7 @@ io.on("connection", (socket) => {
     if (!AVATAR_CHARS.includes(character)) return;
     if (!Number.isInteger(hairIdx) || hairIdx < 0 || hairIdx > HAIR_MAX) return;
     if (!takeToken(buyBucket)) return;
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no makeovers until the round ends!"); return; }
     if (character === p.character && hairIdx === p.hairIdx) {
       socket.emit("shopError", "That's already your look!");
@@ -8449,7 +9299,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id], def = USABLE_ITEMS[item];
     if (!p || !def) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
-    if (rpsBySocket.has(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }
     if (inActiveRound(socket.id)) { socket.emit("shopError", "The lights are out — no shopping until the round ends!"); return; }
 
     // Session-only players (no email): memory-only purchase.
@@ -8809,7 +9659,7 @@ io.on("connection", (socket) => {
       // ping pong table starts Ping Pong. All reuse startRpsChallenge, so
       // every duel cleanup seam applies automatically.
       const station = object === "arcade" ? "arcade" : object.startsWith("pool_table") ? "pool" : "pong";
-      if (rpsBySocket.has(socket.id)) {
+      if (inAnyMatch(socket.id)) {
         socket.emit("interactError", { message: "You're already in a match." });
         return;
       }
@@ -8821,7 +9671,7 @@ io.on("connection", (socket) => {
       // gets the invite and the normal accept/decline flow takes over.
       let bestId = null, bestD = Infinity;
       for (const [oid, op] of Object.entries(players)) {
-        if (oid === socket.id || rpsBySocket.has(oid) || inRound(oid)) continue;
+        if (oid === socket.id || inAnyMatch(oid) || inRound(oid)) continue;
         const ox = (op.x ?? 0) - obj.x, oy = (op.y ?? 0) - obj.y;
         const d = ox * ox + oy * oy;
         if (d <= obj.r * obj.r && d < bestD) { bestId = oid; bestD = d; }
@@ -8850,7 +9700,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(roundBucket)) return;   // silently drop spam
-    if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (propHunt) { socket.emit("roundError", { message: "Hide & Seek is running — wait for it to finish!" }); return; }
     if (deal)     { socket.emit("roundError", { message: "Deal or No Deal is running — wait for the show to end!" }); return; }
     if (rlgl)     { socket.emit("roundError", { message: "Red Light Green Light is running — wait for the doll to finish!" }); return; }
@@ -8882,7 +9732,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(roundBucket)) return;
-    if (rpsBySocket.has(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (inAnyMatch(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (!round || round.state !== "joining") { socket.emit("roundError", { message: "No round is gathering right now." }); return; }
     if (round.members.has(socket.id)) return;   // already in — quietly ignore
     // email on the member record: the round-grace seam (roundDeferLeave /
@@ -8952,6 +9802,7 @@ io.on("connection", (socket) => {
     // is a FORFEIT by the leaver: refreshing while losing used to cancel with
     // no coins moved, which let losers dodge the wager (July 2026 exploit).
     forfeitMatchForLeave(socket.id);
+    petBattleForfeitForLeave(socket.id);   // active pet battle → forfeit (winner +2, leaver +0)
     await raceDuelForfeit(socket.id);   // duel race: survivor wins by walkover
     // The ROUND now gets the same grace as the player: an email-backed member
     // of the ACTIVE round is marked `gone` and their spot survives until the
@@ -9136,6 +9987,43 @@ try {
     last_played_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (email_a, email_b)
   )`);
+  // ── Pet Battle (Aug 2026) settlement ledger ──────────────────────────────
+  // Idempotency: one row per (match_id, email). The XP credit ONLY happens
+  // when this INSERT wins its row, so a retry after an ambiguous COMMIT (lost
+  // ack) can never double-award — exactly the pattern jpo_race_settlements
+  // uses for bet payouts. `match_id` is a server-generated opaque uuid, so a
+  // client can neither forge nor replay someone else's settlement.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_pet_battles (
+    match_id   TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    pet        TEXT NOT NULL,
+    xp         INTEGER NOT NULL,
+    outcome    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (match_id, email)
+  )`);
+  // Persistent per-pet DAILY reward cap: n battle-XP awards granted today for
+  // (email, pet). Beyond PET_BATTLE_DAILY_CAP the match still resolves and is
+  // fun, but grants 0 XP — stops a pair from farming XP all day. Swept on boot.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_pet_battle_caps (
+    day   text NOT NULL,
+    email text NOT NULL,
+    pet   text NOT NULL,
+    n     int NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, email, pet)
+  )`);
+  await pool.query(`DELETE FROM jpo_pet_battle_caps WHERE day < to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')`);
+  // Same-opponent cooldown: last rewarded battle time between an ordered email
+  // pair (a<b). A rematch inside PET_BATTLE_REMATCH_MS still plays but grants
+  // 0 XP — stops two accounts trading wins in a tight loop for free XP.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_pet_battle_pairs (
+    email_a text NOT NULL,
+    email_b text NOT NULL,
+    last_at timestamptz NOT NULL DEFAULT now(),
+    last_match_id text,
+    PRIMARY KEY (email_a, email_b)
+  )`);
+  await pool.query(`ALTER TABLE jpo_pet_battle_pairs ADD COLUMN IF NOT EXISTS last_match_id text`);
 } catch (err) {
   console.error("schema nudge (coach tables) failed:", err);
 }
@@ -9151,6 +10039,9 @@ try {
   // Pet evolution: per-pet treat XP, keyed by pet id ({"pet_cat": 12, ...}).
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_xp jsonb NOT NULL DEFAULT '{}'::jsonb`);
   await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_names jsonb NOT NULL DEFAULT '{}'::jsonb`);
+  // Pet Battle training builds (Aug 2026): per-pet stat allocations, keyed by
+  // pet id. Idempotent self-heal so prod gets the column on first boot.
+  await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS pet_builds jsonb NOT NULL DEFAULT '{}'::jsonb`);
   // Wings slot (Aug 2026): separate from equipped_cosmetic so wings + a
   // wearable can be worn together. One-time self-healing migration: anyone
   // whose old single slot holds wings gets them moved to the new slot.
