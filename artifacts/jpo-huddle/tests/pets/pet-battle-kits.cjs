@@ -153,12 +153,24 @@ assert.doesNotMatch(clientChoreoResolverSource, /stage|Math\.random/,
   "move choreography must be deterministic and must not depend on evolution stage");
 for (const signature of [
   "pbTravelRings(from, to", "pbWeather('snow'", "pbWeather('rain'",
-  "assets/pets/shell_sapphire.png", "pbBeam(mouth, to", "pbAfterimages(attPrefix",
+  "assets/pets/shell_sapphire.png", "pbFlameBreath(mouth, to", "pbAfterimages(attPrefix",
   "case 'cat-stretch'", "case 'cat-pounce'", "case 'boss-slam'",
   "case 'dragon-sputter'", "case 'smoke-breath'", "case 'phoenix-rebirth'",
 ]) {
   assert.ok(clientSource.includes(signature), `battle choreography is missing signature beat: ${signature}`);
 }
+const dragonBreathSource = clientSource.slice(
+  clientSource.indexOf("case 'neon-ignition'"),
+  clientSource.indexOf("case 'rain-dance'"),
+);
+assert.doesNotMatch(dragonBreathSource, /pbBeam\(/,
+  "dragon fire must render as a flame-and-smoke plume, never a simple beam");
+const obsidianSource = clientSource.slice(
+  clientSource.indexOf("case 'void-slam'"),
+  clientSource.indexOf("case 'rain-dance'"),
+);
+assert.match(obsidianSource, /pbTravelRings[\s\S]*?pbFlameBreath/,
+  "Obsidian's signature move must combine the heavy stomp with fire breath");
 const wingKeyframes = clientSource.slice(
   clientSource.indexOf("@keyframes pb-motion-wing"),
   clientSource.indexOf("@keyframes pb-motion-beam"),

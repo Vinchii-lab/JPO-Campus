@@ -2164,6 +2164,14 @@
   width: var(--pb-size, 9px); height: var(--pb-size, 9px); border-radius: 50%;
   background: var(--pb-c2); box-shadow: 0 0 8px 3px var(--pb-c1);
 }
+.pb-trick-flame {
+  width: calc(var(--pb-size, 18px) * 1.35); height: var(--pb-size, 18px);
+  border-radius: 56% 44% 62% 38%;
+  background:
+    radial-gradient(circle at 30% 48%, #fff7ad 0 9%, #ffd34f 15%, var(--pb-c2) 42%, var(--pb-c1) 72%, transparent 76%);
+  box-shadow: 0 0 9px 3px var(--pb-c2), 0 0 18px 5px var(--pb-c1);
+  filter: saturate(1.25);
+}
 .pb-trick-snow {
   color: #fff; font-size: var(--pb-size, 18px); font-weight: 900;
   text-shadow: 0 0 7px #79d9ff, 0 0 14px #fff;
@@ -18807,6 +18815,43 @@
        }
     }
 
+    function pbFlameBreath(from, to, color, color2, gen, intensity = 1) {
+       const dx = to.x - from.x;
+       const dy = to.y - from.y;
+       const count = Math.round(13 * intensity);
+       for (let i = 0; i < count; i++) {
+          const t = .08 + (i / Math.max(1, count - 1)) * .78;
+          const wave = ((i % 3) - 1) * (5 + i * .28);
+          const point = {
+             x: from.x + dx * t,
+             y: from.y + dy * t + wave,
+          };
+          const flame = pbTrickNode('pb-trick-flame', from, {
+             color, color2, size: 13 + (i % 5) * 4,
+          });
+          void pbAnimateTracked(flame, [
+             { transform: 'translate(-50%,-50%) scale(.2,.45) rotate(0deg)', opacity: 0 },
+             { offset: .22, opacity: 1, transform: `translate(calc(-50% + ${(point.x - from.x) * .45}px),calc(-50% + ${(point.y - from.y) * .45}px)) scale(1.05,.8)` },
+             { transform: `translate(calc(-50% + ${point.x - from.x}px),calc(-50% + ${point.y - from.y}px)) scale(.45,1.25) rotate(${(i % 2 ? 10 : -10)}deg)`, opacity: 0 },
+          ], {
+             duration: 430 + (i % 4) * 45,
+             delay: i * 34,
+             easing: 'cubic-bezier(.16,.72,.25,1)',
+          }, gen, true);
+       }
+       const smokeCount = Math.round(7 * intensity);
+       for (let i = 0; i < smokeCount; i++) {
+          const t = .38 + i * .075;
+          setTimeout(() => {
+             if (gen !== pbGen) return;
+             pbBurstAt({
+                x: from.x + dx * t,
+                y: from.y + dy * t - 5 - (i % 3) * 4,
+             }, 'smoke', '#6f4938', '#b86b3f', 3, gen, 22 + i * 3);
+          }, 70 + i * 50);
+       }
+    }
+
     function pbWeather(kind, color, color2, count, gen) {
        const layer = pbEl('pb-arena-fx').getBoundingClientRect();
        for (let i = 0; i < count; i++) {
@@ -19169,16 +19214,8 @@
                 { offset: .6, transform: `translate(${-Math.sign(dx || 1) * 12}px,-8px) rotate(${-Math.sign(dx || 1) * 8}deg) scale(1.05)`, filter: `brightness(1.55) drop-shadow(0 0 12px ${c1})` },
                 { transform: `translate(${-Math.sign(dx || 1) * 10}px,-6px) rotate(${-Math.sign(dx || 1) * 7}deg) scale(1.08,.96)`, filter: `brightness(1.8) drop-shadow(0 0 16px ${c1})` },
              ], 420, 'cubic-bezier(.2,.65,.2,1)'))) return false;
-             pbBeam(mouth, to, c1, c2, gen, false, choreo === 'inferno-breath' ? 28 : 22);
-             for (let i = 0; i < 5; i++) {
-                setTimeout(() => {
-                   if (gen !== pbGen) return;
-                   const t = .22 + i * .13;
-                   pbBurstAt({ x: mouth.x + (to.x - mouth.x) * t, y: mouth.y + (to.y - mouth.y) * t },
-                     'smoke', c1, c2, 6, gen, 42);
-                }, i * 82);
-             }
-             setTimeout(() => gen === pbGen && pbBurstAt(to, 'smoke', c1, c2, 24, gen, 96), 390);
+             pbFlameBreath(mouth, to, c1, c2, gen, choreo === 'inferno-breath' ? 1.3 : 1);
+             setTimeout(() => gen === pbGen && pbBurstAt(to, 'smoke', '#6f4938', '#b86b3f', 18, gen, 82), 430);
              return move([
                 { transform: `translate(${-Math.sign(dx || 1) * 10}px,-6px) rotate(${-Math.sign(dx || 1) * 7}deg) scale(1.08,.96)`, filter: `brightness(1.8) drop-shadow(0 0 16px ${c1})` },
                 { offset: .68, transform: 'translate(0,-4px) scale(1.08,.96)', filter: `brightness(1.45) drop-shadow(0 0 12px ${c1})` },
@@ -19191,6 +19228,18 @@
                 pbBurstAt(to, 'smoke', '#1b1425', '#ff7a2e', 28, gen, 112);
                 pbTravelRings(to, { x: to.x + Math.sign(dx) * 42, y: to.y }, '#17101f', '#ff6b2a', gen);
              }, 570);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                const landedMouth = {
+                   x: from.x + dx * .56 + Math.sign(dx || 1) * from.width * .25,
+                   y: from.y + dy * .56 - from.height * .17,
+                };
+                const breathTarget = {
+                   x: to.x + Math.sign(dx || 1) * from.width * .55,
+                   y: to.y,
+                };
+                pbFlameBreath(landedMouth, breathTarget, '#ff4a24', '#ffd34f', gen, 1.3);
+             }, 620);
              return move([
                 { transform: 'translate(0,0) scale(1)' },
                 { offset: .25, transform: `translate(${dx * .25}px,-130px) rotate(${Math.sign(dx) * -16}deg) scale(.88)` },
