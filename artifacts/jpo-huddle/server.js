@@ -8,6 +8,11 @@ import pg from "pg";
 import crypto from "crypto";
 import OpenAI from "openai";
 import { ReplitConnectors } from "@replit/connectors-sdk";
+import {
+  GRAND_EVENT_ALLOWED_COUNTS,
+  grandEventBattleDecision,
+  grandEventOpeningPlan,
+} from "./grand-event-rules.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -1522,7 +1527,7 @@ const BOT_ID          = "__petbot__";      // sentinel opponent id (no real sock
 const PB_BOT_REWARD_ID = "training-bot@jpo.system"; // durable pair-ledger identity for bot cooldowns
 const PB_MOVES        = new Set(["attack", "guard", "special", "ultimate"]);
 const PB_ACCEPT_MS    = 30_000;            // challenged player's accept/decline window
-const PB_PICK_MS      = 15_000;            // per-round pick clock (short; no-pick = guard)
+const PB_PICK_MS      = Math.max(500, Number(process.env.PET_BATTLE_PICK_MS) || 15_000); // test-overridable; no-pick = guard
 const PB_MAX_ROUNDS   = 6;                 // hard cap — a stalemate at round 6 = higher-HP wins
 const PB_RANGE_PX     = 480;               // "walk up to someone" — same reach as RPS_RANGE_PX (defined later)
 const PB_BOT_MIN_MS   = 500;               // bot "thinks" for a natural beat before it picks…
@@ -1535,6 +1540,21 @@ const PB_DAILY_CAP    = 10;                // rewarded battles per pet per UTC d
 const PB_REMATCH_MS   = 5 * 60_000;        // same-opponent reward cooldown (5 min)
 const PB_SPECIAL_CD   = 2;                 // 'special' unusable again for this many rounds
 const PB_ULT_CHARGE   = 3;                 // 'ultimate' needs this much charge (built by attack/guard)
+
+// ── Pet Wars Grand Event ────────────────────────────────────────────────────
+// One durable, owner/admin-hosted single-elimination tournament at a time.
+// Entrants are keyed by email (not socket id), so refreshes and reconnects keep
+// their bracket slot. Timers are env-tunable only so the socket integration
+// test can exercise a full lifecycle without waiting several minutes.
+const GE_MIN_PLAYERS = 8;
+const GE_MAX_PLAYERS = 16;
+const GE_DEFAULT_ENTRY = 150;
+const GE_JOIN_MS = Number(process.env.GRAND_EVENT_JOIN_MS) || 120_000;
+const GE_READY_MS = Number(process.env.GRAND_EVENT_READY_MS) || 60_000;
+const GE_MAX_COINS = 100_000;
+const GE_ALLOWED_COUNTS = new Set(GRAND_EVENT_ALLOWED_COUNTS);
+let grandEvent = null;
+let grandEventOp = Promise.resolve();
 
 // Build attribute allowlist. Client can only ever spend into these; anything
 // else in a submitted build is rejected. All non-negative, bounded by budget.
@@ -3055,6 +3075,9 @@ async function restorePlayer(socket, row) {
     const token = signToken(state.email);
     if (token) socket.emit("sessionToken", { token });
   }
+  // Durable Grand Event lobby/bracket follows the account across socket ids.
+  // This direct push covers reconnects even before the client sends uiSync.
+  grandEventEmitToSocket(socket.id);
 
   for (const pid in players) {
     if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
@@ -3983,6 +4006,8 @@ function petBattleEmitNoXp(p, sid, pet, reason) {
 async function petBattleFinish(b, { reason, winnerSide = null, forfeit = false } = {}) {
   if (b.state === "settling" || b.state === "done") return;
   b.state = "settling";
+  b.finishReason = reason || "";
+  b.finishWasForfeit = !!forfeit;
   clearBattleTimers(b);
 
   const A = b.sides.challenger, D = b.sides.opponent;
@@ -4000,8 +4025,8 @@ async function petBattleFinish(b, { reason, winnerSide = null, forfeit = false }
   // XP amounts. Forfeit: winner +2, leaver +0. Completed: winner +3, loser +1.
   // Draw (rounds cap tie / mutual KO): both get the loser reward (they fought).
   const matchId = b.matchId;
-  const chEmail = players[A.id]?.email || null;
-  const opEmail = D.isBot ? PB_BOT_REWARD_ID : (players[D.id]?.email || null);
+  const chEmail = A.tournamentEmail || players[A.id]?.email || null;
+  const opEmail = D.isBot ? PB_BOT_REWARD_ID : (D.tournamentEmail || players[D.id]?.email || null);
   const awards = [];
   if (draw) {
     if (!A.isBot) awards.push([A, PB_XP_LOSE, opEmail]);
@@ -4027,9 +4052,14 @@ async function petBattleFinish(b, { reason, winnerSide = null, forfeit = false }
     winnerId,
     youWon: !draw && b.sides[side].id === winner.id,
     combatants: petBattleView(b),
+    tournament: !!b.tournament,
   }));
   b.state = "done";
   petBattleUnmap(b);
+  if (b.tournament && winner) {
+    try { await grandEventBattleFinished(b, winner); }
+    catch (err) { console.error("Grand Event bracket advancement failed:", err); }
+  }
   console.log(`Pet Battle #${b.seq} done (${reason})${draw ? " — draw" : ` — winner ${winner?.name}`}`);
 }
 function petBattleOtherId2(side) { return side === "challenger" ? "opponent" : "challenger"; }
@@ -4042,21 +4072,72 @@ async function petBattleResolve(b) {
   const A = b.sides.challenger, D = b.sides.opponent;
   // No-pick defaults to guard (safe, non-punishing) so a stalled client doesn't
   // hang the match; illegal picks were already rejected at intake.
-  if (!A.pick) A.pick = "guard";
-  if (!D.pick) D.pick = "guard";
+  if (!A.pick) A.pick = b.suddenDeath ? "attack" : "guard";
+  if (!D.pick) D.pick = b.suddenDeath ? "attack" : "guard";
   b.state = "resolving";
 
   const result = petBattleResolveRound(b);
   b.round += 1;
+  if (b.tournament && b.suddenDeath) b.suddenDeathExchanges = (b.suddenDeathExchanges || 0) + 1;
+  const tournamentDecision = b.tournament ? grandEventBattleDecision({
+    challengerHp: A.hp,
+    opponentHp: D.hp,
+    round: b.round,
+    maxRounds: PB_MAX_ROUNDS,
+    suddenDeath: b.suddenDeath,
+    suddenDeathExchanges: b.suddenDeathExchanges || 0,
+  }) : null;
+  if (tournamentDecision?.suddenDeath && !b.suddenDeath) {
+    b.suddenDeath = true;
+    b.suddenDeathExchanges = 0;
+  }
 
   petBattleEmitBoth(b, "petBattleRound", (side) => ({
     matchId: b.matchId, round: b.round, maxRounds: PB_MAX_ROUNDS,
-    result, combatants: petBattleView(b),
+    result, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
+    overtimeReset: tournamentDecision?.action === "overtime-reset",
   }));
 
   // Reset picks for the next round.
   A.pick = null; D.pick = null;
 
+  if (tournamentDecision?.action === "overtime-reset") {
+    // NBA-style bracket matches cannot draw. A simultaneous knockout starts a
+    // clean overtime possession at full HP; using full HP avoids identical
+    // one-hit builds immediately repeating the same mutual knockout forever.
+    // Overtime removes Guard and ends as soon as one pet leads after an exchange.
+    for (const side of [A, D]) {
+      side.hp = side.stats.maxHp;
+      side.charge = 0;
+      side.specialCd = 0;
+      side.status = {
+        shield: 0, dot: null, weaken: 0, exposed: 0, power: 0,
+        evade: 0, counter: 0, regen: 0, regenAmount: 0, rebirth: false,
+      };
+    }
+    petBattleBeginPick(b);
+    return;
+  }
+  if (tournamentDecision?.action === "seed-tiebreak") {
+    const aSeed = Number(A.tournamentSeed) || Number.MAX_SAFE_INTEGER;
+    const dSeed = Number(D.tournamentSeed) || Number.MAX_SAFE_INTEGER;
+    await petBattleFinish(b, {
+      reason: "suddenDeath",
+      winnerSide: aSeed <= dSeed ? "challenger" : "opponent",
+    });
+    return;
+  }
+  if (tournamentDecision?.action === "finish") {
+    await petBattleFinish(b, {
+      reason: b.suddenDeath ? "suddenDeath" : (A.hp <= 0 || D.hp <= 0 ? "ko" : "rounds"),
+      winnerSide: tournamentDecision.winnerSide,
+    });
+    return;
+  }
+  if (b.tournament) {
+    petBattleBeginPick(b);
+    return;
+  }
   if (A.hp <= 0 || D.hp <= 0) {
     await petBattleFinish(b, { reason: "ko" });
     return;
@@ -4081,10 +4162,12 @@ function petBattleBeginPick(b) {
     const me = b.sides[side], foe = b.sides[petBattleOtherId2(side)];
     return {
       matchId: b.matchId, round: b.round + 1, maxRounds: PB_MAX_ROUNDS, pickMs: PB_PICK_MS,
-      legal: [...PB_MOVES].filter((mv) => petBattleMoveLegal(me, mv)),
+      legal: [...PB_MOVES].filter((mv) => (!b.suddenDeath || mv !== "guard") && petBattleMoveLegal(me, mv)),
       charge: me.charge, ultCharge: PB_ULT_CHARGE, specialCd: me.specialCd,
       you: petBattleCombatantView(b, side),
       foe: petBattleCombatantView(b, petBattleOtherId2(side)),
+      tournament: !!b.tournament,
+      suddenDeath: !!b.suddenDeath,
     };
   });
   // Bot picks after a natural beat.
@@ -4110,6 +4193,8 @@ function petBattleStart(b) {
   petBattleEmitBoth(b, "petBattleStart", (side) => ({
     matchId: b.matchId, maxRounds: PB_MAX_ROUNDS, pickMs: PB_PICK_MS,
     you: side, combatants: petBattleView(b),
+    tournament: !!b.tournament,
+    eventLabel: b.tournament ? "Pet Wars Grand Event" : "",
   }));
   petBattleBeginPick(b);
 }
@@ -4148,6 +4233,728 @@ function petBattleCancel(id, reason) {
   io.to(b.challengerId).emit("petBattleCancelled", { matchId: b.matchId, reason: msg });
   if (b.opponentId !== BOT_ID)
     io.to(b.opponentId).emit("petBattleCancelled", { matchId: b.matchId, reason: msg });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PET WARS GRAND EVENT
+// ══════════════════════════════════════════════════════════════════════════
+// The bracket and every coin mutation are server-owned. The event snapshot is
+// persisted after each transition; entry, refund, stage-reward, and champion
+// credits have their own ledgers so replaying a transition is always safe.
+
+function grandEventQueue(work) {
+  const run = grandEventOp.then(work, work);
+  grandEventOp = run.catch((err) => console.error("Grand Event operation failed:", err));
+  return run;
+}
+
+function grandEventSocketForEmail(email) {
+  for (const [id, p] of Object.entries(players)) if (p.email === email) return id;
+  return null;
+}
+
+function grandEventEntrantSnapshot(p) {
+  if (!p?.email || !p.pet) return null;
+  if (Array.isArray(p.cosmetics) && !p.cosmetics.includes(p.pet)) return null;
+  const xp = ((p.petXp || {})[p.pet]) || 0;
+  return {
+    email: p.email,
+    name: p.name,
+    petId: p.pet,
+    stage: petStageOfPet(p.pet, xp),
+    build: { ...effectivePetBuild(p, p.pet) },
+    seed: 0,
+    status: "active",
+    joinedAt: Date.now(),
+  };
+}
+
+function grandEventEmailCompeting(email) {
+  if (!grandEvent || grandEvent.state !== "running" || !email) return false;
+  return grandEvent.entrants.get(email)?.status === "active";
+}
+
+function grandEventIsBlockingOfficeEvents() {
+  return !!grandEvent && (grandEvent.state === "registration" || grandEvent.state === "running");
+}
+
+function grandEventSerialize() {
+  if (!grandEvent) return {};
+  return {
+    joinDeadline: grandEvent.joinDeadline || 0,
+    entrants: [...grandEvent.entrants.values()],
+    rounds: grandEvent.rounds || [],
+    currentRoundIndex: grandEvent.currentRoundIndex || 0,
+    currentMatchIndex: grandEvent.currentMatchIndex || 0,
+    byes: grandEvent.byes || [],
+    champion: grandEvent.champion || null,
+    cancelledMessage: grandEvent.cancelledMessage || "",
+  };
+}
+
+async function grandEventPersist() {
+  if (!grandEvent) return;
+  await pool.query(
+    `UPDATE jpo_grand_events
+        SET state=$2, config=$3::jsonb, snapshot=$4::jsonb,
+            champion_email=$5, updated_at=now(),
+            completed_at=CASE WHEN $2 IN ('complete','cancelled') THEN coalesce(completed_at,now()) ELSE completed_at END
+      WHERE id=$1`,
+    [
+      grandEvent.id,
+      grandEvent.state,
+      JSON.stringify(grandEvent.config),
+      JSON.stringify(grandEventSerialize()),
+      grandEvent.champion?.email || null,
+    ],
+  );
+}
+
+function grandEventEntrantView(email, readySet = null) {
+  const e = grandEvent?.entrants.get(email);
+  if (!e) return null;
+  return {
+    seed: e.seed,
+    name: e.name,
+    petId: e.petId,
+    stage: e.stage,
+    status: e.status,
+    ready: !!readySet?.has(email),
+    online: !!grandEventSocketForEmail(email),
+  };
+}
+
+function grandEventRoundReward(round) {
+  if (!round || !grandEvent) return 0;
+  if (round.key === "opening") return grandEvent.config.rewards.opening;
+  if (round.key === "quarterfinal") return grandEvent.config.rewards.quarterfinal;
+  if (round.key === "semifinal") return grandEvent.config.rewards.semifinal;
+  return grandEvent.config.rewards.final;
+}
+
+function grandEventCurrentMatch() {
+  return grandEvent?.rounds?.[grandEvent.currentRoundIndex]?.matches?.[grandEvent.currentMatchIndex] || null;
+}
+
+function grandEventPublicView(email = null) {
+  if (!grandEvent) return { active: false };
+  if (grandEvent.state === "complete" && Date.now() - Number(grandEvent.champion?.at || 0) > 15 * 60_000)
+    return { active: false };
+  if (grandEvent.state === "cancelled" && Date.now() - Number(grandEvent.endedAt || 0) > 60_000)
+    return { active: false };
+  const current = grandEventCurrentMatch();
+  const readySet = new Set(current?.ready || []);
+  const rounds = (grandEvent.rounds || []).map((round) => ({
+    key: round.key,
+    label: round.label,
+    reward: grandEventRoundReward(round),
+    matches: round.matches.map((m) => ({
+      id: m.id,
+      state: m.state,
+      slot: m.slot,
+      p1: grandEventEntrantView(m.p1, new Set(m.ready || [])),
+      p2: grandEventEntrantView(m.p2, new Set(m.ready || [])),
+      winnerSeed: m.winner ? grandEvent.entrants.get(m.winner)?.seed || null : null,
+      forfeit: !!m.forfeit,
+    })),
+  }));
+  const mine = email ? grandEvent.entrants.get(email) : null;
+  const isCurrent = !!current && (current.p1 === email || current.p2 === email);
+  return {
+    active: true,
+    id: grandEvent.id,
+    state: grandEvent.state,
+    entryFee: grandEvent.config.entryFee,
+    prizeLabel: grandEvent.config.prizeLabel,
+    prizeDetails: grandEvent.config.prizeDetails,
+    rewards: { ...grandEvent.config.rewards },
+    joinDeadline: grandEvent.joinDeadline || 0,
+    minPlayers: GE_MIN_PLAYERS,
+    maxPlayers: GE_MAX_PLAYERS,
+    allowedCounts: [...GE_ALLOWED_COUNTS],
+    pot: grandEvent.entrants.size * grandEvent.config.entryFee,
+    entrants: [...grandEvent.entrants.values()]
+      .sort((a, b) => (a.seed || a.joinedAt) - (b.seed || b.joinedAt))
+      .map((e) => grandEventEntrantView(e.email, readySet)),
+    rounds,
+    currentRoundIndex: grandEvent.currentRoundIndex || 0,
+    currentMatchId: current?.id || null,
+    currentReward: grandEventRoundReward(grandEvent.rounds?.[grandEvent.currentRoundIndex]),
+    readyDeadline: current?.readyDeadline || 0,
+    champion: grandEvent.champion ? {
+      seed: grandEvent.champion.seed,
+      name: grandEvent.champion.name,
+      petId: grandEvent.champion.petId,
+      stage: grandEvent.champion.stage,
+      pot: grandEvent.champion.pot,
+      roundReward: grandEvent.champion.roundReward,
+      prizeLabel: grandEvent.config.prizeLabel,
+      prizeDetails: grandEvent.config.prizeDetails,
+      at: grandEvent.champion.at,
+    } : null,
+    cancelledMessage: grandEvent.cancelledMessage || "",
+    me: {
+      joined: !!mine,
+      status: mine?.status || null,
+      isCurrent,
+      ready: !!email && readySet.has(email),
+      canReady: grandEvent.state === "running" && isCurrent && current?.state === "ready" && !readySet.has(email),
+      canJoin: grandEvent.state === "registration" && !mine && grandEvent.entrants.size < GE_MAX_PLAYERS,
+      canWithdraw: grandEvent.state === "registration" && !!mine,
+    },
+  };
+}
+
+function grandEventEmitToSocket(id) {
+  const email = players[id]?.email || null;
+  io.to(id).emit("grandEventState", grandEventPublicView(email));
+}
+
+function grandEventBroadcast() {
+  for (const id of Object.keys(players)) grandEventEmitToSocket(id);
+  for (const id of admins) {
+    if (!players[id]) io.to(id).emit("grandEventState", grandEventPublicView(null));
+  }
+}
+
+function grandEventClearTimers() {
+  if (!grandEvent) return;
+  clearTimeout(grandEvent.joinTimer);
+  clearTimeout(grandEvent.readyTimer);
+  grandEvent.joinTimer = null;
+  grandEvent.readyTimer = null;
+}
+
+function grandEventPairRound(key, label, emails) {
+  const seeded = [...emails].sort((a, b) =>
+    (grandEvent.entrants.get(a)?.seed || 999) - (grandEvent.entrants.get(b)?.seed || 999));
+  const matches = [];
+  let slot = 1;
+  while (seeded.length >= 2) {
+    const p1 = seeded.shift();
+    const p2 = seeded.pop();
+    matches.push({
+      id: crypto.randomUUID(),
+      slot: slot++,
+      p1,
+      p2,
+      state: "queued",
+      ready: [],
+      readyDeadline: 0,
+      battleId: null,
+      winner: null,
+      forfeit: false,
+    });
+  }
+  return { key, label, matches };
+}
+
+async function grandEventCredit(email, amount, payoutKey, kind) {
+  if (!grandEvent || !email || !(amount > 0)) return false;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let cl;
+    try {
+      cl = await pool.connect();
+      await cl.query("BEGIN");
+      const claim = await cl.query(
+        `INSERT INTO jpo_grand_event_payouts (event_id,payout_key,email,amount,kind)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING 1`,
+        [grandEvent.id, payoutKey, email, amount, kind],
+      );
+      let coins = null;
+      if (claim.rows[0]) {
+        const paid = await cl.query(
+          `UPDATE jpo_players SET coins=coins+$2, updated_at=now() WHERE email=$1 RETURNING coins`,
+          [email, amount],
+        );
+        if (!paid.rows[0]) throw new Error("winner account no longer exists");
+        coins = paid.rows[0].coins;
+      } else {
+        // Every semantic payout key belongs to exactly one recipient. A replay
+        // that proposes a different winner is an integrity error, not an
+        // idempotent retry; never silently advance a new winner unpaid.
+        const prior = await cl.query(
+          `SELECT email,amount,kind FROM jpo_grand_event_payouts
+            WHERE event_id=$1 AND payout_key=$2`,
+          [grandEvent.id, payoutKey],
+        );
+        const row = prior.rows[0];
+        if (!row || row.email !== email || Number(row.amount) !== amount || row.kind !== kind) {
+          throw new Error(`Grand Event payout key conflict: ${payoutKey}`);
+        }
+      }
+      await cl.query("COMMIT");
+      if (coins !== null) {
+        const sid = grandEventSocketForEmail(email);
+        if (sid && players[sid]?.email === email) {
+          players[sid].coins = coins;
+          io.to(sid).emit("coinUpdate", { coins });
+          io.to(sid).emit("grandEventPayout", { kind, amount, coins });
+        }
+      }
+      return !!claim.rows[0];
+    } catch (err) {
+      lastErr = err;
+      try { await cl?.query("ROLLBACK"); } catch {}
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 250 * attempt));
+    } finally {
+      cl?.release();
+    }
+  }
+  throw lastErr || new Error("Grand Event payout failed");
+}
+
+async function grandEventRefundEntrant(entry, state = "refunded") {
+  if (!grandEvent || !entry) return;
+  await grandEventCredit(entry.email, grandEvent.config.entryFee, `entry-refund:${entry.email}`, "refund");
+  await pool.query(
+    `UPDATE jpo_grand_event_entries SET state=$3, updated_at=now() WHERE event_id=$1 AND email=$2`,
+    [grandEvent.id, entry.email, state],
+  );
+}
+
+async function grandEventCancelRegistration(message) {
+  if (!grandEvent || grandEvent.state !== "registration" || grandEvent.closing) return;
+  grandEvent.closing = true;
+  clearTimeout(grandEvent.joinTimer);
+  const entries = [...grandEvent.entrants.values()];
+  let refundError = null;
+  try {
+    for (const entry of entries) {
+      try { await grandEventRefundEntrant(entry, "refunded"); }
+      catch (err) { refundError ||= err; }
+    }
+  } finally {
+    grandEvent.closing = false;
+  }
+  if (refundError) {
+    await grandEventPersist();
+    throw new Error("Some refunds are still pending. Try cancel again; completed refunds will not duplicate.");
+  }
+  grandEvent.state = "cancelled";
+  grandEvent.cancelledMessage = message || "The Grand Event was cancelled. Every entry fee was refunded.";
+  grandEvent.endedAt = Date.now();
+  await grandEventPersist();
+  grandEventBroadcast();
+  io.emit("grandEventCancelled", { id: grandEvent.id, message: grandEvent.cancelledMessage });
+}
+
+async function grandEventCreate(config, createdBy) {
+  grandEventClearTimers();
+  const id = crypto.randomUUID();
+  grandEvent = {
+    id,
+    state: "registration",
+    config,
+    createdBy,
+    joinDeadline: Date.now() + config.joinMs,
+    entrants: new Map(),
+    rounds: [],
+    currentRoundIndex: 0,
+    currentMatchIndex: 0,
+    byes: [],
+    champion: null,
+    joinTimer: null,
+    readyTimer: null,
+    closing: false,
+  };
+  await pool.query(
+    `INSERT INTO jpo_grand_events (id,state,config,snapshot,created_by)
+     VALUES ($1,'registration',$2::jsonb,$3::jsonb,$4)`,
+    [id, JSON.stringify(config), JSON.stringify(grandEventSerialize()), createdBy || ""],
+  );
+  grandEvent.joinTimer = setTimeout(() => {
+    grandEventQueue(async () => {
+      if (!grandEvent || grandEvent.id !== id || grandEvent.state !== "registration") return;
+      if (GE_ALLOWED_COUNTS.has(grandEvent.entrants.size)) await grandEventStartBracket();
+      else await grandEventCancelRegistration(
+        `Registration closed with ${grandEvent.entrants.size} player${grandEvent.entrants.size === 1 ? "" : "s"} — the event needs an even roster of 8–16. Every entry fee was refunded.`,
+      );
+    });
+  }, config.joinMs);
+  grandEventBroadcast();
+  return grandEvent;
+}
+
+async function grandEventJoin(id) {
+  const p = players[id];
+  if (!p?.email || !grandEvent || grandEvent.state !== "registration" || grandEvent.closing) {
+    throw new Error("Registration is not open.");
+  }
+  if (grandEvent.entrants.has(p.email)) throw new Error("You're already in the bracket.");
+  if (grandEvent.entrants.size >= GE_MAX_PLAYERS) throw new Error("The 16-player bracket is full.");
+  if (battleBySocket.has(id) || rpsBySocket.has(id) || inRound(id)) throw new Error("Finish your current game first.");
+  const entry = grandEventEntrantSnapshot(p);
+  if (!entry) throw new Error("Equip a pet you own before joining.");
+  // Date.now() can tie when several sockets register within one millisecond.
+  // Persist an explicit monotonic order so seeds survive fast joins/restarts.
+  entry.registrationOrder = grandEvent.entrants.size + 1;
+  const fee = grandEvent.config.entryFee;
+  let cl;
+  try {
+    cl = await pool.connect();
+    await cl.query("BEGIN");
+    const inserted = await cl.query(
+      `INSERT INTO jpo_grand_event_entries (event_id,email,entry_fee,state,entrant)
+       VALUES ($1,$2,$3,'joined',$4::jsonb) ON CONFLICT DO NOTHING RETURNING 1`,
+      [grandEvent.id, p.email, fee, JSON.stringify(entry)],
+    );
+    if (!inserted.rows[0]) throw new Error("This account already entered this event.");
+    const paid = await cl.query(
+      `UPDATE jpo_players SET coins=coins-$2, updated_at=now()
+        WHERE email=$1 AND coins >= $2 RETURNING coins`,
+      [p.email, fee],
+    );
+    if (!paid.rows[0]) throw new Error(`You need ${fee.toLocaleString()} coins to enter.`);
+    await cl.query("COMMIT");
+    grandEvent.entrants.set(p.email, entry);
+    p.coins = paid.rows[0].coins;
+    io.to(id).emit("coinUpdate", { coins: p.coins });
+    await grandEventPersist();
+    grandEventBroadcast();
+  } catch (err) {
+    try { await cl?.query("ROLLBACK"); } catch {}
+    throw err;
+  } finally {
+    cl?.release();
+  }
+}
+
+async function grandEventWithdraw(id) {
+  const p = players[id];
+  if (!p?.email || !grandEvent || grandEvent.state !== "registration" || grandEvent.closing)
+    throw new Error("Entries are locked.");
+  const entry = grandEvent.entrants.get(p.email);
+  if (!entry) throw new Error("You're not entered.");
+  await grandEventRefundEntrant(entry, "withdrawn");
+  grandEvent.entrants.delete(p.email);
+  await grandEventPersist();
+  grandEventBroadcast();
+}
+
+async function grandEventStartBracket() {
+  if (!grandEvent || grandEvent.state !== "registration") throw new Error("No registration lobby is open.");
+  const count = grandEvent.entrants.size;
+  if (!GE_ALLOWED_COUNTS.has(count)) throw new Error("Start requires an even roster of 8, 10, 12, 14, or 16 players.");
+  clearTimeout(grandEvent.joinTimer);
+  grandEvent.joinTimer = null;
+
+  // Refresh every online entrant's authoritative equipped pet/build at the
+  // instant the bracket locks. Offline entrants retain the valid join snapshot.
+  for (const entry of grandEvent.entrants.values()) {
+    const sid = grandEventSocketForEmail(entry.email);
+    const fresh = sid ? grandEventEntrantSnapshot(players[sid]) : null;
+    if (fresh) Object.assign(entry, fresh, { joinedAt: entry.joinedAt });
+  }
+  [...grandEvent.entrants.values()]
+    .sort((a, b) =>
+      (a.registrationOrder || 999) - (b.registrationOrder || 999)
+      || a.joinedAt - b.joinedAt
+      || a.email.localeCompare(b.email))
+    .forEach((entry, i) => { entry.seed = i + 1; entry.status = "active"; });
+
+  grandEvent.state = "running";
+  grandEvent.rounds = [];
+  grandEvent.currentRoundIndex = 0;
+  grandEvent.currentMatchIndex = 0;
+  grandEvent.byes = [];
+  const emails = [...grandEvent.entrants.values()]
+    .sort((a, b) => a.seed - b.seed)
+    .map((e) => e.email);
+  const opening = grandEventOpeningPlan(count, emails);
+  grandEvent.byes = opening.byes;
+  grandEvent.rounds.push(grandEventPairRound(opening.key, opening.label, opening.participants));
+  await pool.query(
+    `UPDATE jpo_grand_event_entries e
+        SET entrant=v.entrant::jsonb, updated_at=now()
+       FROM (SELECT * FROM jsonb_to_recordset($2::jsonb) AS x(email text, entrant jsonb)) v
+      WHERE e.event_id=$1 AND e.email=v.email`,
+    [
+      grandEvent.id,
+      JSON.stringify([...grandEvent.entrants.values()].map((e) => ({ email: e.email, entrant: e }))),
+    ],
+  ).catch((err) => console.error("Grand Event frozen snapshot update failed:", err));
+  await grandEventPersist();
+  await grandEventArmCurrentMatch();
+}
+
+async function grandEventArmCurrentMatch() {
+  if (!grandEvent || grandEvent.state !== "running") return;
+  clearTimeout(grandEvent.readyTimer);
+  const match = grandEventCurrentMatch();
+  if (!match || match.state === "active" || match.state === "done") return;
+  match.state = "ready";
+  match.ready = [];
+  match.readyDeadline = Date.now() + GE_READY_MS;
+  match.battleId = null;
+  await grandEventPersist();
+  grandEventBroadcast();
+  const eventId = grandEvent.id, matchId = match.id;
+  grandEvent.readyTimer = setTimeout(() => {
+    grandEventQueue(async () => {
+      if (!grandEvent || grandEvent.id !== eventId || grandEvent.state !== "running") return;
+      const cur = grandEventCurrentMatch();
+      if (!cur || cur.id !== matchId || cur.state !== "ready") return;
+      const ready = new Set(cur.ready || []);
+      const p1Available = ready.has(cur.p1) && !!grandEventSocketForEmail(cur.p1);
+      const p2Available = ready.has(cur.p2) && !!grandEventSocketForEmail(cur.p2);
+      let winner = cur.p1;
+      if (p2Available && !p1Available) winner = cur.p2;
+      else if (p1Available && !p2Available) winner = cur.p1;
+      else {
+        const p1Seed = grandEvent.entrants.get(cur.p1)?.seed || 999;
+        const p2Seed = grandEvent.entrants.get(cur.p2)?.seed || 999;
+        winner = p1Seed <= p2Seed ? cur.p1 : cur.p2;
+      }
+      await grandEventCompleteMatch(cur.id, winner, { forfeit: true, reason: "ready timeout" });
+    });
+  }, GE_READY_MS);
+}
+
+async function grandEventReady(id) {
+  const p = players[id];
+  const match = grandEventCurrentMatch();
+  if (!p?.email || !grandEvent || grandEvent.state !== "running" || !match || match.state !== "ready")
+    throw new Error("No tournament match is waiting for you.");
+  if (match.p1 !== p.email && match.p2 !== p.email) throw new Error("Your matchup isn't up yet.");
+  if (battleBySocket.has(id) || rpsBySocket.has(id) || inRound(id)) throw new Error("Finish your current game first.");
+  match.ready = Array.from(new Set([...(match.ready || []), p.email]));
+  await grandEventPersist();
+  grandEventBroadcast();
+  if (match.ready.includes(match.p1) && match.ready.includes(match.p2)) await grandEventStartBattle(match);
+}
+
+async function grandEventStartBattle(match) {
+  if (!grandEvent || grandEvent.state !== "running" || match !== grandEventCurrentMatch() || match.state !== "ready") return;
+  const aId = grandEventSocketForEmail(match.p1);
+  const dId = grandEventSocketForEmail(match.p2);
+  if (!aId || !dId) return;   // the ready clock will settle a walkover if they do not return
+  if (battleBySocket.has(aId) || battleBySocket.has(dId) || rpsBySocket.has(aId) || rpsBySocket.has(dId)) return;
+  const a = grandEvent.entrants.get(match.p1), d = grandEvent.entrants.get(match.p2);
+  if (!a || !d) throw new Error("A bracket entrant is missing.");
+  const matchId = crypto.randomUUID();
+  const b = {
+    matchId,
+    seq: ++petBattleSeq,
+    challengerId: aId,
+    opponentId: dId,
+    state: "starting",
+    round: 0,
+    sides: {
+      challenger: petBattleSnapshot(aId, a.name, a.petId, a.stage, a.build, false),
+      opponent: petBattleSnapshot(dId, d.name, d.petId, d.stage, d.build, false),
+    },
+    tournament: true,
+    grandEventId: grandEvent.id,
+    grandEventMatchId: match.id,
+    suddenDeath: false,
+    suddenDeathExchanges: 0,
+  };
+  b.sides.challenger.tournamentEmail = a.email;
+  b.sides.opponent.tournamentEmail = d.email;
+  b.sides.challenger.tournamentSeed = a.seed;
+  b.sides.opponent.tournamentSeed = d.seed;
+  battleBySocket.set(aId, b);
+  battleBySocket.set(dId, b);
+  clearTimeout(grandEvent.readyTimer);
+  match.state = "active";
+  match.readyDeadline = 0;
+  match.battleId = matchId;
+  await grandEventPersist();
+  grandEventBroadcast();
+  petBattleStart(b);
+  console.log(`Grand Event: ${a.name} vs ${d.name} (${grandEvent.rounds[grandEvent.currentRoundIndex].label})`);
+}
+
+async function grandEventCompleteMatch(matchId, winnerEmail, { forfeit = false, reason = "" } = {}) {
+  if (!grandEvent || grandEvent.state !== "running") return;
+  const round = grandEvent.rounds[grandEvent.currentRoundIndex];
+  const match = round?.matches?.find((m) => m.id === matchId);
+  if (!match || match.state === "done" || match.state === "settling") return;
+  if (winnerEmail !== match.p1 && winnerEmail !== match.p2) throw new Error("Invalid tournament winner.");
+  match.state = "settling";
+  clearTimeout(grandEvent.readyTimer);
+  const loserEmail = winnerEmail === match.p1 ? match.p2 : match.p1;
+  const winner = grandEvent.entrants.get(winnerEmail);
+  const loser = grandEvent.entrants.get(loserEmail);
+  if (!winner || !loser) throw new Error("Tournament entrant disappeared.");
+  loser.status = "eliminated";
+  match.winner = winnerEmail;
+  match.forfeit = !!forfeit;
+  match.reason = reason || "";
+  match.state = "done";
+  const reward = grandEventRoundReward(round);
+  let finalMatch = false;
+  if (grandEvent.currentMatchIndex + 1 < round.matches.length) {
+    grandEvent.currentMatchIndex += 1;
+  } else if (round.key === "final") {
+    finalMatch = true;
+    grandEvent.state = "complete";
+    grandEvent.champion = {
+      email: winner.email,
+      seed: winner.seed,
+      name: winner.name,
+      petId: winner.petId,
+      stage: winner.stage,
+      pot: grandEvent.entrants.size * grandEvent.config.entryFee,
+      roundReward: reward,
+      at: Date.now(),
+    };
+  } else {
+    const winners = round.matches.map((m) => m.winner).filter(Boolean);
+    const nextPlayers = round.key === "opening" ? [...grandEvent.byes, ...winners] : winners;
+    const next = round.key === "opening"
+      ? grandEventPairRound("quarterfinal", "Quarterfinals", nextPlayers)
+      : round.key === "quarterfinal"
+        ? grandEventPairRound("semifinal", "Semifinals", nextPlayers)
+        : grandEventPairRound("final", "Championship", nextPlayers);
+    grandEvent.rounds.push(next);
+    grandEvent.currentRoundIndex += 1;
+    grandEvent.currentMatchIndex = 0;
+  }
+
+  // The durable snapshot is the commit point for a match result. Payouts happen
+  // only after this succeeds, so a crash before it replays an unpaid battle,
+  // while a crash after it restores the recorded winner and recovers any
+  // missing idempotent payout instead of paying a second replay winner.
+  await grandEventPersist();
+  if (process.env.GE_TEST_CRASH_AFTER_MATCH_PERSIST === "1") {
+    process.exit(86);
+  }
+
+  try {
+    if (reward > 0) {
+      await grandEventCredit(winnerEmail, reward, `round:${match.id}`, "round");
+      delete match.payoutPending;
+    }
+  } catch (err) {
+    match.payoutPending = true;
+    console.error(`Grand Event round reward pending for ${winnerEmail}:`, err);
+  }
+
+  if (finalMatch) {
+    const pot = grandEvent.champion.pot;
+    try {
+      if (pot > 0) await grandEventCredit(winner.email, pot, "champion-pot", "champion");
+      delete grandEvent.champion.payoutPending;
+    } catch (err) {
+      grandEvent.champion.payoutPending = true;
+      console.error(`Grand Event champion pot pending for ${winner.email}:`, err);
+    }
+    await grandEventPersist();
+    grandEventBroadcast();
+    io.emit("grandEventChampion", grandEventPublicView(null).champion);
+    console.log(`Grand Event champion: ${winner.name} (+${pot} pot, +${reward} final reward)`);
+    return;
+  }
+
+  await grandEventPersist();
+  grandEventBroadcast();
+  await grandEventArmCurrentMatch();
+}
+
+async function grandEventBattleFinished(b, winner) {
+  if (!b?.tournament || !winner?.tournamentEmail) return;
+  await grandEventQueue(() =>
+    grandEventCompleteMatch(b.grandEventMatchId, winner.tournamentEmail, {
+      forfeit: b.finishWasForfeit,
+      reason: b.finishReason || "",
+    }));
+}
+
+async function grandEventRecoverPayouts() {
+  if (!grandEvent) return;
+  for (const round of grandEvent.rounds || []) {
+    const reward = grandEventRoundReward(round);
+    if (!(reward > 0)) continue;
+    for (const match of round.matches || []) {
+      if (match.state !== "done" || !match.winner) continue;
+      try {
+        await grandEventCredit(match.winner, reward, `round:${match.id}`, "round");
+        delete match.payoutPending;
+      } catch (err) { console.error("Grand Event reward recovery failed:", err); }
+    }
+  }
+  if (grandEvent.state === "complete" && grandEvent.champion?.email && grandEvent.champion.pot > 0) {
+    try {
+      await grandEventCredit(grandEvent.champion.email, grandEvent.champion.pot, "champion-pot", "champion");
+      delete grandEvent.champion.payoutPending;
+    } catch (err) { console.error("Grand Event champion recovery failed:", err); }
+  }
+  await grandEventPersist();
+}
+
+async function grandEventRestoreFromDb() {
+  const { rows } = await pool.query(
+    `SELECT * FROM jpo_grand_events
+      WHERE state IN ('registration','running','complete')
+      ORDER BY created_at DESC LIMIT 1`,
+  );
+  if (!rows[0]) return;
+  const row = rows[0];
+  const config = row.config || {};
+  const snap = row.snapshot || {};
+  const entryRows = (await pool.query(
+    `SELECT email, entrant FROM jpo_grand_event_entries WHERE event_id=$1 AND state='joined' ORDER BY joined_at`,
+    [row.id],
+  )).rows;
+  const fromSnap = new Map((snap.entrants || []).map((e) => [e.email, e]));
+  const entrants = new Map();
+  for (const er of entryRows) {
+    const e = fromSnap.get(er.email) || er.entrant;
+    if (e?.email) entrants.set(e.email, e);
+  }
+  grandEvent = {
+    id: row.id,
+    state: row.state,
+    config,
+    createdBy: row.created_by || "",
+    joinDeadline: Number(snap.joinDeadline) || 0,
+    entrants,
+    rounds: snap.rounds || [],
+    currentRoundIndex: Number(snap.currentRoundIndex) || 0,
+    currentMatchIndex: Number(snap.currentMatchIndex) || 0,
+    byes: snap.byes || [],
+    champion: snap.champion || null,
+    cancelledMessage: snap.cancelledMessage || "",
+    joinTimer: null,
+    readyTimer: null,
+    closing: false,
+  };
+  if (grandEvent.state === "running") {
+    const match = grandEventCurrentMatch();
+    if (match?.state === "active" || match?.state === "settling") {
+      // Pet Battle combat is intentionally in-memory. After a process restart
+      // the bracket matchup is replayed from its frozen entrant snapshots; no
+      // reward or advancement was committed yet, so this cannot double-pay.
+      match.state = "queued";
+      match.ready = [];
+      match.battleId = null;
+      match.readyDeadline = 0;
+    }
+    await grandEventPersist();
+    await grandEventRecoverPayouts();
+    await grandEventArmCurrentMatch();
+  } else if (grandEvent.state === "registration") {
+    const left = grandEvent.joinDeadline - Date.now();
+    if (left <= 0) {
+      setTimeout(() => grandEventQueue(async () => {
+        if (GE_ALLOWED_COUNTS.has(grandEvent?.entrants.size)) await grandEventStartBracket();
+        else await grandEventCancelRegistration("Registration expired during a restart. Every entry fee was refunded.");
+      }), 0);
+    } else {
+      const eventId = grandEvent.id;
+      grandEvent.joinTimer = setTimeout(() => grandEventQueue(async () => {
+        if (!grandEvent || grandEvent.id !== eventId || grandEvent.state !== "registration") return;
+        if (GE_ALLOWED_COUNTS.has(grandEvent.entrants.size)) await grandEventStartBracket();
+        else await grandEventCancelRegistration("Registration closed without an eligible even roster. Every entry fee was refunded.");
+      }), left);
+    }
+  } else {
+    await grandEventRecoverPayouts();
+  }
+  console.log(`Grand Event restored: ${grandEvent.id} (${grandEvent.state}, ${grandEvent.entrants.size} entrants)`);
 }
 
 // Move the wager loser→winner. Email players settle in SQL with the same
@@ -6236,6 +7043,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(roundBucket)) return;
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("phResult", { ok: false, message: "Pet Wars Grand Event is open — finish or cancel it first." }); return; }
     if (propHunt) { socket.emit("phResult", { ok: false, message: "A Hide & Seek round is already running." }); return; }
     if (round)    { socket.emit("phResult", { ok: false, message: "Office After Dark is running — wait for it to finish." }); return; }
     if (deal)     { socket.emit("phResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
@@ -6554,12 +7362,105 @@ io.on("connection", (socket) => {
     } else {
       socket.emit("rlglOver", {});
     }
+    grandEventEmitToSocket(socket.id);
   });
+
+  // ── Pet Wars Grand Event ──────────────────────────────────────────────
+  socket.on("grandEventCreate", (payload) => {
+    if (!admins.has(socket.id)) return;
+    grandEventQueue(async () => {
+      if (grandEventIsBlockingOfficeEvents()) throw new Error("A Grand Event is already open.");
+      if (bingo || race || deal || rlgl || round || propHunt)
+        throw new Error("Another office event is running — wait for it to finish.");
+      const entryFeeRaw = payload?.entryFee == null ? GE_DEFAULT_ENTRY : Math.round(Number(payload.entryFee));
+      if (!Number.isSafeInteger(entryFeeRaw) || entryFeeRaw < 1 || entryFeeRaw > 10_000)
+        throw new Error("Entry fee must be 1–10,000 coins.");
+      const readReward = (key, fallback) => {
+        const n = payload?.rewards?.[key] == null ? fallback : Math.round(Number(payload.rewards[key]));
+        if (!Number.isSafeInteger(n) || n < 0 || n > GE_MAX_COINS)
+          throw new Error("Each round reward must be 0–100,000 coins.");
+        return n;
+      };
+      let joinMs = GE_JOIN_MS;
+      if (payload?.joinSeconds != null) {
+        const sec = Math.round(Number(payload.joinSeconds));
+        if (!Number.isSafeInteger(sec) || sec < 30 || sec > 600)
+          throw new Error("Registration must stay open for 30–600 seconds.");
+        joinMs = sec * 1000;
+      }
+      const prizeLabel = String(payload?.prizeLabel || "Pet Wars Champion").trim().slice(0, 60);
+      const prizeDetails = String(payload?.prizeDetails || "").trim().slice(0, 180);
+      if (!prizeLabel) throw new Error("Add a champion prize label.");
+      const config = {
+        entryFee: entryFeeRaw,
+        rewards: {
+          opening: readReward("opening", 50),
+          quarterfinal: readReward("quarterfinal", 100),
+          semifinal: readReward("semifinal", 200),
+          final: readReward("final", 500),
+        },
+        prizeLabel,
+        prizeDetails,
+        joinMs,
+      };
+      const p = players[socket.id];
+      await grandEventCreate(config, p?.email || p?.name || "admin");
+      logAdmin(socket, "Grand Event opened",
+        `${entryFeeRaw} entry; rewards ${Object.values(config.rewards).join("/")}; prize ${prizeLabel}`);
+      socket.emit("grandEventAdminResult", {
+        ok: true,
+        message: `Grand Event registration is open for ${Math.round(joinMs / 1000)}s. Entry: ${entryFeeRaw.toLocaleString()} coins.`,
+      });
+    }).catch((err) => socket.emit("grandEventAdminResult", { ok: false, message: err.message || "Couldn't open the event." }));
+  });
+
+  socket.on("grandEventStart", () => {
+    if (!admins.has(socket.id)) return;
+    grandEventQueue(async () => {
+      await grandEventStartBracket();
+      logAdmin(socket, "Grand Event bracket started", `${grandEvent.entrants.size} players`);
+      socket.emit("grandEventAdminResult", { ok: true, message: "Bracket locked. The opening matchup has been called." });
+    }).catch((err) => socket.emit("grandEventAdminResult", { ok: false, message: err.message || "Couldn't start the bracket." }));
+  });
+
+  socket.on("grandEventCancel", () => {
+    if (!admins.has(socket.id)) return;
+    grandEventQueue(async () => {
+      if (!grandEvent || grandEvent.state !== "registration")
+        throw new Error("Only an open registration lobby can be cancelled.");
+      await grandEventCancelRegistration("The organizer cancelled the Grand Event. Every entry fee was refunded.");
+      logAdmin(socket, "Grand Event cancelled", "All entry fees refunded");
+      socket.emit("grandEventAdminResult", { ok: true, message: "Grand Event cancelled. Every entry was refunded exactly once." });
+    }).catch((err) => socket.emit("grandEventAdminResult", { ok: false, message: err.message || "Couldn't cancel the event." }));
+  });
+
+  socket.on("grandEventJoin", () => {
+    if (!takeToken(interactBucket)) return;
+    grandEventQueue(() => grandEventJoin(socket.id))
+      .then(() => socket.emit("grandEventActionResult", { ok: true, message: "You're in the Grand Event!" }))
+      .catch((err) => socket.emit("grandEventActionResult", { ok: false, message: err.message || "Couldn't join." }));
+  });
+
+  socket.on("grandEventWithdraw", () => {
+    if (!takeToken(interactBucket)) return;
+    grandEventQueue(() => grandEventWithdraw(socket.id))
+      .then(() => socket.emit("grandEventActionResult", { ok: true, message: "You withdrew. Your entry fee was refunded." }))
+      .catch((err) => socket.emit("grandEventActionResult", { ok: false, message: err.message || "Couldn't withdraw." }));
+  });
+
+  socket.on("grandEventReady", () => {
+    if (!takeToken(interactBucket)) return;
+    grandEventQueue(() => grandEventReady(socket.id))
+      .catch((err) => socket.emit("grandEventActionResult", { ok: false, message: err.message || "Couldn't ready up." }));
+  });
+
+  socket.on("grandEventSync", () => grandEventEmitToSocket(socket.id));
 
   // ── Admin: Red Light, Green Light ─────────────────────────────────────
   socket.on("adminRlglStart", (payload) => {
     if (!admins.has(socket.id)) return;
     if (rlgl)     { socket.emit("adminRlglResult", { ok: false, message: "A doll game is already running." }); return; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("adminRlglResult", { ok: false, message: "The Pet Wars Grand Event is running." }); return; }
     if (bingo)    { socket.emit("adminRlglResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
     if (round)    { socket.emit("adminRlglResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("adminRlglResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
@@ -6601,6 +7502,7 @@ io.on("connection", (socket) => {
   socket.on('ownerStartRace', ({ prize }) => {
     if (!admins.has(socket.id)) return;
     if (race) { socket.emit('ownerMsg', 'A pet race is already running.'); return; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit('ownerMsg', 'The Pet Wars Grand Event is running.'); return; }
     const p = players[socket.id];
     if (!p) return;
     prize = Math.max(0, Math.min(100_000, Math.round(prize || 0)));
@@ -6743,6 +7645,7 @@ io.on("connection", (socket) => {
   socket.on("adminBingoStart", (payload) => {
     if (!admins.has(socket.id)) return;
     if (bingo) { socket.emit("adminBingoResult", { ok: false, message: "A bingo game is already running." }); return; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("adminBingoResult", { ok: false, message: "The Pet Wars Grand Event is running." }); return; }
     if (round) { socket.emit("adminBingoResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("adminBingoResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
     if (deal) { socket.emit("adminBingoResult", { ok: false, message: "Deal or No Deal is running — wait for the show to end." }); return; }
@@ -6877,6 +7780,7 @@ io.on("connection", (socket) => {
   socket.on("ownerDealStart", (payload) => {
     if (!owners.has(socket.id)) return;   // OWNER key only — plain admins can't host
     if (deal)     { socket.emit("ownerDealResult", { ok: false, message: "A show is already running." }); return; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("ownerDealResult", { ok: false, message: "The Pet Wars Grand Event is running." }); return; }
     if (bingo)    { socket.emit("ownerDealResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
     if (round)    { socket.emit("ownerDealResult", { ok: false, message: "Office After Dark is running — wait for the round to end." }); return; }
     if (propHunt) { socket.emit("ownerDealResult", { ok: false, message: "Hide & Seek is running — end it first." }); return; }
@@ -8216,6 +9120,7 @@ io.on("connection", (socket) => {
     if (battleBySocket.has(socket.id)) { socket.emit("petBattleFail", { message: "You're already in a battle." }); return null; }
     if (rpsBySocket.has(socket.id))    { socket.emit("petBattleFail", { message: "Finish your current match first." }); return null; }
     if (inRound(socket.id))            { socket.emit("petBattleFail", { message: "No battles during Office After Dark!" }); return null; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("petBattleFail", { message: "Normal Pet Battles pause during the Pet Wars Grand Event." }); return null; }
     if (!me.pet)                       { socket.emit("petBattleFail", { message: "Equip a pet to battle." }); return null; }
     // Roster/ownership: an equipped pet you no longer own can't fight (defends
     // against a stale equipped_pet after a trade).
@@ -8250,6 +9155,7 @@ io.on("connection", (socket) => {
     if (battleBySocket.has(targetId)) { socket.emit("petBattleFail", { message: `${target.name} is already battling.` }); return; }
     if (rpsBySocket.has(targetId))    { socket.emit("petBattleFail", { message: `${target.name} is busy in another match.` }); return; }
     if (inRound(targetId))            { socket.emit("petBattleFail", { message: `${target.name} is playing Office After Dark.` }); return; }
+    if (grandEventEmailCompeting(target.email)) { socket.emit("petBattleFail", { message: `${target.name} is locked into the Grand Event bracket.` }); return; }
     if (!target.pet)                  { socket.emit("petBattleFail", { message: `${target.name} needs a pet equipped to battle.` }); return; }
     if (target.email && Array.isArray(target.cosmetics) && !target.cosmetics.includes(target.pet)) {
       socket.emit("petBattleFail", { message: `${target.name} needs to equip a pet they own.` }); return;
@@ -8335,6 +9241,9 @@ io.on("connection", (socket) => {
     const side = b.sides.challenger.id === socket.id ? b.sides.challenger
                : b.sides.opponent.id  === socket.id ? b.sides.opponent : null;
     if (!side || side.pick) return;   // not a combatant, or already locked
+    if (b.tournament && b.suddenDeath && move === "guard") {
+      socket.emit("petBattleFail", { message: "Guard is disabled in sudden death." }); return;
+    }
     if (!petBattleMoveLegal(side, move)) {
       socket.emit("petBattleFail", { message: "That move isn't ready." }); return;
     }
@@ -10133,6 +11042,7 @@ io.on("connection", (socket) => {
     if (!p) return;
     if (!takeToken(roundBucket)) return;   // silently drop spam
     if (inAnyMatch(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
+    if (grandEventIsBlockingOfficeEvents()) { socket.emit("roundError", { message: "The Pet Wars Grand Event is running!" }); return; }
     if (propHunt) { socket.emit("roundError", { message: "Hide & Seek is running — wait for it to finish!" }); return; }
     if (deal)     { socket.emit("roundError", { message: "Deal or No Deal is running — wait for the show to end!" }); return; }
     if (rlgl)     { socket.emit("roundError", { message: "Red Light Green Light is running — wait for the doll to finish!" }); return; }
@@ -10456,8 +11366,84 @@ try {
     PRIMARY KEY (email_a, email_b)
   )`);
   await pool.query(`ALTER TABLE jpo_pet_battle_pairs ADD COLUMN IF NOT EXISTS last_match_id text`);
+  // ── Pet Wars Grand Event ────────────────────────────────────────────────
+  // The event row owns the durable bracket snapshot. Entry and payout rows
+  // are separate transactional ledgers: a process restart can replay any
+  // state transition without double-debiting or double-crediting a player.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_grand_events (
+    id              text PRIMARY KEY,
+    state           text NOT NULL,
+    config          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    snapshot        jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_by      text NOT NULL DEFAULT '',
+    champion_email  text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    completed_at    timestamptz
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_grand_event_entries (
+    event_id   text NOT NULL REFERENCES jpo_grand_events(id) ON DELETE CASCADE,
+    email      text NOT NULL,
+    entry_fee  integer NOT NULL CHECK (entry_fee > 0),
+    state      text NOT NULL,
+    entrant    jsonb NOT NULL DEFAULT '{}'::jsonb,
+    joined_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_id,email)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_grand_event_payouts (
+    event_id    text NOT NULL REFERENCES jpo_grand_events(id) ON DELETE CASCADE,
+    payout_key  text NOT NULL,
+    email       text NOT NULL,
+    amount      integer NOT NULL CHECK (amount > 0),
+    kind        text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_id,payout_key)
+  )`);
 } catch (err) {
   console.error("schema nudge (coach tables) failed:", err);
+}
+
+// Fail closed if an older ledger cannot be made semantically unique. The old
+// primary key included email, so two replay winners could own the same match
+// payout key. Refund keys are safely normalized first; any remaining duplicate
+// is a real historical conflict that needs manual reconciliation, not a row we
+// can silently delete while its credited coins remain in circulation.
+{
+  let cl;
+  try {
+    cl = await pool.connect();
+    await cl.query("BEGIN");
+    await cl.query(
+      `UPDATE jpo_grand_event_payouts
+          SET payout_key='entry-refund:' || email
+        WHERE kind='refund' AND payout_key='entry-refund'`,
+    );
+    const conflicts = await cl.query(
+      `SELECT event_id,payout_key,count(*)::int AS claims
+         FROM jpo_grand_event_payouts
+        GROUP BY event_id,payout_key
+       HAVING count(*) > 1
+        LIMIT 1`,
+    );
+    if (conflicts.rows[0]) {
+      const row = conflicts.rows[0];
+      throw new Error(
+        `conflicting Grand Event payout claims for ${row.event_id}/${row.payout_key} (${row.claims} recipients)`,
+      );
+    }
+    await cl.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS jpo_grand_event_payout_once
+         ON jpo_grand_event_payouts(event_id,payout_key)`,
+    );
+    await cl.query("COMMIT");
+  } catch (err) {
+    try { await cl?.query("ROLLBACK"); } catch {}
+    console.error("Grand Event payout ledger is unsafe; refusing to start:", err);
+    throw err;
+  } finally {
+    cl?.release();
+  }
 }
 
 try {
@@ -10644,6 +11630,15 @@ try {
   )`);
 } catch (err) {
   console.error("schema nudge (bid stores) failed:", err);
+}
+
+try {
+  await grandEventRestoreFromDb();
+} catch (err) {
+  // The rest of the office remains available if the tournament tables are
+  // temporarily unreachable, but log loudly: no in-memory fallback may mint
+  // or lose entry coins.
+  console.error("Grand Event restore failed:", err);
 }
 
 const port = process.env.PORT || 3000;
