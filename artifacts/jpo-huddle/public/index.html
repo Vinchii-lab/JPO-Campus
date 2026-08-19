@@ -2002,12 +2002,49 @@
 .pb-motion-pounce { animation: pb-motion-pounce .82s cubic-bezier(.2,.72,.2,1); }
 .pb-motion-hop { animation: pb-motion-hop .82s cubic-bezier(.22,.8,.26,1); }
 .pb-motion-burrow { animation: pb-motion-burrow .9s steps(9,end); }
+.pb-motion-bite { animation: pb-motion-bite .72s steps(7,end); }
+.pb-motion-scratch { animation: pb-motion-scratch .76s steps(8,end); }
+.pb-motion-kick { animation: pb-motion-kick .82s cubic-bezier(.22,.8,.26,1); }
+.pb-motion-peck { animation: pb-motion-peck .68s steps(7,end); }
+.pb-motion-impact { animation: pb-motion-impact .7s ease-out; }
 .pb-motion-shell { animation: pb-motion-shell .82s cubic-bezier(.3,.8,.2,1); }
 .pb-motion-dive { animation: pb-motion-dive .86s cubic-bezier(.25,.76,.2,1); }
 .pb-motion-tongue { animation: pb-motion-tongue .72s steps(8,end); }
-.pb-motion-wing { animation: pb-motion-wing 1.2s cubic-bezier(.2,.72,.18,1); z-index: 30; }
+.pb-motion-wing { animation: pb-motion-wing .9s steps(9,end); z-index: 30; }
 .pb-motion-beam { animation: pb-motion-beam .82s steps(8,end); }
 .pb-motion-rebirth { animation: pb-motion-rebirth .94s cubic-bezier(.16,.8,.22,1); }
+@keyframes pb-motion-bite {
+  0%,100% { transform: translate(0,0) scale(1); }
+  20% { transform: translate(var(--pb-back),8px) scale(1.06,.9); }
+  42% { transform: translate(var(--pb-short),-3px) scale(.96,1.08); }
+  55% { transform: translate(var(--pb-half),1px) scale(1.1,.9); }
+  68% { transform: translate(var(--pb-short),-2px) scale(.98,1.04); }
+}
+@keyframes pb-motion-scratch {
+  0%,100% { transform: translate(0,0) rotate(0); }
+  18% { transform: translate(var(--pb-back),10px) rotate(-7deg) scale(1.08,.88); }
+  42% { transform: translate(var(--pb-half),-18px) rotate(8deg) scale(.98,1.08); }
+  56% { transform: translate(var(--pb-short),-8px) rotate(-9deg); }
+  70% { transform: translate(var(--pb-half),-12px) rotate(7deg); }
+}
+@keyframes pb-motion-kick {
+  0%,100% { transform: translate(0,0) rotate(0); }
+  24% { transform: translate(0,10px) scale(1.12,.82); }
+  48% { transform: translate(var(--pb-short),-38px) rotate(15deg); }
+  65% { transform: translate(var(--pb-half),-10px) rotate(-14deg) scale(.9,1.08); }
+}
+@keyframes pb-motion-peck {
+  0%,100% { transform: translate(0,0) rotate(0); }
+  22% { transform: translate(var(--pb-back-half),5px) rotate(-8deg); }
+  44% { transform: translate(var(--pb-half),5px) rotate(17deg) scale(1.08,.92); }
+  57% { transform: translate(var(--pb-short),0) rotate(-5deg); }
+  70% { transform: translate(var(--pb-half),4px) rotate(13deg); }
+}
+@keyframes pb-motion-impact {
+  0%,100% { transform: translate(0,0) scale(1); }
+  35% { transform: translate(var(--pb-back),5px) scale(.94,1.06); }
+  58% { transform: translate(var(--pb-half),0) scale(1.08,.94); }
+}
 @keyframes pb-motion-rush {
   0%,100% { transform: translate(0,0) scale(1); }
   18% { transform: translate(var(--pb-back),8px) scale(.94,1.05); }
@@ -2052,14 +2089,11 @@
 }
 @keyframes pb-motion-wing {
   0%,100% { transform: translate(0,0) rotate(0) scale(1); }
-  18% { transform: translate(0,-56px) rotate(-8deg) scale(1.06); }
-  44% { transform: translate(var(--pb-flight),-36px) rotate(8deg) scale(1.08); }
-  76% { transform: translate(var(--pb-flight),-4px) rotate(-4deg) scale(1.04); }
-  88% { transform: translate(var(--pb-far),-34px) rotate(-8deg); }
-}
-@media (max-width: 599px) {
-  .pb-challenger .pb-sprite-container { --pb-flight: 180px; }
-  .pb-opponent .pb-sprite-container { --pb-flight: -180px; }
+  16% { transform: translate(0,-12px) rotate(-5deg) scale(1.04); }
+  32% { transform: translate(var(--pb-short),-25px) rotate(7deg) scale(.98,1.08); }
+  48% { transform: translate(0,-38px) rotate(-6deg) scale(1.06,.96); }
+  64% { transform: translate(var(--pb-short),-24px) rotate(8deg) scale(.98,1.08); }
+  78% { transform: translate(0,-12px) rotate(-4deg); }
 }
 @keyframes pb-motion-beam {
   0%,100% { transform: translate(0,0) scale(1); filter: brightness(1); }
@@ -2073,6 +2107,117 @@
   48% { transform: translate(var(--pb-mid),-82px) rotate(24deg) scale(1.16); filter: brightness(2.2) drop-shadow(0 0 22px #ff6a35); }
   70% { transform: translate(var(--pb-forward),-6px) rotate(5deg) scale(.96); filter: brightness(1.4); }
 }
+
+/* Animal-specific contact marks. They are spawned on the defender and are
+   presentation-only: damage and outcomes still come entirely from the server. */
+.pb-animal-hit {
+  position: absolute;
+  left: var(--pb-hit-x); top: var(--pb-hit-y);
+  width: 108px; height: 88px;
+  transform: translate(-50%,-50%);
+  pointer-events: none; z-index: 115;
+  filter: drop-shadow(2px 3px 0 rgba(0,0,0,.55));
+  animation: pb-animal-hit-pop .78s ease-out forwards;
+}
+.pb-animal-hit::after {
+  content: attr(data-label);
+  position: absolute; left: 50%; top: -19px;
+  transform: translateX(-50%) rotate(-6deg);
+  color: var(--pb-hit-c2); font-size: 11px; font-weight: 900;
+  letter-spacing: .7px; white-space: nowrap;
+  text-shadow: 2px 2px 0 #17112b, -1px -1px 0 #17112b;
+}
+.pb-animal-hit.is-crit { width: 130px; height: 104px; }
+.pb-animal-hit i { position: absolute; display: block; }
+@keyframes pb-animal-hit-pop {
+  0% { opacity: 0; transform: translate(-50%,-50%) scale(.35) rotate(-12deg); }
+  20% { opacity: 1; transform: translate(-50%,-50%) scale(1.18) rotate(5deg); }
+  68% { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0); }
+  100% { opacity: 0; transform: translate(-50%,-60%) scale(.82) rotate(4deg); }
+}
+.pb-hit-scratch i {
+  left: 18px; width: 72px; height: 6px; border-radius: 5px;
+  background: linear-gradient(90deg, transparent, var(--pb-hit-c1) 15%, var(--pb-hit-c2) 72%, transparent);
+  transform: rotate(-32deg);
+}
+.pb-hit-scratch i:nth-child(1) { top: 20px; }
+.pb-hit-scratch i:nth-child(2) { top: 38px; left: 10px; }
+.pb-hit-scratch i:nth-child(3) { top: 56px; left: 2px; }
+.pb-hit-scratch i:nth-child(4) { display: none; }
+.pb-hit-bite i:nth-child(1), .pb-hit-bite i:nth-child(2) {
+  left: 19px; width: 70px; height: 31px;
+  border: 5px solid var(--pb-hit-c1);
+}
+.pb-hit-bite i:nth-child(1) { top: 8px; border-radius: 50% 50% 18% 18%; border-bottom: 0; }
+.pb-hit-bite i:nth-child(2) { bottom: 8px; border-radius: 18% 18% 50% 50%; border-top: 0; }
+.pb-hit-bite i:nth-child(3), .pb-hit-bite i:nth-child(4) {
+  top: 31px; width: 0; height: 0;
+  border-left: 8px solid transparent; border-right: 8px solid transparent;
+  border-top: 15px solid var(--pb-hit-c2);
+}
+.pb-hit-bite i:nth-child(3) { left: 35px; }
+.pb-hit-bite i:nth-child(4) { right: 35px; transform: rotate(180deg); top: 42px; }
+.pb-hit-kick i {
+  left: 50%; top: 50%; width: 8px; height: 42px;
+  background: linear-gradient(var(--pb-hit-c2), var(--pb-hit-c1), transparent);
+  transform-origin: 50% 100%;
+}
+.pb-hit-kick i:nth-child(1) { transform: translate(-50%,-100%) rotate(0deg); }
+.pb-hit-kick i:nth-child(2) { transform: translate(-50%,-100%) rotate(90deg); }
+.pb-hit-kick i:nth-child(3) { transform: translate(-50%,-100%) rotate(180deg); }
+.pb-hit-kick i:nth-child(4) { transform: translate(-50%,-100%) rotate(270deg); }
+.pb-hit-peck i:nth-child(1) {
+  left: 25px; top: 24px; width: 0; height: 0;
+  border-top: 20px solid transparent; border-bottom: 20px solid transparent;
+  border-right: 58px solid var(--pb-hit-c1);
+}
+.pb-hit-peck i:nth-child(n+2) {
+  width: 30px; height: 5px; right: 7px; top: 28px;
+  background: var(--pb-hit-c2); transform-origin: left center;
+}
+.pb-hit-peck i:nth-child(3) { transform: rotate(34deg); }
+.pb-hit-peck i:nth-child(4) { transform: rotate(-34deg); }
+.pb-hit-shell i {
+  inset: 10px; border: 5px solid var(--pb-hit-c1); border-radius: 50%;
+}
+.pb-hit-shell i:nth-child(2) { inset: 23px; border-color: var(--pb-hit-c2); }
+.pb-hit-shell i:nth-child(3) { inset: 36px; border-width: 4px; }
+.pb-hit-shell i:nth-child(4) { display: none; }
+.pb-hit-tongue i:nth-child(1) {
+  left: 3px; top: 39px; width: 90px; height: 10px; border-radius: 10px;
+  background: linear-gradient(90deg, #ff7fa8, #ff416f);
+}
+.pb-hit-tongue i:nth-child(2) {
+  right: 4px; top: 28px; width: 25px; height: 30px; border-radius: 50%;
+  background: #ff769d;
+}
+.pb-hit-tongue i:nth-child(n+3) { display: none; }
+.pb-hit-wing i {
+  left: 12px; width: 84px; height: 19px;
+  border-top: 6px solid var(--pb-hit-c1); border-radius: 50%;
+  transform: rotate(-18deg);
+}
+.pb-hit-wing i:nth-child(1) { top: 15px; }
+.pb-hit-wing i:nth-child(2) { top: 34px; left: 4px; }
+.pb-hit-wing i:nth-child(3) { top: 53px; left: 15px; }
+.pb-hit-wing i:nth-child(4) { display: none; }
+.pb-hit-horn i {
+  left: 50%; top: 50%; width: 6px; height: 48px;
+  background: linear-gradient(var(--pb-hit-c2), var(--pb-hit-c1), transparent);
+  transform-origin: 50% 100%;
+}
+.pb-hit-horn i:nth-child(1) { transform: translate(-50%,-100%) rotate(0deg); }
+.pb-hit-horn i:nth-child(2) { transform: translate(-50%,-100%) rotate(60deg); }
+.pb-hit-horn i:nth-child(3) { transform: translate(-50%,-100%) rotate(120deg); }
+.pb-hit-horn i:nth-child(4) { transform: translate(-50%,-100%) rotate(240deg); }
+.pb-hit-impact i {
+  left: 50%; top: 50%; width: 7px; height: 38px;
+  background: var(--pb-hit-c1); transform-origin: 50% 100%;
+}
+.pb-hit-impact i:nth-child(1) { transform: translate(-50%,-100%) rotate(0); }
+.pb-hit-impact i:nth-child(2) { transform: translate(-50%,-100%) rotate(90deg); }
+.pb-hit-impact i:nth-child(3) { transform: translate(-50%,-100%) rotate(180deg); }
+.pb-hit-impact i:nth-child(4) { transform: translate(-50%,-100%) rotate(270deg); }
 
 .pb-dmg-text {
   position: absolute; font-size: 20px; font-weight: bold; color: #ff7675; text-shadow: 2px 2px 0 #000;
@@ -17446,15 +17591,32 @@
       'pet_phoenix':         { color: '#ff4d3d', color2: '#ffe34d', fx: 'fire', special: 'Searing Wing', ultimate: 'Supernova' },
       'default':             { color: '#ffffff', color2: '#b8c0ff', fx: 'impact', special: 'Special', ultimate: 'Ultimate' }
     };
-    const PB_MOTION_BY_PET = {
-      pet_duck: 'dive', pet_duck_snow: 'dive',
-      pet_cat: 'pounce', pet_cat_black: 'pounce', pet_cat_snow: 'pounce',
-      pet_dog: 'rush', pet_dog_choco: 'rush', pet_dog_husky: 'rush',
-      pet_bunny: 'hop', pet_bunny_cocoa: 'burrow',
-      pet_turtle: 'shell', pet_turtle_sapphire: 'shell',
-      pet_dragon: 'wing', pet_dragon_crimson: 'wing', pet_dragon_obsidian: 'wing',
-      pet_frog: 'tongue', pet_unicorn: 'beam', pet_phoenix: 'wing',
+    // Visual-only attack profiles. These choose the pet's real action pose,
+    // body language, and on-target mark; they never affect battle math.
+    const PB_ATTACK_PROFILE_BY_PET = {
+      pet_duck:            { motion: 'peck', effect: 'peck', label: 'PECK!' },
+      pet_duck_snow:       { motion: 'peck', effect: 'peck', label: 'PECK!' },
+      pet_cat:             { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
+      pet_cat_black:       { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
+      pet_cat_snow:        { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
+      pet_dog:             { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
+      pet_dog_choco:       { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
+      pet_dog_husky:       { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
+      pet_bunny:           { motion: 'kick', effect: 'kick', label: 'KICK!' },
+      pet_bunny_cocoa:     { motion: 'kick', effect: 'kick', label: 'KICK!' },
+      pet_turtle:          { motion: 'shell', effect: 'shell', label: 'RAM!' },
+      pet_turtle_sapphire: { motion: 'shell', effect: 'shell', label: 'RAM!' },
+      pet_dragon:          { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
+      pet_dragon_crimson:  { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
+      pet_dragon_obsidian: { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
+      pet_frog:            { motion: 'tongue', effect: 'tongue', label: 'THWAP!' },
+      pet_unicorn:         { motion: 'beam', effect: 'horn', label: 'HORN HIT!' },
+      pet_phoenix:         { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
     };
+    const PB_DEFAULT_ATTACK_PROFILE = { motion: 'impact', effect: 'impact', label: 'HIT!' };
+    function getPbAttackProfile(petId) {
+      return PB_ATTACK_PROFILE_BY_PET[petId] || PB_DEFAULT_ATTACK_PROFILE;
+    }
     function getPbTheme(petId, kit) {
       let baseId = petId;
       if (!PB_THEME_BY_PET[baseId] && baseId.startsWith('pet_')) {
@@ -17463,7 +17625,7 @@
       }
       return {
         ...(PB_THEME_BY_PET[baseId] || PB_THEME_BY_PET['default']),
-        motion: kit?.motion || PB_MOTION_BY_PET[petId] || PB_MOTION_BY_PET[baseId] || 'rush',
+        motion: getPbAttackProfile(petId).motion,
       };
     }
 
@@ -17682,13 +17844,14 @@
        pbCloseAll();
     });
 
-    function pbSetPetImage(img, petId, stage) {
+    function pbSetPetImage(img, petId, stage, force = false) {
        const candidates = [];
        if (stage >= 3) candidates.push('assets/pets/' + petId + '_s3.png');
        if (stage >= 2) candidates.push('assets/pets/' + petId + '_s2.png');
        candidates.push('assets/pets/' + petId + '.png');
        const key = candidates.join('|');
-       if (img.dataset.pbCandidates === key) return;
+       if (!force && img.dataset.pbCandidates === key && !img.dataset.pbActionPose) return;
+       delete img.dataset.pbActionPose;
        img.dataset.pbCandidates = key;
        let at = 0;
        img.onerror = () => {
@@ -17697,6 +17860,42 @@
           else img.onerror = null;
        };
        img.src = candidates[0];
+    }
+
+    function pbActionPoseCandidates(petId, stage) {
+       const stem = String(petId || '').replace(/^pet_/, '');
+       const candidates = [];
+       if (stage >= 3) candidates.push('assets/pets/anim/' + stem + '_s3_action.png');
+       if (stage >= 2) candidates.push('assets/pets/anim/' + stem + '_s2_action.png');
+       candidates.push('assets/pets/anim/' + stem + '_action.png');
+       // Unicorn currently has only final-form action art. Lower forms keep
+       // their normal sprite while still showing the horn impact effect.
+       return [...new Set(candidates)];
+    }
+
+    function pbPreloadActionPose(petId, stage) {
+       pbActionPoseCandidates(petId, stage).forEach(src => {
+          const preload = new Image();
+          preload.src = src;
+       });
+    }
+
+    function pbShowActionPose(img, petId, stage) {
+       const token = String(pbGen) + ':' + String(Date.now()) + ':' + Math.random().toString(36).slice(2);
+       const candidates = pbActionPoseCandidates(petId, stage);
+       let at = 0;
+       img.dataset.pbActionPose = token;
+       const restore = () => {
+          if (img.dataset.pbActionPose !== token) return;
+          pbSetPetImage(img, petId, stage, true);
+       };
+       img.onerror = () => {
+          at += 1;
+          if (at < candidates.length) img.src = candidates[at];
+          else restore();
+       };
+       img.src = candidates[0];
+       return restore;
     }
 
     function pbRenderSide(prefix, data) {
@@ -17736,6 +17935,8 @@
        
        pbRenderSide('pb-cha', myData);
        pbRenderSide('pb-opp', oppData);
+       pbPreloadActionPose(myData.petId, myData.stage);
+       pbPreloadActionPose(oppData.petId, oppData.stage);
        
        const myTheme = getPbTheme(myData.petId, myData.kit);
        function labelMove(buttonId, moveId, cooldownId) {
@@ -17862,13 +18063,33 @@
        }
     }
 
-    async function pbPlayHit(prefix, dmg, crit, dodged, guarded, theme, isUlt, attPrefix, stage, gen) {
+    function pbSpawnAnimalHit(prefix, profile, theme, crit) {
+       const layer = pbEl('pb-arena-fx');
+       const stageBox = layer.getBoundingClientRect();
+       const target = pbEl(prefix + '-sprite').getBoundingClientRect();
+       const mark = document.createElement('div');
+       const effect = String(profile?.effect || 'impact').replace(/[^a-z-]/g, '');
+       mark.className = 'pb-animal-hit pb-hit-' + effect + (crit ? ' is-crit' : '');
+       mark.dataset.label = profile?.label || 'HIT!';
+       mark.style.setProperty('--pb-hit-x', (target.left + target.width / 2 - stageBox.left) + 'px');
+       mark.style.setProperty('--pb-hit-y', (target.top + target.height / 2 - stageBox.top) + 'px');
+       mark.style.setProperty('--pb-hit-c1', theme?.color || '#ffeb70');
+       mark.style.setProperty('--pb-hit-c2', theme?.color2 || '#ffffff');
+       for (let i = 0; i < 4; i++) mark.appendChild(document.createElement('i'));
+       layer.appendChild(mark);
+       setTimeout(() => mark.remove(), 850);
+    }
+
+    async function pbPlayHit(prefix, dmg, crit, dodged, guarded, theme, isUlt, attPrefix, stage, gen, attackProfile) {
        const fxBox = pbEl(prefix + '-fx');
        const sprite = pbEl(prefix + '-sprite');
        if (theme) {
           const impactAt = pbLaunchThemeFx(attPrefix, prefix, theme, isUlt, stage);
           if (!(await pbWait(impactAt, gen))) return;
        }
+       // The animal's attempted contact remains visible even when the defender
+       // dodges; the DODGE label then explains why it dealt no damage.
+       pbSpawnAnimalHit(prefix, attackProfile, theme, crit);
        if (dodged) {
           sprite.classList.add(prefix === 'pb-cha' ? 'pb-anim-dodge-cha' : 'pb-anim-dodge-opp');
           const label = document.createElement('div');
@@ -18001,20 +18222,30 @@
             async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
               const mover = attSprite.closest('.pb-sprite-container');
-              const motion = String(attacker.kit?.motion || attTheme.motion || 'rush').replace(/[^a-z-]/g, '');
+               const attackProfile = getPbAttackProfile(attacker.petId);
+               const motion = String(attackProfile.motion || 'impact').replace(/[^a-z-]/g, '');
               const motionClass = 'pb-motion-' + motion;
-              mover?.classList.add(motionClass);
-              if (attRes.move === 'attack') {
-                  if (!(await pbWait(motion === 'wing' ? 500 : 260, myGen))) return;
-                  await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
-                                  attRes.guarded, null, false, myPrefix, attacker.stage, myGen);
-             } else {
-                 const isUlt = attRes.move === 'ultimate';
-                   if (!(await pbWait(isUlt ? 300 : 210, myGen))) return;
-                  await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
-                                  attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage, myGen);
-             }
-              mover?.classList.remove(motionClass);
+               const impactDelay = {
+                  bite: 250, scratch: 280, kick: 340, peck: 230,
+                  shell: 320, wing: 330, tongue: 290, beam: 330, impact: 260,
+               }[motion] || 260;
+               const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage);
+               mover?.classList.add(motionClass);
+               try {
+                  if (attRes.move === 'attack') {
+                     if (!(await pbWait(impactDelay, myGen))) return;
+                     await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                                     attRes.guarded, null, false, myPrefix, attacker.stage, myGen, attackProfile);
+                  } else {
+                     const isUlt = attRes.move === 'ultimate';
+                     if (!(await pbWait(isUlt ? Math.max(300, impactDelay) : impactDelay, myGen))) return;
+                     await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                                     attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage, myGen, attackProfile);
+                  }
+               } finally {
+                  mover?.classList.remove(motionClass);
+                  restorePose();
+               }
           }
           
           if (myFirst) {
