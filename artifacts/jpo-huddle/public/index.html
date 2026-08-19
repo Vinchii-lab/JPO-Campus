@@ -2143,6 +2143,62 @@
   68% { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0); }
   100% { opacity: 0; transform: translate(-50%,-60%) scale(.82) rotate(4deg); }
 }
+
+/* Battle ports of the pets' real in-office trick choreography. Phaser owns the
+   office scene, so the Pet Arena recreates those same beats in its DOM layer:
+   blinks, dives, breath cones, weather, shells, beams and reappearance bursts. */
+.pb-trick-fx {
+  position: absolute; pointer-events: none; z-index: 108;
+  transform: translate(-50%, -50%); will-change: transform, opacity, filter;
+}
+.pb-trick-orb {
+  width: var(--pb-size, 24px); height: var(--pb-size, 24px); border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #fff 0 12%, var(--pb-c2) 30%, var(--pb-c1) 72%, transparent 74%);
+  box-shadow: 0 0 16px var(--pb-c1), 0 0 30px var(--pb-c2);
+}
+.pb-trick-ring {
+  width: var(--pb-size, 42px); height: calc(var(--pb-size, 42px) * .48);
+  border: 4px solid var(--pb-c1); border-radius: 50%;
+  box-shadow: 0 0 10px var(--pb-c2), inset 0 0 8px var(--pb-c1);
+}
+.pb-trick-spark {
+  width: var(--pb-size, 9px); height: var(--pb-size, 9px); border-radius: 50%;
+  background: var(--pb-c2); box-shadow: 0 0 8px 3px var(--pb-c1);
+}
+.pb-trick-snow {
+  color: #fff; font-size: var(--pb-size, 18px); font-weight: 900;
+  text-shadow: 0 0 7px #79d9ff, 0 0 14px #fff;
+}
+.pb-trick-rain {
+  width: 3px; height: var(--pb-size, 22px); border-radius: 4px;
+  background: linear-gradient(#d9ffff, #36aeea); box-shadow: 0 0 6px #6ee7ff;
+}
+.pb-trick-smoke {
+  width: var(--pb-size, 28px); height: var(--pb-size, 28px); object-fit: contain;
+  image-rendering: pixelated; filter: drop-shadow(0 0 7px var(--pb-c1));
+}
+.pb-trick-shell {
+  width: var(--pb-size, 78px); height: var(--pb-size, 78px); object-fit: contain;
+  image-rendering: pixelated; filter: drop-shadow(0 0 10px var(--pb-c1));
+}
+.pb-trick-beam {
+  height: var(--pb-size, 18px); width: var(--pb-length, 160px);
+  transform-origin: 0 50%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--pb-c1), #fff 48%, var(--pb-c2));
+  box-shadow: 0 0 10px var(--pb-c1), 0 0 24px var(--pb-c2);
+}
+.pb-trick-beam.pb-rainbow {
+  background: linear-gradient(90deg,#ff557b,#ffdf55,#59ef8a,#55cfff,#b56dff,#fff);
+  box-shadow: 0 0 12px #fff, 0 0 24px #75dfff;
+}
+.pb-trick-label {
+  color: #fff; font-size: 11px; white-space: nowrap; font-weight: 900;
+  letter-spacing: 1px; text-shadow: 2px 2px 0 #18112d, 0 0 8px var(--pb-c1);
+}
+.pb-trick-afterimage {
+  width: var(--pb-size, 90px); height: auto; image-rendering: pixelated;
+  object-fit: contain; filter: hue-rotate(var(--pb-hue, 0deg)) drop-shadow(0 0 10px var(--pb-c1));
+}
 .pb-hit-scratch i {
   left: 18px; width: 72px; height: 6px; border-radius: 5px;
   background: linear-gradient(90deg, transparent, var(--pb-hit-c1) 15%, var(--pb-hit-c2) 72%, transparent);
@@ -17576,6 +17632,7 @@
     let pbTimer = null;
     let pbBuildSavePending = false;
     let pbDerivedStats = null;
+    const pbChoreoAnimations = new Set();
     
     // Per-species visual theme mapping for Special and Ultimate moves
     const PB_THEME_BY_PET = {
@@ -17599,29 +17656,29 @@
       'pet_phoenix':         { color: '#ff4d3d', color2: '#ffe34d', fx: 'fire', special: 'Searing Wing', ultimate: 'Supernova' },
       'default':             { color: '#ffffff', color2: '#b8c0ff', fx: 'impact', special: 'Special', ultimate: 'Ultimate' }
     };
-    // Visual-only attack profiles. These choose the pet's real action pose,
-    // body language, and on-target mark; they never affect battle math.
+    // Visual-only ports of the named in-office `_petTrick` routines. The
+    // choreography id determines the whole sequence; it never affects math.
     const PB_ATTACK_PROFILE_BY_PET = {
-      pet_duck:            { motion: 'peck', effect: 'peck', label: 'PECK!' },
-      pet_duck_snow:       { motion: 'peck', effect: 'peck', label: 'PECK!' },
-      pet_cat:             { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
-      pet_cat_black:       { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
-      pet_cat_snow:        { motion: 'scratch', effect: 'scratch', label: 'SCRATCH!' },
-      pet_dog:             { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
-      pet_dog_choco:       { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
-      pet_dog_husky:       { motion: 'bite', effect: 'bite', label: 'CHOMP!' },
-      pet_bunny:           { motion: 'kick', effect: 'kick', label: 'KICK!' },
-      pet_bunny_cocoa:     { motion: 'kick', effect: 'kick', label: 'KICK!' },
-      pet_turtle:          { motion: 'shell', effect: 'shell', label: 'RAM!' },
-      pet_turtle_sapphire: { motion: 'shell', effect: 'shell', label: 'RAM!' },
-      pet_dragon:          { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
-      pet_dragon_crimson:  { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
-      pet_dragon_obsidian: { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
-      pet_frog:            { motion: 'tongue', effect: 'tongue', label: 'THWAP!' },
-      pet_unicorn:         { motion: 'beam', effect: 'horn', label: 'HORN HIT!' },
-      pet_phoenix:         { motion: 'wing', effect: 'wing', label: 'WING HIT!' },
+      pet_duck:            { choreo: 'splash-dive', effect: 'peck', label: 'SPLASH DIVE!' },
+      pet_duck_snow:       { choreo: 'snow-dive', effect: 'peck', label: 'FROST DIVE!' },
+      pet_cat:             { choreo: 'boss-slam', effect: 'scratch', label: 'BOSS SLAM!' },
+      pet_cat_black:       { choreo: 'void-blink', effect: 'scratch', label: 'VOID BLINK!' },
+      pet_cat_snow:        { choreo: 'frost-coronation', effect: 'scratch', label: 'FROST CORONATION!' },
+      pet_dog:             { choreo: 'solar-leap', effect: 'bite', label: 'SOLAR LEAP!' },
+      pet_dog_choco:       { choreo: 'cocoa-pounce', effect: 'bite', label: 'COCOA POUNCE!' },
+      pet_dog_husky:       { choreo: 'moonlit-blink', effect: 'bite', label: 'MOONLIT BLINK!' },
+      pet_bunny:           { choreo: 'blizzard-binky', effect: 'kick', label: 'BLIZZARD BINKY!' },
+      pet_bunny_cocoa:     { choreo: 'drift-donuts', effect: 'kick', label: 'DRIFT DONUTS!' },
+      pet_turtle:          { choreo: 'shell-garden', effect: 'shell', label: 'SHELL BLOOM!' },
+      pet_turtle_sapphire: { choreo: 'sapphire-spin', effect: 'shell', label: 'ICE SHELL!' },
+      pet_dragon:          { choreo: 'neon-ignition', effect: 'wing', label: 'NEON IGNITION!' },
+      pet_dragon_crimson:  { choreo: 'inferno-breath', effect: 'wing', label: 'INFERNO BREATH!' },
+      pet_dragon_obsidian: { choreo: 'void-slam', effect: 'wing', label: 'VOID SLAM!' },
+      pet_frog:            { choreo: 'rain-dance', effect: 'tongue', label: 'RAIN DANCE!' },
+      pet_unicorn:         { choreo: 'prism-beam', effect: 'horn', label: 'PRISM BEAM!' },
+      pet_phoenix:         { choreo: 'ember-dive', effect: 'wing', label: 'EMBER DIVE!' },
     };
-    const PB_DEFAULT_ATTACK_PROFILE = { motion: 'impact', effect: 'impact', label: 'HIT!' };
+    const PB_DEFAULT_ATTACK_PROFILE = { choreo: 'basic-hop', effect: 'impact', label: 'HIT!' };
     function getPbAttackProfile(petId) {
       return PB_ATTACK_PROFILE_BY_PET[petId] || PB_DEFAULT_ATTACK_PROFILE;
     }
@@ -17633,7 +17690,7 @@
       }
       return {
         ...(PB_THEME_BY_PET[baseId] || PB_THEME_BY_PET['default']),
-        motion: getPbAttackProfile(petId).motion,
+        choreo: getPbAttackProfile(petId).choreo,
       };
     }
 
@@ -17678,6 +17735,8 @@
       pbMatchId = null; pbState = null; pbMySide = null;
       pbLastRoundSummary = '';
       pbClearTimers();
+      pbChoreoAnimations.forEach(animation => animation.cancel());
+      pbChoreoAnimations.clear();
       pbEl('pb-cha-fx').replaceChildren();
       pbEl('pb-opp-fx').replaceChildren();
       pbEl('pb-arena-fx').replaceChildren();
@@ -18000,6 +18059,442 @@
        return new Promise((resolve) => setTimeout(() => resolve(gen === pbGen), ms));
     }
 
+    function pbTrickPoint(prefix) {
+       const layer = pbEl('pb-arena-fx');
+       const arena = layer.getBoundingClientRect();
+       const sprite = pbEl(prefix + '-sprite').getBoundingClientRect();
+       return {
+          x: sprite.left + sprite.width / 2 - arena.left,
+          y: sprite.top + sprite.height / 2 - arena.top,
+          width: sprite.width,
+          height: sprite.height,
+       };
+    }
+
+    function pbTrickNode(className, point, options = {}) {
+       const node = options.tag === 'img' ? document.createElement('img') : document.createElement('div');
+       node.className = 'pb-trick-fx ' + className;
+       node.style.left = point.x + 'px';
+       node.style.top = point.y + 'px';
+       if (options.src) node.src = options.src;
+       if (options.text) node.textContent = options.text;
+       if (options.color) node.style.setProperty('--pb-c1', options.color);
+       if (options.color2) node.style.setProperty('--pb-c2', options.color2);
+       if (options.size) node.style.setProperty('--pb-size', options.size + 'px');
+       pbEl('pb-arena-fx').appendChild(node);
+       return node;
+    }
+
+    async function pbAnimateTracked(node, keyframes, options, gen, remove = false) {
+       if (!node || gen !== pbGen) return false;
+       const animation = node.animate(keyframes, { fill: 'both', ...options });
+       pbChoreoAnimations.add(animation);
+       try {
+          await animation.finished;
+       } catch (_) {
+          // Battle close intentionally cancels every in-flight visual.
+       } finally {
+          pbChoreoAnimations.delete(animation);
+          animation.cancel();
+          if (remove) node.remove();
+       }
+       return gen === pbGen;
+    }
+
+    function pbBurstAt(point, kind, color, color2, count, gen, spread = 64) {
+       for (let i = 0; i < count; i++) {
+          const angle = (Math.PI * 2 * i) / Math.max(1, count) + (i % 3) * .21;
+          const distance = spread * (.42 + (i % 5) * .13);
+          let className = 'pb-trick-spark';
+          let options = { color, color2, size: 6 + (i % 4) * 2 };
+          if (kind === 'snow') {
+             className = 'pb-trick-snow';
+             options = { ...options, text: '❄', size: 13 + (i % 4) * 3 };
+          } else if (kind === 'rain') {
+             className = 'pb-trick-rain';
+             options = { ...options, size: 16 + (i % 4) * 5 };
+          } else if (kind === 'smoke' || kind === 'crystal') {
+             className = 'pb-trick-smoke';
+             const stem = kind === 'crystal' ? 'ice_crystal_' : 'smoke_puff_';
+             options = {
+                ...options, tag: 'img', size: 20 + (i % 4) * 5,
+                src: 'assets/pets/' + stem + (i % 3) + '.png',
+             };
+          } else if (kind === 'leaf') {
+             className = 'pb-trick-snow';
+             options = { ...options, text: '◆', size: 9 + (i % 3) * 3 };
+          }
+          const node = pbTrickNode(className, point, options);
+          const tx = Math.cos(angle) * distance;
+          const ty = Math.sin(angle) * distance - (kind === 'snow' ? 26 : 0);
+          void pbAnimateTracked(node, [
+             { transform: 'translate(-50%,-50%) scale(.25) rotate(0deg)', opacity: 0 },
+             { offset: .18, transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
+             { transform: `translate(calc(-50% + ${tx}px),calc(-50% + ${ty}px)) scale(.55) rotate(${180 + i * 23}deg)`, opacity: 0 },
+          ], { duration: 520 + (i % 4) * 70, delay: i * 18, easing: 'cubic-bezier(.18,.75,.25,1)' }, gen, true);
+       }
+    }
+
+    function pbWeather(kind, color, color2, count, gen) {
+       const layer = pbEl('pb-arena-fx').getBoundingClientRect();
+       for (let i = 0; i < count; i++) {
+          const x = 12 + ((i * 47) % Math.max(60, layer.width - 24));
+          const start = { x, y: -20 - (i % 6) * 18 };
+          const className = kind === 'rain' ? 'pb-trick-rain' : 'pb-trick-snow';
+          const node = pbTrickNode(className, start, {
+             color, color2, text: kind === 'rain' ? '' : '❄', size: kind === 'rain' ? 22 : 14 + (i % 4) * 3,
+          });
+          void pbAnimateTracked(node, [
+             { transform: 'translate(-50%,-50%) rotate(0)', opacity: 0 },
+             { offset: .12, opacity: 1 },
+             { transform: `translate(${(i % 3 - 1) * 26}px,${layer.height + 70}px) rotate(${i * 55}deg)`, opacity: .15 },
+          ], { duration: 720 + (i % 5) * 100, delay: i * 24, easing: 'linear' }, gen, true);
+       }
+    }
+
+    function pbTravelRings(from, to, color, color2, gen, icy = false) {
+       for (let i = 0; i < 4; i++) {
+          const t = .12 + i * .22;
+          const point = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t + 24 };
+          const ring = pbTrickNode('pb-trick-ring', point, { color, color2, size: 28 + i * 8 });
+          void pbAnimateTracked(ring, [
+             { transform: 'translate(-50%,-50%) scale(.15)', opacity: 0 },
+             { offset: .3, transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
+             { transform: 'translate(-50%,-50%) scale(2.2)', opacity: 0 },
+          ], { duration: 560, delay: 180 + i * 120, easing: 'ease-out' }, gen, true);
+          if (icy) pbBurstAt(point, 'snow', color, color2, 4, gen, 30);
+       }
+    }
+
+    function pbAfterimages(prefix, from, to, color, gen, count = 4) {
+       const sprite = pbEl(prefix + '-sprite');
+       for (let i = 0; i < count; i++) {
+          const t = (i + 1) / (count + 1);
+          const image = pbTrickNode('pb-trick-afterimage', {
+             x: from.x + (to.x - from.x) * t,
+             y: from.y + (to.y - from.y) * t,
+          }, { tag: 'img', src: sprite.currentSrc || sprite.src, color, color2: '#fff', size: Math.min(100, from.width || 90) });
+          image.style.setProperty('--pb-hue', (i * 32) + 'deg');
+          void pbAnimateTracked(image, [
+             { transform: 'translate(-50%,-50%) scale(.9)', opacity: 0 },
+             { offset: .25, opacity: .55 },
+             { transform: `translate(-50%,-60%) scale(${1.08 + i * .04})`, opacity: 0 },
+          ], { duration: 520, delay: i * 55, easing: 'ease-out' }, gen, true);
+       }
+    }
+
+    function pbBeam(from, to, color, color2, gen, rainbow = false, thickness = 18) {
+       const length = Math.hypot(to.x - from.x, to.y - from.y);
+       const angle = Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
+       const beam = pbTrickNode('pb-trick-beam' + (rainbow ? ' pb-rainbow' : ''), from, {
+          color, color2, size: thickness,
+       });
+       beam.style.setProperty('--pb-length', length + 'px');
+       const base = `translate(0,-50%) rotate(${angle}deg)`;
+       void pbAnimateTracked(beam, [
+          { transform: base + ' scaleX(0)', opacity: 0 },
+          { offset: .2, transform: base + ' scaleX(1)', opacity: 1 },
+          { offset: .72, transform: base + ' scaleX(1)', opacity: 1 },
+          { transform: base + ' scaleX(.96)', opacity: 0 },
+       ], { duration: 620, easing: 'steps(8,end)' }, gen, true);
+    }
+
+    function pbTrickLabel(point, text, color, color2, gen) {
+       const label = pbTrickNode('pb-trick-label', { x: point.x, y: point.y - point.height * .55 - 24 }, {
+          text, color, color2,
+       });
+       void pbAnimateTracked(label, [
+          { transform: 'translate(-50%,-30%) scale(.5)', opacity: 0 },
+          { offset: .2, transform: 'translate(-50%,-50%) scale(1.12)', opacity: 1 },
+          { offset: .72, transform: 'translate(-50%,-60%) scale(1)', opacity: 1 },
+          { transform: 'translate(-50%,-90%) scale(.9)', opacity: 0 },
+       ], { duration: 900, easing: 'ease-out' }, gen, true);
+    }
+
+    function pbResolveOfficeChoreo(petId, stage) {
+       // Battle identity follows the pet, not its evolution gate: even a baby
+       // form uses the recognizable office signature rather than a generic hop.
+       return getPbAttackProfile(petId).choreo;
+    }
+
+    async function pbPlayOfficeChoreo(attPrefix, defPrefix, attacker, theme, gen) {
+       const mover = pbEl(attPrefix + '-sprite').closest('.pb-sprite-container');
+       const sprite = pbEl(attPrefix + '-sprite');
+       const from = pbTrickPoint(attPrefix);
+       const to = pbTrickPoint(defPrefix);
+       const dx = to.x - from.x;
+       const dy = to.y - from.y;
+       const c1 = theme?.color || '#ffcf4d';
+       const c2 = theme?.color2 || '#ffffff';
+       const choreo = pbResolveOfficeChoreo(attacker.petId, attacker.stage || 1);
+       const label = getPbAttackProfile(attacker.petId).label;
+       pbTrickLabel(from, label, c1, c2, gen);
+
+       const move = (frames, duration, easing = 'ease-in-out') =>
+         pbAnimateTracked(mover, frames, { duration, easing }, gen);
+       const pounce = (kind = 'spark', height = 58, duration = 760) => {
+          pbAfterimages(attPrefix, from, to, c1, gen, 3);
+          setTimeout(() => gen === pbGen && pbBurstAt(to, kind, c1, c2, 12, gen, 72), Math.round(duration * .55));
+          return move([
+             { transform: 'translate(0,0) rotate(0) scale(1)' },
+             { offset: .2, transform: 'translate(0,12px) scale(1.1,.82)' },
+             { offset: .55, transform: `translate(${dx * .68}px,${dy * .68 - height}px) rotate(${dx > 0 ? 12 : -12}deg) scale(.95,1.08)` },
+             { offset: .72, transform: `translate(${dx * .72}px,${dy * .72}px) rotate(${dx > 0 ? -7 : 7}deg)` },
+             { transform: 'translate(0,0) rotate(0) scale(1)' },
+          ], duration, 'cubic-bezier(.2,.72,.2,1)');
+       };
+       const blink = (kind, duration = 860) => {
+          pbBurstAt(from, kind, c1, c2, 12, gen, 58);
+          pbAfterimages(attPrefix, from, to, c1, gen, 5);
+          setTimeout(() => gen === pbGen && pbBurstAt(to, kind, c1, c2, 16, gen, 76), Math.round(duration * .5));
+          return move([
+             { transform: 'translate(0,0) scale(1)', opacity: 1, filter: 'brightness(1)' },
+             { offset: .18, transform: 'translate(0,-18px) scale(.7)', opacity: 0, filter: `drop-shadow(0 0 18px ${c1})` },
+             { offset: .48, transform: `translate(${dx * .76}px,${dy * .76 - 10}px) scale(.7)`, opacity: 0 },
+             { offset: .58, transform: `translate(${dx * .76}px,${dy * .76}px) scale(1.12)`, opacity: 1, filter: `drop-shadow(0 0 18px ${c1})` },
+             { offset: .76, transform: `translate(${dx * .62}px,${dy * .62}px) scale(.95)`, opacity: .9 },
+             { transform: 'translate(0,0) scale(1)', opacity: 1, filter: 'brightness(1)' },
+          ], duration, 'steps(10,end)');
+       };
+       switch (choreo) {
+          case 'splash-dive':
+          case 'snow-dive': {
+             const snowy = choreo === 'snow-dive';
+             pbBurstAt(from, snowy ? 'snow' : 'rain', c1, c2, 14, gen, 54);
+             pbTravelRings(from, to, c1, c2, gen, snowy);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(to, snowy ? 'crystal' : 'rain', c1, c2, snowy ? 22 : 18, gen, 88);
+                if (snowy) pbWeather('snow', c1, c2, 22, gen);
+             }, 570);
+             return move([
+                { transform: 'translate(0,0) rotate(0)', opacity: 1 },
+                { offset: .18, transform: `translate(${dx * .15}px,-72px) rotate(${Math.sign(dx) * 12}deg)`, opacity: 1 },
+                { offset: .36, transform: `translate(${dx * .34}px,38px) rotate(${Math.sign(dx) * 72}deg) scale(.72)`, opacity: 0 },
+                { offset: .62, transform: `translate(${dx * .72}px,25px) scale(.5)`, opacity: 0 },
+                { offset: .72, transform: `translate(${dx * .76}px,-28px) rotate(${Math.sign(dx) * -18}deg) scale(1.12)`, opacity: 1 },
+                { offset: .84, transform: `translate(${dx * .64}px,${dy * .64}px) scale(.96)`, opacity: 1 },
+                { transform: 'translate(0,0) rotate(0) scale(1)', opacity: 1 },
+             ], 1080, 'cubic-bezier(.2,.75,.22,1)');
+          }
+          case 'void-blink':
+             return blink('spark', 900);
+          case 'moonlit-blink':
+             pbWeather('snow', c1, c2, 14, gen);
+             return blink('crystal', 940);
+          case 'frost-coronation': {
+             pbWeather('snow', c1, c2, 26, gen);
+             const thronePoint = { x: from.x + dx * .42, y: from.y + dy * .42 + 12 };
+             for (let i = 0; i < 7; i++) {
+                const crystal = pbTrickNode('pb-trick-smoke', {
+                   x: thronePoint.x + (i - 3) * 7, y: thronePoint.y + Math.abs(i - 3) * 2,
+                }, {
+                   tag: 'img', src: 'assets/pets/ice_crystal_' + (i % 3) + '.png',
+                   color: c1, color2: c2, size: 28 + (3 - Math.abs(i - 3)) * 8,
+                });
+                void pbAnimateTracked(crystal, [
+                   { transform: 'translate(-50%,10%) scale(.1)', opacity: 0 },
+                   { offset: .28, transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
+                   { offset: .82, transform: 'translate(-50%,-50%) scale(1)', opacity: .9 },
+                   { transform: `translate(${(i - 3) * 10}px,-70%) scale(.35) rotate(${(i - 3) * 12}deg)`, opacity: 0 },
+                ], { duration: 1420, delay: i * 36, easing: 'cubic-bezier(.2,.75,.2,1)' }, gen, true);
+             }
+             const crown = pbTrickNode('pb-trick-label', {
+                x: thronePoint.x, y: thronePoint.y - 72,
+             }, { text: '♕', color: '#ffe9a8', color2: '#ffffff' });
+             crown.style.fontSize = '28px';
+             void pbAnimateTracked(crown, [
+                { transform: 'translate(-50%,-20%) scale(.3)', opacity: 0 },
+                { offset: .24, transform: 'translate(-50%,-50%) scale(1.2)', opacity: 1 },
+                { offset: .76, transform: 'translate(-50%,-55%) scale(1)', opacity: 1 },
+                { transform: 'translate(-50%,-90%) scale(.7)', opacity: 0 },
+             ], { duration: 1450, delay: 420, easing: 'ease-out' }, gen, true);
+             pbTravelRings(thronePoint, { x: thronePoint.x + Math.sign(dx) * 30, y: thronePoint.y }, c1, c2, gen, true);
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .18, transform: 'translate(0,12px) scale(1.1,.82)' },
+                { offset: .38, transform: `translate(${dx * .42}px,${dy * .42 - 54}px) rotate(${Math.sign(dx) * 8}deg) scale(.96,1.06)` },
+                { offset: .5, transform: `translate(${dx * .42}px,${dy * .42 - 22}px) rotate(0) scale(1)` },
+                { offset: .8, transform: `translate(${dx * .42}px,${dy * .42 - 22}px) scale(1)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 1760, 'cubic-bezier(.2,.72,.2,1)');
+          }
+          case 'boss-slam':
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(to, 'smoke', '#d88b35', '#ffe19b', 22, gen, 96);
+                pbTravelRings(to, { x: to.x + Math.sign(dx) * 34, y: to.y }, '#d88b35', '#fff0b3', gen);
+             }, 520);
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .22, transform: `translate(${dx * .28}px,-105px) rotate(${Math.sign(dx) * -10}deg) scale(.86,1.16)` },
+                { offset: .52, transform: `translate(${dx * .7}px,${dy * .7 + 14}px) rotate(${Math.sign(dx) * 6}deg) scale(1.28,.68)` },
+                { offset: .7, transform: `translate(${dx * .62}px,${dy * .62}px) scale(.94,1.08)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 980, 'cubic-bezier(.22,.68,.18,1)');
+          case 'cat-pounce':
+             return pounce('spark', 70, 820);
+          case 'solar-leap':
+             pbBurstAt(from, 'spark', '#ff9f31', '#fff0a4', 16, gen, 72);
+             return pounce('smoke', 98, 960);
+          case 'cocoa-pounce':
+             pbBurstAt(from, 'smoke', '#8b4b2b', '#efb37d', 12, gen, 64);
+             return pounce('smoke', 52, 900);
+          case 'blizzard-binky':
+             pbWeather('snow', '#bdefff', '#ffffff', 34, gen);
+             setTimeout(() => gen === pbGen && pbBurstAt(to, 'snow', '#bdefff', '#fff', 28, gen, 105), 560);
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .16, transform: 'translate(0,15px) scale(1.14,.8)' },
+                { offset: .42, transform: `translate(${dx * .24}px,-180px) rotate(${Math.sign(dx) * 18}deg)` },
+                { offset: .64, transform: `translate(${dx * .68}px,${dy * .68 - 22}px) rotate(${Math.sign(dx) * 360}deg) scale(1.15)` },
+                { offset: .76, transform: `translate(${dx * .68}px,${dy * .68}px) scale(1.25,.72)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 1120, 'cubic-bezier(.2,.78,.2,1)');
+          case 'drift-donuts':
+             for (let i = 0; i < 4; i++) {
+                setTimeout(() => gen === pbGen && pbBurstAt({
+                   x: from.x + dx * (.2 + i * .13), y: from.y - 20 + (i % 2) * 42,
+                }, 'smoke', c1, c2, 5, gen, 34), 120 + i * 130);
+             }
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .22, transform: `translate(${dx * .24}px,-54px) rotate(90deg)` },
+                { offset: .44, transform: `translate(${dx * .48}px,30px) rotate(210deg)` },
+                { offset: .66, transform: `translate(${dx * .7}px,-35px) rotate(330deg)` },
+                { offset: .78, transform: `translate(${dx * .68}px,${dy * .68}px) rotate(390deg)` },
+                { transform: 'translate(0,0) rotate(720deg)' },
+             ], 1040, 'cubic-bezier(.32,.72,.2,1)');
+          case 'shell-garden':
+          case 'sapphire-spin':
+          case 'shell-spin': {
+             const icy = choreo === 'sapphire-spin';
+             const shellSrc = icy ? 'assets/pets/shell_sapphire.png' : 'assets/pets/shell_green.png';
+             const shell = pbTrickNode('pb-trick-shell', from, { tag: 'img', src: shellSrc, color: c1, color2: c2, size: 78 });
+             if (icy) {
+                pbWeather('snow', c1, c2, 18, gen);
+                pbBurstAt(to, 'crystal', c1, c2, 24, gen, 96);
+             } else if (choreo === 'shell-garden') {
+                pbBurstAt(to, 'leaf', c1, c2, 22, gen, 94);
+             }
+             void pbAnimateTracked(shell, [
+                { left: from.x + 'px', top: from.y + 'px', transform: 'translate(-50%,-50%) rotate(0) scale(.55)', opacity: 0 },
+                { offset: .18, opacity: 1, transform: 'translate(-50%,-50%) rotate(180deg) scale(1)' },
+                { offset: .62, left: (from.x + dx * .76) + 'px', top: (from.y + dy * .76) + 'px', transform: 'translate(-50%,-50%) rotate(900deg) scale(1.14)', opacity: 1 },
+                { left: from.x + 'px', top: from.y + 'px', transform: 'translate(-50%,-50%) rotate(1440deg) scale(.55)', opacity: 0 },
+             ], { duration: 960, easing: 'cubic-bezier(.28,.8,.2,1)' }, gen, true);
+             return move([
+                { transform: 'scale(1)', opacity: 1 },
+                { offset: .15, transform: 'scale(.7)', opacity: 0 },
+                { offset: .84, transform: 'scale(.7)', opacity: 0 },
+                { transform: 'scale(1)', opacity: 1 },
+             ], 960, 'steps(8,end)');
+          }
+          case 'neon-ignition':
+          case 'inferno-breath':
+          case 'ember-breath': {
+             const mouth = { x: from.x + Math.sign(dx || 1) * from.width * .28, y: from.y - from.height * .12 };
+             pbBurstAt(mouth, 'spark', c1, c2, 12, gen, 40);
+             if (!(await move([
+                { transform: 'translate(0,0) rotate(0)', filter: 'brightness(1)' },
+                { offset: .6, transform: `translate(${-Math.sign(dx || 1) * 12}px,-8px) rotate(${-Math.sign(dx || 1) * 8}deg) scale(1.05)`, filter: `brightness(1.55) drop-shadow(0 0 12px ${c1})` },
+                { transform: `translate(${-Math.sign(dx || 1) * 10}px,-6px) rotate(${-Math.sign(dx || 1) * 7}deg) scale(1.08,.96)`, filter: `brightness(1.8) drop-shadow(0 0 16px ${c1})` },
+             ], 420, 'cubic-bezier(.2,.65,.2,1)'))) return false;
+             pbBeam(mouth, to, c1, c2, gen, false, choreo === 'inferno-breath' ? 28 : 22);
+             for (let i = 0; i < 5; i++) {
+                setTimeout(() => {
+                   if (gen !== pbGen) return;
+                   const t = .22 + i * .13;
+                   pbBurstAt({ x: mouth.x + (to.x - mouth.x) * t, y: mouth.y + (to.y - mouth.y) * t },
+                     'smoke', c1, c2, 6, gen, 42);
+                }, i * 82);
+             }
+             setTimeout(() => gen === pbGen && pbBurstAt(to, 'smoke', c1, c2, 24, gen, 96), 390);
+             return move([
+                { transform: `translate(${-Math.sign(dx || 1) * 10}px,-6px) rotate(${-Math.sign(dx || 1) * 7}deg) scale(1.08,.96)`, filter: `brightness(1.8) drop-shadow(0 0 16px ${c1})` },
+                { offset: .68, transform: 'translate(0,-4px) scale(1.08,.96)', filter: `brightness(1.45) drop-shadow(0 0 12px ${c1})` },
+                { transform: 'translate(0,0) rotate(0)', filter: 'brightness(1)' },
+             ], 700, 'cubic-bezier(.2,.65,.2,1)');
+          }
+          case 'void-slam':
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(to, 'smoke', '#1b1425', '#ff7a2e', 28, gen, 112);
+                pbTravelRings(to, { x: to.x + Math.sign(dx) * 42, y: to.y }, '#17101f', '#ff6b2a', gen);
+             }, 570);
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .25, transform: `translate(${dx * .25}px,-130px) rotate(${Math.sign(dx) * -16}deg) scale(.88)` },
+                { offset: .58, transform: `translate(${dx * .72}px,${dy * .72 + 18}px) rotate(${Math.sign(dx) * 20}deg) scale(1.25,.72)` },
+                { offset: .72, transform: `translate(${dx * .62}px,${dy * .62}px) scale(.94,1.08)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 1020, 'cubic-bezier(.22,.68,.18,1)');
+          case 'rain-dance':
+             pbWeather('rain', c1, c2, 36, gen);
+             pbTravelRings(from, to, c1, c2, gen);
+             setTimeout(() => gen === pbGen && pbBurstAt(to, 'rain', c1, c2, 22, gen, 92), 560);
+             return move([
+                { transform: 'translate(0,0)' },
+                { offset: .16, transform: 'translate(0,-52px) rotate(-8deg)' },
+                { offset: .3, transform: 'translate(0,0)' },
+                { offset: .46, transform: `translate(${dx * .25}px,-65px) rotate(9deg)` },
+                { offset: .6, transform: `translate(${dx * .25}px,0)` },
+                { offset: .76, transform: `translate(${dx * .65}px,${dy * .65 - 52}px)` },
+                { transform: 'translate(0,0)' },
+             ], 1040, 'cubic-bezier(.2,.75,.2,1)');
+          case 'prism-beam': {
+             const horn = { x: from.x + Math.sign(dx || 1) * from.width * .28, y: from.y - from.height * .28 };
+             pbBurstAt(horn, 'spark', '#ff66c9', '#8ff6ff', 18, gen, 52);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBeam(horn, to, '#ff66c9', '#8ff6ff', gen, true, 24);
+                pbBurstAt(to, 'spark', '#ff66c9', '#8ff6ff', 28, gen, 100);
+             }, 260);
+             return move([
+                { transform: 'translate(0,0) rotate(0)', filter: 'brightness(1)' },
+                { offset: .28, transform: `translate(${-Math.sign(dx || 1) * 10}px,8px) rotate(${Math.sign(dx || 1) * 8}deg)`, filter: 'brightness(1.6)' },
+                { offset: .7, transform: 'translate(0,-6px) scale(1.08)', filter: 'brightness(2) drop-shadow(0 0 18px #ff7ccd)' },
+                { transform: 'translate(0,0)', filter: 'brightness(1)' },
+             ], 940, 'steps(9,end)');
+          }
+          case 'ember-dive':
+             pbBurstAt(from, 'spark', '#ff5a2d', '#ffe35a', 18, gen, 70);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(to, 'smoke', '#ff4d2d', '#ffe05a', 28, gen, 110);
+                pbTravelRings(to, { x: to.x + Math.sign(dx) * 34, y: to.y }, '#ff5b2d', '#ffe35a', gen);
+             }, 580);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+                { offset: .2, transform: `translate(${dx * .16}px,-105px) rotate(${Math.sign(dx) * -18}deg) scale(.9)` },
+                { offset: .54, transform: `translate(${dx * .74}px,${dy * .74 + 20}px) rotate(${Math.sign(dx) * 26}deg) scale(1.12,.9)`, filter: 'brightness(1.8) drop-shadow(0 0 20px #ff5a2d)' },
+                { offset: .72, transform: `translate(${dx * .62}px,${dy * .62 - 24}px) rotate(${Math.sign(dx) * -8}deg)`, filter: 'brightness(1.25)' },
+                { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
+             ], 1080, 'cubic-bezier(.2,.72,.2,1)');
+          case 'showoff-flap':
+             pbBurstAt(from, 'spark', c1, c2, 14, gen, 64);
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .2, transform: 'translate(0,-38px) rotate(-14deg)' },
+                { offset: .42, transform: `translate(${dx * .3}px,-48px) rotate(18deg)` },
+                { offset: .7, transform: `translate(${dx * .62}px,${dy * .62}px) rotate(-10deg)` },
+                { transform: 'translate(0,0) rotate(0)' },
+             ], 820, 'steps(8,end)');
+          case 'tail-chase':
+             pbBurstAt(from, 'spark', c1, c2, 10, gen, 44);
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .65, transform: 'translate(0,0) rotate(720deg) scale(.88)' },
+                { offset: .82, transform: `translate(${dx * .45}px,${dy * .45 - 28}px) rotate(760deg)` },
+                { transform: 'translate(0,0) rotate(720deg)' },
+             ], 880, 'cubic-bezier(.3,.75,.2,1)');
+          case 'binky':
+             return pounce('spark', 76, 820);
+          default:
+             return pounce('spark', 42, 700);
+       }
+    }
+
     function pbLaunchThemeFx(attPrefix, defPrefix, theme, isUlt, stage) {
        const layer = pbEl('pb-arena-fx');
        const stageBox = pbEl('pb-arena-fx').getBoundingClientRect();
@@ -18093,10 +18588,10 @@
        setTimeout(() => mark.remove(), 850);
     }
 
-    async function pbPlayHit(prefix, dmg, crit, dodged, guarded, theme, isUlt, attPrefix, stage, gen, attackProfile) {
+    async function pbPlayHit(prefix, dmg, crit, dodged, guarded, theme, isUlt, attPrefix, stage, gen, attackProfile, launchThemeFx = true) {
        const fxBox = pbEl(prefix + '-fx');
        const sprite = pbEl(prefix + '-sprite');
-       if (theme) {
+       if (theme && launchThemeFx) {
           const impactAt = pbLaunchThemeFx(attPrefix, prefix, theme, isUlt, stage);
           if (!(await pbWait(impactAt, gen))) return;
        }
@@ -18232,31 +18727,17 @@
           // Animate Attacks (speed informed)
            const myFirst = (myData.build?.speed || 0) >= (oppData.build?.speed || 0);
           
-            async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
+             async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
-              const mover = attSprite.closest('.pb-sprite-container');
                const attackProfile = getPbAttackProfile(attacker.petId);
-               const motion = String(attackProfile.motion || 'impact').replace(/[^a-z-]/g, '');
-              const motionClass = 'pb-motion-' + motion;
-               const impactDelay = {
-                  bite: 250, scratch: 280, kick: 340, peck: 230,
-                  shell: 320, wing: 330, tongue: 290, beam: 330, impact: 260,
-               }[motion] || 260;
                const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage);
-               mover?.classList.add(motionClass);
                try {
-                  if (attRes.move === 'attack') {
-                     if (!(await pbWait(impactDelay, myGen))) return;
-                     await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
-                                     attRes.guarded, null, false, myPrefix, attacker.stage, myGen, attackProfile);
-                  } else {
-                     const isUlt = attRes.move === 'ultimate';
-                     if (!(await pbWait(isUlt ? Math.max(300, impactDelay) : impactDelay, myGen))) return;
-                     await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
-                                     attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage, myGen, attackProfile);
-                  }
+                   if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attTheme, myGen))) return;
+                   const isUlt = attRes.move === 'ultimate';
+                   await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                                   attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage,
+                                   myGen, attackProfile, false);
                } finally {
-                  mover?.classList.remove(motionClass);
                   restorePose();
                }
           }

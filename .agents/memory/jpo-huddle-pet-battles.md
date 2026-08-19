@@ -17,6 +17,6 @@ Every XP-bearing participant must have an approved email-backed account. Settlem
 
 Species identity is visual and physical, not a hidden combat rules layer. The network protocol keeps the four allowlisted move intents (attack, guard, special, ultimate), every species uses the same stat/damage rules, and the pet kit controls names plus body-appropriate arena movement.
 
-**Why:** “Fight differently” means visibly moving like the animal—not adding shields, burns, healing, counters, passives, or species power advantages. Dragon and Phoenix must visibly hover between moves and use an in-place flying/wing action rather than appearing grounded or sliding across the arena.
+**Why:** “Fight differently” means porting the recognizable in-office pet trick choreography into battle—not generic bite/scratch/hover substitutes and not hidden mechanics. Examples include Splash Dive, Moonlit/Void Blink, Blizzard Binky, Ice Shell, Dragon breath, Rain Dance, Prism Beam, and Ember Dive.
 
-**How to apply:** New pets need body-appropriate action poses and readable on-target contact feedback. Flying pets retain an airborne idle hover before and after their local wing attack. Keep form/training as the only stat inputs and do not dispatch species-specific status effects.
+**How to apply:** Map every battle pet/form to its existing office trick beats and assets, translate Phaser choreography into cancellable arena-relative DOM effects, and restore all visual state afterward. Flying pets retain their airborne idle state. Keep form/training as the only stat inputs and do not dispatch species-specific status effects.
