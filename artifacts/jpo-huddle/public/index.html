@@ -17656,31 +17656,167 @@
       'pet_phoenix':         { color: '#ff4d3d', color2: '#ffe34d', fx: 'fire', special: 'Searing Wing', ultimate: 'Supernova' },
       'default':             { color: '#ffffff', color2: '#b8c0ff', fx: 'impact', special: 'Special', ultimate: 'Ultimate' }
     };
-    // Visual-only ports of the named in-office `_petTrick` routines. The
-    // choreography id determines the whole sequence; it never affects math.
+    // Visual-only ports of the named in-office `_petTrick` routines. Attack,
+    // Special, and Ultimate deliberately select different office beats; none
+    // of this data affects server-owned battle math.
     const PB_ATTACK_PROFILE_BY_PET = {
-      pet_duck:            { choreo: 'splash-dive', effect: 'peck', label: 'SPLASH DIVE!' },
-      pet_duck_snow:       { choreo: 'snow-dive', effect: 'peck', label: 'FROST DIVE!' },
-      pet_cat:             { choreo: 'boss-slam', effect: 'scratch', label: 'BOSS SLAM!' },
-      pet_cat_black:       { choreo: 'void-blink', effect: 'scratch', label: 'VOID BLINK!' },
-      pet_cat_snow:        { choreo: 'frost-coronation', effect: 'scratch', label: 'FROST CORONATION!' },
-      pet_dog:             { choreo: 'solar-leap', effect: 'bite', label: 'SOLAR LEAP!' },
-      pet_dog_choco:       { choreo: 'cocoa-pounce', effect: 'bite', label: 'COCOA POUNCE!' },
-      pet_dog_husky:       { choreo: 'moonlit-blink', effect: 'bite', label: 'MOONLIT BLINK!' },
-      pet_bunny:           { choreo: 'blizzard-binky', effect: 'kick', label: 'BLIZZARD BINKY!' },
-      pet_bunny_cocoa:     { choreo: 'drift-donuts', effect: 'kick', label: 'DRIFT DONUTS!' },
-      pet_turtle:          { choreo: 'shell-garden', effect: 'shell', label: 'SHELL BLOOM!' },
-      pet_turtle_sapphire: { choreo: 'sapphire-spin', effect: 'shell', label: 'ICE SHELL!' },
-      pet_dragon:          { choreo: 'neon-ignition', effect: 'wing', label: 'NEON IGNITION!' },
-      pet_dragon_crimson:  { choreo: 'inferno-breath', effect: 'wing', label: 'INFERNO BREATH!' },
-      pet_dragon_obsidian: { choreo: 'void-slam', effect: 'wing', label: 'VOID SLAM!' },
-      pet_frog:            { choreo: 'rain-dance', effect: 'tongue', label: 'RAIN DANCE!' },
-      pet_unicorn:         { choreo: 'prism-beam', effect: 'horn', label: 'PRISM BEAM!' },
-      pet_phoenix:         { choreo: 'ember-dive', effect: 'wing', label: 'EMBER DIVE!' },
+      pet_duck: {
+        effect: 'peck',
+        moves: {
+          attack: { choreo: 'duck-flap', label: 'FLAP FLAP!' },
+          special: { choreo: 'showoff-flap', label: 'SHOW-OFF FLAP!' },
+          ultimate: { choreo: 'splash-dive', label: 'SPLASH DIVE!' },
+        },
+      },
+      pet_duck_snow: {
+        effect: 'peck',
+        moves: {
+          attack: { choreo: 'duck-flap', label: 'FLAP FLAP!' },
+          special: { choreo: 'showoff-flap', label: 'SHOW-OFF FLAP!' },
+          ultimate: { choreo: 'snow-dive', label: 'FROST DIVE!' },
+        },
+      },
+      pet_cat: {
+        effect: 'scratch',
+        moves: {
+          attack: { choreo: 'cat-stretch', label: 'LAZY STRETCH!' },
+          special: { choreo: 'cat-pounce', label: 'POUNCE!' },
+          ultimate: { choreo: 'boss-slam', label: 'BOSS SLAM!' },
+        },
+      },
+      pet_cat_black: {
+        effect: 'scratch',
+        moves: {
+          attack: { choreo: 'cat-stretch', label: 'LAZY STRETCH!' },
+          special: { choreo: 'cat-pounce', label: 'POUNCE!' },
+          ultimate: { choreo: 'void-blink', label: 'VOID BLINK!' },
+        },
+      },
+      pet_cat_snow: {
+        effect: 'scratch',
+        moves: {
+          attack: { choreo: 'cat-stretch', label: 'LAZY STRETCH!' },
+          special: { choreo: 'cat-pounce', label: 'POUNCE!' },
+          ultimate: { choreo: 'frost-coronation', label: 'FROST CORONATION!' },
+        },
+      },
+      pet_dog: {
+        effect: 'bite',
+        moves: {
+          attack: { choreo: 'dog-wag-hop', label: 'HAPPY HOP!' },
+          special: { choreo: 'tail-chase', label: 'TAIL CHASE!' },
+          ultimate: { choreo: 'solar-leap', label: 'SOLAR LEAP!' },
+        },
+      },
+      pet_dog_choco: {
+        effect: 'bite',
+        moves: {
+          attack: { choreo: 'dog-wag-hop', label: 'HAPPY HOP!' },
+          special: { choreo: 'tail-chase', label: 'TAIL CHASE!' },
+          ultimate: { choreo: 'cocoa-pounce', label: 'COCOA POUNCE!' },
+        },
+      },
+      pet_dog_husky: {
+        effect: 'bite',
+        moves: {
+          attack: { choreo: 'dog-wag-hop', label: 'HAPPY HOP!' },
+          special: { choreo: 'tail-chase', label: 'TAIL CHASE!' },
+          ultimate: { choreo: 'moonlit-blink', label: 'MOONLIT BLINK!' },
+        },
+      },
+      pet_bunny: {
+        effect: 'kick',
+        moves: {
+          attack: { choreo: 'bunny-hop', label: 'QUICK HOPS!' },
+          special: { choreo: 'binky', label: 'BIG BINKY!' },
+          ultimate: { choreo: 'blizzard-binky', label: 'BLIZZARD BINKY!' },
+        },
+      },
+      pet_bunny_cocoa: {
+        effect: 'kick',
+        moves: {
+          attack: { choreo: 'bunny-hop', label: 'QUICK HOPS!' },
+          special: { choreo: 'binky', label: 'BIG BINKY!' },
+          ultimate: { choreo: 'drift-donuts', label: 'DRIFT DONUTS!' },
+        },
+      },
+      pet_turtle: {
+        effect: 'shell',
+        moves: {
+          attack: { choreo: 'turtle-rock', label: 'TURTLE ROCK!' },
+          special: { choreo: 'shell-spin', label: 'SHELL SPIN!' },
+          ultimate: { choreo: 'shell-garden', label: 'SHELL BLOOM!' },
+        },
+      },
+      pet_turtle_sapphire: {
+        effect: 'shell',
+        moves: {
+          attack: { choreo: 'turtle-rock', label: 'TURTLE ROCK!' },
+          special: { choreo: 'sapphire-spin', label: 'SAPPHIRE SPIN!' },
+          ultimate: { choreo: 'frost-stomp', label: 'FROST STOMP!' },
+        },
+      },
+      pet_dragon: {
+        effect: 'wing',
+        moves: {
+          attack: { choreo: 'dragon-sputter', label: 'EMBER SPUTTER!' },
+          special: { choreo: 'smoke-breath', label: 'SMOKE BREATH!' },
+          ultimate: { choreo: 'neon-ignition', label: 'NEON IGNITION!' },
+        },
+      },
+      pet_dragon_crimson: {
+        effect: 'wing',
+        moves: {
+          attack: { choreo: 'dragon-sputter', label: 'EMBER SPUTTER!' },
+          special: { choreo: 'smoke-breath', label: 'SMOKE BREATH!' },
+          ultimate: { choreo: 'inferno-breath', label: 'INFERNO BREATH!' },
+        },
+      },
+      pet_dragon_obsidian: {
+        effect: 'wing',
+        moves: {
+          attack: { choreo: 'dragon-sputter', label: 'EMBER SPUTTER!' },
+          special: { choreo: 'smoke-breath', label: 'SMOKE BREATH!' },
+          ultimate: { choreo: 'void-slam', label: 'VOID SLAM!' },
+        },
+      },
+      pet_frog: {
+        effect: 'tongue',
+        moves: {
+          attack: { choreo: 'frog-hop', label: 'RIBBIT HOP!' },
+          special: { choreo: 'rain-drizzle', label: 'RAIN DRIZZLE!' },
+          ultimate: { choreo: 'rain-dance', label: 'STORM DANCE!' },
+        },
+      },
+      pet_unicorn: {
+        effect: 'horn',
+        moves: {
+          attack: { choreo: 'prism-beam', label: 'PRISM BEAM!' },
+          special: { choreo: 'stardust-gallop', label: 'STARDUST GALLOP!' },
+          ultimate: { choreo: 'halo-blessing', label: 'HALO BLESSING!' },
+        },
+      },
+      pet_phoenix: {
+        effect: 'wing',
+        moves: {
+          attack: { choreo: 'solar-flare', label: 'SOLAR FLARE!' },
+          special: { choreo: 'ember-dive', label: 'EMBER DIVE!' },
+          ultimate: { choreo: 'phoenix-rebirth', label: 'REBIRTH!' },
+        },
+      },
     };
-    const PB_DEFAULT_ATTACK_PROFILE = { choreo: 'basic-hop', effect: 'impact', label: 'HIT!' };
-    function getPbAttackProfile(petId) {
-      return PB_ATTACK_PROFILE_BY_PET[petId] || PB_DEFAULT_ATTACK_PROFILE;
+    const PB_DEFAULT_ATTACK_PROFILE = {
+      effect: 'impact',
+      moves: {
+        attack: { choreo: 'basic-hop', label: 'HIT!' },
+        special: { choreo: 'basic-pounce', label: 'SPECIAL!' },
+        ultimate: { choreo: 'basic-slam', label: 'ULTIMATE!' },
+      },
+    };
+    function getPbAttackProfile(petId, moveId = 'attack') {
+      const profile = PB_ATTACK_PROFILE_BY_PET[petId] || PB_DEFAULT_ATTACK_PROFILE;
+      const move = profile.moves[moveId] || profile.moves.attack;
+      return { effect: profile.effect, moveId, ...move };
     }
     function getPbTheme(petId, kit) {
       let baseId = petId;
@@ -17690,7 +17826,6 @@
       }
       return {
         ...(PB_THEME_BY_PET[baseId] || PB_THEME_BY_PET['default']),
-        choreo: getPbAttackProfile(petId).choreo,
       };
     }
 
@@ -17929,9 +18064,10 @@
        img.src = candidates[0];
     }
 
-    function pbActionPoseCandidates(petId, stage) {
+    function pbActionPoseCandidates(petId, stage, moveId = 'attack') {
        const stem = String(petId || '').replace(/^pet_/, '');
-       const candidates = [];
+       const preferredSuffix = moveId === 'ultimate' ? '_s3' : moveId === 'special' ? '_s2' : '';
+       const candidates = ['assets/pets/anim/' + stem + preferredSuffix + '_action.png'];
        if (stage >= 3) candidates.push('assets/pets/anim/' + stem + '_s3_action.png');
        if (stage >= 2) candidates.push('assets/pets/anim/' + stem + '_s2_action.png');
        candidates.push('assets/pets/anim/' + stem + '_action.png');
@@ -17941,15 +18077,17 @@
     }
 
     function pbPreloadActionPose(petId, stage) {
-       pbActionPoseCandidates(petId, stage).forEach(src => {
-          const preload = new Image();
-          preload.src = src;
+       ['attack', 'special', 'ultimate'].forEach(moveId => {
+          pbActionPoseCandidates(petId, stage, moveId).forEach(src => {
+             const preload = new Image();
+             preload.src = src;
+          });
        });
     }
 
-    function pbShowActionPose(img, petId, stage) {
+    function pbShowActionPose(img, petId, stage, moveId) {
        const token = String(pbGen) + ':' + String(Date.now()) + ':' + Math.random().toString(36).slice(2);
-       const candidates = pbActionPoseCandidates(petId, stage);
+       const candidates = pbActionPoseCandidates(petId, stage, moveId);
        let at = 0;
        img.dataset.pbActionPose = token;
        const restore = () => {
@@ -18211,13 +18349,11 @@
        ], { duration: 900, easing: 'ease-out' }, gen, true);
     }
 
-    function pbResolveOfficeChoreo(petId, stage) {
-       // Battle identity follows the pet, not its evolution gate: even a baby
-       // form uses the recognizable office signature rather than a generic hop.
-       return getPbAttackProfile(petId).choreo;
+    function pbResolveOfficeChoreo(petId, moveId) {
+       return getPbAttackProfile(petId, moveId).choreo;
     }
 
-    async function pbPlayOfficeChoreo(attPrefix, defPrefix, attacker, theme, gen) {
+    async function pbPlayOfficeChoreo(attPrefix, defPrefix, attacker, moveId, theme, gen) {
        const mover = pbEl(attPrefix + '-sprite').closest('.pb-sprite-container');
        const sprite = pbEl(attPrefix + '-sprite');
        const from = pbTrickPoint(attPrefix);
@@ -18226,8 +18362,9 @@
        const dy = to.y - from.y;
        const c1 = theme?.color || '#ffcf4d';
        const c2 = theme?.color2 || '#ffffff';
-       const choreo = pbResolveOfficeChoreo(attacker.petId, attacker.stage || 1);
-       const label = getPbAttackProfile(attacker.petId).label;
+       const attackProfile = getPbAttackProfile(attacker.petId, moveId);
+       const choreo = pbResolveOfficeChoreo(attacker.petId, moveId);
+       const label = attackProfile.label;
        pbTrickLabel(from, label, c1, c2, gen);
 
        const move = (frames, duration, easing = 'ease-in-out') =>
@@ -18257,6 +18394,53 @@
           ], duration, 'steps(10,end)');
        };
        switch (choreo) {
+          case 'duck-flap':
+             pbBurstAt(from, 'rain', c1, c2, 8, gen, 34);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+                { offset: .14, transform: 'translate(0,-13px) rotate(-12deg) scale(1.08,.92)' },
+                { offset: .28, transform: 'translate(0,0) rotate(12deg) scale(.94,1.06)' },
+                { offset: .42, transform: `translate(${dx * .1}px,-16px) rotate(-14deg)` },
+                { offset: .58, transform: `translate(${dx * .1}px,0) rotate(13deg)` },
+                { offset: .76, transform: 'translate(0,-7px) rotate(-7deg) scale(1.08,.9)' },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 720, 'steps(12,end)');
+          case 'dog-wag-hop':
+             return move([
+                { transform: 'translate(0,0) rotate(-10deg) scale(1)' },
+                { offset: .12, transform: 'translate(0,-4px) rotate(10deg) scale(1.04,.96)' },
+                { offset: .24, transform: 'translate(0,0) rotate(-10deg) scale(.97,1.03)' },
+                { offset: .36, transform: 'translate(0,-4px) rotate(10deg) scale(1.04,.96)' },
+                { offset: .5, transform: `translate(${dx * .14}px,-24px) rotate(-8deg) scale(.92,1.1)` },
+                { offset: .7, transform: `translate(${dx * .18}px,${dy * .18}px) rotate(7deg) scale(1.08,.9)` },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 760, 'cubic-bezier(.2,.75,.2,1)');
+          case 'cat-stretch':
+             pbBurstAt(from, 'spark', c1, c2, 7, gen, 32);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+                { offset: .22, transform: `translate(${dx * .08}px,8px) rotate(${Math.sign(dx) * 4}deg) scale(1.22,.68)` },
+                { offset: .56, transform: `translate(${dx * .18}px,5px) rotate(${Math.sign(dx) * -5}deg) scale(1.38,.62)` },
+                { offset: .74, transform: `translate(${dx * .2}px,-4px) rotate(${Math.sign(dx) * 9}deg) scale(.9,1.12)` },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 820, 'cubic-bezier(.3,.65,.2,1)');
+          case 'bunny-hop':
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .14, transform: 'translate(0,-18px) scale(.94,1.08)' },
+                { offset: .28, transform: 'translate(0,0) scale(1.08,.9)' },
+                { offset: .44, transform: `translate(${dx * .12}px,-22px) scale(.92,1.1)` },
+                { offset: .58, transform: `translate(${dx * .12}px,0) scale(1.1,.88)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 650, 'cubic-bezier(.2,.78,.2,1)');
+          case 'turtle-rock':
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+                { offset: .2, transform: `translate(${dx * .04}px,5px) rotate(${Math.sign(dx) * -9}deg) scale(1.08,.9)` },
+                { offset: .42, transform: `translate(${dx * .1}px,-8px) rotate(${Math.sign(dx) * 8}deg) scale(.94,1.06)` },
+                { offset: .64, transform: `translate(${dx * .18}px,${dy * .18}px) rotate(${Math.sign(dx) * -5}deg) scale(1.12,.86)` },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 760, 'cubic-bezier(.28,.65,.2,1)');
           case 'splash-dive':
           case 'snow-dive': {
              const snowy = choreo === 'snow-dive';
@@ -18390,6 +18574,57 @@
                 { transform: 'scale(1)', opacity: 1 },
              ], 960, 'steps(8,end)');
           }
+          case 'frost-stomp':
+             pbWeather('snow', '#bdefff', '#ffffff', 24, gen);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(to, 'crystal', '#bdefff', '#ffffff', 30, gen, 112);
+                pbTravelRings(to, { x: to.x + Math.sign(dx) * 38, y: to.y }, '#9fd8ff', '#ffffff', gen, true);
+             }, 510);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+                { offset: .22, transform: `translate(${dx * .24}px,-86px) rotate(${Math.sign(dx) * -8}deg) scale(.88,1.14)` },
+                { offset: .5, transform: `translate(${dx * .68}px,${dy * .68 + 16}px) rotate(${Math.sign(dx) * 6}deg) scale(1.28,.7)` },
+                { offset: .7, transform: `translate(${dx * .58}px,${dy * .58}px) scale(.94,1.08)` },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 1040, 'cubic-bezier(.22,.68,.18,1)');
+          case 'dragon-sputter': {
+             const mouth = { x: from.x + Math.sign(dx || 1) * from.width * .28, y: from.y - from.height * .12 };
+             for (let i = 0; i < 6; i++) {
+                setTimeout(() => {
+                   if (gen !== pbGen) return;
+                   pbBurstAt({
+                      x: mouth.x + Math.sign(dx || 1) * (8 + i * 7),
+                      y: mouth.y + (i % 2 ? 4 : -3),
+                   }, 'spark', '#ffd76a', '#ff632d', 3, gen, 24);
+                }, 170 + i * 75);
+             }
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .25, transform: `translate(0,-7px) rotate(${Math.sign(dx) * -8}deg) scale(1.04,.96)` },
+                { offset: .72, transform: `translate(0,-5px) rotate(${Math.sign(dx) * -8}deg) scale(1.06,.94)`, filter: 'brightness(1.35)' },
+                { transform: 'translate(0,0) rotate(0)', filter: 'brightness(1)' },
+             ], 780, 'steps(10,end)');
+          }
+          case 'smoke-breath': {
+             const mouth = { x: from.x + Math.sign(dx || 1) * from.width * .28, y: from.y - from.height * .12 };
+             for (let i = 0; i < 8; i++) {
+                setTimeout(() => {
+                   if (gen !== pbGen) return;
+                   const t = .08 + i * .065;
+                   pbBurstAt({
+                      x: mouth.x + (to.x - mouth.x) * t,
+                      y: mouth.y + (to.y - mouth.y) * t - i * 2,
+                   }, 'smoke', '#9a93a8', '#d7d1df', 4, gen, 34 + i * 3);
+                }, 210 + i * 86);
+             }
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .22, transform: `translate(${-Math.sign(dx || 1) * 9}px,-7px) rotate(${Math.sign(dx || 1) * -7}deg) scale(1.05,.96)` },
+                { offset: .76, transform: 'translate(0,-4px) scale(1.08,.94)', filter: 'brightness(1.35)' },
+                { transform: 'translate(0,0) rotate(0)', filter: 'brightness(1)' },
+             ], 1120, 'cubic-bezier(.2,.65,.2,1)');
+          }
           case 'neon-ignition':
           case 'inferno-breath':
           case 'ember-breath': {
@@ -18442,6 +18677,29 @@
                 { offset: .76, transform: `translate(${dx * .65}px,${dy * .65 - 52}px)` },
                 { transform: 'translate(0,0)' },
              ], 1040, 'cubic-bezier(.2,.75,.2,1)');
+          case 'frog-hop':
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .12, transform: 'translate(0,8px) scale(1.12,.8)' },
+                { offset: .24, transform: 'translate(0,-34px) scale(.9,1.12)' },
+                { offset: .38, transform: 'translate(0,0) scale(1.1,.84)' },
+                { offset: .5, transform: `translate(${dx * .16}px,-42px) scale(.88,1.14)` },
+                { offset: .66, transform: `translate(${dx * .16}px,0) scale(1.12,.82)` },
+                { offset: .78, transform: `translate(${dx * .34}px,-36px) scale(.9,1.1)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 900, 'cubic-bezier(.2,.78,.2,1)');
+          case 'rain-drizzle':
+             pbWeather('rain', '#83c9ff', '#dff5ff', 18, gen);
+             pbTravelRings(from, { x: from.x + dx * .55, y: from.y + dy * .55 }, '#83c9ff', '#dff5ff', gen);
+             return move([
+                { transform: 'translate(0,0) scale(1)' },
+                { offset: .12, transform: 'translate(0,-42px) rotate(-6deg)' },
+                { offset: .24, transform: 'translate(0,0) scale(1.08,.86)' },
+                { offset: .38, transform: `translate(${dx * .2}px,-49px) rotate(7deg)` },
+                { offset: .52, transform: `translate(${dx * .2}px,0) scale(1.08,.86)` },
+                { offset: .68, transform: `translate(${dx * .46}px,-46px) rotate(-5deg)` },
+                { transform: 'translate(0,0) scale(1)' },
+             ], 980, 'cubic-bezier(.2,.75,.2,1)');
           case 'prism-beam': {
              const horn = { x: from.x + Math.sign(dx || 1) * from.width * .28, y: from.y - from.height * .28 };
              pbBurstAt(horn, 'spark', '#ff66c9', '#8ff6ff', 18, gen, 52);
@@ -18457,6 +18715,39 @@
                 { transform: 'translate(0,0)', filter: 'brightness(1)' },
              ], 940, 'steps(9,end)');
           }
+          case 'stardust-gallop':
+             pbAfterimages(attPrefix, from, { x: from.x + dx * .7, y: from.y + dy * .7 }, '#ff66c9', gen, 5);
+             for (let i = 0; i < 5; i++) {
+                setTimeout(() => gen === pbGen && pbBurstAt({
+                   x: from.x + dx * (.12 + i * .12), y: from.y + dy * (.12 + i * .12) + 18,
+                }, 'spark', ['#ff5f6d','#ffa93d','#ffe45c','#6ee77a','#5cc8ff'][i], '#ffffff', 5, gen, 32), 90 + i * 90);
+             }
+             return move([
+                { transform: 'translate(0,0) rotate(0)' },
+                { offset: .14, transform: 'translate(0,8px) scale(1.08,.86)' },
+                { offset: .48, transform: `translate(${dx * .72}px,${dy * .72 - 18}px) rotate(${Math.sign(dx) * -8}deg) scale(.94,1.06)` },
+                { offset: .7, transform: `translate(${dx * .52}px,${dy * .52}px) rotate(${Math.sign(dx) * 7}deg)` },
+                { transform: 'translate(0,0) rotate(0) scale(1)' },
+             ], 1050, 'cubic-bezier(.22,.75,.2,1)');
+          case 'halo-blessing':
+             pbBurstAt(from, 'spark', '#ffd76a', '#fff7c2', 26, gen, 94);
+             pbTravelRings(from, { x: from.x + Math.sign(dx) * 18, y: from.y }, '#ffd76a', '#fff7c2', gen);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
+                { offset: .25, transform: `translate(0,-28px) rotate(${Math.sign(dx) * -12}deg) scale(.92,1.12)`, filter: 'brightness(1.5)' },
+                { offset: .72, transform: 'translate(0,-24px) scale(1.06)', filter: 'brightness(1.9) drop-shadow(0 0 18px #ffd76a)' },
+                { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
+             ], 1160, 'cubic-bezier(.2,.68,.2,1)');
+          case 'solar-flare':
+             pbBurstAt(from, 'spark', '#ff8b2d', '#ffe35a', 30, gen, 105);
+             pbTravelRings(from, { x: from.x + Math.sign(dx) * 26, y: from.y }, '#ff8b2d', '#ffe35a', gen);
+             setTimeout(() => gen === pbGen && pbBurstAt(to, 'spark', '#ff8b2d', '#ffe35a', 18, gen, 72), 480);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
+                { offset: .25, transform: 'translate(0,-34px) scale(1.22,.82)', filter: 'brightness(1.55)' },
+                { offset: .68, transform: 'translate(0,-30px) scale(1.32,.76)', filter: 'brightness(2) drop-shadow(0 0 22px #ff6b2d)' },
+                { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
+             ], 980, 'cubic-bezier(.2,.68,.2,1)');
           case 'ember-dive':
              pbBurstAt(from, 'spark', '#ff5a2d', '#ffe35a', 18, gen, 70);
              setTimeout(() => {
@@ -18471,6 +18762,21 @@
                 { offset: .72, transform: `translate(${dx * .62}px,${dy * .62 - 24}px) rotate(${Math.sign(dx) * -8}deg)`, filter: 'brightness(1.25)' },
                 { transform: 'translate(0,0) rotate(0) scale(1)', filter: 'brightness(1)' },
              ], 1080, 'cubic-bezier(.2,.72,.2,1)');
+          case 'phoenix-rebirth':
+             pbBurstAt(from, 'smoke', '#5d463d', '#ff9a3d', 24, gen, 82);
+             setTimeout(() => {
+                if (gen !== pbGen) return;
+                pbBurstAt(from, 'spark', '#ff5a2d', '#ffe35a', 36, gen, 118);
+                pbBurstAt(to, 'spark', '#ff5a2d', '#ffe35a', 24, gen, 90);
+             }, 700);
+             return move([
+                { transform: 'translate(0,0) rotate(0) scale(1)', opacity: 1, filter: 'brightness(1)' },
+                { offset: .22, transform: 'translate(0,18px) rotate(12deg) scale(.78)', opacity: .55, filter: 'grayscale(.5) brightness(.7)' },
+                { offset: .42, transform: 'translate(0,28px) rotate(-18deg) scale(.25)', opacity: 0, filter: 'grayscale(1) brightness(.35)' },
+                { offset: .62, transform: 'translate(0,-72px) scale(.35)', opacity: 0, filter: 'brightness(2.2)' },
+                { offset: .78, transform: 'translate(0,-28px) scale(1.22,.82)', opacity: 1, filter: 'brightness(2.4) drop-shadow(0 0 24px #ff5a2d)' },
+                { transform: 'translate(0,0) rotate(0) scale(1)', opacity: 1, filter: 'brightness(1)' },
+             ], 1380, 'cubic-bezier(.2,.72,.2,1)');
           case 'showoff-flap':
              pbBurstAt(from, 'spark', c1, c2, 14, gen, 64);
              return move([
@@ -18729,10 +19035,10 @@
           
              async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
-               const attackProfile = getPbAttackProfile(attacker.petId);
-               const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage);
+               const attackProfile = getPbAttackProfile(attacker.petId, attRes.move);
+               const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage, attRes.move);
                try {
-                   if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attTheme, myGen))) return;
+                   if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attRes.move, attTheme, myGen))) return;
                    const isUlt = attRes.move === 'ultimate';
                    await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
                                    attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage,

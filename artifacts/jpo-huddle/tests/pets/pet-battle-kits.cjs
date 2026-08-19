@@ -56,26 +56,51 @@ assert.equal(kitIds.size, expectedPets.length, "kit ids must be unique");
 assert.equal(specialNames.size, expectedPets.length, "special move names must be unique");
 assert.equal(ultimateNames.size, expectedPets.length, "ultimate move names must be unique");
 
-const expectedProfiles = {
+const expectedUltimates = {
   pet_duck: ["splash-dive", "peck"], pet_duck_snow: ["snow-dive", "peck"],
   pet_cat: ["boss-slam", "scratch"], pet_cat_black: ["void-blink", "scratch"], pet_cat_snow: ["frost-coronation", "scratch"],
   pet_dog: ["solar-leap", "bite"], pet_dog_choco: ["cocoa-pounce", "bite"], pet_dog_husky: ["moonlit-blink", "bite"],
   pet_bunny: ["blizzard-binky", "kick"], pet_bunny_cocoa: ["drift-donuts", "kick"],
-  pet_turtle: ["shell-garden", "shell"], pet_turtle_sapphire: ["sapphire-spin", "shell"],
+  pet_turtle: ["shell-garden", "shell"], pet_turtle_sapphire: ["frost-stomp", "shell"],
   pet_dragon: ["neon-ignition", "wing"], pet_dragon_crimson: ["inferno-breath", "wing"], pet_dragon_obsidian: ["void-slam", "wing"],
-  pet_frog: ["rain-dance", "tongue"], pet_unicorn: ["prism-beam", "horn"], pet_phoenix: ["ember-dive", "wing"],
+  pet_frog: ["rain-dance", "tongue"], pet_unicorn: ["halo-blessing", "horn"], pet_phoenix: ["phoenix-rebirth", "wing"],
 };
+
+const profileStart = clientSource.indexOf("const PB_ATTACK_PROFILE_BY_PET =");
+const profileEnd = clientSource.indexOf("function getPbTheme(", profileStart);
+assert.ok(profileStart >= 0 && profileEnd > profileStart, "client move choreography registry not found");
+const clientSandbox = {};
+vm.runInNewContext(
+  `${clientSource.slice(profileStart, profileEnd)}
+   globalThis.__battleProfiles = { PB_ATTACK_PROFILE_BY_PET, PB_DEFAULT_ATTACK_PROFILE, getPbAttackProfile };`,
+  clientSandbox,
+  { filename: "client-battle-profiles.js" },
+);
+const {
+  PB_ATTACK_PROFILE_BY_PET: profiles,
+  getPbAttackProfile,
+} = clientSandbox.__battleProfiles;
+
+assert.deepEqual(Object.keys(profiles).sort(), expectedPets.sort(),
+  "every current pet needs exactly one client animation profile");
+const moveIds = ["attack", "special", "ultimate"];
 const choreographies = new Set();
 const attackEffects = new Set();
 for (const pet of expectedPets) {
-  const [choreo, effect] = expectedProfiles[pet];
-  const escapedPet = pet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  assert.match(clientSource, new RegExp(`${escapedPet}:?\\s*\\{[^}]*choreo:\\s*'${choreo}'[^}]*effect:\\s*'${effect}'`),
-    `client attack profile is missing ${pet}`);
+  const [ultimateChoreo, effect] = expectedUltimates[pet];
+  const resolved = moveIds.map(moveId => getPbAttackProfile(pet, moveId));
+  assert.equal(new Set(resolved.map(profile => profile.choreo)).size, 3,
+    `${pet} Attack, Special, and Ultimate must use different office choreographies`);
+  assert.equal(resolved[2].choreo, ultimateChoreo, `${pet} lost its signature Ultimate choreography`);
+  assert.ok(resolved.every(profile => profile.effect === effect), `${pet} lost its contact effect`);
+  assert.ok(resolved.every(profile => profile.label && profile.label !== "HIT!"),
+    `${pet} needs a visible label for every move`);
   assert.match(clientSource, new RegExp(`\\.pb-hit-${effect}\\b`), `client is missing the ${effect} contact effect`);
-  assert.match(clientSource, new RegExp(`case '${choreo}'|choreo === '${choreo}'`),
-    `battle adapter is missing the ${choreo} office choreography`);
-  choreographies.add(choreo);
+  for (const { choreo } of resolved) {
+    assert.match(clientSource, new RegExp(`case '${choreo}'|choreo === '${choreo}'`),
+      `battle adapter is missing ${pet}'s ${choreo} office choreography`);
+    choreographies.add(choreo);
+  }
   attackEffects.add(effect);
 
   const stem = pet.replace(/^pet_/, "");
@@ -83,24 +108,28 @@ for (const pet of expectedPets) {
     fs.existsSync(path.join(root, "public/assets/pets/anim", `${stem}${form}_action.png`)));
   assert.ok(hasActionPose, `${pet} needs at least one reusable action pose`);
 }
-assert.ok(choreographies.size >= 15, "the roster needs the real varied office trick choreographies");
+assert.ok(choreographies.size >= 25, "the roster needs distinct lower-tier and signature office choreographies");
 assert.ok(attackEffects.size >= 8, "the roster needs varied on-target contact effects");
 assert.match(clientSource, /function pbShowActionPose\(/, "battle attacks must swap to existing action art");
+assert.match(clientSource, /preferredSuffix\s*=\s*moveId === 'ultimate'[\s\S]*moveId === 'special'/,
+  "Attack, Special, and Ultimate should prefer their matching form action art");
 assert.match(clientSource, /function pbSpawnAnimalHit\(/, "battle attacks must create animal-specific contact feedback");
 assert.match(clientSource, /function pbPlayOfficeChoreo\(/, "battle attacks must use the office choreography adapter");
-assert.match(clientSource, /pbPlayOfficeChoreo\(myPrefix, oppPrefix, attacker/,
-  "the authoritative battle round queue must invoke the office choreography adapter");
+assert.match(clientSource, /pbPlayOfficeChoreo\(myPrefix, oppPrefix, attacker, attRes\.move/,
+  "the authoritative battle round queue must pass the resolved move into the choreography adapter");
 const clientChoreoResolverSource = clientSource.slice(
   clientSource.indexOf("function pbResolveOfficeChoreo("),
   clientSource.indexOf("async function pbPlayOfficeChoreo("),
 );
-assert.match(clientChoreoResolverSource, /return getPbAttackProfile\(petId\)\.choreo/,
-  "every form must retain its pet's recognizable office choreography");
-assert.doesNotMatch(clientChoreoResolverSource, /stage\s*[<>=]|startsWith|basic-hop|tail-chase|shell-spin/,
-  "mapped pets must not fall back to generic choreography at lower stages");
+assert.match(clientChoreoResolverSource, /getPbAttackProfile\(petId, moveId\)\.choreo/,
+  "the choreography resolver must select by both pet and move");
+assert.doesNotMatch(clientChoreoResolverSource, /stage|Math\.random/,
+  "move choreography must be deterministic and must not depend on evolution stage");
 for (const signature of [
   "pbTravelRings(from, to", "pbWeather('snow'", "pbWeather('rain'",
   "assets/pets/shell_sapphire.png", "pbBeam(mouth, to", "pbAfterimages(attPrefix",
+  "case 'cat-stretch'", "case 'cat-pounce'", "case 'boss-slam'",
+  "case 'dragon-sputter'", "case 'smoke-breath'", "case 'phoenix-rebirth'",
 ]) {
   assert.ok(clientSource.includes(signature), `battle choreography is missing signature beat: ${signature}`);
 }
@@ -134,4 +163,4 @@ for (const dispatch of [
   assert.doesNotMatch(resolverSource, dispatch, "visual kits must not dispatch hidden combat effects");
 }
 
-console.log(`PASS ${expectedPets.length} office trick choreographies, ${choreographies.size} sequences, ${attackEffects.size} contact effects`);
+console.log(`PASS ${expectedPets.length} pets × 3 distinct move choreographies, ${choreographies.size} sequences, ${attackEffects.size} contact effects`);

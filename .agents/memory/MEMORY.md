@@ -20,7 +20,7 @@
 - [JPO Huddle Red Light Green Light](jpo-huddle-rlgl.md) — red-light detection rides validated playerMove; replay-until-survivor limbo flag; finishers survive refresh (email-keyed payout).
 - [JPO Huddle pet sprite pipeline](jpo-huddle-pet-sprites.md) — one-sheet gen → bbox slicing → flood-erase opaque white checkerboard; art faces RIGHT; present options before building.
 - [JPO Huddle pet race](jpo-huddle-pet-race.md) — position must come from the server position event, never the sprite loop (action-lock/missing asset froze the whole field); settle duel forfeits before deleting the leaver.
-- [JPO Huddle pet battles](jpo-huddle-pet-battles.md) — server-frozen combat; XP uses idempotent DB claims, UTC cap, and pair cooldown (including bot); block session-only rewards.
+- [JPO Huddle pet battles](jpo-huddle-pet-battles.md) — server-frozen combat; deterministic move-specific office choreography; idempotent XP claims, UTC cap, pair cooldown, no session-only rewards.
 - [JPO Huddle seasonal weather](jpo-huddle-seasonal.md) — client-only Aug–Oct rain; wall-clock-hashed storm slots sync all clients with zero server code; Halloween + evolving seasonal pets on owner's backlog.
 - [JPO Huddle outfit slots & seasonal shop](jpo-huddle-outfit-slots.md) — 4 slot columns beside legacy equipped_cosmetic; every settlement path must clear ALL equip columns; seasonal gate is server-side, client only hides rows.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.
