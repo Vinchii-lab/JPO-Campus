@@ -1540,6 +1540,184 @@ const PB_ULT_CHARGE   = 3;                 // 'ultimate' needs this much charge 
 // else in a submitted build is rejected. All non-negative, bounded by budget.
 const PB_ATTRS = ["power", "vitality", "speed", "critical", "focus"];
 
+// Every owned pet id has a real combat identity. The four wire-level move ids
+// stay fixed (attack/guard/special/ultimate), but their names, stat profile,
+// tactical effect and animation family come from this SERVER-owned kit. This
+// keeps the client untrusted while making a different pet genuinely different.
+const PB_DEFAULT_KIT = {
+  id: "rookie", passive: "Steady", motion: "rush",
+  attackName: "Tackle", guardName: "Brace", specialName: "Power Hit", ultimateName: "Final Rush",
+  attackHint: "Reliable damage", guardHint: "Reduce incoming damage",
+  specialHint: "Heavy hit", ultimateHint: "Charged finisher",
+  hpMult: 1, atkMult: 1, guardBonus: 0, critBonus: 0, dodgeBonus: 0,
+  attackMult: 1, specialMult: 1, ultimateMult: 1,
+  specialEffect: "none", ultimateEffect: "power", guardCounter: 0,
+};
+const PB_KITS = {
+  pet_duck: {
+    id: "puddle-scout", passive: "Wake Rider", motion: "dive",
+    attackName: "Bill Jab", guardName: "Float Guard", specialName: "Water Gun", ultimateName: "Hydro Blast",
+    attackHint: "Fast jab", guardHint: "Softens the next hit", specialHint: "Soaks and weakens", ultimateHint: "Blast + water shield",
+    hpMult: .98, atkMult: 1, guardBonus: .03, critBonus: 0, dodgeBonus: .03,
+    attackMult: 1, specialMult: .9, ultimateMult: 1, specialEffect: "weaken", ultimateEffect: "shield", guardCounter: 0,
+  },
+  pet_duck_snow: {
+    id: "snow-drifter", passive: "Cold Current", motion: "dive",
+    attackName: "Ice Peck", guardName: "Snow Nest", specialName: "Snowball", ultimateName: "Blizzard",
+    attackHint: "Crisp peck", guardHint: "Dense frost guard", specialHint: "Chills enemy power", ultimateHint: "Long freeze",
+    hpMult: .96, atkMult: 1.01, guardBonus: .04, critBonus: 0, dodgeBonus: .02,
+    attackMult: 1, specialMult: .86, ultimateMult: .96, specialEffect: "chill", ultimateEffect: "freeze", guardCounter: 0,
+  },
+  pet_cat: {
+    id: "alley-hunter", passive: "Hunter's Instinct", motion: "pounce",
+    attackName: "Quick Claw", guardName: "Cat Stance", specialName: "Claw Swipe", ultimateName: "Feral Frenzy",
+    attackHint: "High crit swipe", guardHint: "Readies a sidestep", specialHint: "Leaves a bleed", ultimateHint: "Crit-fueled frenzy",
+    hpMult: .92, atkMult: 1.05, guardBonus: -.02, critBonus: .06, dodgeBonus: .04,
+    attackMult: .96, specialMult: .88, ultimateMult: 1.08, specialEffect: "bleed", ultimateEffect: "power", guardCounter: 0,
+  },
+  pet_cat_black: {
+    id: "shadow-stalker", passive: "Fade Step", motion: "pounce",
+    attackName: "Shade Claw", guardName: "Vanish", specialName: "Night Slash", ultimateName: "Phantom Strike",
+    attackHint: "Slips through openings", guardHint: "Banks an evade", specialHint: "Exposes the target", ultimateHint: "Drains health",
+    hpMult: .9, atkMult: 1.03, guardBonus: -.04, critBonus: .04, dodgeBonus: .07,
+    attackMult: 1, specialMult: .94, ultimateMult: .92, specialEffect: "expose", ultimateEffect: "drain", guardCounter: 0,
+  },
+  pet_cat_snow: {
+    id: "frost-prowler", passive: "Snow Paws", motion: "pounce",
+    attackName: "Frost Claw", guardName: "Ice Curl", specialName: "Chill Claw", ultimateName: "Avalanche",
+    attackHint: "Cold quick strike", guardHint: "Builds an ice shell", specialHint: "Chills enemy power", ultimateHint: "Damage + barrier",
+    hpMult: .95, atkMult: 1, guardBonus: .03, critBonus: .03, dodgeBonus: .03,
+    attackMult: 1, specialMult: .9, ultimateMult: 1, specialEffect: "chill", ultimateEffect: "shield", guardCounter: 0,
+  },
+  pet_dog: {
+    id: "pack-leader", passive: "Pack Spirit", motion: "rush",
+    attackName: "Shoulder Rush", guardName: "Hold Ground", specialName: "Battle Bark", ultimateName: "Earth Shaker",
+    attackHint: "Strong body check", guardHint: "Firm defensive stance", specialHint: "Raises attack", ultimateHint: "Sets a counter stance",
+    hpMult: 1.05, atkMult: 1, guardBonus: .02, critBonus: 0, dodgeBonus: -.01,
+    attackMult: 1, specialMult: .76, ultimateMult: 1.04, specialEffect: "power", ultimateEffect: "counter", guardCounter: 0,
+  },
+  pet_dog_choco: {
+    id: "mud-bruiser", passive: "Heavy Paws", motion: "rush",
+    attackName: "Heavy Bite", guardName: "Dig In", specialName: "Mud Slap", ultimateName: "Quake",
+    attackHint: "Slow heavy damage", guardHint: "Extra sturdy block", specialHint: "Muddies enemy damage", ultimateHint: "Massive direct hit",
+    hpMult: 1.1, atkMult: 1.03, guardBonus: .05, critBonus: -.01, dodgeBonus: -.04,
+    attackMult: 1.05, specialMult: .88, ultimateMult: 1.14, specialEffect: "weaken", ultimateEffect: "none", guardCounter: 0,
+  },
+  pet_dog_husky: {
+    id: "tundra-runner", passive: "Trail Guard", motion: "rush",
+    attackName: "Ice Fang", guardName: "Snow Brace", specialName: "Tundra Howl", ultimateName: "Whiteout Charge",
+    attackHint: "Balanced fang strike", guardHint: "Raises a frost shield", specialHint: "Shield + attack boost", ultimateHint: "Charge through the cold",
+    hpMult: 1.04, atkMult: .98, guardBonus: .04, critBonus: 0, dodgeBonus: .01,
+    attackMult: 1, specialMult: .7, ultimateMult: 1.08, specialEffect: "rally", ultimateEffect: "chill", guardCounter: 0,
+  },
+  pet_bunny: {
+    id: "wind-hopper", passive: "Quick Feet", motion: "hop",
+    attackName: "Hop Kick", guardName: "Backstep", specialName: "Quick Kick", ultimateName: "Tornado Spin",
+    attackHint: "Fast kick", guardHint: "Banks an evade", specialHint: "Evade + extra charge", ultimateHint: "Finisher refunds 1 charge",
+    hpMult: .9, atkMult: .98, guardBonus: -.04, critBonus: .02, dodgeBonus: .09,
+    attackMult: .95, specialMult: .88, ultimateMult: 1.05, specialEffect: "evade", ultimateEffect: "charge", guardCounter: 0,
+  },
+  pet_bunny_cocoa: {
+    id: "burrow-boxer", passive: "Deep Burrow", motion: "burrow",
+    attackName: "Burrow Jab", guardName: "Dirt Cover", specialName: "Burrow Strike", ultimateName: "Meteor Bound",
+    attackHint: "Pops up beneath target", guardHint: "Gains an earth shield", specialHint: "Shield + next-hit power", ultimateHint: "Leap and recover",
+    hpMult: 1, atkMult: .98, guardBonus: .04, critBonus: 0, dodgeBonus: .03,
+    attackMult: 1, specialMult: .8, ultimateMult: 1.02, specialEffect: "burrow", ultimateEffect: "regen", guardCounter: 0,
+  },
+  pet_turtle: {
+    id: "shell-warden", passive: "Spiked Shell", motion: "shell",
+    attackName: "Shell Bump", guardName: "Shell Brace", specialName: "Snap Counter", ultimateName: "Nature's Wrath",
+    attackHint: "Armored bump", guardHint: "Reflects guarded damage", specialHint: "Prepares a stronger counter", ultimateHint: "Fortifies the shell",
+    hpMult: 1.13, atkMult: .92, guardBonus: .1, critBonus: -.02, dodgeBonus: -.06,
+    attackMult: .98, specialMult: .72, ultimateMult: .94, specialEffect: "counter", ultimateEffect: "shield", guardCounter: .22,
+  },
+  pet_turtle_sapphire: {
+    id: "tidal-bastion", passive: "Living Reef", motion: "shell",
+    attackName: "Tidal Bump", guardName: "Reef Guard", specialName: "Aqua Mend", ultimateName: "Tsunami Wall",
+    attackHint: "Steady water hit", guardHint: "Strongest basic guard", specialHint: "Restores health", ultimateHint: "Huge barrier",
+    hpMult: 1.1, atkMult: .9, guardBonus: .12, critBonus: -.02, dodgeBonus: -.05,
+    attackMult: 1, specialMult: .68, ultimateMult: .82, specialEffect: "heal", ultimateEffect: "greatShield", guardCounter: .12,
+  },
+  pet_dragon: {
+    id: "arcane-wyrm", passive: "Rune Wings", motion: "wing",
+    attackName: "Wing Cut", guardName: "Rune Guard", specialName: "Arcane Flame", ultimateName: "Dragon Nova",
+    attackHint: "Wing-powered slash", guardHint: "Mystic guard", specialHint: "Exposes the target", ultimateHint: "Empowers future attacks",
+    hpMult: .97, atkMult: 1.04, guardBonus: 0, critBonus: .02, dodgeBonus: .02,
+    attackMult: 1, specialMult: .94, ultimateMult: 1.05, specialEffect: "expose", ultimateEffect: "power", guardCounter: 0,
+  },
+  pet_dragon_crimson: {
+    id: "inferno-wyrm", passive: "Heat Engine", motion: "wing",
+    attackName: "Flame Claw", guardName: "Heat Veil", specialName: "Ember Spit", ultimateName: "Inferno",
+    attackHint: "Hot claw strike", guardHint: "Fire-hardened guard", specialHint: "Applies burn", ultimateHint: "Long, fierce burn",
+    hpMult: .96, atkMult: 1.06, guardBonus: 0, critBonus: .02, dodgeBonus: .01,
+    attackMult: 1, specialMult: .86, ultimateMult: .98, specialEffect: "burn", ultimateEffect: "inferno", guardCounter: 0,
+  },
+  pet_dragon_obsidian: {
+    id: "void-wyrm", passive: "Dark Hunger", motion: "wing",
+    attackName: "Void Claw", guardName: "Abyss Fold", specialName: "Dark Pulse", ultimateName: "Void Eruption",
+    attackHint: "Shadow strike", guardHint: "Dense void guard", specialHint: "Drains health", ultimateHint: "Exposes and drains",
+    hpMult: .95, atkMult: 1.03, guardBonus: .02, critBonus: .03, dodgeBonus: .01,
+    attackMult: 1, specialMult: .82, ultimateMult: .94, specialEffect: "drain", ultimateEffect: "voidDrain", guardCounter: 0,
+  },
+  pet_frog: {
+    id: "storm-caller", passive: "Rain Rhythm", motion: "tongue",
+    attackName: "Tongue Snap", guardName: "Lily Guard", specialName: "Toxic Bubble", ultimateName: "Thunder Swamp",
+    attackHint: "Long-range tongue hit", guardHint: "Slippery guard", specialHint: "Applies poison", ultimateHint: "Storm weakens the enemy",
+    hpMult: .98, atkMult: .97, guardBonus: .02, critBonus: 0, dodgeBonus: .05,
+    attackMult: .96, specialMult: .78, ultimateMult: 1.02, specialEffect: "poison", ultimateEffect: "storm", guardCounter: 0,
+  },
+  pet_unicorn: {
+    id: "prism-guardian", passive: "Gentle Light", motion: "beam",
+    attackName: "Horn Spark", guardName: "Prism Guard", specialName: "Healing Beam", ultimateName: "Starlight Aegis",
+    attackHint: "Focused light strike", guardHint: "Clean magic guard", specialHint: "Deals damage and heals", ultimateHint: "Heal + large barrier",
+    hpMult: 1.02, atkMult: .95, guardBonus: .06, critBonus: 0, dodgeBonus: 0,
+    attackMult: 1, specialMult: .72, ultimateMult: .8, specialEffect: "heal", ultimateEffect: "aegis", guardCounter: 0,
+  },
+  pet_phoenix: {
+    id: "reborn-flame", passive: "Ash Runner", motion: "rebirth",
+    attackName: "Flame Wing", guardName: "Ash Veil", specialName: "Searing Wing", ultimateName: "Supernova",
+    attackHint: "Blazing wing cut", guardHint: "Ash-softened guard", specialHint: "Burn + regeneration", ultimateHint: "Arms one rebirth",
+    hpMult: .94, atkMult: 1.05, guardBonus: 0, critBonus: .03, dodgeBonus: .02,
+    attackMult: 1, specialMult: .82, ultimateMult: 1, specialEffect: "phoenixBurn", ultimateEffect: "rebirth", guardCounter: 0,
+  },
+};
+const PB_PASSIVE_HINTS = {
+  "puddle-scout": "extra dodge and a firmer guard",
+  "snow-drifter": "frost guards are stronger and create cover",
+  "alley-hunter": "higher crit and dodge, lower durability",
+  "shadow-stalker": "highest dodge; guarding banks an evade",
+  "frost-prowler": "balanced crit/dodge; guarding builds ice cover",
+  "pack-leader": "more HP and sturdy close-range pressure",
+  "mud-bruiser": "highest raw bulk; slower to evade",
+  "tundra-runner": "extra HP; guarding builds a frost shield",
+  "wind-hopper": "highest speed dodge; guarding banks an evade",
+  "burrow-boxer": "guarding and burrowing build cover",
+  "shell-warden": "highest HP; guarded hits reflect damage",
+  "tidal-bastion": "strongest guard plus minor reflection",
+  "arcane-wyrm": "high attack with balanced air mobility",
+  "inferno-wyrm": "high attack and crit pressure",
+  "void-wyrm": "crit pressure paired with health drain",
+  "storm-caller": "slippery movement and long status pressure",
+  "prism-guardian": "durable guard and reliable restoration",
+  "reborn-flame": "high crit/dodge; Searing Wing regenerates",
+};
+function petBattleKit(petId) {
+  return { ...PB_DEFAULT_KIT, ...(PB_KITS[petId] || {}), petId };
+}
+function petBattlePublicKit(kit) {
+  return {
+    id: kit.id, passive: kit.passive,
+    passiveHint: PB_PASSIVE_HINTS[kit.id] || "balanced battle stats",
+    motion: kit.motion,
+    moves: {
+      attack: { name: kit.attackName, hint: kit.attackHint },
+      guard: { name: kit.guardName, hint: kit.guardHint },
+      special: { name: kit.specialName, hint: kit.specialHint },
+      ultimate: { name: kit.ultimateName, hint: kit.ultimateHint },
+    },
+  };
+}
+
 // Training budget: points a pet may allocate across PB_ATTRS. Grows with
 // feed-XP and stage so an evolved, well-fed pet is meaningfully stronger — but
 // BOUNDED so form is an edge, not a runaway. Budget is derived server-side
@@ -1576,35 +1754,34 @@ function effectivePetBuild(p, pet) {
   return clean || { power: 0, vitality: 0, speed: 0, critical: 0, focus: 0 };
 }
 
-// ── Combat math (pure; identical rules for every species — see fairness note)
-// FORM FAIRNESS: raw combat is derived ONLY from stage + build. Species differ
-// on the CLIENT (pixel art/animation) but share one rule set here, so no pet is
-// mechanically stronger for its look. Higher stage grants a bounded baseline
-// and better multipliers, so evolving matters materially without being a
-// guaranteed win.
-function petBattleStats(stage, build) {
+// ── Combat math (pure; species identity stays inside a bounded power budget)
+// A kit changes the shape of the pet (durability, speed, crit, move effects),
+// not the reward rules or authority model. Rare pets are side-grades, never a
+// paid/stat tier. Stage + owner build remain the main progression inputs.
+function petBattleStats(stage, build, kit = PB_DEFAULT_KIT) {
   const b = build || {};
   const p = b.power || 0, v = b.vitality || 0, sp = b.speed || 0, cr = b.critical || 0, fo = b.focus || 0;
   // Stage baseline (bounded): stage 1/2/3 → these anchors before build tuning.
   const hpBase   = [0, 50, 62, 74][stage] || 50;
   const atkBase  = [0, 10, 12, 14][stage] || 10;
   const formMult = [0, 1.00, 1.10, 1.22][stage] || 1.0;  // stage improves multipliers
+  const attack = Math.round((atkBase + p * 3) * formMult * kit.atkMult);
   return {
-    maxHp:    Math.round((hpBase + v * 6) * formMult),
-    attack:   Math.round((atkBase + p * 3) * formMult),
+    maxHp:    Math.round((hpBase + v * 6) * formMult * kit.hpMult),
+    attack,
     // guard mitigation fraction (higher vitality + focus = tougher block), capped.
-    guardCut: Math.min(0.75, 0.45 + v * 0.03 + fo * 0.02),
+    guardCut: Math.min(0.78, Math.max(0.3, 0.45 + v * 0.03 + fo * 0.02 + kit.guardBonus)),
     // crit chance & multiplier from the critical attribute (bounded).
-    critChance: Math.min(0.6, 0.05 + cr * 0.05),
+    critChance: Math.min(0.6, Math.max(0.01, 0.05 + cr * 0.05 + kit.critBonus)),
     critMult:   1.5 + Math.min(0.5, cr * 0.05),
     // Speed is an actual combat choice: quicker pets can cleanly evade a blow.
     // It is capped well below certainty so form/build never guarantees a dodge.
-    dodgeChance: Math.min(0.3, sp * 0.025),
+    dodgeChance: Math.min(0.34, Math.max(0, sp * 0.025 + kit.dodgeBonus)),
     speed:      sp,
     focus:      fo,
     // special = a bigger, cooldown-gated hit; ultimate = charge-gated finisher.
-    special:  Math.round((atkBase + p * 3) * formMult * (1.6 + fo * 0.05)),
-    ultimate: Math.round((atkBase + p * 3) * formMult * (2.4 + fo * 0.06)),
+    special:  Math.round(attack * (1.6 + fo * 0.05) * kit.specialMult),
+    ultimate: Math.round(attack * (2.4 + fo * 0.06) * kit.ultimateMult),
   };
 }
 
@@ -3280,8 +3457,25 @@ function petBattleCombatantView(b, side) {
     hp:       c.hp,
     maxHp:    c.stats.maxHp,
     charge:   c.charge,
+    kit:      petBattlePublicKit(c.kit),
+    statuses: petBattleStatusView(c),
     isBot:    !!c.isBot,
   };
+}
+
+function petBattleStatusView(side) {
+  const s = side.status || {};
+  const out = [];
+  if (s.shield > 0) out.push(`Shield ${s.shield}`);
+  if (s.dot?.turns > 0) out.push(`${s.dot.kind} ${s.dot.turns}`);
+  if (s.weaken > 0) out.push(`Weakened ${s.weaken}`);
+  if (s.exposed > 0) out.push(`Exposed ${s.exposed}`);
+  if (s.power > 0) out.push(`Power Up ${s.power}`);
+  if (s.evade > 0) out.push(`Evade ${s.evade}`);
+  if (s.counter > 0) out.push(`Counter ${s.counter}`);
+  if (s.regen > 0) out.push(`Regen ${s.regen}`);
+  if (s.rebirth) out.push("Rebirth armed");
+  return out;
 }
 
 // The full pair of combatant views, from the perspective label the client wants.
@@ -3295,13 +3489,18 @@ function petBattleView(b) {
 // the single source of truth (so evolving/retraining mid-battle can't change
 // an in-flight fight, and a client can't inject stats).
 function petBattleSnapshot(id, name, petId, stage, build, isBot) {
-  const stats = petBattleStats(stage, build);
+  const kit = petBattleKit(petId);
+  const stats = petBattleStats(stage, build, kit);
   return {
     id, name, petId, stage, build: { ...build }, isBot: !!isBot,
-    stats,
+    kit, stats,
     hp: stats.maxHp,        // both sides start at form-scaled full HP
     charge: 0,              // ultimate charge, built by attack/guard
     specialCd: 0,           // rounds remaining before 'special' is usable again
+    status: {
+      shield: 0, dot: null, weaken: 0, exposed: 0, power: 0,
+      evade: 0, counter: 0, regen: 0, regenAmount: 0, rebirth: false,
+    },
     pick: null,             // this round's chosen move (server-locked)
   };
 }
@@ -3326,8 +3525,12 @@ function petBattleMoveLegal(side, move) {
 function petBattleBotMove(bot, foe) {
   if (petBattleMoveLegal(bot, "ultimate")) return "ultimate";
   const lowHp = bot.hp <= bot.stats.maxHp * 0.35;
-  if (lowHp && Math.random() < 0.5) return "guard";
-  if (petBattleMoveLegal(bot, "special") && Math.random() < 0.6) return "special";
+  const recoveryKit = ["heal", "rally", "burrow", "regen", "phoenixBurn"].includes(bot.kit.specialEffect);
+  if (lowHp && recoveryKit && petBattleMoveLegal(bot, "special")) return "special";
+  if (lowHp && Math.random() < 0.55) return "guard";
+  const setupUseful = !(foe.status?.weaken || foe.status?.exposed || foe.status?.dot);
+  if (petBattleMoveLegal(bot, "special") && (setupUseful || Math.random() < 0.48)) return "special";
+  if (bot.kit.guardCounter > 0 && Math.random() < 0.22) return "guard";
   if (Math.random() < 0.15) return "guard";
   return "attack";
 }
@@ -3341,19 +3544,33 @@ function petBattleBotMove(bot, foe) {
 function petBattleResolveRound(b) {
   const A = b.sides.challenger, D = b.sides.opponent;
   const picks = { challenger: A.pick, opponent: D.pick };
+  const notes = { challenger: [], opponent: [] };
 
   // Compute the outgoing blow from one attacker against a defender's stance.
   function blow(atk, def) {
     const move = atk.pick;
-    if (move === "guard") return { move, damage: 0, crit: false, guarded: false, dodged: false };
+    if (move === "guard") {
+      return { move, moveName: atk.kit.guardName, damage: 0, crit: false, guarded: false, dodged: false, absorbed: 0 };
+    }
     // Guard and dodge are distinct defensive choices. A guarding pet plants
     // its feet and mitigates the hit; otherwise Speed may evade it completely.
     const guarded = def.pick === "guard";
-    const dodged = !guarded && Math.random() < def.stats.dodgeChance;
-    if (dodged) return { move, damage: 0, crit: false, guarded: false, dodged: true };
+    const bankedEvade = !guarded && def.status.evade > 0;
+    const dodged = bankedEvade || (!guarded && Math.random() < def.stats.dodgeChance);
+    if (dodged) {
+      return {
+        move, moveName: move === "attack" ? atk.kit.attackName
+          : move === "special" ? atk.kit.specialName : atk.kit.ultimateName,
+        damage: 0, crit: false, guarded: false, dodged: true, absorbed: 0,
+      };
+    }
     let base = move === "attack" ? atk.stats.attack
              : move === "special" ? atk.stats.special
              : atk.stats.ultimate;
+    if (move === "attack") base *= atk.kit.attackMult;
+    if (atk.status.weaken > 0) base *= 0.78;
+    if (atk.status.power > 0) base *= 1.18;
+    if (def.status.exposed > 0) base *= 1.18;
     // server RNG crit
     const crit = Math.random() < atk.stats.critChance;
     if (crit) base = Math.round(base * atk.stats.critMult);
@@ -3362,7 +3579,18 @@ function petBattleResolveRound(b) {
     if (guarded) dmg = Math.round(base * (1 - def.stats.guardCut));
     // small ±10% variance so identical builds aren't perfectly deterministic
     dmg = Math.round(dmg * (0.9 + Math.random() * 0.2));
-    return { move, damage: Math.max(guarded ? 0 : 1, dmg), crit, guarded, dodged: false };
+    dmg = Math.max(guarded ? 0 : 1, dmg);
+    const absorbed = Math.min(def.status.shield, dmg);
+    if (absorbed > 0) {
+      def.status.shield -= absorbed;
+      dmg -= absorbed;
+    }
+    return {
+      move,
+      moveName: move === "attack" ? atk.kit.attackName
+        : move === "special" ? atk.kit.specialName : atk.kit.ultimateName,
+      damage: dmg, crit, guarded, dodged: false, absorbed,
+    };
   }
 
   const aBlow = blow(A, D);   // challenger hits opponent
@@ -3372,21 +3600,237 @@ function petBattleResolveRound(b) {
   D.hp = Math.max(0, D.hp - aBlow.damage);
   A.hp = Math.max(0, A.hp - dBlow.damage);
 
+  const extra = {
+    challenger: { healed: 0, statusDamage: 0, counterDamage: 0, revived: false },
+    opponent: { healed: 0, statusDamage: 0, counterDamage: 0, revived: false },
+  };
+
+  function addShield(side, pct, label, sideName) {
+    const amount = Math.max(4, Math.round(side.stats.maxHp * pct));
+    side.status.shield = Math.min(Math.round(side.stats.maxHp * .55), side.status.shield + amount);
+    notes[sideName].push(`${label}: +${amount} shield`);
+  }
+  function heal(side, pct, label, sideName) {
+    // Ordinary healing/regen can recover a living pet, never resurrect a pet
+    // that has already reached 0. Rebirth is the one explicit exception below.
+    if (side.hp <= 0) return;
+    const before = side.hp;
+    side.hp = Math.min(side.stats.maxHp, side.hp + Math.max(3, Math.round(side.stats.maxHp * pct)));
+    const amount = side.hp - before;
+    extra[sideName].healed += amount;
+    if (amount > 0) notes[sideName].push(`${label}: +${amount} HP`);
+  }
+  function setDot(target, kind, turns, pct, targetName) {
+    const damage = Math.max(2, Math.round(target.stats.maxHp * pct));
+    if (!target.status.dot || damage * turns >= target.status.dot.damage * target.status.dot.turns) {
+      target.status.dot = { kind, turns, damage };
+    }
+    notes[targetName].push(`${kind} applied`);
+  }
+  function applyEffect(actor, target, effect, blowRes, actorName, targetName) {
+    // Debuffs and damage-over-time are on-hit effects. A true dodge avoids the
+    // whole payload; a shield still counts as a landed hit and may absorb only
+    // its direct damage. Self-only setup/recovery effects remain usable if the
+    // attached strike is dodged.
+    const onHitTargetEffects = new Set([
+      "weaken", "chill", "freeze", "bleed", "burn", "inferno",
+      "poison", "expose", "voidDrain", "storm",
+    ]);
+    if (blowRes.dodged && onHitTargetEffects.has(effect)) {
+      notes[actorName].push(`${blowRes.moveName} missed`);
+      return;
+    }
+    switch (effect) {
+      case "weaken":
+        target.status.weaken = Math.max(target.status.weaken, 3);
+        notes[targetName].push("Damage weakened");
+        break;
+      case "chill":
+        target.status.weaken = Math.max(target.status.weaken, 3);
+        actor.status.shield += Math.max(2, Math.round(actor.stats.maxHp * .06));
+        notes[targetName].push("Chilled");
+        break;
+      case "freeze":
+        target.status.weaken = Math.max(target.status.weaken, 4);
+        target.status.exposed = Math.max(target.status.exposed, 2);
+        notes[targetName].push("Frozen and exposed");
+        break;
+      case "bleed":
+        setDot(target, "Bleed", 3, .045, targetName);
+        break;
+      case "burn":
+        setDot(target, "Burn", 3, .04, targetName);
+        break;
+      case "inferno":
+        setDot(target, "Inferno", 4, .055, targetName);
+        break;
+      case "poison":
+        setDot(target, "Poison", 4, .035, targetName);
+        break;
+      case "expose":
+        target.status.exposed = Math.max(target.status.exposed, 3);
+        notes[targetName].push("Defense exposed");
+        break;
+      case "power":
+        actor.status.power = Math.max(actor.status.power, 3);
+        notes[actorName].push("Attack powered up");
+        break;
+      case "counter":
+        actor.status.counter = Math.max(actor.status.counter, 3);
+        notes[actorName].push("Counter stance ready");
+        break;
+      case "shield":
+        addShield(actor, .22, actor.kit.ultimateName, actorName);
+        break;
+      case "greatShield":
+        addShield(actor, .38, actor.kit.ultimateName, actorName);
+        break;
+      case "heal":
+        heal(actor, .18, actor.kit.specialName, actorName);
+        break;
+      case "aegis":
+        heal(actor, .16, actor.kit.ultimateName, actorName);
+        addShield(actor, .3, actor.kit.ultimateName, actorName);
+        break;
+      case "drain":
+        heal(actor, Math.min(.18, (blowRes.damage * .45) / actor.stats.maxHp), actor.kit.specialName, actorName);
+        break;
+      case "voidDrain":
+        target.status.exposed = Math.max(target.status.exposed, 3);
+        heal(actor, Math.min(.25, (blowRes.damage * .55) / actor.stats.maxHp), actor.kit.ultimateName, actorName);
+        break;
+      case "rally":
+        actor.status.power = Math.max(actor.status.power, 3);
+        addShield(actor, .12, actor.kit.specialName, actorName);
+        break;
+      case "evade":
+        actor.status.evade = Math.max(actor.status.evade, 2);
+        actor.charge = Math.min(PB_ULT_CHARGE, actor.charge + 1);
+        notes[actorName].push("Evade banked; +1 charge");
+        break;
+      case "charge":
+        // Applied after this ultimate is spent by the bookkeeping block.
+        actor.postUltimateCharge = 1;
+        notes[actorName].push("1 ultimate charge refunded");
+        break;
+      case "burrow":
+        addShield(actor, .16, actor.kit.specialName, actorName);
+        actor.status.power = Math.max(actor.status.power, 2);
+        break;
+      case "regen":
+        actor.status.regen = Math.max(actor.status.regen, 3);
+        actor.status.regenAmount = Math.max(actor.status.regenAmount, Math.round(actor.stats.maxHp * .07));
+        notes[actorName].push("Regeneration started");
+        break;
+      case "storm":
+        target.status.weaken = Math.max(target.status.weaken, 4);
+        setDot(target, "Storm", 3, .03, targetName);
+        break;
+      case "phoenixBurn":
+        if (blowRes.dodged) {
+          notes[actorName].push(`${blowRes.moveName} missed`);
+        } else {
+          setDot(target, "Burn", 3, .04, targetName);
+        }
+        actor.status.regen = Math.max(actor.status.regen, 3);
+        actor.status.regenAmount = Math.max(actor.status.regenAmount, Math.round(actor.stats.maxHp * .05));
+        notes[actorName].push("Flames begin healing");
+        break;
+      case "rebirth":
+        actor.status.rebirth = true;
+        notes[actorName].push("Rebirth armed");
+        break;
+    }
+  }
+
+  // A few identities alter Guard itself, so defensive pets and evasive pets
+  // do not share the same animation-only button.
+  function applyGuardIdentity(side, sideName) {
+    if (side.pick !== "guard") return;
+    if (["shadow-stalker", "wind-hopper"].includes(side.kit.id)) {
+      side.status.evade = Math.max(side.status.evade, 2);
+      notes[sideName].push("Evade banked");
+    } else if (["snow-drifter", "frost-prowler", "tundra-runner", "burrow-boxer"].includes(side.kit.id)) {
+      addShield(side, .08, side.kit.guardName, sideName);
+    }
+  }
+  applyGuardIdentity(A, "challenger");
+  applyGuardIdentity(D, "opponent");
+
+  if (A.pick === "special") applyEffect(A, D, A.kit.specialEffect, aBlow, "challenger", "opponent");
+  if (D.pick === "special") applyEffect(D, A, D.kit.specialEffect, dBlow, "opponent", "challenger");
+  if (A.pick === "ultimate") applyEffect(A, D, A.kit.ultimateEffect, aBlow, "challenger", "opponent");
+  if (D.pick === "ultimate") applyEffect(D, A, D.kit.ultimateEffect, dBlow, "opponent", "challenger");
+
+  // Turtle-style guarded counters apply after simultaneous direct damage.
+  function applyCounter(def, atk, incoming, defName, atkName) {
+    if (def.pick !== "guard" || !incoming.guarded || incoming.damage <= 0) return;
+    const pct = Math.min(.5, (def.kit.guardCounter || 0) + (def.status.counter > 0 ? .24 : 0));
+    if (pct <= 0) return;
+    const reflected = Math.max(1, Math.round(incoming.damage * pct));
+    atk.hp = Math.max(0, atk.hp - reflected);
+    extra[defName].counterDamage += reflected;
+    notes[atkName].push(`Countered for ${reflected}`);
+  }
+  applyCounter(D, A, aBlow, "opponent", "challenger");
+  applyCounter(A, D, dBlow, "challenger", "opponent");
+
+  // Ongoing effects tick once per completed round, then duration counters fall.
+  function tick(side, sideName) {
+    if (side.status.dot?.turns > 0) {
+      const dmg = Math.min(side.hp, side.status.dot.damage);
+      side.hp = Math.max(0, side.hp - dmg);
+      extra[sideName].statusDamage += dmg;
+      notes[sideName].push(`${side.status.dot.kind} -${dmg}`);
+      side.status.dot.turns -= 1;
+      if (side.status.dot.turns <= 0) side.status.dot = null;
+    }
+    if (side.status.regen > 0 && side.hp > 0) {
+      const before = side.hp;
+      side.hp = Math.min(side.stats.maxHp, side.hp + side.status.regenAmount);
+      const amount = side.hp - before;
+      extra[sideName].healed += amount;
+      if (amount > 0) notes[sideName].push(`Regen +${amount}`);
+      side.status.regen -= 1;
+      if (side.status.regen <= 0) side.status.regenAmount = 0;
+    }
+    for (const key of ["weaken", "exposed", "power", "evade", "counter"]) {
+      if (side.status[key] > 0) side.status[key] -= 1;
+    }
+    if (side.hp <= 0 && side.status.rebirth) {
+      side.status.rebirth = false;
+      side.hp = Math.max(1, Math.round(side.stats.maxHp * .34));
+      extra[sideName].revived = true;
+      notes[sideName].push(`Reborn at ${side.hp} HP`);
+    }
+  }
+  tick(A, "challenger");
+  tick(D, "opponent");
+
   // Charge/cooldown bookkeeping, per side, from THIS round's move.
-  for (const [side, blowRes] of [[A, aBlow], [D, dBlow]]) {
+  for (const side of [A, D]) {
     if (side.pick === "attack") side.charge = Math.min(PB_ULT_CHARGE, side.charge + 1);
     else if (side.pick === "guard") side.charge = Math.min(PB_ULT_CHARGE, side.charge + 1);
     else if (side.pick === "special") side.specialCd = PB_SPECIAL_CD;
-    else if (side.pick === "ultimate") side.charge = 0;   // spent
+    else if (side.pick === "ultimate") {
+      side.charge = Number.isInteger(side.postUltimateCharge) ? side.postUltimateCharge : 0;
+      delete side.postUltimateCharge;
+    }
     if (side.specialCd > 0 && side.pick !== "special") side.specialCd -= 1;
   }
 
   return {
     picks,
-    challenger: { move: aBlow.move, damageDealt: aBlow.damage, crit: aBlow.crit, guarded: aBlow.guarded, dodged: aBlow.dodged,
-                  hp: A.hp, charge: A.charge },
-    opponent:   { move: dBlow.move, damageDealt: dBlow.damage, crit: dBlow.crit, guarded: dBlow.guarded, dodged: dBlow.dodged,
-                  hp: D.hp, charge: D.charge },
+    challenger: {
+      move: aBlow.move, moveName: aBlow.moveName, damageDealt: aBlow.damage,
+      crit: aBlow.crit, guarded: aBlow.guarded, dodged: aBlow.dodged, absorbed: aBlow.absorbed,
+      hp: A.hp, charge: A.charge, notes: notes.challenger, ...extra.challenger,
+    },
+    opponent: {
+      move: dBlow.move, moveName: dBlow.moveName, damageDealt: dBlow.damage,
+      crit: dBlow.crit, guarded: dBlow.guarded, dodged: dBlow.dodged, absorbed: dBlow.absorbed,
+      hp: D.hp, charge: D.charge, notes: notes.opponent, ...extra.opponent,
+    },
   };
 }
 
@@ -3404,7 +3848,7 @@ function petBattleEmitBoth(b, event, payloadFor) {
 // jpo_players.pet_xp together, so a retry after an ambiguous COMMIT can never
 // double-award. Also enforces the persistent per-pet daily cap and the
 // same-opponent rematch cooldown (both make the award 0 without failing the
-// match). Session-only (no email) players get an in-memory bump, no ledger.
+// match). Session-only players are not eligible to enter XP-bearing battles.
 // Returns the pet's post-award xp (or null if nothing to show), and emits
 // evolution/update if a stage boundary was crossed. Never trusts a client.
 async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
@@ -7957,7 +8401,9 @@ io.on("connection", (socket) => {
     socket.emit("petBattleBuild", {
       pet, build, budget: petBattleBudget(pet, xp),
       spent: PB_ATTRS.reduce((s, a) => s + (build[a] || 0), 0),
-      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS, stats: petBattleStats(petStageOfPet(pet, xp), build),
+      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS,
+      kit: petBattlePublicKit(petBattleKit(pet)),
+      stats: petBattleStats(petStageOfPet(pet, xp), build, petBattleKit(pet)),
     });
   });
 
@@ -8003,7 +8449,9 @@ io.on("connection", (socket) => {
     socket.emit("petBattleBuild", {
       pet, build: clean, budget,
       spent: PB_ATTRS.reduce((s, a) => s + (clean[a] || 0), 0),
-      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS, stats: petBattleStats(petStageOfPet(pet, xp), clean),
+      stage: petStageOfPet(pet, xp), attrs: PB_ATTRS,
+      kit: petBattlePublicKit(petBattleKit(pet)),
+      stats: petBattleStats(petStageOfPet(pet, xp), clean, petBattleKit(pet)),
     });
     console.log(`${p.name} set ${pet} battle build (spent ${PB_ATTRS.reduce((s, a) => s + (clean[a] || 0), 0)}/${budget})`);
   });
