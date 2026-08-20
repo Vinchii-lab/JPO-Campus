@@ -119,7 +119,9 @@ try {
   const firstAck = await aBg.next(8000, "bingo ack");
   ok(/announced/.test(firstAck.message) && firstAck.isHost === true && /spectating unless you choose Join/.test(firstAck.message),
     "starter is explicitly a host/spectator, not an automatic player");
-  await bLobby.next(8000, "B lobby");
+  const firstLobby = await bLobby.next(8000, "B lobby");
+  ok(typeof firstLobby.gameId === "string" && /:/.test(firstLobby.gameId),
+    "each Bingo game has a restart-safe boot-scoped id");
   B.s.emit("bingoJoin");
   await bCard.next(8000, "B card (solo)");
   await sleep(150);

@@ -314,7 +314,12 @@ let bannerSeq = 0;
 // same card. Server owns the cards, the calls, and the win check — the client
 // only daubs and claims. Prize is paid by the house (no entry fee).
 let bingo = null;   // { id, hostEmail, state:'joining'|'active', prize, players: Map(email -> {name, card, daubs:Set}), pool, called:[], joinTimer, callTimer }
-let bingoGameSeq = 0;   // every game gets a fresh id; late async emits from an old game carry it so clients can ignore them
+// A tab can survive a server restart. Pair the per-process sequence with a
+// boot nonce so that a new game can never reuse the previous server's gameId
+// and accidentally resurrect an old player card in that tab.
+const BINGO_BOOT_NONCE = crypto.randomBytes(8).toString("hex");
+let bingoGameSeq = 0;
+const nextBingoGameId = () => `${BINGO_BOOT_NONCE}:${++bingoGameSeq}`;
 // Env-tunable so integration tests can run a fast game (prod stays 60s/4s).
 const BINGO_JOIN_MS = Number(process.env.BINGO_JOIN_MS) || 60_000;
 const BINGO_CALL_MS = Number(process.env.BINGO_CALL_MS) || 4_000;
@@ -7826,7 +7831,7 @@ io.on("connection", (socket) => {
     const pool = Array.from({ length: 75 }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     bingo = {
-      id: ++bingoGameSeq, hostEmail, state: "joining", mode, prize, players: new Map(), pool, called: [],
+      id: nextBingoGameId(), hostEmail, state: "joining", mode, prize, players: new Map(), pool, called: [],
       callMs, rule,
       joinDeadline: Date.now() + BINGO_JOIN_MS,
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,

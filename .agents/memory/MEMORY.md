@@ -25,3 +25,4 @@
 - [JPO Huddle outfit slots & seasonal shop](jpo-huddle-outfit-slots.md) — 4 slot columns beside legacy equipped_cosmetic; every settlement path must clear ALL equip columns; seasonal gate is server-side, client only hides rows.
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.
 - [JPO Huddle Grand Event](jpo-huddle-grand-event.md) — persist outcomes before rewards; spectator/quit is a separate account-keyed viewer preference, never a bracket or escrow mutation.
+- [JPO Huddle Bingo roles & restarts](jpo-huddle-bingo.md) — starter is a host/spectator unless they Join; boot-scoped game IDs prevent old cards surviving a server restart.

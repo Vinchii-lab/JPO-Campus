@@ -9109,7 +9109,10 @@
     // holds the OLD game's card. Any message carrying a NEWER gameId proves
     // that game is dead — wipe the stale card before handling the new game.
     function _bingoDropStale(gameId) {
-      if (gameId != null && _bingoGameId != null && gameId > _bingoGameId) _bingoHideAll();
+      // Bingo IDs include a server-boot nonce. A different ID therefore means
+      // this is a genuinely new game (including after a server restart), so
+      // clear any old card before rendering the new host/spectator state.
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) _bingoHideAll();
     }
     function ownerStartBingo() {
       const prize = Math.round(Number(_bgEl('op-bingo-prize').value));
@@ -10393,7 +10396,8 @@
       }
       _bingoHostRefresh();
     });
-    socket.on('bingoCall', ({ n, letter, count } = {}) => {
+    socket.on('bingoCall', ({ gameId, n, letter, count } = {}) => {
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
       if (!_bingoCard && !_bingoSpectating) return;
       _bingoCalled.push(n);
       _bgEl('bingo-call').textContent = `${letter}-${n}`;
@@ -10409,7 +10413,7 @@
     _bgEl('bingo-host-switch').addEventListener('click', () => ownerBingoSwitch());
     // Live "who's playing" list — shown in the lobby AND inside the card panel.
     socket.on('bingoNames', ({ gameId, names } = {}) => {
-      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
       _bingoDropStale(gameId);
       const label = (names && names.length) ? `🎟️ Playing (${names.length}): ${names.join(', ')}` : '';
       const a = document.getElementById('bingo-lobby-players'); if (a) a.textContent = label;
@@ -10434,7 +10438,7 @@
     socket.on('bingoOver', ({ gameId, message, winnerName, prize } = {}) => {
       // A late "game over" from an OLD game (e.g. a slow payout) must never
       // tear down the UI of a newer game we've since joined.
-      if (gameId != null && _bingoGameId != null && gameId < _bingoGameId) return;
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
       if (winnerName) _bingoWinBanner(`🎉 BINGO! ${winnerName} wins ${(prize ?? 0).toLocaleString()} coins! 🎱`);
       else if (message) _rpsToast(`🎱 ${message}`);
       const lp = document.getElementById('bingo-lobby-players'); if (lp) lp.textContent = '';
