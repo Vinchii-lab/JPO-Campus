@@ -10264,7 +10264,7 @@
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
       _bingoActive = false; _bingoPhase = null; _bingoIsHost = false; _bingoSpectating = false;
       document.getElementById('bingo-host-row').style.display = 'none';
-      _bgEl('bingo-grid').style.display = '';
+      _bgEl('bingo-grid').style.display = 'grid';
       _bgEl('bingo-howto-block').style.display = '';
       _bingoUnminimize();
     }
@@ -10369,7 +10369,7 @@
       _bgEl('bingo-prize-label').textContent = `${(prize ?? 0).toLocaleString()} 🪙`;
       _bgEl('bingo-panel').style.display = 'block';
       _bingoUnminimize();
-      _bgEl('bingo-grid').style.display = '';
+      _bgEl('bingo-grid').style.display = 'grid';
       _bgEl('bingo-howto-block').style.display = '';
       const last = _bingoCalled[_bingoCalled.length - 1];
       _bgEl('bingo-call').textContent = last ? `${'BINGO'[Math.floor((last - 1) / 15)]}-${last}` : '—';
