@@ -1832,6 +1832,13 @@
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 9px; color: #ccc;
 }
 .pt-derived-stats span { color: #FFC046; }
+.pt-build-private {
+  min-height: 150px; padding: 20px; box-sizing: border-box;
+  border: 2px dashed #3a3a5e; border-radius: 8px; background: #111;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; text-align: center; color: #ccc; font-size: 9px; line-height: 1.6;
+}
+.pt-build-private strong { color: #FFC046; font-size: 11px; }
 
 .pt-footer {
   padding: 16px 24px; background: #111; border-top: 4px solid #3a3a5e;
@@ -18743,6 +18750,19 @@
       }
     }
 
+    function renderPbPrivateBuild() {
+      const list = pbEl('pt-attr-list');
+      list.replaceChildren();
+      const note = document.createElement('div');
+      note.className = 'pt-build-private';
+      const title = document.createElement('strong');
+      title.textContent = 'BATTLE BUILD HIDDEN';
+      const copy = document.createElement('span');
+      copy.textContent = "Coworkers' attributes and derived stats are private. Challenge this pet to discover how it fights.";
+      note.append(title, copy);
+      list.appendChild(note);
+    }
+
     function updatePbAttr(attr) {
        if (!pbProfileIsSelf) return;
        const cur = pbBuild[attr] || 0;
@@ -18810,18 +18830,20 @@
         return;
       }
       const { ownerId, ownerName, self, pet, petName, build, budget, spent, stage, attrs, stats } = payload;
+      const safeAttrs = self && Array.isArray(attrs) ? attrs : [];
+      const safeBudget = self && Number.isSafeInteger(budget) ? budget : 0;
       const wasSaving = !!matchesPendingSave;
-      let shownBuild = { ...build };
-      let shownSpent = spent;
+      let shownBuild = self && build && typeof build === 'object' ? { ...build } : {};
+      let shownSpent = self && Number.isSafeInteger(spent) ? spent : 0;
       let retryMessage = "";
       if (!isSaveResponse && self && pbBuildRetryDraft
           && pbBuildRetryDraft.ownerId === ownerId && pbBuildRetryDraft.pet === pet) {
         const draft = pbBuildRetryDraft.build;
-        const draftSpent = attrs.reduce((sum, attr) => sum + (draft[attr] || 0), 0);
-        const stillValid = draftSpent <= budget
-          && attrs.every((attr) => Number.isInteger(draft[attr])
+        const draftSpent = safeAttrs.reduce((sum, attr) => sum + (draft[attr] || 0), 0);
+        const stillValid = draftSpent <= safeBudget
+          && safeAttrs.every((attr) => Number.isInteger(draft[attr])
             && draft[attr] >= (build[attr] || 0));
-        if (stillValid && attrs.some((attr) => draft[attr] !== (build[attr] || 0))) {
+        if (stillValid && safeAttrs.some((attr) => draft[attr] !== (build[attr] || 0))) {
           shownBuild = { ...draft };
           shownSpent = draftSpent;
           retryMessage = pbBuildRetryDraft.message || "Last save failed. Review and retry.";
@@ -18831,7 +18853,7 @@
       pbProfileOwnerId = ownerId;
       pbProfilePet = pet;
       pbProfileIsSelf = !!self;
-      pbBudget = budget; pbBuild = shownBuild; pbAttrs = attrs; pbDerivedStats = stats;
+      pbBudget = safeBudget; pbBuild = shownBuild; pbAttrs = safeAttrs; pbDerivedStats = self ? stats : null;
       const img = pbEl('pt-pet-img');
       pbSetPetImage(img, pet, stage);
       const cPet = typeof PETS !== 'undefined' ? PETS.find(p => p.id === pet) : null;
@@ -18849,9 +18871,11 @@
       pbEl('pt-challenge-hint').textContent = self
         ? ''
         : `Walk close to ${ownerName}, then challenge their pet.`;
+      pbEl('pt-points-avail').closest('.pt-budget-row').style.display = self ? '' : 'none';
       pbEl('pt-progress-hint').style.display = self ? '' : 'none';
       pbEl('pt-permanent-hint').style.display = self ? '' : 'none';
-      renderPbBuild(shownSpent, stats);
+      if (self) renderPbBuild(shownSpent, stats);
+      else renderPbPrivateBuild();
       const refreshNotice = pbProfileRefreshNotice?.ownerId === ownerId
         ? pbProfileRefreshNotice : null;
       if (refreshNotice) pbProfileRefreshNotice = null;
@@ -18859,8 +18883,8 @@
         || refreshNotice?.message
         || (wasSaving
           ? "Points committed."
-          : (self
-            ? (budget > shownSpent ? `${budget - shownSpent} unspent point${budget - shownSpent === 1 ? '' : 's'} available.` : "No unspent points.")
+            : (self
+              ? (safeBudget > shownSpent ? `${safeBudget - shownSpent} unspent point${safeBudget - shownSpent === 1 ? '' : 's'} available.` : "No unspent points.")
             : ""));
       pbEl('pt-error').style.color = retryMessage
         ? '#e74c3c'
@@ -19035,8 +19059,9 @@
        const statuses = Array.isArray(data.statuses) && data.statuses.length ? ' • ' + data.statuses.join(' · ') : '';
        pbEl(prefix + '-form').textContent = form + statuses;
        pbEl(prefix + '-form').title = (data.statuses || []).join(' • ');
-       pbEl(prefix + '-hp-bar').style.width = Math.max(0, (data.hp / data.maxHp) * 100) + '%';
-       pbEl(prefix + '-hp-text').textContent = Math.max(0, data.hp) + '/' + data.maxHp;
+       const healthPct = Math.max(0, Math.min(100, Number(data.healthPct) || 0));
+       pbEl(prefix + '-hp-bar').style.width = healthPct + '%';
+       pbEl(prefix + '-hp-text').textContent = healthPct + '%';
        
        const pips = pbEl(prefix + '-charge-bg').children;
        for (let i = 0; i < 3; i++) {
@@ -19907,7 +19932,7 @@
        if (dmg > 0) {
           const damage = document.createElement('div');
           damage.className = 'pb-dmg-text' + (crit ? ' crit' : '');
-          damage.textContent = '-' + dmg;
+           damage.textContent = '-' + dmg + '%';
           damage.style.left = '42px';
           damage.style.top = '24px';
           fxBox.appendChild(damage);
@@ -20030,8 +20055,9 @@
           if (myRes.move === 'guard') chaSprite.classList.add('pb-anim-guard');
           if (oppRes.move === 'guard') oppSprite.classList.add('pb-anim-guard');
           
-          // Animate Attacks (speed informed)
-           const myFirst = (myData.build?.speed || 0) >= (oppData.build?.speed || 0);
+           // The server reveals only which side moves first, never either
+           // side's exact Speed allocation.
+            const myFirst = payload.result.firstSide === pbMySide;
           
              async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
@@ -20040,7 +20066,7 @@
                try {
                    if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attRes.move, attTheme, myGen))) return;
                    const isUlt = attRes.move === 'ultimate';
-                   await pbPlayHit(oppPrefix, attRes.damageDealt, attRes.crit, attRes.dodged,
+                   await pbPlayHit(oppPrefix, attRes.damagePct, attRes.crit, attRes.dodged,
                                    attRes.guarded, attTheme, isUlt, myPrefix, attacker.stage,
                                    myGen, attackProfile, false);
                } finally {
@@ -20057,14 +20083,14 @@
           }
            if (myGen !== pbGen) return;
           
-          pbEl('pb-cha-hp-bar').style.width = Math.max(0, (myRes.hp / myData.maxHp) * 100) + '%';
-          pbEl('pb-cha-hp-text').textContent = Math.max(0, myRes.hp) + '/' + myData.maxHp;
-          pbEl('pb-opp-hp-bar').style.width = Math.max(0, (oppRes.hp / oppData.maxHp) * 100) + '%';
-          pbEl('pb-opp-hp-text').textContent = Math.max(0, oppRes.hp) + '/' + oppData.maxHp;
+          pbEl('pb-cha-hp-bar').style.width = myRes.healthPct + '%';
+          pbEl('pb-cha-hp-text').textContent = myRes.healthPct + '%';
+          pbEl('pb-opp-hp-bar').style.width = oppRes.healthPct + '%';
+          pbEl('pb-opp-hp-text').textContent = oppRes.healthPct + '%';
           
           // Re-render pips
-          pbRenderSide('pb-cha', {...myData, hp: myRes.hp, charge: myRes.charge});
-          pbRenderSide('pb-opp', {...oppData, hp: oppRes.hp, charge: oppRes.charge});
+          pbRenderSide('pb-cha', {...myData, healthPct: myRes.healthPct, charge: myRes.charge});
+          pbRenderSide('pb-opp', {...oppData, healthPct: oppRes.healthPct, charge: oppRes.charge});
             const roundNotes = [
               myRes.moveName
                 ? (pbSpectator ? `${myData.name} used ${myRes.moveName}.` : `You used ${myRes.moveName}.`)
@@ -20158,8 +20184,7 @@
        if (payload.delta > 0) {
           pbEl('pb-result-xp').textContent = '+' + payload.delta + ' XP';
        } else {
-          const reason = payload.reason === 'dailyCap' ? 'Daily battle cap reached'
-            : payload.reason === 'rematchCooldown' ? 'Same-opponent cooldown'
+          const reason = payload.reason === 'rematchCooldown' ? 'Same-opponent cooldown'
             : payload.reason === 'forfeit' ? 'Forfeit reward: 0 XP'
             : 'No XP earned';
           pbEl('pb-result-xp').textContent = reason;

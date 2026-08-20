@@ -1564,7 +1564,6 @@ const PB_XP_WIN       = 3;                 // completed match: winner +3
 const PB_XP_LOSE      = 1;                 // completed match: loser  +1
 const PB_XP_FF_WIN    = 2;                 // forfeit: the remaining side +2
 const PB_XP_FF_LOSE   = 0;                 // forfeit: the leaver +0
-const PB_DAILY_CAP    = 10;                // rewarded battles per pet per UTC day
 const PB_REMATCH_MS   = 5 * 60_000;        // same-opponent reward cooldown (5 min)
 const PB_SPECIAL_CD   = 2;                 // 'special' unusable again for this many rounds
 const PB_ULT_CHARGE   = 3;                 // 'ultimate' needs this much charge (built by attack/guard)
@@ -3504,8 +3503,9 @@ function petBattleUnmap(b) {
   battleBySocket.delete(b.opponentId);
 }
 
-// Build the SAFE, client-ready view of a combatant. NEVER leaks server-only
-// internals (RNG seeds, the other side's pending pick, cooldown timers).
+// Build the SAFE, client-ready view of a combatant. The exact training build is
+// private, so it stays in the frozen server snapshot and is never serialized to
+// opponents, participants, or spectators.
 function petBattleCombatantView(b, side) {
   const c = b.sides[side];
   return {
@@ -3513,9 +3513,7 @@ function petBattleCombatantView(b, side) {
     name:     c.name,
     petId:    c.petId,
     stage:    c.stage,
-    build:    { ...c.build },
-    hp:       c.hp,
-    maxHp:    c.stats.maxHp,
+    healthPct: Math.max(0, Math.min(100, Math.round((c.hp / c.stats.maxHp) * 100))),
     charge:   c.charge,
     kit:      petBattlePublicKit(c.kit),
     statuses: petBattleStatusView(c),
@@ -3524,6 +3522,42 @@ function petBattleCombatantView(b, side) {
 
 function petBattleStatusView(side) {
   return [];
+}
+
+function petBattlePublicRoundResult(b, result) {
+  const pct = (value, max) => Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+  const publicNotes = (notes) => (notes || []).map((note) => String(note)
+    .replace(/\s+(?:at|for)\s+\d+(?:\s+(?:HP|shield))?/gi, "")
+    .replace(/\s*[+-]\d+(?:\s+(?:HP|shield|charge))?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()).filter(Boolean);
+  const sideView = (side, foeSide) => {
+    const resolved = result[side];
+    const combatant = b.sides[side];
+    const foe = b.sides[foeSide];
+    return {
+      move: resolved.move,
+      moveName: resolved.moveName,
+      damagePct: pct(resolved.damageDealt, foe.stats.maxHp),
+      crit: resolved.crit,
+      guarded: resolved.guarded,
+      dodged: resolved.dodged,
+      absorbed: resolved.absorbed > 0,
+      healthPct: pct(combatant.hp, combatant.stats.maxHp),
+      charge: resolved.charge,
+      notes: publicNotes(resolved.notes),
+      healed: resolved.healed > 0,
+      statusDamage: resolved.statusDamage > 0,
+      counterDamage: resolved.counterDamage > 0,
+      revived: resolved.revived,
+    };
+  };
+  return {
+    picks: { ...result.picks },
+    firstSide: b.sides.challenger.stats.speed >= b.sides.opponent.stats.speed ? "challenger" : "opponent",
+    challenger: sideView("challenger", "opponent"),
+    opponent: sideView("opponent", "challenger"),
+  };
 }
 
 // The full pair of combatant views, from the perspective label the client wants.
@@ -3867,9 +3901,9 @@ function petBattleEmitBoth(b, event, payloadFor) {
 // Award battle XP idempotently and (for account players) persist it in ONE
 // atomic transaction: claim the (match_id, email) ledger row AND increment
 // jpo_players.pet_xp together, so a retry after an ambiguous COMMIT can never
-// double-award. Also enforces the persistent per-pet daily cap and the
-// same-opponent rematch cooldown (both make the award 0 without failing the
-// match). Session-only players are not eligible to enter XP-bearing battles.
+// double-award. There is intentionally NO daily XP cap; the same-opponent
+// rematch cooldown still makes rapid repeat farming award 0 without failing the
+// match. Session-only players are not eligible to enter XP-bearing battles.
 // Returns the pet's post-award xp (or null if nothing to show), and emits
 // evolution/update if a stage boundary was crossed. Never trusts a client.
 async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
@@ -3882,12 +3916,11 @@ async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
   }
   // Battles are restricted to approved email-backed accounts. Keep this guard
   // here too so an old/in-flight session-only battle can never bypass the
-  // durable cap, cooldown, and idempotency ledgers.
+  // durable cooldown and idempotency ledgers.
   if (!p.email) {
     petBattleEmitNoXp(p, side.id, pet, "accountRequired");
     return null;
   }
-  const day = new Date().toISOString().slice(0, 10);   // UTC YYYY-MM-DD
   let cl;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -3917,30 +3950,12 @@ async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
         }
       }
 
-      // A cooldown-blocked rematch is not a rewarded battle and therefore must
-      // not consume one of today's cap slots.
       if (overCooldown) {
         await cl.query(
           `UPDATE jpo_pet_battles SET xp=0, outcome='rematch_cooldown'
             WHERE match_id=$1 AND email=$2`, [matchId, p.email]);
         await cl.query("COMMIT");
         petBattleEmitNoXp(p, side.id, pet, "rematchCooldown");
-        return null;
-      }
-
-      // Daily per-pet cap: bump only reward-eligible battles. If it now exceeds
-      // the cap, this match remains claimed but its ledger records zero XP.
-      const cap = await cl.query(
-        `INSERT INTO jpo_pet_battle_caps (day, email, pet, n) VALUES ($1,$2,$3,1)
-         ON CONFLICT (day, email, pet) DO UPDATE SET n = jpo_pet_battle_caps.n + 1
-         RETURNING n`, [day, p.email, pet]);
-      const overCap = (cap.rows[0]?.n || 0) > PB_DAILY_CAP;
-      if (overCap) {
-        await cl.query(
-          `UPDATE jpo_pet_battles SET xp=0, outcome='daily_cap'
-            WHERE match_id=$1 AND email=$2`, [matchId, p.email]);
-        await cl.query("COMMIT");
-        petBattleEmitNoXp(p, side.id, pet, "dailyCap");
         return null;
       }
 
@@ -4096,6 +4111,7 @@ async function petBattleResolve(b) {
   b.state = "resolving";
 
   const result = petBattleResolveRound(b);
+  const publicResult = petBattlePublicRoundResult(b, result);
   b.round += 1;
   if (b.tournament && b.suddenDeath) b.suddenDeathExchanges = (b.suddenDeathExchanges || 0) + 1;
   const tournamentDecision = b.tournament ? grandEventBattleDecision({
@@ -4113,12 +4129,12 @@ async function petBattleResolve(b) {
 
   petBattleEmitBoth(b, "petBattleRound", (side) => ({
     matchId: b.matchId, round: b.round, maxRounds: PB_MAX_ROUNDS,
-    result, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
+    result: publicResult, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
     overtimeReset: tournamentDecision?.action === "overtime-reset",
   }));
   petBattleEmitTournamentSpectators(b, "petBattleRound", {
     matchId: b.matchId, round: b.round, maxRounds: PB_MAX_ROUNDS,
-    result, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
+    result: publicResult, combatants: petBattleView(b), suddenDeath: !!b.suddenDeath,
     overtimeReset: tournamentDecision?.action === "overtime-reset",
   });
 
@@ -9273,9 +9289,8 @@ io.on("connection", (socket) => {
     return petBattleSnapshot(id, p.name, pet, stage, build);
   }
 
-  // Send the safe public battle profile for one online player's equipped pet.
-  // Everyone may inspect committed attributes and derived combat stats; only
-  // the owner receives an editable profile.
+  // Send the safe battle profile for one online player's equipped pet. Exact
+  // attributes, available points, and derived combat stats are OWNER-ONLY.
   function petBattleRequestId(payload) {
     const id = payload?.requestId;
     return Number.isSafeInteger(id) && id >= 0 ? id : null;
@@ -9307,24 +9322,30 @@ io.on("connection", (socket) => {
     }
     const xp = ((target.petXp || {})[pet]) || 0;
     const stage = petStageOfPet(pet, xp);
-    const build = effectivePetBuild(target, pet);
-    socket.emit("petBattleProfile", {
+    const self = targetId === socket.id;
+    const profile = {
       ok: true,
       ownerId: targetId,
       requestId,
       reason,
       ownerName: target.name,
-      self: targetId === socket.id,
+      self,
       pet,
       petName: ((target.petNames || {})[pet]) || "",
-      build,
-      budget: petBattleBudget(pet, xp),
-      spent: PB_ATTRS.reduce((s, a) => s + (build[a] || 0), 0),
       stage,
-      attrs: PB_ATTRS,
       kit: petBattlePublicKit(petBattleKit(pet)),
-      stats: petBattleStats(stage, build, petBattleKit(pet)),
-    });
+    };
+    if (self) {
+      const build = effectivePetBuild(target, pet);
+      Object.assign(profile, {
+        build,
+        budget: petBattleBudget(pet, xp),
+        spent: PB_ATTRS.reduce((s, a) => s + (build[a] || 0), 0),
+        attrs: PB_ATTRS,
+        stats: petBattleStats(stage, build, petBattleKit(pet)),
+      });
+    }
+    socket.emit("petBattleProfile", profile);
   }
 
   socket.on("petBattleGetProfile", (payload) => {
@@ -11747,17 +11768,6 @@ try {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (match_id, email)
   )`);
-  // Persistent per-pet DAILY reward cap: n battle-XP awards granted today for
-  // (email, pet). Beyond PET_BATTLE_DAILY_CAP the match still resolves and is
-  // fun, but grants 0 XP — stops a pair from farming XP all day. Swept on boot.
-  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_pet_battle_caps (
-    day   text NOT NULL,
-    email text NOT NULL,
-    pet   text NOT NULL,
-    n     int NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, email, pet)
-  )`);
-  await pool.query(`DELETE FROM jpo_pet_battle_caps WHERE day < to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')`);
   // Same-opponent cooldown: last rewarded battle time between an ordered email
   // pair (a<b). A rematch inside PET_BATTLE_REMATCH_MS still plays but grants
   // 0 XP — stops two accounts trading wins in a tight loop for free XP.

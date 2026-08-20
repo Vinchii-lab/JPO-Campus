@@ -21,6 +21,23 @@ assert.match(clientSource, /requestPetBattleProfile[\s\S]*?requestId[\s\S]*?payl
   "out-of-order profile responses must not replace the currently viewed pet");
 assert.match(serverSource, /emitPetBattleProfile\(targetId, requestId[\s\S]*?requestId,[\s\S]*?reason/,
   "the server must correlate pet-profile and save responses with the client request");
+assert.doesNotMatch(serverSource, /PB_DAILY_CAP|jpo_pet_battle_caps|daily_cap|dailyCap/,
+  "Pet Battle XP must not have a daily reward cap");
+assert.match(serverSource, /There is intentionally NO daily XP cap[\s\S]*?INSERT INTO jpo_pet_battles[\s\S]*?jpo_pet_battle_pairs/,
+  "unlimited daily XP must retain settlement idempotency and rematch cooldown protection");
+const combatantViewStart = serverSource.indexOf("function petBattleCombatantView(");
+const combatantViewEnd = serverSource.indexOf("function petBattleStatusView(", combatantViewStart);
+assert.ok(combatantViewStart >= 0 && combatantViewEnd > combatantViewStart, "battle combatant serializer not found");
+assert.doesNotMatch(serverSource.slice(combatantViewStart, combatantViewEnd), /\bbuild\s*:/,
+  "battle payloads must not expose either pet's exact training build");
+assert.doesNotMatch(serverSource.slice(combatantViewStart, combatantViewEnd), /\b(?:hp|maxHp)\s*:/,
+  "battle payloads must not expose exact HP values that reveal Vitality");
+assert.match(serverSource, /function petBattlePublicRoundResult[\s\S]*?damagePct[\s\S]*?healthPct[\s\S]*?firstSide/,
+  "public rounds should use percentage health/damage and relative initiative");
+assert.match(serverSource, /const profile = \{[\s\S]*?kit: petBattlePublicKit[\s\S]*?\};\s*if \(self\) \{[\s\S]*?Object\.assign\(profile, \{[\s\S]*?build,/,
+  "only the owner profile may receive build attributes and derived stats");
+assert.match(clientSource, /BATTLE BUILD HIDDEN[\s\S]*?attributes and derived stats are private/,
+  "coworker profiles should explain that battle attributes are private");
 assert.match(clientSource, /payload\?\.action === 'buildSave'[\s\S]*?pbBuildRetryDraft[\s\S]*?requestPetBattleProfile/,
   "a rejected point commit should refresh authoritative state and retain a valid retry draft");
 assert.match(clientSource, /obj\.on\('pointerdown'[\s\S]*?window\.openPetProfile/,

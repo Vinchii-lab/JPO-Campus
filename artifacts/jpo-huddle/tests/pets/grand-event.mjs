@@ -159,7 +159,11 @@ async function connectPlayers({ autoPlay = false } = {}) {
       if (payload?.spectator) client.spectatorStarts.push(payload);
       for (const side of Object.values(payload.combatants || {})) {
         if (side?.name === names[0]) {
-          client.battleStages.push({ stage: side.stage, build: side.build, tournament: payload.tournament });
+          client.battleStages.push({
+            stage: side.stage,
+            buildExposed: Object.hasOwn(side, "build"),
+            tournament: payload.tournament,
+          });
         }
       }
     });
@@ -301,7 +305,9 @@ try {
   ok(started.entrants.every((e, i) => e.seed === i + 1 && e.name === names[i]),
     "registration order becomes deterministic seeds 1–8");
   const frozen = (await pool.query(`SELECT snapshot FROM jpo_grand_events WHERE id=$1`, [eventId])).rows[0].snapshot;
-  ok(frozen.entrants.find((e) => e.email === emails[0])?.stage === 3, "final-form stage frozen into the durable entrant snapshot");
+  ok(frozen.entrants.find((e) => e.email === emails[0])?.stage === 3
+      && frozen.entrants.find((e) => e.email === emails[0])?.build?.power === 6,
+    "final-form stage and training build freeze only inside the durable server snapshot");
   await pool.query(
     `UPDATE jpo_players SET pet_xp='{"pet_dog":0}'::jsonb, pet_builds='{"pet_dog":{"power":0,"vitality":0,"speed":0,"critical":0,"focus":0}}'::jsonb WHERE email=$1`,
     [emails[0]],
@@ -354,7 +360,9 @@ try {
   await waitFor(() => observer.state?.me?.viewMode === "spectate", 8_000, "spectator preference");
   await waitFor(() => observer.spectatorStarts.length > 0, 30_000, "sanitized spectator battle start");
   ok(observer.spectatorStarts.every((payload) => payload.spectator && payload.tournament
-      && payload.viewSide === "challenger" && payload.combatants),
+      && payload.viewSide === "challenger" && payload.combatants
+      && Object.values(payload.combatants).every((side) =>
+        ["build", "stats", "hp", "maxHp"].every((key) => !Object.hasOwn(side, key)))),
     "spectators receive a read-only sanitized tournament start snapshot");
 
   // Reconnect while the event is active. The durable preference should restore,
@@ -382,7 +390,10 @@ try {
   ok(observer.spectatorStatuses.length > 0 && observer.pickStatuses.length === 0,
     "spectators receive progress updates without legal moves or control prompts");
   ok(observer.spectatorRounds.every((payload) => payload.spectator
-      && payload.result && payload.combatants),
+      && payload.result && payload.combatants
+      && Object.values(payload.combatants).every((side) =>
+        ["build", "stats", "hp", "maxHp"].every((key) => !Object.hasOwn(side, key)))
+      && !JSON.stringify(payload.result).includes("damageDealt")),
     "live spectators receive battle animation rounds with public combatants");
 
   const currentAtQuit = observer.state.currentMatchId;
@@ -433,8 +444,8 @@ try {
 
   const allStageCaptures = [...preCrashStages, ...clients.flatMap((c) => c.battleStages)];
   ok(allStageCaptures.length > 0
-    && allStageCaptures.every((x) => x.tournament && x.stage === 3 && x.build?.power === 6),
-  "post-restart battles use the frozen final-form artwork stage and training build");
+    && allStageCaptures.every((x) => x.tournament && x.stage === 3 && !x.buildExposed),
+  "post-restart battles use frozen final-form artwork without leaking training builds");
   const results = new Map([...preCrashResults, ...clients.flatMap((c) => [...c.battleResults.entries()])]);
   ok(results.size === 7 && [...results.values()].every((r) => r.tournament && !r.draw),
     "seven server-authoritative tournament Pet Battles finished without a draw");

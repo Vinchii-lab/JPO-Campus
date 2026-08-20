@@ -9,21 +9,25 @@ Pet battles are a separate lifecycle from pet races and coin-wager games. The cl
 
 **How to apply:** Any new battle mode or move must derive from the frozen server snapshot and settle through the pet-battle lifecycle rather than a client-authored receipt.
 
-Standard player-facing Pet Battles are social PvP. A public Pet Profile shows the equipped pet's form, committed attributes, unspent points, and derived stats; owners allocate points there, while coworkers get a read-only build plus the battle action. There is no training-bot route.
+Standard player-facing Pet Battles are social PvP. A coworker's Pet Profile shows identity/form and the battle action, but exact attributes, unspent points, and derived stats are private; only the owner receives or edits their full build. There is no training-bot route.
 
 **Why:** The intended loop is inspecting and challenging fellow coworkers' pets, not launching an isolated training-bot match from a separate arena.
 
-**How to apply:** Keep the avatar popover to View Profile. Coworker profiles hold whisper/challenge/gift/trade/store cards, but Pet Battle belongs on the clicked pet's profile. Local/remote office pets and a player's Pet row open that profile. Retain server-side eligibility/distance checks and explain point/XP progression on the owner's profile.
+**How to apply:** Keep the avatar popover to View Profile. Coworker profiles hold whisper/challenge/gift/trade/store cards, but Pet Battle belongs on the clicked pet's profile. Local/remote office pets and a player's Pet row open that profile. Retain server-side eligibility/distance checks, explain point/XP progression on the owner's profile, and redact builds at server serialization for profiles, opponents, and spectators.
 
-Pet Point allocations are permanent once committed: an owner may only add newly available points and may never subtract, reset, or reshuffle prior points. Public profile reads are safe, but only the owner may submit a build.
+Battle wire payloads use rounded health/damage percentages and a relative first-moving side; never serialize exact HP, max HP, raw damage, builds, or derived stats.
+
+**Why:** exact max HP reveals Vitality directly, and raw combat numbers make private builds easy to reverse-engineer even when the profile is hidden.
+
+Pet Point allocations are permanent once committed: an owner may only add newly available points and may never subtract, reset, or reshuffle prior points. Only the owner may read or submit the exact build.
 
 **Why:** Respeccing would erase build identity, and hiding minus controls is not security—stale or modified clients could still lower stored attributes.
 
 **How to apply:** Validate monotonic extension against the live authoritative build, then repeat every attribute floor in the database update so concurrent/stale saves cannot overwrite newer allocations. Correlate async profile/save responses so navigating mid-save cannot show or edit the wrong pet.
 
-Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim, a UTC per-pet daily rewarded-match cap, and a same-opponent cooldown; session-only players must never receive memory-only battle XP.
+Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim and a same-opponent cooldown; there is deliberately no daily XP cap, and session-only players must never receive memory-only battle XP.
 
-**Why:** Retry/reconnect races, immediate rematches, and ephemeral identities otherwise bypass farming controls or double-credit XP.
+**Why:** Retry/reconnect races and ephemeral identities must not double-credit XP, but the owner explicitly wants players free to earn battle XP without a daily ceiling.
 
 **How to apply:** Route every positive battle reward through the same transaction. Forfeits settle before removing the leaver: remaining player gets +2, leaver gets +0 and an explicit zero-XP receipt.
 
