@@ -17,6 +17,7 @@ const rand = Math.random().toString(36).slice(2, 8);
 const E_A = `bgo-a-${rand}@justpressone.com`;  // admin
 const E_B = `bgo-b-${rand}@justpressone.com`;  // daubs, wins
 const E_C = `bgo-c-${rand}@justpressone.com`;  // never daubs
+const E_D = `bgo-d-${rand}@justpressone.com`;  // second admin, spectates
 
 const fails = [];
 const ok = (cond, label) => { console.log((cond ? "  ✓ " : "  ✗ ") + label); if (!cond) fails.push(label); };
@@ -74,26 +75,31 @@ try {
   await pool.query(
     `INSERT INTO jpo_players (email, first_name, last_name, name, character, approved, coins, cosmetics, last_daily_bonus)
      VALUES ($1,'Admina','Bgo','Admina Bgo','adam',true,1000,ARRAY[]::text[],CURRENT_DATE),
-            ($2,'Winnie','Bgo','Winnie Bgo','bob', true,1000,ARRAY[]::text[],CURRENT_DATE),
-            ($3,'Sleepy','Bgo','Sleepy Bgo','amelia',true,1000,ARRAY[]::text[],CURRENT_DATE)`,
-    [E_A, E_B, E_C]);
+             ($2,'Winnie','Bgo','Winnie Bgo','bob', true,1000,ARRAY[]::text[],CURRENT_DATE),
+             ($3,'Sleepy','Bgo','Sleepy Bgo','amelia',true,1000,ARRAY[]::text[],CURRENT_DATE),
+             ($4,'Watchy','Bgo','Watchy Bgo','melissa',true,1000,ARRAY[]::text[],CURRENT_DATE)`,
+    [E_A, E_B, E_C, E_D]);
   console.log("seeded", rand);
 
-  const A = connect(E_A, "Admina", "adam"), B = connect(E_B, "Winnie", "bob"), C = connect(E_C, "Sleepy", "amelia");
-  const aApr = queue(A.s, "approved"), bApr = queue(B.s, "approved"), cApr = queue(C.s, "approved");
-  const aAuth = queue(A.s, "adminAuthOk"), aRes = queue(A.s, "adminPriceResult"), aBg = queue(A.s, "adminBingoResult");
+  const A = connect(E_A, "Admina", "adam"), B = connect(E_B, "Winnie", "bob"), C = connect(E_C, "Sleepy", "amelia"), D = connect(E_D, "Watchy", "melissa");
+  const aApr = queue(A.s, "approved"), bApr = queue(B.s, "approved"), cApr = queue(C.s, "approved"), dApr = queue(D.s, "approved");
+  const aAuth = queue(A.s, "adminAuthOk"), dAuth = queue(D.s, "adminAuthOk");
+  const aRes = queue(A.s, "adminPriceResult"), aBg = queue(A.s, "adminBingoResult"), dBg = queue(D.s, "adminBingoResult");
   const bBan = queue(B.s, "bannerUpdate"), cBan = queue(C.s, "bannerUpdate");
   const bLobby = queue(B.s, "bingoLobby"), cLobby = queue(C.s, "bingoLobby");
   const bCard = queue(B.s, "bingoCard"), cCard = queue(C.s, "bingoCard");
-  const bStart = queue(B.s, "bingoStart");
+  const aCard = queue(A.s, "bingoCard"), dCard = queue(D.s, "bingoCard");
+  const bStart = queue(B.s, "bingoStart"), dStart = queue(D.s, "bingoStart");
   const bErr = queue(B.s, "bingoError");
   const bOver = queue(B.s, "bingoOver"), cOver = queue(C.s, "bingoOver");
-  await Promise.all([A.ready, B.ready, C.ready]);
-  await aApr.next(15000, "A approved"); await bApr.next(15000, "B approved"); await cApr.next(15000, "C approved");
+  await Promise.all([A.ready, B.ready, C.ready, D.ready]);
+  await aApr.next(15000, "A approved"); await bApr.next(15000, "B approved"); await cApr.next(15000, "C approved"); await dApr.next(15000, "D approved");
 
   // ── admin banner ──
   A.s.emit("adminAuth", { password: process.env.ADMIN_PASSWORD });
   await aAuth.next(8000, "admin auth");
+  D.s.emit("adminAuth", { password: process.env.ADMIN_PASSWORD });
+  await dAuth.next(8000, "spectator admin auth");
   bBan.drain(); cBan.drain();
   A.s.emit("adminBanner", { text: "Bingo in 5 minutes! 🎱" });
   ok(/every screen/.test((await aRes.next(8000, "banner ack")).message), "admin told banner is up");
@@ -110,10 +116,14 @@ try {
 
   // ── bingo: not-enough-players round ──
   A.s.emit("adminBingoStart", { prize: 500 });
-  ok(/announced/.test((await aBg.next(8000, "bingo ack")).message), "bingo announced");
+  const firstAck = await aBg.next(8000, "bingo ack");
+  ok(/announced/.test(firstAck.message) && firstAck.isHost === true && /spectating unless you choose Join/.test(firstAck.message),
+    "starter is explicitly a host/spectator, not an automatic player");
   await bLobby.next(8000, "B lobby");
   B.s.emit("bingoJoin");
   await bCard.next(8000, "B card (solo)");
+  await sleep(150);
+  ok(aCard.items.length === 0, "starting Bingo does not deal the host a card");
   const solo = await bOver.next(10000, "solo cancelled");
   ok(/not enough players/.test(solo.message), "solo game cancels itself");
 
@@ -122,7 +132,7 @@ try {
   const bPre = await coinsOf(E_B), cPre = await coinsOf(E_C);
   A.s.emit("adminBingoStart", { prize: 500, mode: "manual" });
   const ack2 = await aBg.next(8000, "bingo2 ack");
-  ok(/YOU call/.test(ack2.message) && ack2.mode === "manual", "manual (host) mode announced");
+  ok(/YOU call/.test(ack2.message) && ack2.mode === "manual" && ack2.isHost === true, "manual (host) mode announced");
   await bLobby.next(8000, "B lobby 2"); await cLobby.next(8000, "C lobby 2");
   B.s.emit("bingoJoin"); C.s.emit("bingoJoin");
   const bc = await bCard.next(8000, "B card"); await cCard.next(8000, "C card");
@@ -131,11 +141,18 @@ try {
   ok(colOk, "columns use real bingo ranges (B1-15 … O61-75)");
   const st = await bStart.next(8000, "game started");
   ok(st.mode === "manual", "players told the host is calling");
+  const spectatorStart = await dStart.next(8000, "spectator sees game start");
+  ok(spectatorStart.prize === 500 && dCard.items.length === 0, "another admin receives a spectator view without a player card");
 
   // no auto balls in manual mode
   const bCallQ = queue(B.s, "bingoCall");
   await sleep(600);   // > 4 fast-call intervals — nothing should arrive
   ok(bCallQ.items.length === 0, "manual mode: no balls until the host deals");
+  D.s.emit("adminBingoCall");
+  ok(/Only the person who started/.test((await dBg.next(8000, "non-host call rejected")).message),
+    "another admin cannot be mistaken for the Bingo host");
+  await sleep(200);
+  ok(bCallQ.items.length === 0, "a spectator cannot deal a ball");
   A.s.emit("adminBingoCall");
   ok((await bCallQ.next(8000, "hosted ball")).n >= 1, "host-dealt ball reaches players");
   const callAck = await aBg.next(8000, "call ack"); aBg.drain();
