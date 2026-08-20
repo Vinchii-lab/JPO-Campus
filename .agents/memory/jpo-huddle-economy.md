@@ -55,6 +55,9 @@ description: Design rules for coin gifting, direct item gifts, pet trades, playe
 
 ## Flash sale (Aug 2026)
 - Global "X% off for N min" lives in server memory + single-row `jpo_flash_sale` (re-armed at boot). Buy handlers charge `salePrice(catalog[item])` at request time.
+- Direct item gifts cost the sender the same live Shop price: derive `salePrice(catalog[item])` again at send time and debit it in the ownership-transfer transaction. Picker quotes are display-only and may be superseded by a later price/sale update.
+- **Why:** the boss explicitly wants gifting to cost exactly what the Shop would charge now; a quote captured when the picker opened must never authorize a stale or free transfer.
+- **How to apply:** return a priced inventory for honest UI, but always validate the current catalog/sale price and durable balance after player-row locks; publish the committed sender balance afterward.
 - **Rule:** `priceList`/`priceUpdate` always broadcast BASE prices; clients apply the sale % locally from `saleState`. **Why:** sale-adjusted broadcasts corrupted the F8 editor — the owner could save a discounted number as the permanent override.
 - salePrice() must pass through falsy costs untouched (rare/unknown items rely on `!cost` gates).
 

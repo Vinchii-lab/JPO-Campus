@@ -10145,10 +10145,12 @@ io.on("connection", (socket) => {
   });
 
   // ── Direct item gifts: every catalog item except owner-only rares ─────────
-  // The picker is display-only. sendItemGift rechecks the catalog, rare gate,
-  // ownership, duplicate ownership, listing state and activity gates, then
-  // moves the item in ONE transaction. Recipient equipment is never changed;
-  // only a sender slot containing the gifted item is cleared.
+  // Sending costs the same live price as buying from the Shop (including an
+  // active flash sale). The picker is display-only. sendItemGift rechecks the
+  // price, rare gate, ownership, duplicate ownership, listing state, balance
+  // and activity gates, then charges + moves the item in ONE transaction.
+  // Recipient equipment is never changed; only a sender slot containing the
+  // gifted item is cleared.
   socket.on("itemGiftInventory", async (payload) => {
     const { targetId } = payload || {};
     const requestId = Number.isSafeInteger(payload?.requestId) ? payload.requestId : null;
@@ -10168,6 +10170,7 @@ io.on("connection", (socket) => {
         .filter((id) => catalogOf(id) && !RARE_IDS.has(id))
         .map((id) => ({
           id,
+          cost: salePrice(catalogOf(id)[id]),
           unavailable: (target.cosmetics || []).includes(id)
             ? `${target.name} already owns this`
             : listed.has(id) ? "Listed in your store" : "",
@@ -10190,8 +10193,11 @@ io.on("connection", (socket) => {
     if (!takeToken(buyBucket)) { fail("Slow down a second, then try again."); return; }
     if (!target || targetId === socket.id) { fail("They're not in the office right now."); return; }
     if (!p.email || !target.email) { fail("Item gifts need saved accounts on both sides."); return; }
-    if (!catalogOf(item)) { fail("That isn't a giftable item."); return; }
+    const catalog = catalogOf(item);
+    if (!catalog) { fail("That isn't a giftable item."); return; }
     if (RARE_IDS.has(item)) { fail("Rare items are personal gifts from the boss and can't be regifted."); return; }
+    const cost = salePrice(catalog[item]);
+    if (!Number.isSafeInteger(cost) || cost < 1) { fail("That item doesn't have a valid Shop price."); return; }
     if (!(p.cosmetics || []).includes(item)) { fail("You don't own that item anymore."); return; }
     if ((target.cosmetics || []).includes(item)) { fail(`${target.name} already owns that item.`); return; }
     if (inAnyMatch(socket.id) || inAnyMatch(targetId)) { fail("No item gifting mid-match!"); return; }
@@ -10207,7 +10213,7 @@ io.on("connection", (socket) => {
       // listings/ownership. A concurrent listing can no longer sneak in
       // between the gift's NOT EXISTS snapshot and COMMIT.
       const { rows: locked } = await client.query(
-        `SELECT email FROM jpo_players WHERE email = ANY($1) ORDER BY email FOR UPDATE`,
+        `SELECT email, coins FROM jpo_players WHERE email = ANY($1) ORDER BY email FOR UPDATE`,
         [[p.email, target.email]],
       );
       if (locked.length !== 2) {
@@ -10215,9 +10221,16 @@ io.on("connection", (socket) => {
         fail("The gift couldn't be completed — nothing changed.");
         return;
       }
+      const lockedSender = locked.find((row) => row.email === p.email);
+      if (!lockedSender || Number(lockedSender.coins) < cost) {
+        await client.query("ROLLBACK");
+        fail(`You need ${cost.toLocaleString()} coins to gift ${itemLabel(item)}.`);
+        return;
+      }
       const removeGift = () => client.query(
         `UPDATE jpo_players SET
            cosmetics = array_remove(cosmetics, $1),
+           coins = coins - $3,
            equipped_cosmetic = CASE WHEN equipped_cosmetic = $1 THEN '' ELSE equipped_cosmetic END,
            equipped_wings    = CASE WHEN equipped_wings    = $1 THEN '' ELSE equipped_wings    END,
            equipped_pet      = CASE WHEN equipped_pet      = $1 THEN '' ELSE equipped_pet      END,
@@ -10228,13 +10241,13 @@ io.on("connection", (socket) => {
            equipped_held     = CASE WHEN equipped_held     = $1 THEN '' ELSE equipped_held     END,
            equipped_feet     = CASE WHEN equipped_feet     = $1 THEN '' ELSE equipped_feet     END,
            updated_at = now()
-         WHERE email = $2 AND $1 = ANY(cosmetics)
+         WHERE email = $2 AND $1 = ANY(cosmetics) AND coins >= $3
            AND NOT EXISTS (
              SELECT 1 FROM jpo_store_listings sl
               WHERE sl.seller_email = $2 AND sl.item_id = $1
            )
          RETURNING email`,
-        [item, p.email],
+        [item, p.email, cost],
       );
       const receiveGift = () => client.query(
         `UPDATE jpo_players
@@ -10259,7 +10272,7 @@ io.on("connection", (socket) => {
         await transferPetProfileTx(client, p.email, target.email, item);
       }
       const { rows } = await client.query(
-        `SELECT email, cosmetics, equipped_cosmetic, equipped_wings, equipped_pet, equipped_pet_acc,
+        `SELECT email, coins, cosmetics, equipped_cosmetic, equipped_wings, equipped_pet, equipped_pet_acc,
                 equipped_top, equipped_bottom, equipped_neckwear, equipped_held, equipped_feet,
                 pet_xp, pet_names, pet_builds
            FROM jpo_players WHERE email = ANY($1)`,
@@ -10283,6 +10296,7 @@ io.on("connection", (socket) => {
     }
 
     const applyGiftRow = (pl, row) => {
+      pl.coins = Number(row.coins) || 0;
       pl.cosmetics = row.cosmetics || [];
       pl.equipped = row.equipped_cosmetic || "";
       pl.wings = row.equipped_wings || "";
@@ -10297,7 +10311,7 @@ io.on("connection", (socket) => {
       pl.petBuilds = row.pet_builds || {};
     };
     const stateOf = (pl) => ({
-      cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
+      coins: pl.coins, cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
       pet: pl.pet, petAcc: pl.petAcc, petXp: pl.petXp, petNames: pl.petNames,
     });
     for (const [id, pl] of Object.entries(players)) {
@@ -10305,6 +10319,7 @@ io.on("connection", (socket) => {
       if (!row) continue;
       applyGiftRow(pl, row);
       io.to(id).emit("itemGiftState", stateOf(pl));
+      if (pl.email === p.email) io.to(id).emit("coinUpdate", { coins: pl.coins });
       io.emit("playerCosmeticUpdate", {
         id, cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
       });
@@ -10314,7 +10329,8 @@ io.on("connection", (socket) => {
     }
     const label = itemLabel(item);
     socket.emit("itemGiftResult", {
-      ok: true, targetId, requestId, item, message: `Sent ${label} to ${target.name}! 🎁`,
+      ok: true, targetId, requestId, item, cost, coins: p.coins,
+      message: `Sent ${label} to ${target.name} for ${cost.toLocaleString()} coins! 🎁`,
     });
     const liveTargetId = socketIdByEmail(target.email);
     if (liveTargetId) {

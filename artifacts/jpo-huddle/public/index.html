@@ -5760,6 +5760,7 @@
       document.getElementById('food-coin-display').textContent = coins;
       // Affordability (the greyed "Buy" state) depends on the balance.
       if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (document.getElementById('item-gift-modal').classList.contains('open')) _itemGiftSummary();
     });
 
     // ── Live shop prices ────────────────────────────────────────────────
@@ -5777,7 +5778,12 @@
       if (!Number.isInteger(price)) return;
       for (const cat of [COSMETICS, PETS, PET_ACCESSORIES]) {
         const row = cat.find(c => c.id === item);
-        if (row) { row.baseCost = price; row.cost = _saleAdj(price); return; }
+        if (row) {
+          row.baseCost = price;
+          row.cost = _saleAdj(price);
+          if (document.getElementById('item-gift-modal').classList.contains('open')) _itemGiftSummary();
+          return;
+        }
       }
     }
     function _reapplySaleToCatalogs() {
@@ -5788,6 +5794,7 @@
         }
       }
       if (document.getElementById('shop-modal').classList.contains('open')) _refreshShopUI();
+      if (document.getElementById('item-gift-modal').classList.contains('open')) _itemGiftSummary();
       if (typeof _opRenderPrices === 'function') _opRenderPrices();
     }
     socket.on('priceList', (map) => {
@@ -8749,16 +8756,21 @@
         return;
       }
       const meta = _itemGiftMeta(opt.value);
+      const cost = Number.isInteger(meta.cost) ? meta.cost : Number(opt.dataset.cost);
+      const affordable = Number.isSafeInteger(cost) && cost > 0 && _playerCoins >= cost;
+      const balanceNote = affordable
+        ? `You have ${_playerCoins.toLocaleString()} coins.`
+        : `You need ${Math.max(0, cost - _playerCoins).toLocaleString()} more coins.`;
       rpsEl('item-gift-summary').textContent =
-        `Send ${meta.emoji || '🎁'} ${meta.name || opt.value} to ${targetName}? This gift can't be undone.`;
-      btn.disabled = !!_itemGiftPending;
+        `Send ${meta.emoji || '🎁'} ${meta.name || opt.value} to ${targetName} for ${cost.toLocaleString()} coins — the current Shop price? This gift can't be undone. ${balanceNote}`;
+      btn.disabled = !!_itemGiftPending || !affordable;
     }
     function openItemGift(targetId) {
       _itemGiftTargetId = targetId;
       const requestId = ++_itemGiftSeq;
       _itemGiftViewRequestId = requestId;
       const name = _online[targetId]?.name || 'this coworker';
-      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${name}`;
+      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${name} — you pay its current Shop price`;
       rpsEl('item-gift-error').textContent = '';
       rpsEl('item-gift-summary').textContent = 'Loading your collection…';
       rpsEl('item-gift-select').replaceChildren();
@@ -8796,14 +8808,15 @@
           const opt = document.createElement('option');
           opt.value = meta.id;
           opt.disabled = !!row.unavailable;
-          opt.textContent = `${meta.emoji || '🎁'} ${meta.name}${row.unavailable ? ` — ${row.unavailable}` : ''}`;
+          opt.dataset.cost = String(row.cost);
+          opt.textContent = `${meta.emoji || '🎁'} ${meta.name} — ${Number(row.cost).toLocaleString()} coins${row.unavailable ? ` — ${row.unavailable}` : ''}`;
           group.appendChild(opt);
         }
         sel.appendChild(group);
       }
       const first = [...sel.options].find((opt) => !opt.disabled);
       if (first) first.selected = true;
-      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${targetName || 'this coworker'}`;
+      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${targetName || 'this coworker'} — you pay its current Shop price`;
       if (!sel.options.length) rpsEl('item-gift-error').textContent = 'You have no non-rare items available to gift.';
       else if (!first) rpsEl('item-gift-error').textContent = `${targetName || 'They'} already own every available item, or your items are listed.`;
       _itemGiftSummary();
