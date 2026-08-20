@@ -9,8 +9,8 @@ Record the match winner and resulting bracket progression durably before attempt
 
 **How to apply:** For any durable tournament or organizer-funded event, make the saved outcome the commit point, recover unpaid rewards from that outcome, and reject conflicting claim ownership instead of silently treating it as an idempotent retry.
 
-Keep eliminated status immutable. Store Quit/Spectate as a separate, account-keyed viewer preference; quitting must never refund escrow or alter bracket progression. Only opted-in eliminated entrants may receive sanitized live battle events, and reconnect should restore that preference without granting battle controls.
+Keep eliminated status immutable. Store Quit/Spectate and optional public live viewing as separate, account-keyed viewer preferences; quitting/stopping must never refund escrow or alter bracket progression. Only explicit viewers may receive sanitized live battle events, and reconnect/restart should restore that preference without granting battle controls.
 
-**Why:** Treating "quit" as withdrawal corrupts a locked tournament, while client-only spectator state disappears on reconnect and can tempt implementations to reuse participant channels that expose controls.
+**Why:** Treating "quit" as withdrawal corrupts a locked tournament, while client-only viewer state disappears on reconnect and can tempt implementations to reuse participant channels that expose controls. Public viewing must be opt-in so coworkers can keep using the office normally.
 
-**How to apply:** Gate spectator delivery on the current event, eliminated account, and persisted preference. Send only public start/progress/round/result data; never legal move prompts or participant ownership. Keep invite dismissal client-only and event-scoped.
+**How to apply:** Gate spectator delivery on the current event and persisted preference, exclude the current fighters, and keep Quit available only to eliminated entrants. Send only public start/progress/round/result data; never legal move prompts or participant ownership. Keep invite dismissal client-only and event-scoped.

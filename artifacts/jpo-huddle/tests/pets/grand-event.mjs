@@ -17,6 +17,12 @@ const run = Math.random().toString(36).slice(2, 8);
 const emails = Array.from({ length: 8 }, (_, i) => `geit-${run}-${i + 1}@justpressone.com`);
 const names = ["StageThree", "BracketTwo", "BracketThree", "BracketFour", "BracketFive", "BracketSix", "BracketSeven", "BracketEight"];
 const chars = ["adam", "amelia", "bob", "ash", "lucy", "nancy", "oliver", "sophia"];
+const publicViewerIdentity = {
+  email: `geit-${run}-viewer@justpressone.com`,
+  name: "OfficeViewer",
+  char: "lucy",
+};
+const allTestEmails = [...emails, publicViewerIdentity.email];
 const fails = [];
 const ok = (value, label) => {
   console.log(`${value ? "  ✓" : "  ✗"} ${label}`);
@@ -99,7 +105,7 @@ async function stopServer() {
 
 async function cleanup() {
   await pool.query(`DELETE FROM jpo_grand_events WHERE created_by=$1`, [emails[0]]);
-  await pool.query(`DELETE FROM jpo_players WHERE email = ANY($1::text[])`, [emails]);
+  await pool.query(`DELETE FROM jpo_players WHERE email = ANY($1::text[])`, [allTestEmails]);
 }
 
 async function seed() {
@@ -124,83 +130,119 @@ async function seed() {
       [emails[i], names[i], `${names[i]} GrandEvent`, chars[i], JSON.stringify(xp), JSON.stringify(builds)],
     );
   }
+  await pool.query(
+    `INSERT INTO jpo_players
+      (email,first_name,last_name,name,character,department,approved,coins,cosmetics,equipped_pet,pet_xp,pet_builds,last_daily_bonus)
+     VALUES ($1,$2,'GrandEvent',$3,$4,'IT',true,1000,ARRAY['pet_dog']::text[],'pet_dog','{"pet_dog":0}'::jsonb,'{}'::jsonb,CURRENT_DATE)`,
+    [
+      publicViewerIdentity.email,
+      publicViewerIdentity.name,
+      `${publicViewerIdentity.name} GrandEvent`,
+      publicViewerIdentity.char,
+    ],
+  );
+}
+
+async function connectPlayer({ email, name, char, autoPlay = false }) {
+  const socket = io(URL, { transports: ["websocket"], reconnection: false });
+  const client = {
+    s: socket,
+    identity: { email, name, char },
+    autoPlay,
+    state: null,
+    readySent: new Set(),
+    picks: new Set(),
+    action: eventQueue(socket, "grandEventActionResult"),
+    admin: eventQueue(socket, "grandEventAdminResult"),
+    auth: eventQueue(socket, "adminAuthOk"),
+    approved: eventQueue(socket, "approved"),
+    ph: eventQueue(socket, "phResult"),
+    phEnd: eventQueue(socket, "phEnd"),
+    battleStages: [],
+    battleResults: new Map(),
+    spectatorStarts: [],
+    spectatorRounds: [],
+    spectatorStatuses: [],
+    pickStatuses: [],
+    champions: [],
+  };
+  socket.on("grandEventState", (state) => {
+    client.state = state;
+    if (client.autoPlay && state?.me?.canReady && state.currentMatchId && !client.readySent.has(state.currentMatchId)) {
+      client.readySent.add(state.currentMatchId);
+      socket.emit("grandEventReady");
+    }
+  });
+  socket.on("petBattleStart", (payload) => {
+    if (payload?.spectator) client.spectatorStarts.push(payload);
+    for (const side of Object.values(payload.combatants || {})) {
+      if (side?.name === names[0]) {
+        client.battleStages.push({
+          stage: side.stage,
+          buildExposed: Object.hasOwn(side, "build"),
+          tournament: payload.tournament,
+        });
+      }
+    }
+  });
+  socket.on("petBattlePickStatus", (payload) => {
+    client.pickStatuses.push(payload);
+    if (!client.autoPlay || !payload?.matchId || !Array.isArray(payload.legal)) return;
+    const key = `${payload.matchId}:${payload.round}`;
+    if (client.picks.has(key)) return;
+    client.picks.add(key);
+    const move = ["ultimate", "special", "attack"].find((m) => payload.legal.includes(m));
+    if (move) socket.emit("petBattlePick", { matchId: payload.matchId, move });
+  });
+  socket.on("petBattleResult", (payload) => {
+    if (payload?.matchId) client.battleResults.set(payload.matchId, payload);
+  });
+  socket.on("petBattleRound", (payload) => {
+    if (payload?.spectator) client.spectatorRounds.push(payload);
+  });
+  socket.on("petBattleSpectatorStatus", (payload) => {
+    client.spectatorStatuses.push(payload);
+  });
+  socket.on("grandEventChampion", (payload) => client.champions.push(payload));
+  await new Promise((resolve, reject) => {
+    socket.once("connect", resolve);
+    socket.once("connect_error", reject);
+  });
+  socket.emit("register", {
+    firstName: name,
+    lastName: "GrandEvent",
+    email,
+    password: "testpass123",
+    character: char,
+    department: "IT",
+  });
+  await client.approved.next(15_000, `approved ${name}`);
+  return client;
 }
 
 async function connectPlayers({ autoPlay = false } = {}) {
   const clients = [];
   for (let i = 0; i < emails.length; i++) {
-    const socket = io(URL, { transports: ["websocket"], reconnection: false });
-    const client = {
-      s: socket,
-      state: null,
-      readySent: new Set(),
-      picks: new Set(),
-      action: eventQueue(socket, "grandEventActionResult"),
-      admin: eventQueue(socket, "grandEventAdminResult"),
-      auth: eventQueue(socket, "adminAuthOk"),
-      approved: eventQueue(socket, "approved"),
-      ph: eventQueue(socket, "phResult"),
-      phEnd: eventQueue(socket, "phEnd"),
-      battleStages: [],
-      battleResults: new Map(),
-      spectatorStarts: [],
-      spectatorRounds: [],
-      spectatorStatuses: [],
-      pickStatuses: [],
-    };
-    socket.on("grandEventState", (state) => {
-      client.state = state;
-      if (autoPlay && state?.me?.canReady && state.currentMatchId && !client.readySent.has(state.currentMatchId)) {
-        client.readySent.add(state.currentMatchId);
-        socket.emit("grandEventReady");
-      }
-    });
-    socket.on("petBattleStart", (payload) => {
-      if (payload?.spectator) client.spectatorStarts.push(payload);
-      for (const side of Object.values(payload.combatants || {})) {
-        if (side?.name === names[0]) {
-          client.battleStages.push({
-            stage: side.stage,
-            buildExposed: Object.hasOwn(side, "build"),
-            tournament: payload.tournament,
-          });
-        }
-      }
-    });
-    socket.on("petBattlePickStatus", (payload) => {
-      client.pickStatuses.push(payload);
-      if (!autoPlay || !payload?.matchId || !Array.isArray(payload.legal)) return;
-      const key = `${payload.matchId}:${payload.round}`;
-      if (client.picks.has(key)) return;
-      client.picks.add(key);
-      const move = ["ultimate", "special", "attack"].find((m) => payload.legal.includes(m));
-      if (move) socket.emit("petBattlePick", { matchId: payload.matchId, move });
-    });
-    socket.on("petBattleResult", (payload) => {
-      if (payload?.matchId) client.battleResults.set(payload.matchId, payload);
-    });
-    socket.on("petBattleRound", (payload) => {
-      if (payload?.spectator) client.spectatorRounds.push(payload);
-    });
-    socket.on("petBattleSpectatorStatus", (payload) => {
-      client.spectatorStatuses.push(payload);
-    });
-    await new Promise((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("connect_error", reject);
-    });
-    socket.emit("register", {
-      firstName: names[i],
-      lastName: "GrandEvent",
+    clients.push(await connectPlayer({
       email: emails[i],
-      password: "testpass123",
-      character: chars[i],
-      department: "IT",
-    });
-    await client.approved.next(15_000, `approved ${i + 1}`);
-    clients.push(client);
+      name: names[i],
+      char: chars[i],
+      autoPlay,
+    }));
   }
   return clients;
+}
+
+function enableAutoPlay(clients) {
+  for (const client of clients) {
+    client.autoPlay = true;
+    if (client.state?.me?.canReady
+        && client.state.currentMatchId
+        && !client.readySent.has(client.state.currentMatchId)) {
+      client.readySent.add(client.state.currentMatchId);
+      client.s.emit("grandEventReady");
+    }
+  }
 }
 
 const closePlayers = (clients) => clients.forEach((c) => c.s.close());
@@ -211,6 +253,7 @@ const config = {
   prizeDetails: "Golden office trophy — manual fulfillment",
 };
 
+let publicViewer = null;
 try {
   await seed();
   await startServer();
@@ -344,26 +387,90 @@ try {
   server = null;
 
   await startServer();
-  clients = await connectPlayers({ autoPlay: true });
+  publicViewer = await connectPlayer({ ...publicViewerIdentity, autoPlay: false });
+  clients = await connectPlayers({ autoPlay: false });
   const firstSettledMatch = crashSnapshot.rounds[0].matches[0];
   const firstLoserEmail = firstSettledMatch.winner === firstSettledMatch.p1
     ? firstSettledMatch.p2
     : firstSettledMatch.p1;
-  const observer = clients[emails.indexOf(firstLoserEmail)];
+  let observer = clients[emails.indexOf(firstLoserEmail)];
   const observerBalanceBefore = Number((await pool.query(
     `SELECT coins FROM jpo_players WHERE email=$1`, [firstLoserEmail],
   )).rows[0].coins);
 
+  // Establish eliminated-entry viewing before starting the next matchup so
+  // short automated matches cannot finish the bracket ahead of this coverage.
   observer.s.emit("grandEventViewMode", { mode: "spectate" });
   const spectateChoice = await observer.action.next(8_000, "spectate choice");
   ok(spectateChoice.ok, "an eliminated entrant can opt into live spectating");
   await waitFor(() => observer.state?.me?.viewMode === "spectate", 8_000, "spectator preference");
+  enableAutoPlay(clients);
+
+  const viewerLiveState = await waitFor(
+    () => publicViewer.state?.state === "running" && publicViewer.state?.me?.canWatch && publicViewer.state,
+    30_000,
+    "non-entrant live watch action",
+  );
+  ok(!viewerLiveState.me.joined && viewerLiveState.me.status === null,
+    "an approved coworker can watch without entering the tournament");
+  const liveMatch = viewerLiveState.rounds[viewerLiveState.currentRoundIndex].matches
+    .find((match) => match.id === viewerLiveState.currentMatchId);
+  const fighter = clients[names.indexOf(liveMatch.p1.name)];
+  const fighterSpectatorStarts = fighter.spectatorStarts.length;
+  fighter.action.drain();
+  fighter.s.emit("grandEventWatch", { watch: true });
+  publicViewer.s.emit("grandEventWatch", { watch: true });
+  const [fighterWatch, publicWatch] = await Promise.all([
+    fighter.action.next(8_000, "current fighter watch rejection"),
+    publicViewer.action.next(8_000, "public watch choice"),
+  ]);
+  await sleep(150);
+  ok(!fighterWatch.ok && /cannot spectate/i.test(fighterWatch.message || "")
+      && fighter.spectatorStarts.length === fighterSpectatorStarts,
+    "a current fighter cannot opt into their own spectator feed");
+
+  ok(publicWatch.ok,
+    "a non-entrant can opt into the current live Pet Wars fight");
+  await waitFor(() => publicViewer.state?.me?.watching, 8_000, "public watcher preference");
+  await waitFor(() => publicViewer.spectatorStarts.length > 0, 15_000, "public spectator start");
+
+  // Persist the public watch choice through a real process restart. Combat is
+  // replayed from the frozen bracket snapshot, and the opted-in coworker must
+  // be reattached to the next/current sanitized feed after re-registering.
+  const midRestartStages = clients.flatMap((client) => client.battleStages);
+  const midRestartResults = new Map(clients.flatMap((client) => [...client.battleResults.entries()]));
+  closePlayers(clients);
+  publicViewer.s.close();
+  publicViewer = null;
+  await stopServer();
+  await startServer();
+  publicViewer = await connectPlayer({ ...publicViewerIdentity, autoPlay: false });
+  clients = await connectPlayers({ autoPlay: false });
+  observer = clients[emails.indexOf(firstLoserEmail)];
+
+  await waitFor(() => publicViewer.state?.me?.watching, 12_000, "restored public watcher after server restart");
+  await waitFor(() => observer.state?.me?.viewMode === "spectate", 12_000, "restored eliminated spectator after server restart");
+  enableAutoPlay(clients);
+  await waitFor(() => publicViewer.spectatorStarts.length > 0, 30_000, "public spectator start after server restart");
+  ok(publicViewer.state?.me?.watching && !publicViewer.state?.me?.joined,
+    "server restart restores a non-entrant's active watch preference");
+
   await waitFor(() => observer.spectatorStarts.length > 0, 30_000, "sanitized spectator battle start");
   ok(observer.spectatorStarts.every((payload) => payload.spectator && payload.tournament
       && payload.viewSide === "challenger" && payload.combatants
       && Object.values(payload.combatants).every((side) =>
         ["build", "stats", "hp", "maxHp"].every((key) => !Object.hasOwn(side, key)))),
     "spectators receive a read-only sanitized tournament start snapshot");
+
+  await waitFor(() => publicViewer.spectatorRounds.length > 0, 30_000, "public spectator round");
+  ok(publicViewer.spectatorStarts.every((payload) => payload.spectator && payload.tournament
+      && Object.values(payload.combatants || {}).every((side) =>
+        ["build", "stats", "hp", "maxHp"].every((key) => !Object.hasOwn(side, key))))
+      && publicViewer.spectatorRounds.every((payload) => payload.spectator
+        && !JSON.stringify(payload.result || {}).includes("damageDealt")),
+    "non-entrant viewers receive choreography with percentage-only combat data");
+  ok(publicViewer.spectatorStatuses.length > 0 && publicViewer.pickStatuses.length === 0,
+    "non-entrant viewers receive live status without move controls");
 
   // Reconnect while the event is active. The durable preference should restore,
   // and either the current battle or the next one should reopen automatically.
@@ -396,6 +503,15 @@ try {
       && !JSON.stringify(payload.result).includes("damageDealt")),
     "live spectators receive battle animation rounds with public combatants");
 
+  const publicMatchAtStop = publicViewer.state.currentMatchId;
+  publicViewer.s.emit("grandEventWatch", { watch: false });
+  ok((await publicViewer.action.next(8_000, "public stop watch")).ok,
+    "a public viewer can stop watching and return to the bracket");
+  await waitFor(() => publicViewer.state?.me?.watching === false, 8_000, "public stop preference");
+  const publicEventsAtStop = publicViewer.spectatorStarts.length
+    + publicViewer.spectatorRounds.length
+    + [...publicViewer.battleResults.values()].filter((payload) => payload.spectator).length;
+
   const currentAtQuit = observer.state.currentMatchId;
   observer.s.emit("grandEventViewMode", { mode: "quit" });
   const quitChoice = await observer.action.next(8_000, "quit choice");
@@ -417,6 +533,12 @@ try {
     + [...observer.battleResults.values()].filter((payload) => payload.spectator).length;
   ok(spectatorEventCountAfterQuit === spectatorEventCountAtQuit,
     "quit spectators stop receiving later live battle events");
+  const publicEventsAfterStop = publicViewer.spectatorStarts.length
+    + publicViewer.spectatorRounds.length
+    + [...publicViewer.battleResults.values()].filter((payload) => payload.spectator).length;
+  ok((publicViewer.state?.state === "complete" || publicViewer.state?.currentMatchId !== publicMatchAtStop)
+      && publicEventsAfterStop === publicEventsAtStop,
+    "stopped public viewers receive no later live battle events");
   ok(observer.state?.me?.status === "eliminated",
     "quit is a viewer preference and never reverses bracket elimination");
   ok(Number((await pool.query(
@@ -441,12 +563,29 @@ try {
   "custom champion prize is recorded and displayed for manual fulfillment");
   ok(completed.champion.pot === 1200 && completed.champion.roundReward === 40,
     "champion receives the full 1,200 entry pot plus configured final reward");
+  await waitFor(
+    () => [...clients, publicViewer].every((client) =>
+      client.champions.some((champion) => champion?.name === completed.champion.name
+        && champion?.petId === completed.champion.petId)),
+    8_000,
+    "office-wide champion broadcast",
+  );
+  ok([...clients, publicViewer].every((client) => client.champions.length > 0),
+    "every connected coworker receives the champion and winning pet announcement");
 
-  const allStageCaptures = [...preCrashStages, ...clients.flatMap((c) => c.battleStages)];
+  const allStageCaptures = [
+    ...preCrashStages,
+    ...midRestartStages,
+    ...clients.flatMap((c) => c.battleStages),
+  ];
   ok(allStageCaptures.length > 0
     && allStageCaptures.every((x) => x.tournament && x.stage === 3 && !x.buildExposed),
   "post-restart battles use frozen final-form artwork without leaking training builds");
-  const results = new Map([...preCrashResults, ...clients.flatMap((c) => [...c.battleResults.entries()])]);
+  const results = new Map([
+    ...preCrashResults,
+    ...midRestartResults,
+    ...clients.flatMap((c) => [...c.battleResults.entries()]),
+  ]);
   ok(results.size === 7 && [...results.values()].every((r) => r.tournament && !r.draw),
     "seven server-authoritative tournament Pet Battles finished without a draw");
 
@@ -466,6 +605,8 @@ try {
   const balancesBeforeRecovery = (await pool.query(
     `SELECT email,coins FROM jpo_players WHERE email = ANY($1::text[]) ORDER BY email`, [emails],
   )).rows;
+  publicViewer.s.close();
+  publicViewer = null;
   closePlayers(clients);
   await stopServer();
   await startServer();
@@ -482,6 +623,7 @@ try {
   fails.push(error.message);
   console.log(`RESULT: FAIL (${fails.length})`);
 } finally {
+  publicViewer?.s.close();
   await stopServer().catch(() => {});
   await cleanup().catch(() => {});
   await pool.end();

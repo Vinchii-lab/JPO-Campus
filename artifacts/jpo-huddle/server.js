@@ -4330,6 +4330,7 @@ function grandEventSerialize() {
   return {
     joinDeadline: grandEvent.joinDeadline || 0,
     entrants: [...grandEvent.entrants.values()],
+    watchers: [...(grandEvent.watchers || new Set())],
     rounds: grandEvent.rounds || [],
     currentRoundIndex: grandEvent.currentRoundIndex || 0,
     currentMatchIndex: grandEvent.currentMatchIndex || 0,
@@ -4383,6 +4384,13 @@ function grandEventCurrentMatch() {
   return grandEvent?.rounds?.[grandEvent.currentRoundIndex]?.matches?.[grandEvent.currentMatchIndex] || null;
 }
 
+function grandEventEmailWatching(email) {
+  if (!grandEvent || !email) return false;
+  const entrant = grandEvent.entrants.get(email);
+  return grandEvent.watchers?.has(email)
+    || (entrant?.status === "eliminated" && entrant.viewMode === "spectate");
+}
+
 function grandEventPublicView(email = null) {
   if (!grandEvent) return { active: false };
   if (grandEvent.state === "complete" && Date.now() - Number(grandEvent.champion?.at || 0) > 15 * 60_000)
@@ -4407,6 +4415,7 @@ function grandEventPublicView(email = null) {
   }));
   const mine = email ? grandEvent.entrants.get(email) : null;
   const isCurrent = !!current && (current.p1 === email || current.p2 === email);
+  const watching = grandEventEmailWatching(email);
   return {
     active: true,
     id: grandEvent.id,
@@ -4445,6 +4454,11 @@ function grandEventPublicView(email = null) {
       joined: !!mine,
       status: mine?.status || null,
       viewMode: mine?.viewMode || (mine?.status === "eliminated" ? "decision" : "playing"),
+      watching,
+      canWatch: grandEvent.state === "running"
+        && current?.state === "active"
+        && !isCurrent
+        && mine?.viewMode !== "quit",
       isCurrent,
       ready: !!email && readySet.has(email),
       canReady: grandEvent.state === "running" && isCurrent && current?.state === "ready" && !readySet.has(email),
@@ -4483,13 +4497,16 @@ function grandEventCurrentBattle() {
 
 function grandEventSpectatorSocketIds(battle) {
   if (!battle?.tournament || !grandEvent || battle.grandEventId !== grandEvent.id) return [];
-  const ids = [];
+  const ids = new Set();
+  const emails = new Set(grandEvent.watchers || []);
   for (const entrant of grandEvent.entrants.values()) {
-    if (entrant.status !== "eliminated" || entrant.viewMode !== "spectate") continue;
-    const id = grandEventSocketForEmail(entrant.email);
-    if (id && id !== battle.challengerId && id !== battle.opponentId) ids.push(id);
+    if (entrant.status === "eliminated" && entrant.viewMode === "spectate") emails.add(entrant.email);
   }
-  return ids;
+  for (const email of emails) {
+    const id = grandEventSocketForEmail(email);
+    if (id && id !== battle.challengerId && id !== battle.opponentId) ids.add(id);
+  }
+  return [...ids];
 }
 
 function grandEventSpectatorStartPayload(battle) {
@@ -4516,10 +4533,9 @@ function petBattleEmitTournamentSpectators(battle, event, payload) {
 
 function grandEventEmitCurrentBattleToSpectator(id) {
   const email = players[id]?.email;
-  const entrant = email ? grandEvent?.entrants.get(email) : null;
-  if (!entrant || entrant.status !== "eliminated" || entrant.viewMode !== "spectate") return;
+  if (!grandEventEmailWatching(email)) return;
   const battle = grandEventCurrentBattle();
-  if (!battle) return;
+  if (!battle || id === battle.challengerId || id === battle.opponentId) return;
   io.to(id).emit("petBattleStart", grandEventSpectatorStartPayload(battle));
   io.to(id).emit("petBattleSpectatorStatus", {
     matchId: battle.matchId,
@@ -4673,6 +4689,7 @@ async function grandEventCreate(config, createdBy) {
     createdBy,
     joinDeadline: Date.now() + config.joinMs,
     entrants: new Map(),
+    watchers: new Set(),
     rounds: [],
     currentRoundIndex: 0,
     currentMatchIndex: 0,
@@ -4862,9 +4879,34 @@ async function grandEventSetViewMode(id, mode) {
     throw new Error("Quit and Spectate are available after elimination.");
   if (mode !== "spectate" && mode !== "quit") throw new Error("Choose Quit or Spectate.");
   entrant.viewMode = mode;
+  if (mode === "spectate") grandEvent.watchers.add(p.email);
+  else grandEvent.watchers.delete(p.email);
   await grandEventPersist();
   grandEventBroadcast();
   if (mode === "spectate") grandEventEmitCurrentBattleToSpectator(id);
+}
+
+async function grandEventSetWatching(id, watch) {
+  const p = players[id];
+  if (!p?.email || !grandEvent || !["running", "complete"].includes(grandEvent.state))
+    throw new Error("No Grand Event is available.");
+  const entrant = grandEvent.entrants.get(p.email);
+  if (entrant?.viewMode === "quit") throw new Error("You already left Pet Wars.");
+  if (watch) {
+    const match = grandEventCurrentMatch();
+    if (match?.p1 === p.email || match?.p2 === p.email)
+      throw new Error("Fighters cannot spectate their own match.");
+    const battle = grandEventCurrentBattle();
+    if (!battle) throw new Error("No Pet Wars fight is live right now.");
+    grandEvent.watchers.add(p.email);
+    if (entrant?.status === "eliminated") entrant.viewMode = "spectate";
+  } else {
+    grandEvent.watchers.delete(p.email);
+    if (entrant?.status === "eliminated" && entrant.viewMode === "spectate") entrant.viewMode = "decision";
+  }
+  await grandEventPersist();
+  grandEventBroadcast();
+  if (watch) grandEventEmitCurrentBattleToSpectator(id);
 }
 
 async function grandEventStartBattle(match) {
@@ -5054,6 +5096,7 @@ async function grandEventRestoreFromDb() {
     createdBy: row.created_by || "",
     joinDeadline: Number(snap.joinDeadline) || 0,
     entrants,
+    watchers: new Set(Array.isArray(snap.watchers) ? snap.watchers.filter((email) => typeof email === "string") : []),
     rounds: snap.rounds || [],
     currentRoundIndex: Number(snap.currentRoundIndex) || 0,
     currentMatchIndex: Number(snap.currentMatchIndex) || 0,
@@ -7612,6 +7655,22 @@ io.on("connection", (socket) => {
       .catch((err) => socket.emit("grandEventActionResult", {
         ok: false,
         message: err.message || "Couldn't update your Pet Wars view.",
+      }));
+  });
+
+  socket.on("grandEventWatch", (payload) => {
+    if (!takeToken(interactBucket)) return;
+    const watch = payload?.watch === true;
+    grandEventQueue(() => grandEventSetWatching(socket.id, watch))
+      .then(() => socket.emit("grandEventActionResult", {
+        ok: true,
+        message: watch
+          ? "Opening the live Pet Wars fight."
+          : "Live viewing is off. You're back at the bracket.",
+      }))
+      .catch((err) => socket.emit("grandEventActionResult", {
+        ok: false,
+        message: err.message || "Couldn't update live viewing.",
       }));
   });
 

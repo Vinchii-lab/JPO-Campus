@@ -2529,6 +2529,25 @@
 .ge-champion { margin:14px 16px 18px;padding:18px;text-align:center;border:2px solid #f0b83f;border-radius:14px;background:radial-gradient(circle at top,#533b18,#221830 68%); }
 .ge-champion h3 { color:#ffdc78;font-size:24px;margin:0 0 8px; }
 .ge-champion b { color:#fff;font-size:18px; }
+#ge-champion-banner {
+  position:fixed;top:18px;left:50%;z-index:9800;display:none;align-items:center;gap:12px;
+  width:min(620px,calc(100vw - 24px));box-sizing:border-box;padding:14px 16px;
+  transform:translateX(-50%);border:2px solid #ffd66b;border-radius:16px;
+  background:linear-gradient(135deg,rgba(91,56,18,.98),rgba(40,22,66,.98));
+  box-shadow:0 14px 50px rgba(0,0,0,.7),0 0 30px rgba(240,184,63,.22);
+  color:#fff;font-family:monospace;cursor:pointer;
+}
+#ge-champion-banner.open { display:flex;animation:geChampionIn .42s cubic-bezier(.2,.9,.2,1); }
+.ge-champion-cup { font-size:34px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45)); }
+.ge-champion-copy { flex:1;min-width:0; }
+.ge-champion-kicker { color:#ffd66b;font-size:10px;font-weight:900;letter-spacing:1.3px;text-transform:uppercase; }
+#ge-champion-name { margin-top:3px;font-size:16px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+#ge-champion-pet { margin-top:3px;color:#d9ccef;font-size:11px; }
+.ge-champion-dismiss { border:0;background:transparent;color:#d9ccef;font:900 18px monospace;cursor:pointer; }
+@keyframes geChampionIn {
+  from { opacity:0;transform:translate(-50%,-18px) scale(.96); }
+  to { opacity:1;transform:translate(-50%,0) scale(1); }
+}
 @media (max-width:700px) {
   #ge-lobby-card { bottom:82px;padding:12px; }
   #ge-panel { padding:0;align-items:flex-start; }
@@ -2890,6 +2909,16 @@
   </div>
 
   <!-- ── Pet Wars Grand Event lobby + bracket ── -->
+  <div id="ge-champion-banner" role="status" aria-live="assertive">
+    <div class="ge-champion-cup" aria-hidden="true">🏆</div>
+    <div class="ge-champion-copy">
+      <div class="ge-champion-kicker">Pet Wars Champion</div>
+      <div id="ge-champion-name"></div>
+      <div id="ge-champion-pet"></div>
+    </div>
+    <button id="ge-champion-dismiss" class="ge-champion-dismiss" type="button" aria-label="Dismiss champion announcement">✕</button>
+  </div>
+
   <aside id="ge-lobby-card" aria-live="polite">
     <div class="ge-lobby-head">
       <div class="ge-lobby-title">🏆 Pet Wars Grand Event</div>
@@ -2901,6 +2930,7 @@
       <button id="ge-join-btn" class="ge-btn primary" type="button">Enter bracket</button>
       <button id="ge-withdraw-btn" class="ge-btn danger" type="button">Withdraw</button>
       <button id="ge-ready-btn" class="ge-btn primary" type="button">Ready for battle</button>
+      <button id="ge-watch-btn" class="ge-btn primary" type="button">Watch live</button>
       <button id="ge-view-btn" class="ge-btn" type="button">View bracket</button>
       <span id="ge-lobby-msg" class="ge-msg"></span>
     </div>
@@ -18129,6 +18159,7 @@
     let _geState = null;
     let _geDismissedId = null;
     let _gePendingViewMode = null;
+    let _geChampionTimer = null;
     try { _geDismissedId = sessionStorage.getItem('jpo_ge_dismissed') || null; } catch (e) {}
     const geEl = (id) => document.getElementById(id);
     const geEsc = (v) => String(v == null ? '' : v)
@@ -18182,6 +18213,15 @@
       socket.emit('grandEventReady');
     };
 
+    function geSetWatching(watch) {
+      if (!watch) {
+        pbCloseAll();
+        geOpenPanel();
+      }
+      socket.emit('grandEventWatch', { watch: !!watch });
+    }
+    geEl('ge-watch-btn').onclick = () => geSetWatching(true);
+
     function geChooseView(mode) {
       if (mode !== 'spectate' && mode !== 'quit') return;
       // Apply an immediate client gate while the durable server update is in
@@ -18229,7 +18269,10 @@
         return;
       }
       if (!m) {
-        el.innerHTML = `<div class="ge-current-title">${s.state === 'complete' ? 'Tournament complete' : 'Building next round…'}</div>${geLossChoiceHtml(s)}`;
+        el.innerHTML = `<div class="ge-current-title">${s.state === 'complete' ? 'Tournament complete' : 'Building next round…'}</div>
+          ${s.me?.watching ? '<div class="ge-current-actions" style="margin-top:8px"><button class="ge-btn danger" type="button" data-ge-stop-watch>Stop watching</button></div>' : ''}
+          ${geLossChoiceHtml(s)}`;
+        el.querySelector('[data-ge-stop-watch]')?.addEventListener('click', () => geSetWatching(false));
         geWireLossChoices(el);
         return;
       }
@@ -18244,9 +18287,13 @@
         </div>
         <div class="ge-current-actions">
           ${s.me?.canReady ? '<button class="ge-btn primary" type="button" data-ge-ready>Ready for battle</button>' : ''}
+          ${s.me?.canWatch ? `<button class="ge-btn primary" type="button" data-ge-watch>${s.me?.watching ? 'Return to live fight' : 'Watch live'}</button>` : ''}
+          ${s.me?.watching ? '<button class="ge-btn danger" type="button" data-ge-stop-watch>Stop watching</button>' : ''}
           <span class="ge-msg">${geEsc(readyCopy)} · Winner gets ${geCoins(s.currentReward)} round coins</span>
         </div>${geLossChoiceHtml(s)}`;
       el.querySelector('[data-ge-ready]')?.addEventListener('click', () => socket.emit('grandEventReady'));
+      el.querySelector('[data-ge-watch]')?.addEventListener('click', () => geSetWatching(true));
+      el.querySelector('[data-ge-stop-watch]')?.addEventListener('click', () => geSetWatching(false));
       geWireLossChoices(el);
     }
 
@@ -18308,13 +18355,15 @@
         copy = s.cancelledMessage || 'The event has ended.';
       }
       geEl('ge-lobby-copy').textContent = copy;
-      const join = geEl('ge-join-btn'), withdraw = geEl('ge-withdraw-btn'), ready = geEl('ge-ready-btn');
+      const join = geEl('ge-join-btn'), withdraw = geEl('ge-withdraw-btn'), ready = geEl('ge-ready-btn'), watch = geEl('ge-watch-btn');
       join.style.display = s.me?.canJoin ? '' : 'none';
       join.textContent = `Enter for ${geCoins(s.entryFee)} coins`;
       withdraw.style.display = s.me?.canWithdraw ? '' : 'none';
       ready.style.display = s.me?.isCurrent && s.state === 'running' ? '' : 'none';
       ready.disabled = !s.me?.canReady;
       ready.textContent = s.me?.ready ? 'Ready ✓' : 'Ready for battle';
+      watch.style.display = s.me?.canWatch ? '' : 'none';
+      watch.textContent = s.me?.watching ? 'Return to live fight' : 'Watch live';
       const hostStart = document.getElementById('op-ge-start');
       if (hostStart) {
         hostStart.disabled = !s.canStart;
@@ -18377,7 +18426,27 @@
       geEl('ge-lobby-msg').style.color = '#ffdc78';
       geEl('ge-lobby-msg').textContent = `Grand Event ${kind}: +${geCoins(amount)} coins`;
     });
-    socket.on('grandEventChampion', () => { geOpenPanel(); });
+    function geShowChampion(champion) {
+      if (!champion) return;
+      const banner = geEl('ge-champion-banner');
+      geEl('ge-champion-name').textContent = `${champion.name || 'The winner'} wins Pet Wars!`;
+      geEl('ge-champion-pet').textContent = `${gePetLabel(champion)} · Click to view the final bracket`;
+      banner.classList.add('open');
+      clearTimeout(_geChampionTimer);
+      _geChampionTimer = setTimeout(() => banner.classList.remove('open'), 12000);
+    }
+    geEl('ge-champion-banner').onclick = () => {
+      geEl('ge-champion-banner').classList.remove('open');
+      geOpenPanel();
+    };
+    geEl('ge-champion-dismiss').onclick = (event) => {
+      event.stopPropagation();
+      geEl('ge-champion-banner').classList.remove('open');
+    };
+    socket.on('grandEventChampion', (champion) => {
+      geShowChampion(champion);
+      geOpenPanel();
+    });
     socket.on('grandEventCancelled', ({ message } = {}) => {
       geEl('ge-lobby-msg').style.color = '#ffdc78';
       geEl('ge-lobby-msg').textContent = message || 'Event cancelled and entries refunded.';
@@ -18668,6 +18737,7 @@
       pbEl('pb-result-screen').classList.remove('open');
       pbEl('pb-controls').style.display = '';
       pbEl('pb-forfeit-btn').style.display = '';
+      pbEl('pb-forfeit-btn').textContent = 'Forfeit';
       pbEl('pb-result-close').style.display = '';
       pbEl('pb-result-spectate').style.display = 'none';
       pbEl('pb-result-quit').style.display = 'none';
@@ -19106,8 +19176,10 @@
     socket.on('petBattleStart', (payload) => {
        const spectator = !!payload.spectator;
        if (spectator) {
-          const viewerMode = _gePendingViewMode || _geState?.me?.viewMode;
-          if (viewerMode !== 'spectate') return;
+           const watching = _geState?.me?.watching
+             || _gePendingViewMode === 'spectate'
+             || _geState?.me?.viewMode === 'spectate';
+           if (!watching) return;
           if (payload.matchId !== pbMatchId && pbMatchId) pbCloseAll();
        } else if (payload.matchId !== pbMatchId && pbMatchId) return;
        pbMatchId = payload.matchId;
@@ -19161,9 +19233,15 @@
        pbEl('pb-controls').style.pointerEvents = 'none';
        pbEl('pb-controls').style.display = spectator ? 'none' : '';
        
-       pbEl('pb-forfeit-btn').style.display = spectator ? 'none' : '';
-       pbEl('pb-forfeit-btn').disabled = spectator;
+       const stopWatching = spectator && pbTournament && !!_geState?.me?.watching;
+       pbEl('pb-forfeit-btn').style.display = spectator && !stopWatching ? 'none' : '';
+       pbEl('pb-forfeit-btn').disabled = false;
+       pbEl('pb-forfeit-btn').textContent = stopWatching ? 'Stop watching' : 'Forfeit';
        pbEl('pb-forfeit-btn').onclick = () => {
+          if (stopWatching) {
+             geSetWatching(false);
+             return;
+          }
           pbEl('pb-forfeit-btn').disabled = true;
           pbEl('pb-status-text').textContent = "Surrendering...";
           socket.emit('petBattleForfeit', { matchId: pbMatchId });
@@ -20171,16 +20249,18 @@
            const spectate = pbEl('pb-result-spectate');
            const quit = pbEl('pb-result-quit');
            close.style.display = '';
-           close.textContent = watched ? 'Back to bracket' : 'Close';
+           const hasWatchPreference = watched && !!_geState?.me?.watching;
+           close.textContent = hasWatchPreference ? 'Stop watching' : watched ? 'Back to bracket' : 'Close';
            spectate.style.display = 'none';
            quit.style.display = 'none';
             close.onclick = () => {
              const tournament = !!payload.tournament;
+              if (hasWatchPreference) geSetWatching(false);
              pbCloseAll();
              if (tournament) geOpenPanel();
            };
 
-           if (watched) {
+           if (watched && _geState?.me?.status === 'eliminated') {
              quit.style.display = '';
              quit.onclick = () => {
                geChooseView('quit');
