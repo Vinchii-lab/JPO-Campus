@@ -6493,6 +6493,42 @@
       document.getElementById('work-chip').classList.toggle('on', !!on);
     }
 
+    // ── World-pointer layering ─────────────────────────────────────────
+    // Phaser resolves interactive sprites on pointerdown, while several DOM
+    // controls (notably Shop) open on the later click event. Only an event that
+    // genuinely originated on the Phaser canvas may reach a world sprite.
+    // Visible-layer detection also blocks clicks on uncovered canvas around a
+    // popup card, including panels that use inline display:flex instead of
+    // toggling an .open class (the pet panel is one example).
+    const WORLD_BLOCKING_LAYERS = [
+      '[id$="-modal"]', '[id$="-panel"]', '[id$="-overlay"]', '[role="dialog"]',
+      '#rps-menu', '#rps-match', '#rps-incoming', '#rps-waiting',
+      '#trade-incoming', '#round-invite', '#round-role', '#round-end',
+      '#pb-incoming', '#pb-waiting', '#pb-result-screen',
+      '#tut-card', '#ge-lobby-card', '#ge-panel', '#img-lightbox', '#minimap',
+    ].join(',');
+    function _visibleWorldBlockingLayer() {
+      return Array.from(document.querySelectorAll(WORLD_BLOCKING_LAYERS)).some((el) => {
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden'
+          && style.pointerEvents !== 'none' && rect.width > 0 && rect.height > 0;
+      });
+    }
+    function _worldPointerBlocked(pointer) {
+      if (!document.body.classList.contains('playing') || _chatOpen || _dmOpen
+          || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen
+          || window._bingoUiOpen?.() || window._dealUiOpen?.()) return true;
+      const target = pointer?.event?.target;
+      if (target && target.tagName !== 'CANVAS') return true;
+      return _visibleWorldBlockingLayer();
+    }
+    // Phaser also observes pointer events high in the DOM tree. Stop UI presses
+    // before they bubble to window; target-level card/button handlers still run.
+    document.addEventListener('pointerdown', (event) => {
+      if (event.target?.tagName !== 'CANVAS') event.stopPropagation();
+    });
+
     // ── Shop ──────────────────────────────────────────────────────────
     function openShop() {
       _wardrobeShirtSel = _playerShirtIdx;   // wardrobe picks start at what you're wearing
@@ -14058,14 +14094,9 @@
         // Whisper/Challenge/Profile menu from _addOtherPlayer). Same gate as
         // the other-avatar click so it never fires under an open panel.
         this.player.setInteractive({ useHandCursor: true });
-        this.player.on('pointerdown', () => {
-          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
-              && !window._bingoUiOpen?.()
-              && !window._dealUiOpen?.()
-              && !document.getElementById('shop-modal').classList.contains('open')) {
-            window._openProfile(socket.id);
-          }
+        this.player.on('pointerdown', (pointer) => {
+          if (_worldPointerBlocked(pointer)) return;
+          window._openProfile(socket.id);
         });
 
         this.cursors = this.input.keyboard.createCursorKeys();
@@ -14574,6 +14605,7 @@
         if (obj._ownerId) {
           obj.setInteractive({ useHandCursor: true });
           obj.on('pointerdown', (_pointer, _localX, _localY, event) => {
+            if (_worldPointerBlocked(_pointer)) return;
             event?.stopPropagation?.();
             window.openPetProfile?.(obj._ownerId);
           });
@@ -16867,13 +16899,16 @@
               this._petTrick(petObj);
             }
           }
-          // ── FLIGHT: dragons stage 2+ and final phoenixes stay airborne with
-          // their wings cycling even while they are holding position.
-          const flying = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
-            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);   // grown phoenix is AIRBORNE like the dragons
+          // ── OFFICE FLIGHT: grown dragons/Phoenixes fly while following, then
+          // LAND when they stop. In particular, an owner's seated state must
+          // show the pet's real sit/nest art. Pet Wars owns its separate,
+          // continuously-airborne battle renderer.
+          const airborneSpecies = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
+            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);
+          const movingFly = dist > gap + 1;
+          const flying = airborneSpecies && movingFly && !seated;
           if (flying) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
-            const movingFly = dist > gap + 1;
             // SWOOP LANDING (storyboard #3) — per-dragon personality:
             //   Violet   graceful wide arc, soft landing, neat dust ring
             //   Crimson  steeper faster dive, harder brake, camera bump
@@ -17095,7 +17130,8 @@
               .setVisible(petObj.visible)
               .setScale(1 + (hov - 11) * -0.02);   // shadow breathes opposite the bob
           } else {
-            if (flying) {
+            if (airborneSpecies) {
+              petObj._wasFlyMove = false;
               // SWOOP LANDING on sit-down (boss rule): the dragon doesn't
               // teleport into its seat — it visibly DESCENDS over ~half a
               // second, wings flared to brake, then the dust hits on touchdown.
@@ -17563,14 +17599,9 @@
         // Listener dies with the sprite on destroy — no cleanup bookkeeping.
         sprite.setInteractive({ useHandCursor: true });
         sprite.on('pointerdown', (pointer) => {
-          if (document.body.classList.contains('playing') && !_chatOpen && !_dmOpen
-              && !_ownerPanelOpen && !_boardPanelOpen && !_rpsUiOpen && !_coachPanelOpen
-              && !window._bingoUiOpen?.()
-              && !window._dealUiOpen?.()
-              && !document.getElementById('shop-modal').classList.contains('open')) {
-            const ev = pointer && pointer.event;
-            window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
-          }
+          if (_worldPointerBlocked(pointer)) return;
+          const ev = pointer && pointer.event;
+          window._rpsShowMenu(id, ev?.clientX ?? innerWidth / 2, ev?.clientY ?? innerHeight / 2);
         });
 
         const nameTag = this._makeNameTag(data.x, data.y, data.name || '?');
