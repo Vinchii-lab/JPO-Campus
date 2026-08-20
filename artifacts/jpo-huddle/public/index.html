@@ -1103,6 +1103,19 @@
     .pf-row:last-child { border-bottom: none; }
     .pf-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; flex-shrink: 0; }
     .pf-row span:last-child { word-break: break-all; text-align: right; }
+    #pf-actions { display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.12); }
+    #pf-actions.show { display: block; }
+    .pf-actions-title { margin: 0 0 9px; color: #aeadc2; font-size: 11px; text-align: left; }
+    .pf-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .pf-action {
+      min-height: 58px; padding: 10px; border: 1px solid #46416f; border-radius: 9px;
+      background: linear-gradient(145deg, #2c2948, #242239); color: #f5f3ff;
+      font: 11px 'Press Start 2P', monospace; line-height: 1.4; cursor: pointer; text-align: left;
+      transition: transform .12s, background .12s, border-color .12s;
+    }
+    .pf-action:hover { transform: translateY(-1px); border-color: #9387ff; background: #38345a; }
+    .pf-action.pet { border-color: #e59a31; background: linear-gradient(145deg, #4a3420, #2c2530); }
+    .pf-action.pet:hover { border-color: #ffcb60; background: #5b4022; }
     #pf-dept-pick { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.12); }
     #pf-dept-pick.show { display: block; }
     #pf-dept-select {
@@ -1802,6 +1815,10 @@
   text-align: right; text-shadow: none;
 }
 #pt-challenge-hint b { color: #FFC046; }
+#pt-progress-hint {
+  margin: 0 24px 14px; color: #b7b5ca; font-size: 8px; line-height: 1.55; text-align: center;
+}
+#pt-progress-hint b { color: #FFC046; }
 .pt-btn {
   padding: 12px 16px; font-family: inherit; font-size: 12px; background: #3a3a5e;
   color: #fff; border: 2px solid #5C4BE1; border-radius: 6px; cursor: pointer;
@@ -2730,6 +2747,7 @@
           </div>
         </div>
       </div>
+      <div id="pt-progress-hint">Start with 2 training points. Earn Pet XP in coworker battles: <b>+3 win</b>, <b>+1 completed loss/draw</b>. Treats give +1 XP. Each evolution and every 25 XP unlock another point, up to 12.</div>
       <div class="pt-footer">
          <div id="pt-error"></div>
           <div id="pt-challenge-hint">Walk up to a coworker with a pet, then select <b>Pet Battle</b>.</div>
@@ -2857,12 +2875,6 @@
   <!-- ── Rock-Paper-Scissors challenges ── -->
   <div id="rps-menu">
     <button id="rps-menu-profile" type="button">👤 View profile</button>
-    <button id="rps-menu-dm" type="button">💬 Whisper</button>
-    <button id="rps-menu-challenge" type="button">⚔️ Challenge</button>
-    <button id="rps-menu-petbattle" type="button">⚔️ Pet Battle</button>
-    <button id="rps-menu-gift" type="button">💰 Send coins</button>
-    <button id="rps-menu-trade" type="button">🐾 Trade pets</button>
-    <button id="rps-menu-store" type="button">🏪 Their store</button>
   </div>
 
   <!-- ── Player profile card (non-blocking; values set via textContent only) ── -->
@@ -2875,7 +2887,19 @@
         <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
         <div class="pf-row"><span class="pf-label">Wins</span><span id="pf-wins"></span></div>
         <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
+        <div class="pf-row" id="pf-pet-row"><span class="pf-label">Pet</span><span id="pf-pet"></span></div>
         <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
+      </div>
+      <div id="pf-actions">
+        <p class="pf-actions-title">Connect with this coworker</p>
+        <div class="pf-action-grid">
+          <button id="pf-action-whisper" class="pf-action" type="button">💬 Whisper</button>
+          <button id="pf-action-challenge" class="pf-action" type="button">⚔️ Challenge</button>
+          <button id="pf-action-petbattle" class="pf-action pet" type="button">🐾 Pet Battle</button>
+          <button id="pf-action-gift" class="pf-action" type="button">💰 Send coins</button>
+          <button id="pf-action-trade" class="pf-action" type="button">🐾 Trade pets</button>
+          <button id="pf-action-store" class="pf-action" type="button">🏪 Their store</button>
+        </div>
       </div>
       <div id="pf-dept-pick">
         <label class="rps-wager-label" for="pf-dept-select">Pick your department — this is set once</label>
@@ -8555,12 +8579,11 @@
       }
     }
 
-    // Context menu on avatar click. Pet Battle is offered only for coworkers
-    // who currently have a pet equipped; the server still re-checks ownership.
+    // Avatar clicks stay intentionally lightweight: open the coworker's profile,
+    // where the full set of social/game actions has room to breathe.
     function _rpsShowMenu(playerId, px, py) {
       _rpsMenuTargetId = playerId;
       _rpsMenuAt = Date.now();
-      rpsEl('rps-menu-petbattle').style.display = _online[playerId]?.pet ? '' : 'none';
       rpsMenu.style.left = Math.max(6, Math.min(px, innerWidth - 170)) + 'px';
       rpsMenu.style.top  = Math.max(6, Math.min(py, innerHeight - 150)) + 'px';
       rpsMenu.classList.add('open');
@@ -8574,16 +8597,6 @@
       if (Date.now() - _rpsMenuAt < 80) return;
       if (!rpsMenu.contains(e.target)) _rpsHideMenu();
     });
-    rpsEl('rps-menu-dm').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const id = _rpsMenuTargetId; _rpsHideMenu();
-      if (id) openDM(id);
-    });
-    rpsEl('rps-menu-challenge').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const id = _rpsMenuTargetId; _rpsHideMenu();
-      if (id) openRpsWager(id);
-    });
     rpsEl('rps-menu-profile').addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       const id = _rpsMenuTargetId; _rpsHideMenu();
@@ -8591,8 +8604,8 @@
     });
 
     // ── Send coins + pet trades (July 2026) ─────────────────────────────
-    // Both live in the avatar context menu next to Challenge. Gift = a tiny
-    // amount modal → sendCoins. Trade = composer modal (server sends both
+    // Both open from the coworker's profile action cards. Gift = a tiny amount
+    // modal → sendCoins. Trade = composer modal (server sends both
     // sides' pet lists) → tradeOffer; the other side gets an accept/decline
     // card like an incoming challenge. Server is authoritative on all of it.
     const _petLabel = (id) => {
@@ -8747,22 +8760,6 @@
       _tradeIncomingClose();
       const coinBit = coins ? (coins > 0 ? ` (+${coins.toLocaleString()} coins)` : ` (${coins.toLocaleString()} coins)`) : '';
       _rpsToast(`🤝 Trade with ${otherName} done! Your ${_petLabel(gave)} → their place, ${_petLabel(got)} is yours${coinBit}`);
-    });
-
-    rpsEl('rps-menu-gift').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const id = _rpsMenuTargetId; _rpsHideMenu();
-      if (id) openGift(id);
-    });
-    rpsEl('rps-menu-trade').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const id = _rpsMenuTargetId; _rpsHideMenu();
-      if (id) openTrade(id);
-    });
-    rpsEl('rps-menu-store').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const id = _rpsMenuTargetId; _rpsHideMenu();
-      if (id) openStoreOf(id);
     });
 
     // ── Bid stores / office market ─────────────────────────────────────
@@ -10582,6 +10579,7 @@
     // it deliberately does NOT join the chatting/_rpsUiOpen mutual-exclusion
     // seams) and rendered with textContent ONLY — never innerHTML.
     const pfEl = (id) => document.getElementById(id);
+    let _pfTargetId = null;
     function openProfile(targetId) {
       socket.emit('getProfile', { targetId });
     }
@@ -10593,6 +10591,18 @@
     pfEl('profile-modal').addEventListener('pointerdown', (e) => {
       if (e.target === pfEl('profile-modal')) closeProfile();
     });
+    function _pfRun(action) {
+      const targetId = _pfTargetId;
+      if (!targetId) return;
+      closeProfile();
+      action(targetId);
+    }
+    pfEl('pf-action-whisper').addEventListener('click', () => _pfRun(openDM));
+    pfEl('pf-action-challenge').addEventListener('click', () => _pfRun(openRpsWager));
+    pfEl('pf-action-petbattle').addEventListener('click', () => _pfRun(challengePetBattle));
+    pfEl('pf-action-gift').addEventListener('click', () => _pfRun(openGift));
+    pfEl('pf-action-trade').addEventListener('click', () => _pfRun(openTrade));
+    pfEl('pf-action-store').addEventListener('click', () => _pfRun(openStoreOf));
 
     // One-time legacy department picker — options from the ONE shared list.
     (() => {
@@ -10670,7 +10680,14 @@
       pfEl('pf-wins').textContent = _winsText(d.wins);
       const worn = COSMETICS.find(c => c.id === d.equipped);
       pfEl('pf-worn').textContent = worn ? worn.emoji + ' ' + worn.name : '—';
+      const pet = PETS.find(p => p.id === d.pet);
+      const stage = d.petStage === 3 ? 'Final Form' : d.petStage === 2 ? 'Evolved' : 'Baby';
+      pfEl('pf-pet-row').style.display = d.pet ? 'flex' : 'none';
+      pfEl('pf-pet').textContent = pet ? `${pet.emoji} ${pet.name} · ${stage}` : '—';
       pfEl('pf-joined').textContent = _pfJoinedText(d.joinedAt);
+      _pfTargetId = d.self ? null : d.id;
+      pfEl('pf-actions').classList.toggle('show', !d.self);
+      pfEl('pf-action-petbattle').style.display = d.pet ? '' : 'none';
       pfEl('pf-error').textContent = '';
       pfEl('pf-hobby-error').textContent = '';
       // One-time picker: only on YOUR OWN card, only while unset.
@@ -18371,16 +18388,12 @@
       pbEl('pb-result-quit').style.display = 'none';
     }
 
-    pbEl('rps-menu-petbattle').addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const targetId = _rpsMenuTargetId;
-      _rpsHideMenu();
-      if (targetId) {
-         if (!_equippedPet) { _rpsToast("You need a pet equipped to battle!"); return; }
-         pbState = 'pending';
-         socket.emit('petBattleChallenge', { targetId });
-      }
-    });
+    function challengePetBattle(targetId) {
+      if (!targetId) return;
+      if (!_equippedPet) { _rpsToast("You need a pet equipped to battle!"); return; }
+      pbState = 'pending';
+      socket.emit('petBattleChallenge', { targetId });
+    }
 
     window.openPetTraining = function() {
       if (!_equippedPet) { _rpsToast("Equip a pet first!"); return; }

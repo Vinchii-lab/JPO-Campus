@@ -9,11 +9,11 @@ Pet battles are a separate lifecycle from pet races and coin-wager games. The cl
 
 **How to apply:** Any new battle mode or move must derive from the frozen server snapshot and settle through the pet-battle lifecycle rather than a client-authored receipt.
 
-Standard player-facing Pet Battles are social PvP: the Pet Arena configures a pet's build, while battles begin by walking up to a coworker with an equipped pet and selecting the avatar's Pet Battle action. Do not expose bot challenge or bot-rematch controls in the UI.
+Standard player-facing Pet Battles are social PvP: the Pet Arena configures a pet's build, while battles begin by walking up to a coworker with an equipped pet, viewing their profile, and selecting its Pet Battle card. Do not expose bot challenge or bot-rematch controls in the UI.
 
 **Why:** The intended loop is challenging fellow coworkers and their pets, not launching an isolated training-bot match from the arena.
 
-**How to apply:** Show the avatar action only when the targeted coworker currently has a pet equipped, retain server-side eligibility and distance checks, and keep the arena footer focused on build saving plus the coworker-challenge instruction.
+**How to apply:** Keep the avatar popover uncluttered with View Profile as its only action. Put whispering, normal challenges, Pet Battle, gifting, trading, and their store in a card grid on the coworker profile; hide the Pet Battle card when no pet is equipped. Retain server-side eligibility and distance checks. The arena should explain that players start with two points, gain points from evolutions and each 25 Pet XP, and earn battle XP from completed coworker fights.
 
 Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim, a UTC per-pet daily rewarded-match cap, and a same-opponent cooldown. The training bot must retain a stable synthetic identity in that pair ledger; session-only players must never receive memory-only battle XP.
 

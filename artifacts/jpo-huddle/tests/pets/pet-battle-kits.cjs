@@ -11,10 +11,16 @@ assert.doesNotMatch(clientSource, /pt-challenge-bot|Challenge Bot|petBattleBotCh
   "the Pet Arena should not expose a training-bot challenge path");
 assert.match(clientSource, /Walk up to a coworker with a pet, then select[\s\S]*?Pet Battle/,
   "the Pet Arena should direct players to challenge coworkers with equipped pets");
-assert.match(clientSource, /rps-menu-petbattle[\s\S]*?Pet Battle/,
-  "nearby coworkers must retain the Pet Battle context-menu action");
-assert.match(clientSource, /rps-menu-petbattle'\)\.style\.display = _online\[playerId\]\?\.pet/,
-  "the Pet Battle context action should appear only for coworkers with an equipped pet");
+assert.match(clientSource, /Start with 2 training points[\s\S]*?Earn Pet XP in coworker battles:[\s\S]*?\+3 win[\s\S]*?\+1 completed loss\/draw[\s\S]*?every 25 XP[\s\S]*?up to 12/i,
+  "the Pet Arena should explain how coworker battles unlock training points");
+assert.doesNotMatch(clientSource, /id="rps-menu-(?:dm|challenge|petbattle|gift|trade|store)"/,
+  "the avatar popover should not be cluttered with social and game actions");
+for (const id of ["whisper", "challenge", "petbattle", "gift", "trade", "store"]) {
+  assert.match(clientSource, new RegExp(`id=\"pf-action-${id}\"`),
+    `${id} should be available as a coworker profile action card`);
+}
+assert.match(clientSource, /pf-action-petbattle'\)\.style\.display = d\.pet/,
+  "the profile Pet Battle card should appear only when the coworker has an equipped pet");
 
 // Load only the declarative server kit registry. Requiring server.js would
 // start the live server, so this contract test evaluates the self-contained

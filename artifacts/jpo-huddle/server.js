@@ -8858,6 +8858,8 @@ io.on("connection", (socket) => {
       joinedAt:   p.createdAt || null,
       wins:       p.wins || {},
       hobby:      p.hobby || "",
+      pet:        p.pet || "",
+      petStage:   p.pet ? petStageFor(p) : 0,
     });
   });
 
