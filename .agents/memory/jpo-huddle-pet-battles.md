@@ -9,15 +9,21 @@ Pet battles are a separate lifecycle from pet races and coin-wager games. The cl
 
 **How to apply:** Any new battle mode or move must derive from the frozen server snapshot and settle through the pet-battle lifecycle rather than a client-authored receipt.
 
-Standard player-facing Pet Battles are social PvP: the Pet Arena configures a pet's build, while battles begin by walking up to a coworker with an equipped pet, viewing their profile, and selecting its Pet Battle card. Do not expose bot challenge or bot-rematch controls in the UI.
+Standard player-facing Pet Battles are social PvP. A public Pet Profile shows the equipped pet's form, committed attributes, unspent points, and derived stats; owners allocate points there, while coworkers get a read-only build plus the battle action. There is no training-bot route.
 
-**Why:** The intended loop is challenging fellow coworkers and their pets, not launching an isolated training-bot match from the arena.
+**Why:** The intended loop is inspecting and challenging fellow coworkers' pets, not launching an isolated training-bot match from a separate arena.
 
-**How to apply:** Keep the avatar popover uncluttered with View Profile as its only action. Put whispering, normal challenges, Pet Battle, gifting, trading, and their store in a card grid on the coworker profile; hide the Pet Battle card when no pet is equipped. Retain server-side eligibility and distance checks. The arena should explain that players start with two points, gain points from evolutions and each 25 Pet XP, and earn battle XP from completed coworker fights.
+**How to apply:** Keep the avatar popover to View Profile. Coworker profiles hold whisper/challenge/gift/trade/store cards, but Pet Battle belongs on the clicked pet's profile. Local/remote office pets and a player's Pet row open that profile. Retain server-side eligibility/distance checks and explain point/XP progression on the owner's profile.
 
-Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim, a UTC per-pet daily rewarded-match cap, and a same-opponent cooldown. The training bot must retain a stable synthetic identity in that pair ledger; session-only players must never receive memory-only battle XP.
+Pet Point allocations are permanent once committed: an owner may only add newly available points and may never subtract, reset, or reshuffle prior points. Public profile reads are safe, but only the owner may submit a build.
 
-**Why:** Retry/reconnect races, immediate bot rematches, and ephemeral identities otherwise bypass farming controls or double-credit XP.
+**Why:** Respeccing would erase build identity, and hiding minus controls is not security—stale or modified clients could still lower stored attributes.
+
+**How to apply:** Validate monotonic extension against the live authoritative build, then repeat every attribute floor in the database update so concurrent/stale saves cannot overwrite newer allocations. Correlate async profile/save responses so navigating mid-save cannot show or edit the wrong pet.
+
+Every XP-bearing participant must have an approved email-backed account. Settlement uses a per-match/per-player idempotency claim, a UTC per-pet daily rewarded-match cap, and a same-opponent cooldown; session-only players must never receive memory-only battle XP.
+
+**Why:** Retry/reconnect races, immediate rematches, and ephemeral identities otherwise bypass farming controls or double-credit XP.
 
 **How to apply:** Route every positive battle reward through the same transaction. Forfeits settle before removing the leaver: remaining player gets +2, leaver gets +0 and an explicit zero-XP receipt.
 
@@ -25,7 +31,7 @@ Species identity is visual and physical, not a hidden combat rules layer. The ne
 
 **Why:** “Fight differently” means porting the recognizable in-office pet trick choreography into battle—not generic bite/scratch/hover substitutes and not hidden mechanics. Examples include Splash Dive, Moonlit/Void Blink, Blizzard Binky, Ice Shell, Dragon breath, Rain Dance, Prism Beam, and Ember Dive.
 
-**How to apply:** Map every battle pet/form deterministically by the authoritative round-result move: Attack uses its lower office beat, Special uses a distinct mid-tier beat, and Ultimate uses the exact form's signature final trick. Use the same resolved move path for players and bots. Translate Phaser choreography into cancellable arena-relative DOM effects, and restore all visual state afterward. Dragons and phoenixes stay airborne even while stationary (including when the owner sits) and continuously cycle exact-form wing frames; a static bob or sit pose is not an acceptable idle. Dragon breath is a chunky cluster of fireballs and smoke, never a simple beam. Obsidian's ultimate must combine its heavy stomp with fire breath rather than stopping after the landing. Keep form/training as the only stat inputs and do not dispatch species-specific status effects.
+**How to apply:** Map every battle pet/form deterministically by the authoritative round-result move: Attack uses its lower office beat, Special uses a distinct mid-tier beat, and Ultimate uses the exact form's signature final trick. Use the same resolved move path for both players. Translate Phaser choreography into cancellable arena-relative DOM effects, and restore all visual state afterward. Dragons and phoenixes stay airborne even while stationary (including when the owner sits) and continuously cycle exact-form wing frames; a static bob or sit pose is not an acceptable idle. Dragon breath is a chunky cluster of fireballs and smoke, never a simple beam. Obsidian's ultimate must combine its heavy stomp with fire breath rather than stopping after the landing. Keep form/training as the only stat inputs and do not dispatch species-specific status effects.
 
 Move identity changes choreography only; action-pose artwork must follow the pet's frozen current evolution stage for every move. A final-form pet must never briefly render baby or stage-two artwork to perform Attack or Special.
 

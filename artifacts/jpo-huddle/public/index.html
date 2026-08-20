@@ -1103,6 +1103,12 @@
     .pf-row:last-child { border-bottom: none; }
     .pf-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; flex-shrink: 0; }
     .pf-row span:last-child { word-break: break-all; text-align: right; }
+    #pf-pet-row {
+      width: 100%; color: inherit; background: none; border: 0; font-family: inherit;
+      cursor: pointer; border-radius: 7px; text-align: left;
+    }
+    #pf-pet-row:hover { background: rgba(147,135,255,.12); color: #fff; }
+    #pf-pet-row:hover #pf-pet::after { content: '  ›'; color: #9387ff; }
     #pf-actions { display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.12); }
     #pf-actions.show { display: block; }
     .pf-actions-title { margin: 0 0 9px; color: #aeadc2; font-size: 11px; text-align: left; }
@@ -1559,6 +1565,7 @@
 #pt-pet-img { width: 96px; height: 96px; object-fit: contain; image-rendering: pixelated; }
 #pt-pet-name { font-size: 12px; color: #fff; margin-bottom: 6px; }
 #pt-pet-stage { font-size: 10px; color: #FFC046; }
+#pt-owner-name { margin-top: 8px; font-size: 8px; line-height: 1.4; color: #aeadc2; text-shadow: none; }
 
 .pt-stats-col { flex: 1; }
 .pt-budget-row { font-size: 12px; margin-bottom: 16px; color: #ccc; }
@@ -1587,6 +1594,22 @@
 .pt-btn:active { transform: translateY(2px); box-shadow: none; }
 .pt-btn-primary { background: #FFC046; border-color: #d99a2a; color: #111; text-shadow: none; }
 .pt-btn-primary:hover { background: #ffcf70; }
+
+@media (max-width: 560px) {
+  #pt-train-modal {
+    align-items: flex-start; justify-content: flex-start; overflow-y: auto;
+    padding: 8px 0 20px;
+  }
+  .pt-rpg-card { flex: 0 0 auto; margin: 0 auto 20px; max-width: calc(100vw - 16px); }
+  #pt-content { padding: 20px; gap: 20px; }
+  .pt-pet-col { flex-basis: 100%; }
+  .pt-img-box { margin-left: auto; margin-right: auto; }
+  .pt-stats-col { min-width: 0; width: 100%; }
+  #pt-progress-hint, #pt-permanent-hint { margin-left: 20px; margin-right: 20px; }
+  .pt-footer { padding: 14px 20px; flex-direction: column; align-items: stretch; }
+  .pt-footer-actions { width: 100%; flex-wrap: wrap; }
+  .pt-footer-actions .pt-btn { flex: 1 1 130px; min-width: 0; padding: 12px 8px; font-size: 10px; }
+}
 
 /* Arena */
 .pb-arena {
@@ -1809,16 +1832,25 @@
   padding: 16px 24px; background: #111; border-top: 4px solid #3a3a5e;
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
 }
-#pt-error { color: #2ecc71; font-size: 10px; flex: 1; text-align: left; }
+.pt-footer-copy { flex: 1; min-width: 0; }
+.pt-footer-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+#pt-error { color: #2ecc71; font-size: 9px; line-height: 1.45; text-align: left; }
 #pt-challenge-hint {
-  max-width: 230px; color: #b7b5ca; font-size: 8px; line-height: 1.55;
-  text-align: right; text-shadow: none;
+  margin-top: 5px; color: #b7b5ca; font-size: 8px; line-height: 1.45;
+  text-align: left; text-shadow: none;
 }
 #pt-challenge-hint b { color: #FFC046; }
 #pt-progress-hint {
   margin: 0 24px 14px; color: #b7b5ca; font-size: 8px; line-height: 1.55; text-align: center;
 }
 #pt-progress-hint b { color: #FFC046; }
+#pt-permanent-hint {
+  margin: 0 24px 14px; padding: 9px 10px; border: 1px solid #6e5b25; border-radius: 6px;
+  color: #ffd76a; background: rgba(100,74,20,.22); font-size: 8px; line-height: 1.5;
+  text-align: center; text-shadow: none;
+}
+.pt-btn[hidden] { display: none; }
+.pt-btn:disabled { opacity: .45; cursor: default; }
 .pt-btn {
   padding: 12px 16px; font-family: inherit; font-size: 12px; background: #3a3a5e;
   color: #fff; border: 2px solid #5C4BE1; border-radius: 6px; cursor: pointer;
@@ -2722,20 +2754,21 @@
   <div id="img-lightbox"><img alt="chat image" /></div>
 
   
-  <!-- ── Pet Training Modal ── -->
+  <!-- ── Pet Battle Profile ── -->
   <div id="pt-train-modal">
     <div class="pt-rpg-card">
       <div class="pt-header">
-        <h3 id="pt-title">Pet Training</h3>
-        <button class="pt-close" id="pt-close" aria-label="Close Pet Training" type="button">X</button>
+        <h3 id="pt-title">Pet Profile</h3>
+        <button class="pt-close" id="pt-close" aria-label="Close Pet Profile" type="button">X</button>
       </div>
       <div id="pt-content">
         <div class="pt-pet-col">
           <div class="pt-img-box">
-            <img id="pt-pet-img" src="" alt="Your equipped pet" />
+            <img id="pt-pet-img" src="" alt="Equipped pet" />
           </div>
           <div id="pt-pet-name"></div>
           <div id="pt-pet-stage"></div>
+          <div id="pt-owner-name"></div>
         </div>
         <div class="pt-stats-col">
           <div class="pt-budget-row">
@@ -2748,10 +2781,17 @@
         </div>
       </div>
       <div id="pt-progress-hint">Start with 2 training points. Earn Pet XP in coworker battles: <b>+3 win</b>, <b>+1 completed loss/draw</b>. Treats give +1 XP. Each evolution and every 25 XP unlock another point, up to 12.</div>
+      <div id="pt-permanent-hint">Choose carefully: once a point is saved, it is permanently committed to that attribute.</div>
       <div class="pt-footer">
-         <div id="pt-error"></div>
-          <div id="pt-challenge-hint">Walk up to a coworker with a pet, then select <b>Pet Battle</b>.</div>
-          <button id="pt-save" class="pt-btn" type="button">Save Build</button>
+         <div class="pt-footer-copy">
+           <div id="pt-error"></div>
+           <div id="pt-challenge-hint"></div>
+         </div>
+         <div class="pt-footer-actions">
+           <button id="pt-care" class="pt-btn" type="button">Care &amp; Feed</button>
+           <button id="pt-challenge" class="pt-btn pt-btn-primary" type="button" hidden>Pet Battle</button>
+           <button id="pt-save" class="pt-btn" type="button">Commit Points</button>
+         </div>
       </div>
     </div>
   </div>
@@ -2887,7 +2927,7 @@
         <div class="pf-row"><span class="pf-label">Coins</span><span id="pf-coins"></span></div>
         <div class="pf-row"><span class="pf-label">Wins</span><span id="pf-wins"></span></div>
         <div class="pf-row"><span class="pf-label">Wearing</span><span id="pf-worn"></span></div>
-        <div class="pf-row" id="pf-pet-row"><span class="pf-label">Pet</span><span id="pf-pet"></span></div>
+        <button class="pf-row" id="pf-pet-row" type="button"><span class="pf-label">Pet</span><span id="pf-pet"></span></button>
         <div class="pf-row"><span class="pf-label">Joined</span><span id="pf-joined"></span></div>
       </div>
       <div id="pf-actions">
@@ -2895,7 +2935,6 @@
         <div class="pf-action-grid">
           <button id="pf-action-whisper" class="pf-action" type="button">💬 Whisper</button>
           <button id="pf-action-challenge" class="pf-action" type="button">⚔️ Challenge</button>
-          <button id="pf-action-petbattle" class="pf-action pet" type="button">🐾 Pet Battle</button>
           <button id="pf-action-gift" class="pf-action" type="button">💰 Send coins</button>
           <button id="pf-action-trade" class="pf-action" type="button">🐾 Trade pets</button>
           <button id="pf-action-store" class="pf-action" type="button">🏪 Their store</button>
@@ -3141,7 +3180,6 @@
   <div id="coin-hud">
     <img src="assets/ui/jpo_coin.png" alt="coins" style="height:17px; vertical-align:-3px;"> <span id="coin-count">0</span>
     <button id="shop-btn" onclick="openShop()">Shop</button>
-    <button id="pet-bot-btn" onclick="openPetTraining()" title="Pet Battle Training" style="padding: 3px 10px; font-size: 12px; font-family: monospace; background: #e67e22; color: #fff; border: none; border-radius: 5px; cursor: pointer; transition: background 0.15s; margin-right: 8px;">Pet Arena</button>
     <button id="voice-btn" onclick="toggleVoice()" title="Voice: on — hold V to talk">🎙️</button>
   </div>
 
@@ -10580,6 +10618,7 @@
     // seams) and rendered with textContent ONLY — never innerHTML.
     const pfEl = (id) => document.getElementById(id);
     let _pfTargetId = null;
+    let _pfViewedId = null;
     function openProfile(targetId) {
       socket.emit('getProfile', { targetId });
     }
@@ -10599,10 +10638,15 @@
     }
     pfEl('pf-action-whisper').addEventListener('click', () => _pfRun(openDM));
     pfEl('pf-action-challenge').addEventListener('click', () => _pfRun(openRpsWager));
-    pfEl('pf-action-petbattle').addEventListener('click', () => _pfRun(challengePetBattle));
     pfEl('pf-action-gift').addEventListener('click', () => _pfRun(openGift));
     pfEl('pf-action-trade').addEventListener('click', () => _pfRun(openTrade));
     pfEl('pf-action-store').addEventListener('click', () => _pfRun(openStoreOf));
+    pfEl('pf-pet-row').addEventListener('click', () => {
+      const targetId = _pfViewedId;
+      if (!targetId) return;
+      closeProfile();
+      window.openPetProfile?.(targetId);
+    });
 
     // One-time legacy department picker — options from the ONE shared list.
     (() => {
@@ -10685,9 +10729,9 @@
       pfEl('pf-pet-row').style.display = d.pet ? 'flex' : 'none';
       pfEl('pf-pet').textContent = pet ? `${pet.emoji} ${pet.name} · ${stage}` : '—';
       pfEl('pf-joined').textContent = _pfJoinedText(d.joinedAt);
+      _pfViewedId = d.id;
       _pfTargetId = d.self ? null : d.id;
       pfEl('pf-actions').classList.toggle('show', !d.self);
-      pfEl('pf-action-petbattle').style.display = d.pet ? '' : 'none';
       pfEl('pf-error').textContent = '';
       pfEl('pf-hobby-error').textContent = '';
       // One-time picker: only on YOUR OWN card, only while unset.
@@ -14282,7 +14326,7 @@
       // its owner's sprite each frame (see _stepPet in update()), so pets
       // cost zero movement traffic. Depth 2: above the floor and the player
       // bodies (default 0) but below seat occluders (900) and nametags (990).
-      _makePet(pet, x, y, acc, stage) {
+      _makePet(pet, x, y, acc, stage, ownerId) {
         const emoji = PET_EMOJI[pet];
         if (!emoji) return null;                    // unknown id — not a pet
         let obj;
@@ -14371,6 +14415,14 @@
           obj._accOffX = an.dx * fit.mx;                 // mirrored by flip in _placePetAcc
           obj._accOffY = an.dy * fit.my + fit.dy;
           this._placePetAcc(obj);
+        }
+        obj._ownerId = ownerId || null;
+        if (obj._ownerId) {
+          obj.setInteractive({ useHandCursor: true });
+          obj.on('pointerdown', (_pointer, _localX, _localY, event) => {
+            event?.stopPropagation?.();
+            window.openPetProfile?.(obj._ownerId);
+          });
         }
         return obj;
       }
@@ -17014,12 +17066,8 @@
       _setLocalPet(pet) {
         if (this.localPet) { this._destroyPet(this.localPet); this.localPet = null; }
         if (!this.player) return;
-        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc, _evoPreview || _myPetStage(pet));
-        // Your own pet is clickable → opens the pet card (feed / progress).
-        if (this.localPet) {
-          this.localPet.setInteractive({ useHandCursor: true });
-          this.localPet.on('pointerdown', () => window._openPetPanel && window._openPetPanel());
-        }
+        this.localPet = this._makePet(pet, this.player.x, this.player.y, _equippedPetAcc,
+                                      _evoPreview || _myPetStage(pet), socket.id);
       }
 
       _updatePlayerPet(id, pet, petAcc, petStage) {
@@ -17027,7 +17075,7 @@
         if (!entry) return;
         if (petStage != null) entry.petStage = petStage;
         if (entry.pet) { this._destroyPet(entry.pet); entry.pet = null; }
-        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1);
+        entry.pet = this._makePet(pet, entry.sprite.x, entry.sprite.y, petAcc, entry.petStage || 1, id);
       }
 
       // Wardrobe: rebuild the LOCAL player's palette-swapped sheets after a
@@ -17387,7 +17435,7 @@
           if (m) slotObjs[slot] = m;
         }
         const petStage = _petStageFor(data.pet, ((data.petXp || {})[data.pet]) || 0);
-        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage);
+        const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage, id);
 
         this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit',
           appear: { hairIdx, skinIdx, shirtIdx, pantsIdx },
@@ -18120,8 +18168,15 @@
     let pbLastRoundSummary = '';
     let pbGen = 0;
     let pbTimer = null;
-    let pbBuildSavePending = false;
+    let pbBuildSavePending = null;
     let pbDerivedStats = null;
+    let pbProfileOwnerId = null;
+    let pbProfilePet = null;
+    let pbProfileIsSelf = false;
+    let pbProfileRequestSeq = 0;
+    let pbProfileRequestId = 0;
+    let pbBuildRetryDraft = null;
+    let pbProfileRefreshNotice = null;
     let pbTournament = false;
     let pbSpectator = false;
     const pbChoreoAnimations = new Set();
@@ -18395,16 +18450,42 @@
       socket.emit('petBattleChallenge', { targetId });
     }
 
-    window.openPetTraining = function() {
-      if (!_equippedPet) { _rpsToast("Equip a pet first!"); return; }
+    function requestPetBattleProfile(ownerId) {
+      const requestId = ++pbProfileRequestSeq;
+      pbProfileRequestId = requestId;
+      socket.emit('petBattleGetProfile', { targetId: ownerId, requestId });
+      return requestId;
+    }
+
+    window.openPetProfile = function(ownerId) {
+      if (!ownerId) return;
       pbEl('pt-train-modal').classList.add('open');
-      pbBuildSavePending = false;
-      pbEl('pt-error').textContent = "Loading build...";
+      pbProfileOwnerId = ownerId;
+      pbProfilePet = null;
+      pbProfileIsSelf = false;
+      pbEl('pt-title').textContent = 'Pet Profile';
+      pbEl('pt-error').textContent = "Loading pet...";
       pbEl('pt-error').style.color = '#ccc';
-      socket.emit('petBattleGetBuild', { pet: _equippedPet });
+      pbEl('pt-challenge-hint').textContent = '';
+      pbEl('pt-care').hidden = true;
+      pbEl('pt-challenge').hidden = true;
+      pbEl('pt-save').hidden = true;
+      pbEl('pt-save').disabled = true;
+      requestPetBattleProfile(ownerId);
     };
 
     pbEl('pt-close').addEventListener('pointerdown', () => pbEl('pt-train-modal').classList.remove('open'));
+    pbEl('pt-care').addEventListener('pointerdown', () => {
+      if (!pbProfileIsSelf) return;
+      pbEl('pt-train-modal').classList.remove('open');
+      window._openPetPanel?.();
+    });
+    pbEl('pt-challenge').addEventListener('pointerdown', () => {
+      const targetId = pbProfileOwnerId;
+      if (!targetId || pbProfileIsSelf) return;
+      pbEl('pt-train-modal').classList.remove('open');
+      challengePetBattle(targetId);
+    });
 
     function renderPbBuild(spent, stats) {
       const list = pbEl('pt-attr-list');
@@ -18428,13 +18509,15 @@
          left.append(lbl, desc);
          
          const ctrl = document.createElement('div'); ctrl.className = 'pt-attr-ctrl';
-         const bMinus = document.createElement('button'); bMinus.className = 'pt-btn-calc'; bMinus.textContent = '-';
-         bMinus.onclick = () => updatePbAttr(a, -1);
          const v = document.createElement('div'); v.className = 'pt-attr-val'; v.textContent = pbBuild[a] || 0;
-         const bPlus = document.createElement('button'); bPlus.className = 'pt-btn-calc'; bPlus.textContent = '+';
-         bPlus.onclick = () => updatePbAttr(a, 1);
-         
-         ctrl.append(bMinus, v, bPlus);
+         ctrl.appendChild(v);
+         if (pbProfileIsSelf) {
+           const bPlus = document.createElement('button'); bPlus.className = 'pt-btn-calc'; bPlus.textContent = '+';
+           bPlus.disabled = spent >= pbBudget;
+           bPlus.setAttribute('aria-label', `Commit another point to ${a}`);
+           bPlus.onclick = () => updatePbAttr(a);
+           ctrl.appendChild(bPlus);
+         }
          row.append(left, ctrl);
          list.appendChild(row);
       });
@@ -18462,35 +18545,128 @@
       }
     }
 
-    function updatePbAttr(attr, delta) {
+    function updatePbAttr(attr) {
+       if (!pbProfileIsSelf) return;
        const cur = pbBuild[attr] || 0;
        const spent = pbAttrs.reduce((s, a) => s + (pbBuild[a] || 0), 0);
-       if (delta < 0 && cur > 0) pbBuild[attr] = cur - 1;
-       else if (delta > 0 && spent < pbBudget) pbBuild[attr] = cur + 1;
-        renderPbBuild(pbAttrs.reduce((s, a) => s + (pbBuild[a] || 0), 0), pbDerivedStats);
-       pbEl('pt-error').textContent = "Unsaved changes...";
+       if (spent >= pbBudget) return;
+       pbBuild[attr] = cur + 1;
+       renderPbBuild(spent + 1, pbDerivedStats);
+       pbEl('pt-save').disabled = false;
+       pbEl('pt-error').textContent = "Unsaved point ready.";
        pbEl('pt-error').style.color = '#FFC046';
     }
 
     pbEl('pt-save').addEventListener('pointerdown', () => {
-       pbBuildSavePending = true;
-       pbEl('pt-error').textContent = "Saving...";
+       if (!pbProfileIsSelf || !pbProfilePet || pbEl('pt-save').disabled) return;
+       if (pbBuildSavePending) return;
+       const requestId = ++pbProfileRequestSeq;
+       pbProfileRequestId = requestId;
+       pbBuildSavePending = {
+         requestId, ownerId: pbProfileOwnerId, pet: pbProfilePet, build: { ...pbBuild },
+       };
+       pbEl('pt-save').disabled = true;
+       pbEl('pt-error').textContent = "Committing points...";
        pbEl('pt-error').style.color = '#ccc';
-       socket.emit('petBattleSetBuild', { pet: _equippedPet, build: pbBuild });
+       socket.emit('petBattleSetBuild', { pet: pbProfilePet, build: pbBuild, requestId });
     });
 
-    socket.on('petBattleBuild', (payload) => {
-      const { pet, build, budget, spent, stage, attrs, stats } = payload;
-      pbBudget = budget; pbBuild = { ...build }; pbAttrs = attrs; pbDerivedStats = stats;
+    socket.on('petBattleProfile', (payload = {}) => {
+      const modalOpen = pbEl('pt-train-modal').classList.contains('open');
+      const pendingSave = pbBuildSavePending;
+      const isSaveResponse = payload.reason === 'save';
+      const matchesPendingSave = isSaveResponse
+        && pendingSave
+        && payload.requestId === pendingSave.requestId
+        && payload.ownerId === pendingSave.ownerId;
+
+      if (isSaveResponse) {
+        if (!matchesPendingSave) return;
+        pbBuildSavePending = null;
+        if (!modalOpen) {
+          _rpsToast("Pet points committed.");
+          return;
+        }
+        if (payload.ownerId !== pbProfileOwnerId) {
+          _rpsToast("Pet points committed.");
+          return;
+        }
+        // The owner profile was closed/reopened while its save was in flight.
+        // Re-read it so an older view response can never overwrite the commit.
+        if (payload.requestId !== pbProfileRequestId) {
+          pbProfileRefreshNotice = {
+            ownerId: payload.ownerId, message: "Points committed.", color: '#2ecc71',
+          };
+          requestPetBattleProfile(payload.ownerId);
+          return;
+        }
+      } else if (!modalOpen
+          || payload.requestId !== pbProfileRequestId
+          || payload.ownerId !== pbProfileOwnerId) {
+        return;
+      }
+
+      if (!payload.ok) {
+        pbEl('pt-train-modal').classList.remove('open');
+        _rpsToast(payload.message || "That pet profile isn't available.");
+        return;
+      }
+      const { ownerId, ownerName, self, pet, petName, build, budget, spent, stage, attrs, stats } = payload;
+      const wasSaving = !!matchesPendingSave;
+      let shownBuild = { ...build };
+      let shownSpent = spent;
+      let retryMessage = "";
+      if (!isSaveResponse && self && pbBuildRetryDraft
+          && pbBuildRetryDraft.ownerId === ownerId && pbBuildRetryDraft.pet === pet) {
+        const draft = pbBuildRetryDraft.build;
+        const draftSpent = attrs.reduce((sum, attr) => sum + (draft[attr] || 0), 0);
+        const stillValid = draftSpent <= budget
+          && attrs.every((attr) => Number.isInteger(draft[attr])
+            && draft[attr] >= (build[attr] || 0));
+        if (stillValid && attrs.some((attr) => draft[attr] !== (build[attr] || 0))) {
+          shownBuild = { ...draft };
+          shownSpent = draftSpent;
+          retryMessage = pbBuildRetryDraft.message || "Last save failed. Review and retry.";
+        }
+        pbBuildRetryDraft = null;
+      }
+      pbProfileOwnerId = ownerId;
+      pbProfilePet = pet;
+      pbProfileIsSelf = !!self;
+      pbBudget = budget; pbBuild = shownBuild; pbAttrs = attrs; pbDerivedStats = stats;
       const img = pbEl('pt-pet-img');
       pbSetPetImage(img, pet, stage);
       const cPet = typeof PETS !== 'undefined' ? PETS.find(p => p.id === pet) : null;
-      pbEl('pt-pet-name').textContent = cPet ? cPet.species + ' — ' + cPet.name : pet;
+      pbEl('pt-title').textContent = self ? 'Your Pet Profile' : `${ownerName}'s Pet`;
+      pbEl('pt-pet-name').textContent = petName || (cPet ? cPet.name : pet);
       pbEl('pt-pet-stage').textContent = stage >= 3 ? 'FINAL FORM' : stage === 2 ? 'EVOLVED' : 'BABY';
-      renderPbBuild(spent, stats);
-      pbEl('pt-error').textContent = pbBuildSavePending ? "Saved!" : "Build loaded";
-      pbEl('pt-error').style.color = '#2ecc71';
-      pbBuildSavePending = false;
+      pbEl('pt-owner-name').textContent = cPet
+        ? `${cPet.species} · ${self ? 'Your battle build' : `Owned by ${ownerName}`}`
+        : (self ? 'Your battle build' : `Owned by ${ownerName}`);
+      pbEl('pt-care').hidden = !self;
+      pbEl('pt-save').hidden = !self;
+      pbEl('pt-save').disabled = !retryMessage || !!pbBuildSavePending;
+      pbEl('pt-challenge').hidden = !!self;
+      pbEl('pt-challenge').textContent = `Battle ${ownerName}`;
+      pbEl('pt-challenge-hint').textContent = self
+        ? ''
+        : `Walk close to ${ownerName}, then challenge their pet.`;
+      pbEl('pt-progress-hint').style.display = self ? '' : 'none';
+      pbEl('pt-permanent-hint').style.display = self ? '' : 'none';
+      renderPbBuild(shownSpent, stats);
+      const refreshNotice = pbProfileRefreshNotice?.ownerId === ownerId
+        ? pbProfileRefreshNotice : null;
+      if (refreshNotice) pbProfileRefreshNotice = null;
+      pbEl('pt-error').textContent = retryMessage
+        || refreshNotice?.message
+        || (wasSaving
+          ? "Points committed."
+          : (self
+            ? (budget > shownSpent ? `${budget - shownSpent} unspent point${budget - shownSpent === 1 ? '' : 's'} available.` : "No unspent points.")
+            : ""));
+      pbEl('pt-error').style.color = retryMessage
+        ? '#e74c3c'
+        : (refreshNotice?.color || '#2ecc71');
     });
 
     socket.on('petBattleChallengeSent', (payload) => {
@@ -18527,13 +18703,25 @@
     });
 
     socket.on('petBattleFail', (payload) => {
-       _rpsToast(payload.message);
-       if (pbBuildSavePending && pbEl('pt-train-modal').classList.contains('open')) {
-          pbBuildSavePending = false;
-          pbEl('pt-error').textContent = payload.message || "Build was not saved";
-          pbEl('pt-error').style.color = '#e74c3c';
+       const pendingSave = pbBuildSavePending;
+       if (payload?.action === 'buildSave' && pendingSave
+           && payload.requestId === pendingSave.requestId) {
+          pbBuildSavePending = null;
+          const modalOpen = pbEl('pt-train-modal').classList.contains('open');
+          if (modalOpen && pbProfileOwnerId === pendingSave.ownerId) {
+            pbBuildRetryDraft = {
+              ...pendingSave,
+              message: payload.message || "Build was not saved. Review and retry.",
+            };
+            pbEl('pt-error').textContent = "Refreshing your saved build...";
+            pbEl('pt-error').style.color = '#e74c3c';
+            requestPetBattleProfile(pendingSave.ownerId);
+          } else {
+            _rpsToast(payload.message || "Pet points were not saved.");
+          }
           return;
        }
+       _rpsToast(payload.message);
        pbCloseAll();
     });
 

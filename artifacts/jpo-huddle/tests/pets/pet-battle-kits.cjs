@@ -8,19 +8,61 @@ const serverSource = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const clientSource = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
 
 assert.doesNotMatch(clientSource, /pt-challenge-bot|Challenge Bot|petBattleBotChallenge/,
-  "the Pet Arena should not expose a training-bot challenge path");
-assert.match(clientSource, /Walk up to a coworker with a pet, then select[\s\S]*?Pet Battle/,
-  "the Pet Arena should direct players to challenge coworkers with equipped pets");
+  "the pet profile should not expose a training-bot challenge path");
+assert.doesNotMatch(serverSource, /socket\.on\("petBattleBotChallenge"/,
+  "modified clients must not be able to request a training-bot battle");
+assert.doesNotMatch(serverSource, /BOT_ID|PB_BOT|petBattleIsBot|petBattleBotMove|Training Bot|__petbot__/,
+  "standard pet battles must not retain a hidden bot combat path");
+assert.doesNotMatch(clientSource, /id="pet-bot-btn"|openPetTraining/,
+  "the standalone Pet Arena entry should be removed");
+assert.match(clientSource, /window\.openPetProfile[\s\S]*?petBattleGetProfile/,
+  "pet clicks should open a server-backed battle profile");
+assert.match(clientSource, /requestPetBattleProfile[\s\S]*?requestId[\s\S]*?payload\.requestId !== pbProfileRequestId/,
+  "out-of-order profile responses must not replace the currently viewed pet");
+assert.match(serverSource, /emitPetBattleProfile\(targetId, requestId[\s\S]*?requestId,[\s\S]*?reason/,
+  "the server must correlate pet-profile and save responses with the client request");
+assert.match(clientSource, /payload\?\.action === 'buildSave'[\s\S]*?pbBuildRetryDraft[\s\S]*?requestPetBattleProfile/,
+  "a rejected point commit should refresh authoritative state and retain a valid retry draft");
+assert.match(clientSource, /obj\.on\('pointerdown'[\s\S]*?window\.openPetProfile/,
+  "office pets should open their owner's battle profile when clicked");
 assert.match(clientSource, /Start with 2 training points[\s\S]*?Earn Pet XP in coworker battles:[\s\S]*?\+3 win[\s\S]*?\+1 completed loss\/draw[\s\S]*?every 25 XP[\s\S]*?up to 12/i,
-  "the Pet Arena should explain how coworker battles unlock training points");
+  "the owner pet profile should explain how coworker battles unlock training points");
 assert.doesNotMatch(clientSource, /id="rps-menu-(?:dm|challenge|petbattle|gift|trade|store)"/,
   "the avatar popover should not be cluttered with social and game actions");
-for (const id of ["whisper", "challenge", "petbattle", "gift", "trade", "store"]) {
+for (const id of ["whisper", "challenge", "gift", "trade", "store"]) {
   assert.match(clientSource, new RegExp(`id=\"pf-action-${id}\"`),
     `${id} should be available as a coworker profile action card`);
 }
-assert.match(clientSource, /pf-action-petbattle'\)\.style\.display = d\.pet/,
-  "the profile Pet Battle card should appear only when the coworker has an equipped pet");
+assert.doesNotMatch(clientSource, /id="pf-action-petbattle"/,
+  "Pet Battle should live on the pet profile rather than the player action grid");
+assert.match(clientSource, /id="pf-pet-row"[\s\S]*?window\.openPetProfile/,
+  "the pet row on a player profile should open the pet battle profile");
+assert.match(clientSource, /id="pt-challenge"[\s\S]*?challengePetBattle\(targetId\)/,
+  "a coworker's pet profile should provide the player battle action");
+assert.doesNotMatch(clientSource, /bMinus|updatePbAttr\(a,\s*-1\)/,
+  "the owner pet profile must not provide a subtract/reset control");
+assert.match(serverSource, /const current = effectivePetBuild\(p, pet\)[\s\S]*?!petBattleBuildExtends\(current, clean\)/,
+  "the server must compare a submitted build with the authoritative stored build");
+assert.match(serverSource, /#>> ARRAY\[\$2::text, 'power'\][\s\S]*?#>> ARRAY\[\$2::text, 'focus'\][\s\S]*?RETURNING 1/,
+  "the durable build update must atomically preserve every committed attribute floor");
+
+const extendsStart = serverSource.indexOf("function petBattleBuildExtends(");
+const extendsEnd = serverSource.indexOf("// The build actually IN EFFECT", extendsStart);
+assert.ok(extendsStart >= 0 && extendsEnd > extendsStart, "permanent build validator not found");
+const extendsSandbox = {};
+vm.runInNewContext(
+  `const PB_ATTRS = ${JSON.stringify(["power", "vitality", "speed", "critical", "focus"])};
+   ${serverSource.slice(extendsStart, extendsEnd)}
+   globalThis.__petBattleBuildExtends = petBattleBuildExtends;`,
+  extendsSandbox,
+  { filename: "server-permanent-pet-build.js" },
+);
+const buildExtends = extendsSandbox.__petBattleBuildExtends;
+const committed = { power: 2, vitality: 1, speed: 0, critical: 1, focus: 0 };
+assert.equal(buildExtends(committed, { ...committed, focus: 1 }), true,
+  "owners may spend a newly unlocked point");
+assert.equal(buildExtends(committed, { power: 1, vitality: 1, speed: 1, critical: 1, focus: 0 }), false,
+  "owners may not move a committed point to another attribute");
 
 // Load only the declarative server kit registry. Requiring server.js would
 // start the live server, so this contract test evaluates the self-contained
