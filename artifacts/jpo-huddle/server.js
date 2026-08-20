@@ -1456,6 +1456,39 @@ async function transferPetXpTx(client, fromEmail, toEmail, pet) {
   return (r2.length && r2[0].xp) || xp;   // receiver's final xp for this pet
 }
 
+// Pet identity/battle progress travels with the pet too. Unlike XP (where the
+// receiver keeps the better history), the incoming pet's name and committed
+// build replace any stale metadata left from a previously-owned copy.
+async function transferPetProfileTx(client, fromEmail, toEmail, pet) {
+  const { rows } = await client.query(
+    `SELECT pet_names->$2::text AS pet_name, pet_builds->$2::text AS pet_build
+       FROM jpo_players WHERE email = $1`,
+    [fromEmail, pet],
+  );
+  const petName = rows[0]?.pet_name ?? null;
+  const petBuild = rows[0]?.pet_build ?? null;
+  await client.query(
+    `UPDATE jpo_players
+        SET pet_names = coalesce(pet_names, '{}'::jsonb) - $2::text,
+            pet_builds = coalesce(pet_builds, '{}'::jsonb) - $2::text
+      WHERE email = $1`,
+    [fromEmail, pet],
+  );
+  await client.query(
+    `UPDATE jpo_players
+        SET pet_names =
+              (coalesce(pet_names, '{}'::jsonb) - $2::text) ||
+              CASE WHEN $3::jsonb IS NULL THEN '{}'::jsonb
+                   ELSE jsonb_build_object($2::text, $3::jsonb) END,
+            pet_builds =
+              (coalesce(pet_builds, '{}'::jsonb) - $2::text) ||
+              CASE WHEN $4::jsonb IS NULL THEN '{}'::jsonb
+                   ELSE jsonb_build_object($2::text, $4::jsonb) END
+      WHERE email = $1`,
+    [toEmail, pet, petName == null ? null : JSON.stringify(petName), petBuild == null ? null : JSON.stringify(petBuild)],
+  );
+}
+
 // Shared feed path for BOTH the cafeteria pet-treat menu item and the
 // click-your-pet "Feed" button. Coins out + XP in commit in ONE statement
 // for account players, so a crash can't charge without feeding (or vice
@@ -10111,6 +10144,187 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("equipPetAcc failed:", err); }
   });
 
+  // ── Direct item gifts: every catalog item except owner-only rares ─────────
+  // The picker is display-only. sendItemGift rechecks the catalog, rare gate,
+  // ownership, duplicate ownership, listing state and activity gates, then
+  // moves the item in ONE transaction. Recipient equipment is never changed;
+  // only a sender slot containing the gifted item is cleared.
+  socket.on("itemGiftInventory", async (payload) => {
+    const { targetId } = payload || {};
+    const requestId = Number.isSafeInteger(payload?.requestId) ? payload.requestId : null;
+    const p = players[socket.id];
+    const target = typeof targetId === "string" ? players[targetId] : null;
+    const reply = (data) => socket.emit("itemGiftInventory", { targetId, requestId, ...data });
+    if (!p || !target || targetId === socket.id) { reply({ error: "They're not in the office right now.", items: [] }); return; }
+    if (!takeToken(profileBucket)) { reply({ error: "Give it a second, then try again.", items: [] }); return; }
+    if (!p.email || !target.email) { reply({ error: "Item gifts need saved accounts on both sides.", items: [] }); return; }
+    try {
+      const { rows } = await pool.query(
+        `SELECT item_id FROM jpo_store_listings WHERE seller_email = $1`,
+        [p.email],
+      );
+      const listed = new Set(rows.map((r) => r.item_id));
+      const items = (p.cosmetics || [])
+        .filter((id) => catalogOf(id) && !RARE_IDS.has(id))
+        .map((id) => ({
+          id,
+          unavailable: (target.cosmetics || []).includes(id)
+            ? `${target.name} already owns this`
+            : listed.has(id) ? "Listed in your store" : "",
+        }));
+      reply({ targetName: target.name, items });
+    } catch (err) {
+      console.error("itemGiftInventory failed:", err);
+      reply({ error: "Couldn't load your giftable items — try again.", items: [] });
+    }
+  });
+
+  socket.on("sendItemGift", async (payload) => {
+    const { targetId } = payload || {};
+    const requestId = Number.isSafeInteger(payload?.requestId) ? payload.requestId : null;
+    const item = typeof payload?.item === "string" ? payload.item : "";
+    const p = players[socket.id];
+    const target = typeof targetId === "string" ? players[targetId] : null;
+    const fail = (message) => socket.emit("itemGiftResult", { ok: false, targetId, requestId, item, message });
+    if (!p) return;
+    if (!takeToken(buyBucket)) { fail("Slow down a second, then try again."); return; }
+    if (!target || targetId === socket.id) { fail("They're not in the office right now."); return; }
+    if (!p.email || !target.email) { fail("Item gifts need saved accounts on both sides."); return; }
+    if (!catalogOf(item)) { fail("That isn't a giftable item."); return; }
+    if (RARE_IDS.has(item)) { fail("Rare items are personal gifts from the boss and can't be regifted."); return; }
+    if (!(p.cosmetics || []).includes(item)) { fail("You don't own that item anymore."); return; }
+    if ((target.cosmetics || []).includes(item)) { fail(`${target.name} already owns that item.`); return; }
+    if (inAnyMatch(socket.id) || inAnyMatch(targetId)) { fail("No item gifting mid-match!"); return; }
+    if (inActiveRound(socket.id) || inActiveRound(targetId)) { fail("The lights are out — no item gifting until the round ends!"); return; }
+    if (tradeBySocket.has(socket.id) || tradeBySocket.has(targetId)) { fail("Finish the open pet trade first."); return; }
+
+    const client = await pool.connect();
+    let fromRow = null, toRow = null;
+    try {
+      await client.query("BEGIN");
+      // Shared serialization point with storeList (and pet-trade accept):
+      // lock both account rows in email order BEFORE a fresh statement checks
+      // listings/ownership. A concurrent listing can no longer sneak in
+      // between the gift's NOT EXISTS snapshot and COMMIT.
+      const { rows: locked } = await client.query(
+        `SELECT email FROM jpo_players WHERE email = ANY($1) ORDER BY email FOR UPDATE`,
+        [[p.email, target.email]],
+      );
+      if (locked.length !== 2) {
+        await client.query("ROLLBACK");
+        fail("The gift couldn't be completed — nothing changed.");
+        return;
+      }
+      const removeGift = () => client.query(
+        `UPDATE jpo_players SET
+           cosmetics = array_remove(cosmetics, $1),
+           equipped_cosmetic = CASE WHEN equipped_cosmetic = $1 THEN '' ELSE equipped_cosmetic END,
+           equipped_wings    = CASE WHEN equipped_wings    = $1 THEN '' ELSE equipped_wings    END,
+           equipped_pet      = CASE WHEN equipped_pet      = $1 THEN '' ELSE equipped_pet      END,
+           equipped_pet_acc  = CASE WHEN equipped_pet_acc  = $1 THEN '' ELSE equipped_pet_acc  END,
+           equipped_top      = CASE WHEN equipped_top      = $1 THEN '' ELSE equipped_top      END,
+           equipped_bottom   = CASE WHEN equipped_bottom   = $1 THEN '' ELSE equipped_bottom   END,
+           equipped_neckwear = CASE WHEN equipped_neckwear = $1 THEN '' ELSE equipped_neckwear END,
+           equipped_held     = CASE WHEN equipped_held     = $1 THEN '' ELSE equipped_held     END,
+           equipped_feet     = CASE WHEN equipped_feet     = $1 THEN '' ELSE equipped_feet     END,
+           updated_at = now()
+         WHERE email = $2 AND $1 = ANY(cosmetics)
+           AND NOT EXISTS (
+             SELECT 1 FROM jpo_store_listings sl
+              WHERE sl.seller_email = $2 AND sl.item_id = $1
+           )
+         RETURNING email`,
+        [item, p.email],
+      );
+      const receiveGift = () => client.query(
+        `UPDATE jpo_players
+            SET cosmetics = array_append(cosmetics, $1), updated_at = now()
+          WHERE email = $2 AND NOT ($1 = ANY(cosmetics))
+          RETURNING email`,
+        [item, target.email],
+      );
+      // Match market settlement's deterministic player-row lock order.
+      const senderFirst = p.email <= target.email;
+      const rA = await (senderFirst ? removeGift() : receiveGift());
+      const rB = await (senderFirst ? receiveGift() : removeGift());
+      const removed = senderFirst ? rA : rB;
+      const received = senderFirst ? rB : rA;
+      if (removed.rowCount !== 1 || received.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        fail("That gift changed before it could be sent. Refresh your collection and try again.");
+        return;
+      }
+      if (Object.hasOwn(PETS, item)) {
+        await transferPetXpTx(client, p.email, target.email, item);
+        await transferPetProfileTx(client, p.email, target.email, item);
+      }
+      const { rows } = await client.query(
+        `SELECT email, cosmetics, equipped_cosmetic, equipped_wings, equipped_pet, equipped_pet_acc,
+                equipped_top, equipped_bottom, equipped_neckwear, equipped_held, equipped_feet,
+                pet_xp, pet_names, pet_builds
+           FROM jpo_players WHERE email = ANY($1)`,
+        [[p.email, target.email]],
+      );
+      fromRow = rows.find((r) => r.email === p.email) || null;
+      toRow = rows.find((r) => r.email === target.email) || null;
+      if (!fromRow || !toRow) {
+        await client.query("ROLLBACK");
+        fail("The gift couldn't be completed — nothing changed.");
+        return;
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("sendItemGift failed:", err);
+      fail("Sending that gift failed — nothing changed.");
+      return;
+    } finally {
+      client.release();
+    }
+
+    const applyGiftRow = (pl, row) => {
+      pl.cosmetics = row.cosmetics || [];
+      pl.equipped = row.equipped_cosmetic || "";
+      pl.wings = row.equipped_wings || "";
+      pl.pet = row.equipped_pet || "";
+      pl.petAcc = row.equipped_pet_acc || "";
+      pl.slots = {
+        top: row.equipped_top || "", bottom: row.equipped_bottom || "",
+        neckwear: row.equipped_neckwear || "", held: row.equipped_held || "", feet: row.equipped_feet || "",
+      };
+      pl.petXp = row.pet_xp || {};
+      pl.petNames = row.pet_names || {};
+      pl.petBuilds = row.pet_builds || {};
+    };
+    const stateOf = (pl) => ({
+      cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
+      pet: pl.pet, petAcc: pl.petAcc, petXp: pl.petXp, petNames: pl.petNames,
+    });
+    for (const [id, pl] of Object.entries(players)) {
+      const row = pl.email === p.email ? fromRow : pl.email === target.email ? toRow : null;
+      if (!row) continue;
+      applyGiftRow(pl, row);
+      io.to(id).emit("itemGiftState", stateOf(pl));
+      io.emit("playerCosmeticUpdate", {
+        id, cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
+      });
+      io.emit("playerPetUpdate", {
+        id, pet: pl.pet, petAcc: pl.petAcc, petStage: petStageFor(pl),
+      });
+    }
+    const label = itemLabel(item);
+    socket.emit("itemGiftResult", {
+      ok: true, targetId, requestId, item, message: `Sent ${label} to ${target.name}! 🎁`,
+    });
+    const liveTargetId = socketIdByEmail(target.email);
+    if (liveTargetId) {
+      io.to(liveTargetId).emit("itemGiftReceived", {
+        fromName: p.name, item, message: `${p.name} gifted you ${label}! 🎁`,
+      });
+    }
+    console.log(`ITEM GIFT: ${p.name} → ${target.name} (${item})`);
+  });
+
   // ── Coin gifting: send coins to another player ───────────────────────────
   // Same money rules as the shop: buy throttle, blocked mid-match for the
   // SENDER (spending would break the wager invariant; the receiver only
@@ -10281,6 +10495,12 @@ io.on("connection", (socket) => {
     let ok = false, fromRow, toRow;
     try {
       await client.query("BEGIN");
+      // Serialize with storeList so a listing cannot appear while either
+      // offered pet is being moved.
+      await client.query(
+        `SELECT email FROM jpo_players WHERE email = ANY($1) ORDER BY email FOR UPDATE`,
+        [[from.email, to.email]],
+      );
       // Offerer: loses offerPet + coins, gains askPet (auto-adopted).
       const r1 = await client.query(
         `UPDATE jpo_players
@@ -10392,17 +10612,35 @@ io.on("connection", (socket) => {
     if (!Number.isFinite(min) || min < STORE_BID_MIN || min > STORE_BID_MAX) {
       storeFail(`Minimum bid must be ${STORE_BID_MIN}–${STORE_BID_MAX.toLocaleString()} coins.`); return;
     }
+    const client = await pool.connect();
     try {
+      await client.query("BEGIN");
+      // The player row is the serialization point shared by every direct
+      // ownership move. Re-read durable ownership only after the lock, rather
+      // than trusting the live cache that a concurrent gift may have changed.
+      const { rows: owned } = await client.query(
+        `SELECT cosmetics FROM jpo_players WHERE email = $1 FOR UPDATE`,
+        [p.email],
+      );
+      if (!owned[0] || !(owned[0].cosmetics || []).includes(item)) {
+        await client.query("ROLLBACK");
+        storeFail("You don't own that item anymore.");
+        return;
+      }
       // UNIQUE(seller_email, item_id) turns a double-list into a friendly error.
-      await pool.query(
+      await client.query(
         `INSERT INTO jpo_store_listings (seller_email, item_id, min_bid) VALUES ($1, $2, $3)`,
         [p.email, item, min]);
+      await client.query("COMMIT");
       socket.emit("storeOk", { message: `${itemLabel(item)} is up for bids (min ${min.toLocaleString()}).` });
       console.log(`Market: ${p.name} listed ${item} (min ${min})`);
       await pushMarket(); marketPing();
     } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
       if (String(err.code) === "23505") storeFail("You already have that item listed.");
       else { console.error("storeList failed:", err); storeFail("Couldn't list that — try again."); }
+    } finally {
+      client.release();
     }
   });
 

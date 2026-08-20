@@ -1038,22 +1038,27 @@
     }
     #rps-menu button:hover { background: rgba(108,99,255,0.25); }
 
-    #rps-wager-modal, #rps-match, #gift-modal, #trade-modal {
+    #rps-wager-modal, #rps-match, #gift-modal, #item-gift-modal, #trade-modal {
       position: fixed; inset: 0; z-index: 8500; display: none;
       align-items: center; justify-content: center; background: rgba(0,0,0,0.6);
     }
-    #rps-wager-modal.open, #rps-match.open, #gift-modal.open, #trade-modal.open { display: flex; }
+    #rps-wager-modal.open, #rps-match.open, #gift-modal.open, #item-gift-modal.open, #trade-modal.open { display: flex; }
     #gift-amount-input, #trade-coins-input {
       width: 130px; padding: 9px 12px; font-size: 16px; font-family: monospace; text-align: center;
       background: #111; border: 2px solid #444; border-radius: 8px; color: #eee; outline: none;
     }
     #gift-amount-input:focus, #trade-coins-input:focus { border-color: #6c63ff; }
-    #trade-offer-select, #trade-ask-select {
+    #trade-offer-select, #trade-ask-select, #item-gift-select {
       width: 100%; padding: 9px 12px; font-size: 14px; font-family: monospace;
       background: #111; border: 2px solid #444; border-radius: 8px; color: #eee;
       outline: none; cursor: pointer;
     }
-    #trade-offer-select:focus, #trade-ask-select:focus { border-color: #6c63ff; }
+    #trade-offer-select:focus, #trade-ask-select:focus, #item-gift-select:focus { border-color: #6c63ff; }
+    #item-gift-modal .rps-card { max-height: calc(100vh - 32px); overflow-y: auto; }
+    #item-gift-summary {
+      min-height: 34px; margin-top: 10px; padding: 9px 10px; border-radius: 8px;
+      background: rgba(108,99,255,.12); color: #c9c4ff; font-size: 12px; line-height: 1.45;
+    }
     #trade-incoming {
       position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); z-index: 232;
       display: none; flex-direction: column; gap: 8px; text-align: center;
@@ -2936,6 +2941,7 @@
           <button id="pf-action-whisper" class="pf-action" type="button">💬 Whisper</button>
           <button id="pf-action-challenge" class="pf-action" type="button">⚔️ Challenge</button>
           <button id="pf-action-gift" class="pf-action" type="button">💰 Send coins</button>
+          <button id="pf-action-itemgift" class="pf-action" type="button">🎁 Gift an item</button>
           <button id="pf-action-trade" class="pf-action" type="button">🐾 Trade pets</button>
           <button id="pf-action-store" class="pf-action" type="button">🏪 Their store</button>
         </div>
@@ -3012,6 +3018,24 @@
       <div class="rps-btn-row">
         <button id="gift-send" class="rps-btn primary" type="button">Send</button>
         <button id="gift-cancel" class="rps-btn" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Direct item gift (all owned non-rare catalog items) ── -->
+  <div id="item-gift-modal">
+    <div class="rps-card">
+      <h3>🎁 Gift an item</h3>
+      <p class="rps-sub" id="item-gift-sub">Choose something from your collection</p>
+      <div id="rps-wager-fields">
+        <label class="rps-wager-label" for="item-gift-select">You give</label>
+        <select id="item-gift-select" aria-describedby="item-gift-summary"></select>
+      </div>
+      <div id="item-gift-summary">Loading your collection…</div>
+      <div id="item-gift-error" style="color:#e74c3c;font-size:12px;min-height:16px;margin-top:8px;"></div>
+      <div class="rps-btn-row">
+        <button id="item-gift-send" class="rps-btn primary" type="button" disabled>Send gift</button>
+        <button id="item-gift-cancel" class="rps-btn" type="button">Cancel</button>
       </div>
     </div>
   </div>
@@ -8641,16 +8665,17 @@
       if (id) openProfile(id);
     });
 
-    // ── Send coins + pet trades (July 2026) ─────────────────────────────
-    // Both open from the coworker's profile action cards. Gift = a tiny amount
-    // modal → sendCoins. Trade = composer modal (server sends both
-    // sides' pet lists) → tradeOffer; the other side gets an accept/decline
-    // card like an incoming challenge. Server is authoritative on all of it.
+    // ── Gifts + pet trades (July/August 2026) ────────────────────────────
+    // All open from coworker profile action cards. Coin gifts stay separate
+    // from direct item gifts; the item picker comes from the server and is
+    // display-only. Trade remains an offer/accept pet swap. The server is
+    // authoritative on every transfer.
     const _petLabel = (id) => {
       const c = PETS.find(p => p.id === id);
       return c ? `${c.emoji} ${c.species} — ${c.name}` : id;
     };
-    let _giftTargetId = null, _tradeTargetId = null;
+    let _giftTargetId = null, _itemGiftTargetId = null, _tradeTargetId = null;
+    let _itemGiftSeq = 0, _itemGiftViewRequestId = null, _itemGiftPending = null;
 
     function openGift(targetId) {
       _giftTargetId = targetId;
@@ -8673,6 +8698,130 @@
       closeGift();
     });
     socket.on('giftResult', ({ ok, message } = {}) => { _rpsToast(message || (ok ? 'Sent!' : 'Sending failed.')); });
+
+    const _itemGiftMeta = (id) =>
+      COSMETICS.find(c => c.id === id) || PETS.find(c => c.id === id)
+      || PET_ACCESSORIES.find(c => c.id === id) || { id, name: id, emoji: '🎁' };
+    function _itemGiftSummary() {
+      const sel = rpsEl('item-gift-select');
+      const opt = sel.selectedOptions[0];
+      const btn = rpsEl('item-gift-send');
+      const targetName = _online[_itemGiftTargetId]?.name || 'this coworker';
+      if (!opt || !opt.value || opt.disabled) {
+        rpsEl('item-gift-summary').textContent = 'No eligible item is selected.';
+        btn.disabled = true;
+        return;
+      }
+      const meta = _itemGiftMeta(opt.value);
+      rpsEl('item-gift-summary').textContent =
+        `Send ${meta.emoji || '🎁'} ${meta.name || opt.value} to ${targetName}? This gift can't be undone.`;
+      btn.disabled = !!_itemGiftPending;
+    }
+    function openItemGift(targetId) {
+      _itemGiftTargetId = targetId;
+      const requestId = ++_itemGiftSeq;
+      _itemGiftViewRequestId = requestId;
+      const name = _online[targetId]?.name || 'this coworker';
+      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${name}`;
+      rpsEl('item-gift-error').textContent = '';
+      rpsEl('item-gift-summary').textContent = 'Loading your collection…';
+      rpsEl('item-gift-select').replaceChildren();
+      rpsEl('item-gift-send').disabled = true;
+      rpsEl('item-gift-modal').classList.add('open');
+      socket.emit('itemGiftInventory', { targetId, requestId });
+    }
+    function closeItemGift() {
+      rpsEl('item-gift-modal').classList.remove('open');
+      _itemGiftTargetId = null;
+      _itemGiftViewRequestId = null;
+      if (!IS_TOUCH) document.querySelector('canvas')?.focus();
+    }
+    rpsEl('item-gift-cancel').addEventListener('click', closeItemGift);
+    rpsEl('item-gift-select').addEventListener('change', _itemGiftSummary);
+    socket.on('itemGiftInventory', ({ targetId, requestId, targetName, items, error } = {}) => {
+      if (targetId !== _itemGiftTargetId || requestId !== _itemGiftViewRequestId) return;
+      const sel = rpsEl('item-gift-select');
+      sel.replaceChildren();
+      rpsEl('item-gift-error').textContent = error || '';
+      if (error) { _itemGiftSummary(); return; }
+      const byId = new Map((items || []).map((row) => [row.id, row]));
+      const groups = [
+        ['Pets', PETS],
+        ['Wearables, wings & outfits', COSMETICS],
+        ['Pet accessories', PET_ACCESSORIES],
+      ];
+      for (const [label, catalog] of groups) {
+        const rows = catalog.filter((meta) => byId.has(meta.id));
+        if (!rows.length) continue;
+        const group = document.createElement('optgroup');
+        group.label = label;
+        for (const meta of rows) {
+          const row = byId.get(meta.id);
+          const opt = document.createElement('option');
+          opt.value = meta.id;
+          opt.disabled = !!row.unavailable;
+          opt.textContent = `${meta.emoji || '🎁'} ${meta.name}${row.unavailable ? ` — ${row.unavailable}` : ''}`;
+          group.appendChild(opt);
+        }
+        sel.appendChild(group);
+      }
+      const first = [...sel.options].find((opt) => !opt.disabled);
+      if (first) first.selected = true;
+      rpsEl('item-gift-sub').textContent = `Choose an item to send to ${targetName || 'this coworker'}`;
+      if (!sel.options.length) rpsEl('item-gift-error').textContent = 'You have no non-rare items available to gift.';
+      else if (!first) rpsEl('item-gift-error').textContent = `${targetName || 'They'} already own every available item, or your items are listed.`;
+      _itemGiftSummary();
+    });
+    rpsEl('item-gift-send').addEventListener('click', () => {
+      const item = rpsEl('item-gift-select').value;
+      if (!item || !_itemGiftTargetId || _itemGiftPending) return;
+      const requestId = ++_itemGiftSeq;
+      _itemGiftPending = {
+        requestId, targetId: _itemGiftTargetId, item, viewRequestId: _itemGiftViewRequestId,
+      };
+      rpsEl('item-gift-error').textContent = '';
+      rpsEl('item-gift-send').disabled = true;
+      socket.emit('sendItemGift', { targetId: _itemGiftTargetId, requestId, item });
+    });
+    socket.on('itemGiftResult', ({ ok, targetId, requestId, message } = {}) => {
+      const pending = _itemGiftPending;
+      if (!pending || requestId !== pending.requestId || targetId !== pending.targetId) return;
+      _itemGiftPending = null;
+      const sameComposer = targetId === _itemGiftTargetId
+        && pending.viewRequestId === _itemGiftViewRequestId;
+      if (ok) {
+        if (sameComposer) closeItemGift();
+        else if (rpsEl('item-gift-modal').classList.contains('open')) _itemGiftSummary();
+        _rpsToast(message || 'Gift sent! 🎁');
+        return;
+      }
+      if (sameComposer && rpsEl('item-gift-modal').classList.contains('open')) {
+        rpsEl('item-gift-error').textContent = message || 'That gift could not be sent.';
+        _itemGiftSummary();
+      } else {
+        _rpsToast(message || 'That gift could not be sent.');
+        if (rpsEl('item-gift-modal').classList.contains('open')) _itemGiftSummary();
+      }
+    });
+    socket.on('itemGiftState', ({ cosmetics, equipped, wings, slots, pet, petAcc, petXp, petNames } = {}) => {
+      if (Array.isArray(cosmetics)) _ownedItems = cosmetics;
+      _equippedCosmetic = equipped || '';
+      _equippedWings = wings || '';
+      _equippedSlots = Object.assign({ top: '', bottom: '', neckwear: '', held: '', feet: '' }, slots || {});
+      _equippedPet = pet || '';
+      _equippedPetAcc = petAcc || '';
+      _myPetXp = petXp || {};
+      _myPetNames = petNames || {};
+      _refreshShopUI();
+      window._gameScene?._setLocalCosmetic(_equippedCosmetic);
+      window._gameScene?._setLocalWings(_equippedWings);
+      window._gameScene?._setLocalSlots(_equippedSlots);
+      window._gameScene?._setLocalPet(_equippedPet);
+    });
+    socket.on('itemGiftReceived', ({ item, message } = {}) => {
+      const meta = _itemGiftMeta(item);
+      _rpsToast(message || `You received ${meta.emoji || '🎁'} ${meta.name || item}!`);
+    });
     // ── Lingering gift receipts ── each stays until ITS ✕ is clicked. The
     // server persists them per-email, so offline recipients see them at next
     // login and a refresh doesn't clear them. id:null = session-only player
@@ -8770,7 +8919,7 @@
       closeTrade();
     });
     // Keep typing in the composer inputs from steering the avatar.
-    ['gift-amount-input', 'trade-coins-input', 'trade-offer-select', 'trade-ask-select'].forEach(id => {
+    ['gift-amount-input', 'item-gift-select', 'trade-coins-input', 'trade-offer-select', 'trade-ask-select'].forEach(id => {
       const el = rpsEl(id);
       el.addEventListener('keydown', (e) => e.stopPropagation());
       el.addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
@@ -8779,6 +8928,10 @@
     rpsEl('gift-amount-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') rpsEl('gift-send').click();
       if (e.key === 'Escape') closeGift();
+    });
+    rpsEl('item-gift-select').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') rpsEl('item-gift-send').click();
+      if (e.key === 'Escape') closeItemGift();
     });
 
     socket.on('tradeSent', ({ toName, offerPet, askPet, coins } = {}) => {
@@ -10639,6 +10792,7 @@
     pfEl('pf-action-whisper').addEventListener('click', () => _pfRun(openDM));
     pfEl('pf-action-challenge').addEventListener('click', () => _pfRun(openRpsWager));
     pfEl('pf-action-gift').addEventListener('click', () => _pfRun(openGift));
+    pfEl('pf-action-itemgift').addEventListener('click', () => _pfRun(openItemGift));
     pfEl('pf-action-trade').addEventListener('click', () => _pfRun(openTrade));
     pfEl('pf-action-store').addEventListener('click', () => _pfRun(openStoreOf));
     pfEl('pf-pet-row').addEventListener('click', () => {

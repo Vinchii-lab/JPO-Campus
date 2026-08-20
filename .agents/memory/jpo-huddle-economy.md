@@ -1,6 +1,6 @@
 ---
 name: JPO Huddle economy features
-description: Design rules for coin gifting, pet trades, and live admin price overrides
+description: Design rules for coin gifting, direct item gifts, pet trades, player markets, and live admin price overrides
 ---
 
 **Rules:**
@@ -18,6 +18,9 @@ description: Design rules for coin gifting, pet trades, and live admin price ove
 - Bids ESCROW at placement (guarded `coins + old >= new` swap on raise); every path that deletes a bid row must refund in the SAME transaction — the listings→bids ON DELETE CASCADE will silently destroy escrow otherwise. The accept-time "seller no longer owns it" path must refund-all + delete + COMMIT, never rollback + bare delete.
 - A listed item is exclusive: tradeOffer pre-checks jpo_store_listings AND both tradeAccept UPDATEs carry `NOT EXISTS (... listings ...)` guards, so a listed pet can't be traded away under live bids.
 - Player-row updates in settle transactions run in EMAIL ORDER (seller/winner ordered, refunds sorted) to avoid deadlocks with concurrent trades.
+- The `jpo_players` row is the serialization point for every durable ownership move and new market listing. Lock all affected player rows in email order, then run ownership/listing checks in a FRESH statement before mutation.
+- **Why:** an UPDATE that waits for a row lock can retain an older statement snapshot; a concurrent listing can otherwise commit after `NOT EXISTS` was evaluated and leave a transferred item actively listed.
+- **How to apply:** store listing, direct gifting, trades, and future ownership-changing paths must share this row-lock protocol; client/in-memory ownership checks are only early UX gates.
 - Server catalogs are plain id→price maps with NO display names — use itemLabel() to prettify ids for toasts.
 - Grace-window toast trap: a just-disconnected player lingers in `players` ~10s; any "notify or queue mail" helper must require `io.sockets.sockets.has(id)` or the message dies on a dead socket. Disconnect flush only writes x/y/dir/anim, and all coin writes are delta-based (`coins = coins ± n`) — safe against overwriting refunds.
 - Integration-test gotcha: the server pushes a fresh marketState after every mutation and pings sellers on new bids — always drain() event queues before re-requesting a snapshot or awaiting a specific storeOk, or stale items race the test ahead.
