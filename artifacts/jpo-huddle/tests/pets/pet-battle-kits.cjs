@@ -44,6 +44,10 @@ assert.match(clientSource, /obj\.on\('pointerdown'[\s\S]*?window\.openPetProfile
   "office pets should open their owner's battle profile when clicked");
 assert.match(clientSource, /Start with 2 training points[\s\S]*?Earn Pet XP in coworker battles:[\s\S]*?\+3 win[\s\S]*?\+1 completed loss\/draw[\s\S]*?every 25 XP[\s\S]*?up to 12/i,
   "the owner pet profile should explain how coworker battles unlock training points");
+assert.match(clientSource, /BATTLE ATTRIBUTE PROGRESS[\s\S]*?pet-panel-attribute-bar[\s\S]*?pet-panel-attribute-xp/,
+  "the player's pet card should show progress toward the next attribute unlock");
+assert.match(clientSource, /socket\.on\('petBattleXp'[\s\S]*?_myPetXp\[payload\.pet\] = payload\.xp[\s\S]*?renderPetPanel\(\)/,
+  "battle XP should refresh the open pet card without waiting for a reload");
 assert.doesNotMatch(clientSource, /id="rps-menu-(?:dm|challenge|petbattle|gift|trade|store)"/,
   "the avatar popover should not be cluttered with social and game actions");
 for (const id of ["whisper", "challenge", "gift", "trade", "store"]) {
@@ -62,6 +66,42 @@ assert.match(serverSource, /const current = effectivePetBuild\(p, pet\)[\s\S]*?!
   "the server must compare a submitted build with the authoritative stored build");
 assert.match(serverSource, /#>> ARRAY\[\$2::text, 'power'\][\s\S]*?#>> ARRAY\[\$2::text, 'focus'\][\s\S]*?RETURNING 1/,
   "the durable build update must atomically preserve every committed attribute floor");
+
+const attributeStart = clientSource.indexOf("function _petAttributeBudget(");
+const attributeEnd = clientSource.indexOf("function renderPetPanel(", attributeStart);
+assert.ok(attributeStart >= 0 && attributeEnd > attributeStart, "pet attribute progress calculator not found");
+const attributeSandbox = {};
+vm.runInNewContext(
+  `const PET_MYTHIC = new Set(["pet_unicorn", "pet_phoenix"]);
+   function _petStageFor(pet, xp) {
+     return PET_MYTHIC.has(pet) ? (xp >= 30 ? 3 : 1) : (xp >= 70 ? 3 : xp >= 30 ? 2 : 1);
+   }
+   ${clientSource.slice(attributeStart, attributeEnd)}
+   globalThis.__petAttributeProgress = _petAttributeProgress;`,
+  attributeSandbox,
+  { filename: "client-pet-attribute-progress.js" },
+);
+const attributeProgress = attributeSandbox.__petAttributeProgress;
+assert.deepEqual(
+  JSON.parse(JSON.stringify(attributeProgress("pet_dog", 24))),
+  { budget: 2, previous: 0, next: 25, gain: 1 },
+  "a normal pet should show its first earned attribute point at 25 XP",
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(attributeProgress("pet_dog", 25))),
+  { budget: 3, previous: 25, next: 30, gain: 1 },
+  "the next normal-pet point after 25 XP should be the evolution point at 30 XP",
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(attributeProgress("pet_unicorn", 29))),
+  { budget: 3, previous: 25, next: 30, gain: 2 },
+  "a mythical pet should show both points granted by its final-form threshold",
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(attributeProgress("pet_dog", 200))),
+  { budget: 12, previous: 200, next: null, gain: 0 },
+  "attribute progress should stop at the twelve-point cap",
+);
 
 const extendsStart = serverSource.indexOf("function petBattleBuildExtends(");
 const extendsEnd = serverSource.indexOf("// The build actually IN EFFECT", extendsStart);

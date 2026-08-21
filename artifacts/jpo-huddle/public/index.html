@@ -3586,6 +3586,13 @@
         <div id="pet-panel-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#6c63ff,#ffd97a); transition:width .4s;"></div>
       </div>
       <div id="pet-panel-xp" style="font-size:12px; color:#bbb; margin:6px 0 14px;"></div>
+      <div style="text-align:left; margin:0 0 14px; padding:10px; border:1px solid #443a66; border-radius:9px; background:#191427;">
+        <div style="font-size:10px; font-weight:800; letter-spacing:.08em; color:#ffd97a; margin-bottom:6px;">⚔️ BATTLE ATTRIBUTE PROGRESS</div>
+        <div style="background:#141021; border-radius:7px; height:9px; overflow:hidden; border:1px solid #443a66;">
+          <div id="pet-panel-attribute-bar" style="height:100%; width:0%; background:linear-gradient(90deg,#ff8a5b,#ffd76a); transition:width .4s;"></div>
+        </div>
+        <div id="pet-panel-attribute-xp" style="font-size:11px; color:#bbb; margin-top:6px; line-height:1.35;"></div>
+      </div>
       <button id="pet-panel-feed" style="width:100%; background:#6c63ff; color:#fff; border:none; border-radius:10px;
         padding:10px; font-size:14px; cursor:pointer; font-family:inherit;">🦴 Feed a Treat — 150 <img src="assets/ui/jpo_coin.png" alt="coins" style="height:15px; vertical-align:-2px;"></button>
       <button id="pet-panel-close" style="margin-top:8px; background:none; border:none; color:#888;
@@ -6263,6 +6270,29 @@
       // Prefer real stage art if it shipped for this pet (dog lines so far).
       return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
     }
+    // Battle rewards add to the same per-pet XP that unlocks the training
+    // budget: one point every 25 XP, plus points when a pet changes form.
+    // Keep this presentation-only mirror aligned with petBattleBudget() on the
+    // server; the server remains the authority when points are committed.
+    function _petAttributeBudget(pet, xp) {
+      return Math.min(12, 2 + (_petStageFor(pet, xp) - 1) + Math.floor(xp / 25));
+    }
+    function _petAttributeProgress(pet, xp) {
+      const budget = _petAttributeBudget(pet, xp);
+      if (budget >= 12) return { budget, previous: xp, next: null, gain: 0 };
+      let previous = 0;
+      for (let n = xp; n > 0; n--) {
+        if (_petAttributeBudget(pet, n) > _petAttributeBudget(pet, n - 1)) {
+          previous = n;
+          break;
+        }
+      }
+      for (let n = xp + 1; n <= 250; n++) {
+        const nextBudget = _petAttributeBudget(pet, n);
+        if (nextBudget > budget) return { budget, previous, next: n, gain: nextBudget - budget };
+      }
+      return { budget, previous: xp, next: null, gain: 0 };
+    }
     function renderPetPanel() {
       const pet = _equippedPet;
       if (!pet) return;
@@ -6287,6 +6317,13 @@
       document.getElementById('pet-panel-xp').textContent =
         next ? `${xp} treat${xp === 1 ? '' : 's'} — ${next - xp} more to ${stage === 1 && !PET_MYTHIC.has(pet) ? 'EVOLVE ✨' : 'FINAL FORM 👑'}`
              : `${xp} treats — max level, what a champion! 👑`;
+      const attribute = _petAttributeProgress(pet, xp);
+      const attributePct = attribute.next == null ? 100
+        : Math.round(((xp - attribute.previous) / (attribute.next - attribute.previous)) * 100);
+      document.getElementById('pet-panel-attribute-bar').style.width = `${attributePct}%`;
+      document.getElementById('pet-panel-attribute-xp').textContent = attribute.next == null
+        ? `${attribute.budget}/12 training points unlocked — attribute progress is maxed.`
+        : `${attribute.budget}/12 training points unlocked · ${xp}/${attribute.next} XP — ${attribute.next - xp} more XP until +${attribute.gain} attribute point${attribute.gain === 1 ? '' : 's'}.`;
     }
     window._openPetPanel = () => {
       if (!_equippedPet) return;
@@ -20286,6 +20323,10 @@
     });
 
     socket.on('petBattleXp', (payload) => {
+       if (payload.pet && Number.isFinite(payload.xp)) {
+         _myPetXp[payload.pet] = payload.xp;
+         if (_petPanelOpen && _equippedPet === payload.pet) renderPetPanel();
+       }
        if (payload.delta > 0) {
           pbEl('pb-result-xp').textContent = '+' + payload.delta + ' XP';
        } else {
