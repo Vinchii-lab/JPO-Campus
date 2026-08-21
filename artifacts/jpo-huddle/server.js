@@ -236,6 +236,9 @@ app.post("/admin/purge", express.json(), async (req, res) => {
       // dropLiveByEmail (delete first is fine).
       roundHandleLeave(id);
       rlglHandleLeave(id);
+      await activityFlushSocket(id, p.email)
+        .catch((err) => console.error("activity purge flush failed:", err));
+      activityBySocket.delete(id);
       delete players[id];
       io.to(id).emit("kicked");
       io.emit("playerLeft", id);
@@ -2319,6 +2322,76 @@ function isAtWorkSeat(p) {
   return !!WORK_SEATS[row * MAP_W + col];
 }
 
+// ── Privacy-safe Huddle activity reporting ──────────────────────────────────
+// This deliberately stores only coarse, daily aggregates from this app:
+// active/idle seconds, server-confirmed completed actions, and passive office
+// coins. No keys, text, clipboard data, pointer
+// coordinates, screenshots, audio, URLs, or tab titles are accepted or stored.
+const ACTIVITY_RETENTION_DAYS = 30;
+const ACTIVITY_PULSE_MIN_MS = Math.max(1_000, Number(process.env.ACTIVITY_PULSE_MIN_MS) || 15_000);
+const ACTIVITY_PULSE_MAX_SECONDS = 90; // sleep/background gaps never become hours of claimed time
+const activityBySocket = new Map();    // socket id -> last coarse boolean pulse
+
+async function activityRecordTime(email, active, seconds) {
+  if (!email) return;
+  const safeSeconds = Math.max(0, Math.min(ACTIVITY_PULSE_MAX_SECONDS, Math.floor(Number(seconds) || 0)));
+  await pool.query(
+    `INSERT INTO jpo_activity_daily
+       (day, email, active_seconds, idle_seconds, meaningful_actions, passive_coins)
+     VALUES
+       (CURRENT_DATE, $1, $2, $3, 0, 0)
+     ON CONFLICT (day, email) DO UPDATE SET
+       active_seconds = jpo_activity_daily.active_seconds + EXCLUDED.active_seconds,
+       idle_seconds = jpo_activity_daily.idle_seconds + EXCLUDED.idle_seconds`,
+    [email, active ? safeSeconds : 0, active ? 0 : safeSeconds],
+  );
+}
+
+async function activityRecordMeaningful(email) {
+  if (!email) return;
+  await pool.query(
+    `INSERT INTO jpo_activity_daily
+       (day, email, active_seconds, idle_seconds, meaningful_actions, passive_coins)
+     VALUES (CURRENT_DATE, $1, 0, 0, 1, 0)
+     ON CONFLICT (day, email) DO UPDATE SET
+       meaningful_actions = jpo_activity_daily.meaningful_actions + 1`,
+    [email],
+  );
+}
+
+async function activityRecordPassiveCoins(email, amount) {
+  const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!email || !safeAmount) return;
+  await pool.query(
+    `INSERT INTO jpo_activity_daily
+       (day, email, active_seconds, idle_seconds, meaningful_actions, passive_coins)
+     VALUES (CURRENT_DATE, $1, 0, 0, 0, $2)
+     ON CONFLICT (day, email) DO UPDATE SET
+       passive_coins = jpo_activity_daily.passive_coins + EXCLUDED.passive_coins`,
+    [email, safeAmount],
+  );
+}
+
+async function activityPruneOld() {
+  await pool.query(
+    `DELETE FROM jpo_activity_daily
+      WHERE day < CURRENT_DATE - ($1::integer - 1)`,
+    [ACTIVITY_RETENTION_DAYS],
+  );
+}
+
+async function activityFlushSocket(socketId, email) {
+  const state = activityBySocket.get(socketId);
+  if (!state || !email) return;
+  const now = Date.now();
+  const seconds = Math.min(
+    ACTIVITY_PULSE_MAX_SECONDS,
+    Math.max(0, Math.floor((now - state.at) / 1000)),
+  );
+  state.at = now;
+  await activityRecordTime(email, state.active, seconds);
+}
+
 // Once-per-calendar-day login bonus (server/DB date, UTC). Granted on the first
 // successful entry into the office each day via restorePlayer — the atomic
 // conditional UPDATE below is the farm-proofing: re-login, refresh, resume, or
@@ -2709,6 +2782,7 @@ async function coachComplete(email) {
        RETURNING p.coins, m.mission`,
     [email, MISSION_REWARD]);
   if (!rows[0]) return;
+  activityRecordMeaningful(email).catch((err) => console.error("activity mission record failed:", err));
   const sid = liveSocketIdByEmail(email);
   const p = sid ? players[sid] : null;
   if (!p) return;   // reward is banked; they'll see it next login
@@ -2959,7 +3033,14 @@ function dropLiveByEmail(email, exceptId) {
     // roundLeaveGoneByEmail themselves (password reset, pending-queue exits).
     if (!roundDeferLeave(id)) roundHandleLeave(id);
     rlglHandleLeave(id);
-    if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
+    if (players[id]) {
+      const oldPlayer = players[id];
+      activityFlushSocket(id, oldPlayer.email)
+        .catch((err) => console.error("activity replaced-session flush failed:", err));
+      activityBySocket.delete(id);
+      delete players[id];
+      io.emit("playerLeft", id);
+    }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
     if (stale) stale.disconnect(true);
@@ -3990,6 +4071,7 @@ async function petBattleAwardXp(matchId, side, amount, opponentEmail) {
           RETURNING (pet_xp->>$2)::int AS xp`,
         [p.email, pet, amount]);
       await cl.query("COMMIT");
+      activityRecordMeaningful(p.email).catch((err) => console.error("activity Pet Battle record failed:", err));
       const xp = (rows[0] && rows[0].xp) || 0;
       const prev = xp - amount;
       // Sync the live copy only after a confirmed commit (never before).
@@ -5726,7 +5808,11 @@ setInterval(async () => {
             RETURNING coins`,
           [p.email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
         );
-        if (rows[0]) p.coins = rows[0].coins;
+        if (rows[0]) {
+          p.coins = rows[0].coins;
+          activityRecordPassiveCoins(p.email, rate)
+            .catch((err) => console.error("activity passive-coin record failed:", err));
+        }
       } catch (err) {
         console.error("coin/position tick failed:", err);
         p.coins = (p.coins || 0) + rate;
@@ -6898,6 +6984,7 @@ io.on("connection", (socket) => {
   const profileBucket = makeBucket(4, 1000); // guards profile-open / department-set spam
   const interactBucket = makeBucket(4, 1500);  // guards office-object spam (~1 per 1.5s sustained)
   const roundBucket = makeBucket(4, 1500);     // guards round start/join/kill spam
+  const activityBucket = makeBucket(3, ACTIVITY_PULSE_MIN_MS); // boolean-only, low-frequency participation pulses
   const voiceSigBucket  = makeBucket(80, 150); // WebRTC handshakes burst (~15 msgs × several peers entering a crowd), then go quiet
   const voiceTalkBucket = makeBucket(8, 600);  // 🎙 badge flips + the 4s keepalive while the key is held
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
@@ -7129,6 +7216,50 @@ io.on("connection", (socket) => {
       roundLeaveGoneByEmail(em);
       socket.emit("loginFailed", { message: "Something went wrong — try again." });
     }
+  });
+
+  // ── Coarse in-Huddle activity pulse ───────────────────────────────────
+  // Accepts exactly one fact: whether this visible/focused Huddle tab has seen
+  // a recent generic interaction. Event details never leave the browser.
+  socket.on("activityPulse", (payload) => {
+    if (typeof payload?.active !== "boolean") return;
+    const p = players[socket.id];
+    if (!p?.email || !takeToken(activityBucket)) return;
+    const now = Date.now();
+    const nextActive = payload.active;
+    const prior = activityBySocket.get(socket.id);
+
+    if (!prior) {
+      activityBySocket.set(socket.id, {
+        active: nextActive,
+        at: now,
+      });
+      activityRecordTime(p.email, nextActive, 0)
+        .catch((err) => console.error("activity pulse start failed:", err));
+      return;
+    }
+
+    const elapsedMs = now - prior.at;
+    // Too-soon duplicates are dropped. A real active↔idle transition is kept
+    // in memory immediately, but the tiny interval is discarded rather than
+    // letting a modified client generate high-frequency database writes.
+    if (elapsedMs < ACTIVITY_PULSE_MIN_MS) {
+      if (prior.active !== nextActive) {
+        prior.active = nextActive;
+        prior.at = now;
+      }
+      return;
+    }
+
+    const seconds = Math.min(
+      ACTIVITY_PULSE_MAX_SECONDS,
+      Math.max(0, Math.floor(elapsedMs / 1000)),
+    );
+    const wasActive = prior.active;
+    prior.active = nextActive;
+    prior.at = now;
+    activityRecordTime(p.email, wasActive, seconds)
+      .catch((err) => console.error("activity pulse write failed:", err));
   });
 
   // ── Resume (auto-rejoin with a signed token) ──────────────────────────
@@ -8170,6 +8301,53 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Owner-only: privacy-safe activity report ──────────────────────────
+  // Plain admins cannot request this. Results contain daily aggregates only;
+  // there is no raw-event table or raw-event response to expose.
+  socket.on("ownerActivityReport", async (payload) => {
+    if (!owners.has(socket.id)) return;
+    const requested = Math.floor(Number(payload?.days));
+    const days = [1, 7, 30].includes(requested) ? requested : 7;
+    try {
+      await activityPruneOld();
+      const { rows } = await pool.query(
+        `SELECT
+           a.email,
+           COALESCE(NULLIF(p.nickname, ''), NULLIF(p.first_name, ''), p.name, a.email) AS name,
+           COALESCE(p.department, '') AS department,
+           SUM(a.active_seconds)::bigint AS active_seconds,
+           SUM(a.idle_seconds)::bigint AS idle_seconds,
+           SUM(a.meaningful_actions)::bigint AS meaningful_actions,
+           SUM(a.passive_coins)::bigint AS passive_coins
+         FROM jpo_activity_daily a
+         LEFT JOIN jpo_players p ON p.email = a.email
+         WHERE a.day >= CURRENT_DATE - ($1::integer - 1)
+         GROUP BY a.email, p.nickname, p.first_name, p.name, p.department
+         ORDER BY SUM(a.active_seconds) DESC, LOWER(COALESCE(NULLIF(p.nickname, ''), NULLIF(p.first_name, ''), p.name, a.email))`,
+        [days],
+      );
+      const now = Date.now();
+      socket.emit("ownerActivityReport", {
+        ok: true,
+        days,
+        retentionDays: ACTIVITY_RETENTION_DAYS,
+        generatedAt: new Date(now).toISOString(),
+        rows: rows.map((r) => ({
+          email: r.email,
+          name: r.name,
+          department: r.department,
+          activeSeconds: Number(r.active_seconds) || 0,
+          idleSeconds: Number(r.idle_seconds) || 0,
+          meaningfulActions: Number(r.meaningful_actions) || 0,
+          passiveCoins: Number(r.passive_coins) || 0,
+        })),
+      });
+    } catch (err) {
+      console.error("ownerActivityReport failed:", err);
+      socket.emit("ownerActivityReport", { ok: false, message: "Couldn't load the activity report — try again." });
+    }
+  });
+
   // ── Owner-only: gift a rare pet (unicorn / phoenix) ───────────────────
   // Same OWNER_PASSWORD tier as coin adjustments — plain admins can't.
   // Email-based like adminAdjustCoins so the person doesn't have to be
@@ -8388,6 +8566,9 @@ io.on("connection", (socket) => {
     
     roundHandleLeave(targetId);
     rlglHandleLeave(targetId);
+    await activityFlushSocket(targetId, p.email)
+      .catch((err) => console.error("activity kick flush failed:", err));
+    activityBySocket.delete(targetId);
     delete players[targetId];
     io.to(targetId).emit("kicked");
     io.emit("playerLeft", targetId);
@@ -11480,6 +11661,8 @@ io.on("connection", (socket) => {
               p.coins = rows[0].coins;
               socket.emit("coinUpdate", { coins: p.coins });
             }
+            activityRecordMeaningful(p.email)
+              .catch((err) => console.error("activity chore record failed:", err));
             announceChore();
           })
           .catch((err) => {
@@ -11669,6 +11852,9 @@ io.on("connection", (socket) => {
     }
     const p = players[socket.id];
     if (p) {
+      await activityFlushSocket(socket.id, p.email)
+        .catch((err) => console.error("activity disconnect flush failed:", err));
+      activityBySocket.delete(socket.id);
       delete players[socket.id];
       if (p.email) {
         // Grace period: don't broadcast "left" yet. Keep the avatar visible for
@@ -11831,6 +12017,22 @@ try {
     last_played_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (email_a, email_b)
   )`);
+  // Daily aggregate participation report. There is intentionally no raw-event
+  // table: the privacy boundary is enforced by the storage shape itself.
+  await pool.query(`CREATE TABLE IF NOT EXISTS jpo_activity_daily (
+    day                date NOT NULL DEFAULT CURRENT_DATE,
+    email              text NOT NULL,
+    active_seconds     integer NOT NULL DEFAULT 0 CHECK (active_seconds >= 0),
+    idle_seconds       integer NOT NULL DEFAULT 0 CHECK (idle_seconds >= 0),
+    meaningful_actions integer NOT NULL DEFAULT 0 CHECK (meaningful_actions >= 0),
+    passive_coins      integer NOT NULL DEFAULT 0 CHECK (passive_coins >= 0),
+    PRIMARY KEY (day, email)
+  )`);
+  // Tighten early development builds of this feature to the final aggregate-
+  // only contract: no precise per-person behavioral timestamp is retained.
+  await pool.query(`ALTER TABLE jpo_activity_daily DROP COLUMN IF EXISTS last_active_at`);
+  await pool.query(`ALTER TABLE jpo_activity_daily DROP COLUMN IF EXISTS updated_at`);
+  await activityPruneOld();
   // ── Pet Battle (Aug 2026) settlement ledger ──────────────────────────────
   // Idempotency: one row per (match_id, email). The XP credit ONLY happens
   // when this INSERT wins its row, so a retry after an ambiguous COMMIT (lost
@@ -11894,6 +12096,13 @@ try {
 } catch (err) {
   console.error("schema nudge (coach tables) failed:", err);
 }
+
+// Retention does not depend on an owner opening the report. This light sweep is
+// also run on boot and report reads; the interval makes the 30-day limit hold on
+// long-lived servers too.
+setInterval(() => {
+  activityPruneOld().catch((err) => console.error("activity retention sweep failed:", err));
+}, 6 * 60 * 60 * 1000).unref();
 
 // Fail closed if an older ledger cannot be made semantically unique. The old
 // primary key included email, so two replay winners could own the same match

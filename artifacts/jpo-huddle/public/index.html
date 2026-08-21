@@ -540,6 +540,57 @@
       position: fixed; bottom: 10px; left: 14px; z-index: 99;
       font-size: 12px; font-family: monospace; color: rgba(255,255,255,0.18); pointer-events: none;
     }
+    .activity-disclosure {
+      margin: 12px 0 0; padding: 10px 12px; border-radius: 9px;
+      background: #f5f2ff; border: 1px solid #ddd5ff; color: #514d65;
+      font-size: 11px; line-height: 1.45; text-align: left;
+    }
+    .activity-disclosure strong { display: block; color: #322b56; margin-bottom: 3px; }
+    #activity-privacy-chip {
+      position: fixed; right: 14px; bottom: 10px; z-index: 99; display: none;
+      border: 1px solid rgba(255,255,255,.2); border-radius: 999px;
+      background: rgba(22,22,36,.86); color: #d9d8e7; padding: 7px 11px;
+      font: 11px monospace; cursor: pointer; box-shadow: 0 3px 14px rgba(0,0,0,.3);
+    }
+    #activity-privacy-chip.visible { display: block; }
+    #activity-privacy-chip:hover { background: rgba(35,35,57,.96); color: #fff; }
+    #activity-privacy-state[data-state="active"] { color: #72df93; }
+    #activity-privacy-state[data-state="idle"] { color: #f4c66b; }
+    #activity-privacy-modal {
+      position: fixed; inset: 0; z-index: 10020; display: none;
+      align-items: center; justify-content: center; padding: 20px;
+      background: rgba(0,0,0,.64); font-family: monospace;
+    }
+    #activity-privacy-modal.open { display: flex; }
+    #activity-privacy-card {
+      width: 470px; max-width: 100%; max-height: calc(100vh - 50px); overflow: auto;
+      border: 1px solid #4b4b73; border-radius: 14px; background: #1e1e30;
+      color: #eee; padding: 20px 22px; box-shadow: 0 10px 44px rgba(0,0,0,.7);
+    }
+    #activity-privacy-card h2 { margin: 0 0 9px; font-size: 17px; }
+    #activity-privacy-card p, #activity-privacy-card li { color: #b9b8c8; font-size: 12px; line-height: 1.55; }
+    #activity-privacy-card ul { padding-left: 20px; }
+    #activity-privacy-card .privacy-no { color: #8ddca5; }
+    #activity-privacy-close {
+      width: 100%; margin-top: 8px; border: 0; border-radius: 8px; padding: 9px;
+      background: #6c63ff; color: #fff; font: 12px monospace; cursor: pointer;
+    }
+    .activity-report-note {
+      border: 1px solid #8d6f244f; background: #29240f; color: #e8d38d;
+      border-radius: 8px; padding: 10px 11px; font-size: 11px; line-height: 1.45; margin-bottom: 12px;
+    }
+    .activity-report-summary {
+      display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px; margin: 11px 0;
+    }
+    .activity-report-stat { background: #25253e; border-radius: 8px; padding: 9px; }
+    .activity-report-stat b { display: block; color: #fff; font-size: 15px; }
+    .activity-report-stat span { color: #85849a; font-size: 10px; }
+    .activity-report-row { border: 1px solid #30304d; border-radius: 9px; padding: 10px; margin: 8px 0; }
+    .activity-report-head { display: flex; gap: 8px; align-items: center; }
+    .activity-report-name { color: #fff; font-weight: 700; flex: 1; }
+    .activity-report-meta { color: #76758a; font-size: 10px; margin-top: 3px; overflow-wrap: anywhere; }
+    .activity-report-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px 10px; margin-top: 9px; font-size: 11px; color: #aaa; }
+    .activity-report-grid b { color: #e8e8ef; }
 
     /* ── Admin announcement composer (inside owner panel) ── */
     .op-ann-input {
@@ -2617,6 +2668,10 @@
           <input id="inp-remember" type="checkbox" checked style="accent-color:#6c63ff;" />
           Remember me on this device
         </label>
+        <div class="activity-disclosure">
+          <strong>Activity privacy in JPO Huddle</strong>
+          While you are signed in, Huddle reports only coarse active/idle time for this visible, focused tab, completed in-Huddle actions, and passive office coins. It does not collect what you type, individual keys, clipboard contents, pointer coordinates, screenshots, audio, URLs, tab titles, or anything outside Huddle. Records are deleted after 30 days.
+        </div>
         <div class="error-msg" id="reg-error"></div>
         <button class="join-btn" id="next-to-builder-btn">Build your character →</button>
         <p style="font-size:13px;color:#777;margin-top:14px;">
@@ -2701,6 +2756,10 @@
         <input id="login-remember" type="checkbox" checked style="accent-color:#6c63ff;" />
         Remember me on this device
       </label>
+      <div class="activity-disclosure">
+        <strong>Activity privacy in JPO Huddle</strong>
+        While you are signed in, Huddle reports only coarse active/idle time for this visible, focused tab, completed in-Huddle actions, and passive office coins. It does not collect what you type, individual keys, clipboard contents, pointer coordinates, screenshots, audio, URLs, tab titles, or anything outside Huddle. Records are deleted after 30 days.
+      </div>
       <div class="error-msg" id="login-error"></div>
       <button class="join-btn" id="login-btn">Sign in →</button>
       <p style="font-size:13px;color:#777;margin-top:14px;">
@@ -3600,6 +3659,25 @@
     </div>
   </div>
 
+  <button id="activity-privacy-chip" type="button" aria-haspopup="dialog" aria-controls="activity-privacy-modal">
+    Activity signal: <span id="activity-privacy-state" data-state="idle">idle</span> · privacy details
+  </button>
+  <div id="activity-privacy-modal" role="dialog" aria-modal="true" aria-labelledby="activity-privacy-title">
+    <div id="activity-privacy-card">
+      <h2 id="activity-privacy-title">Activity privacy</h2>
+      <p>JPO Huddle sends a low-frequency <strong>active or idle</strong> signal only while you are signed in. A hidden or unfocused tab is idle. The owner can see aggregate participation for up to 30 days.</p>
+      <p><strong>Included:</strong></p>
+      <ul>
+        <li>Coarse active and idle time in this Huddle tab</li>
+        <li>Counts of server-confirmed completed Huddle actions</li>
+        <li>Passive office coins earned</li>
+      </ul>
+      <p class="privacy-no"><strong>Never included:</strong> actual keys, typed text, clipboard data, pointer coordinates, screenshots, microphone/audio, URLs, tab titles, or activity outside JPO Huddle.</p>
+      <p>This is a participation signal, not proof of productivity. Aggregate records are removed after 30 days. Tracking does not change any coin or reward rules.</p>
+      <button id="activity-privacy-close" type="button">Got it</button>
+    </div>
+  </div>
+
   <div id="owner-panel">
     <div id="owner-card">
       <div id="owner-card-header">
@@ -3609,6 +3687,7 @@
       <div id="owner-tabs">
         <button class="o-tab active" data-otab-btn="reg" onclick="ownerTab('reg')">📝 Registration <span class="o-tab-badge" id="op-tab-pending" style="display:none;">0</span></button>
         <button class="o-tab" data-otab-btn="online" onclick="ownerTab('online')">🟢 Online Players</button>
+        <button class="o-tab" data-otab-btn="activity" onclick="ownerTab('activity')" style="display:none;">📊 Activity report</button>
         <button class="o-tab" data-otab-btn="roster" onclick="ownerTab('roster')">👥 Registered</button>
         <button class="o-tab" data-otab-btn="prices" onclick="ownerTab('prices')">🏷️ In-game Prices</button>
         <button class="o-tab" data-otab-btn="ann" onclick="ownerTab('ann')">📢 Announcements</button>
@@ -3636,6 +3715,25 @@
             <tr><td class="owner-empty" colspan="6">No players online</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="owner-section" data-otab="activity">
+        <h3>📊 Huddle Activity <span class="owner-badge" style="background:#c9a227;">owner key only</span></h3>
+        <div class="activity-report-note">
+          <strong>Participation signal — not proof of productivity.</strong><br>
+          This report contains only coarse active/idle time in a visible, focused Huddle tab, counts of server-confirmed completed Huddle actions, and passive office coins. It contains no raw keys, text, pointer coordinates, screenshots, audio, URLs, tab titles, or outside-Huddle activity. Records are kept for 30 days.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="op-activity-days" onchange="ownerActivityRefresh()"
+                  style="flex:1;padding:7px 9px;border:1px solid #444;border-radius:6px;background:#1d1f27;color:#eee;font-size:12px;">
+            <option value="1">Today</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+          <button class="o-btn" onclick="ownerActivityRefresh()">Refresh</button>
+        </div>
+        <div id="op-activity-summary" class="activity-report-summary"></div>
+        <div id="op-activity-list"><div class="owner-empty">Open this tab to load the report.</div></div>
+        <div id="op-activity-updated" style="font-size:10px;color:#666;margin-top:9px;"></div>
       </div>
       <div class="owner-section" data-otab="roster">
         <h3>Registered Players <span class="owner-badge" id="op-roster-count">0</span></h3>
@@ -3952,6 +4050,72 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
     const socket = io();
+
+    // ── Privacy-safe in-Huddle activity signal ──────────────────────────
+    // Generic interaction events update one local timestamp; event details are
+    // never read or sent. The server receives only { active: boolean }.
+    const ACTIVITY_RECENT_MS = 2 * 60 * 1000;
+    const ACTIVITY_HEARTBEAT_MS = 30 * 1000;
+    let _activityTrackerStarted = false;
+    let _activityLastInteractionAt = 0;
+    let _activityHeartbeat = null;
+
+    function _activityCurrentlyActive() {
+      return _activityTrackerStarted
+        && !document.hidden
+        && document.hasFocus()
+        && Date.now() - _activityLastInteractionAt <= ACTIVITY_RECENT_MS;
+    }
+    function _activityRenderState() {
+      const active = _activityCurrentlyActive();
+      const el = document.getElementById('activity-privacy-state');
+      if (el) {
+        el.textContent = active ? 'active' : 'idle';
+        el.dataset.state = active ? 'active' : 'idle';
+      }
+      return active;
+    }
+    function _activitySendPulse() {
+      const active = _activityRenderState();
+      if (_activityTrackerStarted && socket.connected) socket.emit('activityPulse', { active });
+    }
+    function _activityMarkInteraction() {
+      if (!_activityTrackerStarted || document.hidden || !document.hasFocus()) return;
+      _activityLastInteractionAt = Date.now();
+      _activityRenderState();
+    }
+    function _activityVisibilityChanged() {
+      if (!document.hidden && document.hasFocus()) _activityLastInteractionAt = Date.now();
+      _activitySendPulse();
+    }
+    function _startActivityTracker() {
+      if (!_activityTrackerStarted) {
+        _activityTrackerStarted = true;
+        _activityLastInteractionAt = Date.now();
+        // Deliberately discard every event object. No key, text, target,
+        // pointer position, clipboard value, or other event detail is read.
+        window.addEventListener('keydown', _activityMarkInteraction, { capture: true });
+        window.addEventListener('pointerdown', _activityMarkInteraction, { capture: true, passive: true });
+        window.addEventListener('touchstart', _activityMarkInteraction, { capture: true, passive: true });
+        document.addEventListener('visibilitychange', _activityVisibilityChanged);
+        window.addEventListener('focus', _activityVisibilityChanged);
+        window.addEventListener('blur', _activityVisibilityChanged);
+        _activityHeartbeat = setInterval(_activitySendPulse, ACTIVITY_HEARTBEAT_MS);
+        document.getElementById('activity-privacy-chip')?.classList.add('visible');
+      }
+      _activitySendPulse();
+    }
+    document.getElementById('activity-privacy-chip')?.addEventListener('click', () => {
+      document.getElementById('activity-privacy-modal')?.classList.add('open');
+    });
+    function _closeActivityPrivacy() {
+      document.getElementById('activity-privacy-modal')?.classList.remove('open');
+      document.querySelector('canvas')?.focus();
+    }
+    document.getElementById('activity-privacy-close')?.addEventListener('click', _closeActivityPrivacy);
+    document.getElementById('activity-privacy-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'activity-privacy-modal') _closeActivityPrivacy();
+    });
 
     // ── Build handshake: stale tabs pull themselves forward ─────────────
     // The server sends its BUILD_STAMP on every (re)connect; if it doesn't
@@ -5765,6 +5929,7 @@
       }
 
       document.body.classList.add('playing');
+      _startActivityTracker();
       document.getElementById('coin-hud').classList.add('visible');
       document.getElementById('coin-count').textContent = _playerCoins;
       socket.emit('uiSync');   // office banner + bingo card resync (fresh login OR blip resume)
@@ -12437,6 +12602,7 @@
       });
       if (tab === 'log') window.ownerLogGo(_ownerLogPage);
       if (tab === 'whispers') window.ownerWhisperRefresh();   // fresh pull on every open
+      if (tab === 'activity' && window._ownerAuthed) window.ownerActivityRefresh();
       if (tab === 'roster') socket.emit('adminRegisteredList');   // fresh DB pull on every open
     };
     window.ownerLogGo = function (page) {
@@ -12462,6 +12628,84 @@
       document.getElementById('op-log-pageinfo').textContent = `Page ${d.page} of ${d.pages} (${d.total} entr${d.total === 1 ? 'y' : 'ies'})`;
       document.getElementById('op-log-prev').disabled = d.page <= 1;
       document.getElementById('op-log-next').disabled = d.page >= d.pages;
+    });
+
+    function _activityDuration(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      if (h) return `${h}h ${m}m`;
+      if (m) return `${m}m`;
+      return `${total}s`;
+    }
+    window.ownerActivityRefresh = function () {
+      if (!window._ownerAuthed) return;
+      const days = Number(document.getElementById('op-activity-days')?.value) || 7;
+      const list = document.getElementById('op-activity-list');
+      if (list) list.innerHTML = '<div class="owner-empty">Loading aggregate activity…</div>';
+      socket.emit('ownerActivityReport', { days });
+    };
+    socket.on('ownerActivityReport', (d = {}) => {
+      if (!window._ownerAuthed) return;
+      const list = document.getElementById('op-activity-list');
+      const summary = document.getElementById('op-activity-summary');
+      const updated = document.getElementById('op-activity-updated');
+      if (!list || !summary || !updated) return;
+      if (!d.ok || !Array.isArray(d.rows)) {
+        list.innerHTML = `<div class="owner-empty">${d.message || 'Could not load the activity report.'}</div>`;
+        summary.innerHTML = '';
+        return;
+      }
+      const totals = d.rows.reduce((a, r) => {
+        a.active += Number(r.activeSeconds) || 0;
+        a.idle += Number(r.idleSeconds) || 0;
+        a.actions += Number(r.meaningfulActions) || 0;
+        a.coins += Number(r.passiveCoins) || 0;
+        return a;
+      }, { active: 0, idle: 0, actions: 0, coins: 0 });
+      summary.innerHTML = [
+        ['Active time', _activityDuration(totals.active)],
+        ['Idle time', _activityDuration(totals.idle)],
+        ['Completed actions', totals.actions.toLocaleString()],
+        ['Passive coins', totals.coins.toLocaleString()],
+      ].map(([label, value]) =>
+        `<div class="activity-report-stat"><b>${value}</b><span>${label}</span></div>`
+      ).join('');
+      list.innerHTML = '';
+      if (!d.rows.length) {
+        list.innerHTML = '<div class="owner-empty">No aggregate activity in this period yet.</div>';
+      }
+      for (const r of d.rows) {
+        const row = document.createElement('div');
+        row.className = 'activity-report-row';
+        const head = document.createElement('div');
+        head.className = 'activity-report-head';
+        const name = document.createElement('div');
+        name.className = 'activity-report-name';
+        name.textContent = r.name || r.email;
+        head.append(name);
+        const meta = document.createElement('div');
+        meta.className = 'activity-report-meta';
+        meta.textContent = [r.department, r.email].filter(Boolean).join(' · ');
+        const grid = document.createElement('div');
+        grid.className = 'activity-report-grid';
+        for (const [label, value] of [
+          ['Active', _activityDuration(r.activeSeconds)],
+          ['Idle', _activityDuration(r.idleSeconds)],
+          ['Completed actions', Number(r.meaningfulActions || 0).toLocaleString()],
+          ['Passive coins', Number(r.passiveCoins || 0).toLocaleString()],
+        ]) {
+          const cell = document.createElement('div');
+          const b = document.createElement('b');
+          b.textContent = value;
+          cell.append(document.createTextNode(`${label}: `), b);
+          grid.appendChild(cell);
+        }
+        row.append(head, meta, grid);
+        list.appendChild(row);
+      }
+      const when = d.generatedAt ? new Date(d.generatedAt).toLocaleString() : 'just now';
+      updated.textContent = `Updated ${when}. Aggregate records are deleted after ${d.retentionDays || 30} days.`;
     });
 
     window.ownerAdjustCoins = function () {
@@ -12522,6 +12766,10 @@
       if (whisperTab) whisperTab.style.display = (d && d.owner) ? '' : 'none';
       const whisperSec = document.querySelector('.owner-section[data-otab="whispers"]');
       if (whisperSec && !(d && d.owner)) whisperSec.classList.remove('otab-show');
+      const activityTab = document.querySelector('[data-otab-btn="activity"]');
+      if (activityTab) activityTab.style.display = (d && d.owner) ? '' : 'none';
+      const activitySec = document.querySelector('.owner-section[data-otab="activity"]');
+      if (activitySec && !(d && d.owner)) activitySec.classList.remove('otab-show');
       window._ownerAuthed = !!(d && d.owner);
       // Plain admin key: no price tools at all, and game pots are locked to
       // a fixed 500 coins (the server enforces both regardless of the UI).
