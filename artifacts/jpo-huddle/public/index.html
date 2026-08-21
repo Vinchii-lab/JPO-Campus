@@ -2801,6 +2801,14 @@
       <p style="font-size:12px;color:#999;margin-bottom:20px;">Re-register to pick new colors.</p>
       <button class="join-btn" onclick="location.reload()" style="padding:10px 28px;font-size:14px;">Re-register</button>
     </div>
+
+    <div class="join-card hidden" id="card-account-removed">
+      <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
+      <div style="font-size:40px;margin:20px 0;">🔒</div>
+      <p style="font-size:15px;color:#e67e22;margin-bottom:12px;">This account was removed by the owner.</p>
+      <p style="font-size:12px;color:#999;margin-bottom:20px;">Its sign-in was revoked and past records were kept anonymously. A new registration starts fresh and still needs approval.</p>
+      <button class="join-btn" onclick="location.reload()" style="padding:10px 28px;font-size:14px;">Return to sign in</button>
+    </div>
   </div>
 
   <!-- ── Chat bar ── -->
@@ -3738,12 +3746,13 @@
       <div class="owner-section" data-otab="roster">
         <h3>Registered Players <span class="owner-badge" id="op-roster-count">0</span></h3>
         <p style="font-size:12px;color:#888;margin:0 0 8px">Everyone who has an approved account — even people who aren't online right now.</p>
+        <div id="op-roster-msg" style="font-size:11px;color:#888;min-height:16px;margin-bottom:6px;"></div>
         <input id="op-roster-search" type="search" placeholder="🔍 Search name, email or department…" oninput="renderRoster()"
                style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:7px 10px;border:1px solid #444;border-radius:6px;background:#1d1f27;color:#eee;font-size:13px;">
         <table class="owner-table">
-          <thead><tr><th>Name</th><th>Dept</th><th>Email</th><th>Coins</th><th>Last seen</th></tr></thead>
+          <thead><tr><th>Name</th><th>Dept</th><th>Email</th><th>Coins</th><th>Last seen</th><th>Account</th></tr></thead>
           <tbody id="op-roster-tbody">
-            <tr><td class="owner-empty" colspan="5">Loading…</td></tr>
+            <tr><td class="owner-empty" colspan="6">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -5897,6 +5906,17 @@
       });
       document.getElementById('card-kicked').classList.remove('hidden');
       // Also hide the game overlay (join overlay) in case they were in-game
+      document.getElementById('join-overlay').style.display = 'flex';
+    });
+
+    socket.on('accountRemoved', () => {
+      _roundReset();
+      _clearToken();
+      [
+        'card-register', 'card-login', 'card-reconnecting', 'card-pending',
+        'card-rejected', 'card-kicked',
+      ].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+      document.getElementById('card-account-removed')?.classList.remove('hidden');
       document.getElementById('join-overlay').style.display = 'flex';
     });
 
@@ -12771,6 +12791,7 @@
       const activitySec = document.querySelector('.owner-section[data-otab="activity"]');
       if (activitySec && !(d && d.owner)) activitySec.classList.remove('otab-show');
       window._ownerAuthed = !!(d && d.owner);
+      if (typeof window.renderRoster === 'function') window.renderRoster();
       // Plain admin key: no price tools at all, and game pots are locked to
       // a fixed 500 coins (the server enforces both regardless of the UI).
       const isOwner = window._ownerAuthed;
@@ -13073,6 +13094,7 @@
 
     // ── Registered directory (all approved accounts, online or not) ──
     let _rosterList = [];
+    const _removingRosterEmails = new Set();
     socket.on('registeredList', (list) => {
       _rosterList = Array.isArray(list) ? list : [];
       renderRoster();
@@ -13096,7 +13118,7 @@
       const shown = !q ? list : list.filter(p =>
         [p.fullName, p.name, p.email, p.department].some(v => (v || '').toLowerCase().includes(q)));
       const tbody = document.getElementById('op-roster-tbody');
-      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="5">${q ? 'No one matches your search' : 'No registered players yet'}</td></tr>`; return; }
+      if (!shown.length) { tbody.innerHTML = `<tr><td class="owner-empty" colspan="6">${q ? 'No one matches your search' : 'No registered players yet'}</td></tr>`; return; }
       tbody.innerHTML = shown.map(p => `
         <tr${p.online ? '' : ' style="opacity:.7"'}>
           <td>${p.online ? '<span class="online-dot"></span>' : ''}${esc(p.fullName || p.name)}${p.fullName && p.name && p.fullName !== p.name ? ` <span style="color:#888;font-size:11px;">“${esc(p.name)}”</span>` : ''}</td>
@@ -13104,8 +13126,56 @@
           <td style="font-size:11px;color:#888">${esc(p.email || '—')}</td>
           <td>💰 ${Number(p.coins) || 0}</td>
           <td style="font-size:11px;color:${p.online ? '#27ae60' : '#888'}">${p.online ? 'online now' : esc(_lastSeenLabel(p.lastActive))}</td>
+          <td>${window._ownerAuthed
+            ? `<button class="o-btn o-btn-reject" data-remove-account data-email="${esc(p.email || '')}" data-name="${esc(p.fullName || p.name || p.email || 'player')}" ${_removingRosterEmails.has((p.email || '').toLowerCase()) ? 'disabled' : ''} title="Permanently revoke this account and anonymize its retained history">${_removingRosterEmails.has((p.email || '').toLowerCase()) ? 'Removing…' : 'Remove'}</button>`
+            : '<span style="color:#555">—</span>'}</td>
         </tr>`).join('');
     };
+    document.getElementById('op-roster-tbody').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-remove-account]');
+      if (!button) return;
+      ownerRemoveAccount(button.dataset.email || '', button.dataset.name || 'player');
+    });
+
+    window.ownerRemoveAccount = function (email, name) {
+      if (!window._ownerAuthed || !email || _removingRosterEmails.has(email.toLowerCase())) return;
+      const typed = window.prompt(
+        `Remove ${name}'s existing account permanently?\n\n`
+        + `This immediately revokes its password and resume token, disconnects any live session, `
+        + `and removes identifying profile details. Game, economy, and activity history is retained `
+        + `under a unique anonymous identity.\n\nThis cannot be undone. A future registration with `
+        + `the same email starts as a separate pending account.\n\nType the full email to continue:\n${email}`,
+      );
+      if (typed === null) return;
+      if (typed.trim().toLowerCase() !== email.toLowerCase()) {
+        const msg = document.getElementById('op-roster-msg');
+        msg.style.color = '#e74c3c';
+        msg.textContent = 'Email did not match. Nothing was removed.';
+        return;
+      }
+      if (!window.confirm(
+        `Final confirmation: revoke ${email} now and anonymize its retained history? This cannot be undone.`,
+      )) return;
+      _removingRosterEmails.add(email.toLowerCase());
+      const msg = document.getElementById('op-roster-msg');
+      msg.style.color = '#f39c12';
+      msg.textContent = 'Removing account and anonymizing retained history…';
+      renderRoster();
+      socket.emit('ownerRemoveAccount', { email, confirmEmail: typed });
+    };
+
+    socket.on('ownerRemoveAccountResult', ({ ok, message, removedEmail } = {}) => {
+      if (removedEmail) _removingRosterEmails.delete(String(removedEmail).toLowerCase());
+      else _removingRosterEmails.clear();
+      const msg = document.getElementById('op-roster-msg');
+      msg.style.color = ok ? '#27ae60' : '#e74c3c';
+      msg.textContent = message || (ok ? 'Account removed.' : 'Account removal failed.');
+      if (ok && removedEmail) {
+        _rosterList = _rosterList.filter(p => (p.email || '').toLowerCase() !== String(removedEmail).toLowerCase());
+        socket.emit('adminRegisteredList');
+      }
+      renderRoster();
+    });
 
     function ownerApprove(id) { socket.emit('approvePlayer', id); }
     function ownerReject(id)  { socket.emit('rejectPlayer',  id); }

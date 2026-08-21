@@ -280,7 +280,46 @@ const pending = {};   // socketId → { firstName, lastName, email, character, n
 const players = {};   // socketId → live player state (mirrors a jpo_players row for online, approved players)
 const admins  = new Set();   // socketIds authenticated as admin this session (never persisted)
 const owners  = new Set();   // subset of admins who entered OWNER_PASSWORD — unlocks owner-only tools
+const accountRemovalEmails = new Set(); // normalized emails currently being irreversibly anonymized
+const accountRemovalReleaseTimers = new Map();
+const accountRemovalHandledOps = new Map(); // opId -> email, until durable operation disappears
+const accountRemovalOpsInFlight = new Set();
+const INSTANCE_ID = crypto.randomUUID();
+const ACCOUNT_REMOVAL_GUARD_MS = 30_000;
 let _whisperLogN = 0;        // module-scope so the whisper-log prune counts ALL traffic, not per-connection
+
+function holdAccountRemovalEmail(email) {
+  accountRemovalEmails.add(email);
+  clearTimeout(accountRemovalReleaseTimers.get(email));
+  const timer = setTimeout(() => {
+    accountRemovalEmails.delete(email);
+    accountRemovalReleaseTimers.delete(email);
+  }, ACCOUNT_REMOVAL_GUARD_MS);
+  timer.unref?.();
+  accountRemovalReleaseTimers.set(email, timer);
+}
+
+function releaseAccountRemovalEmail(email) {
+  accountRemovalEmails.delete(email);
+  clearTimeout(accountRemovalReleaseTimers.get(email));
+  accountRemovalReleaseTimers.delete(email);
+}
+
+function accountRemovalEmailToken(email) {
+  const key = SESSION_SECRET || OWNER_PASSWORD || ADMIN_PASSWORD;
+  return crypto.createHmac("sha256", key).update(email).digest("hex");
+}
+
+async function accountRemovalStillCompleting(db, email) {
+  const { rows } = await db.query(
+    `SELECT 1
+       FROM jpo_account_removal_ops
+      WHERE state='committed' AND email_token=$1
+      LIMIT 1`,
+    [accountRemovalEmailToken(email)],
+  );
+  return !!rows[0];
+}
 
 // ── Admin activity log ───────────────────────────────────────────────────────
 // Every mutation made from the F8 panel is written to jpo_admin_log with WHO
@@ -643,6 +682,50 @@ async function dealPayAll(gameId, emails, per, overMsg) {
   io.emit("dealOver", paid === emails.length ? overMsg
     : { ...overMsg, message: overMsg.message + ` (⚠️ ${emails.length - paid} payout(s) failed — the owner should award those manually.)` });
   console.log(`DEAL over: ${per} coins × ${paid}/${emails.length} players`);
+}
+
+function removeEmailFromEphemeralGames(email) {
+  if (bingo) {
+    if (bingo.hostEmail === email) {
+      const gameId = bingo.id;
+      bingoStop();
+      io.emit("bingoOver", {
+        gameId,
+        winnerName: null,
+        message: "Bingo cancelled because the host account was removed.",
+      });
+    } else if (bingo.players.delete(email)) {
+      const names = [...bingo.players.values()].map((v) => v.name);
+      io.emit("bingoNames", { gameId: bingo.id, names });
+      if (bingo.players.size === 0) {
+        const gameId = bingo.id;
+        bingoStop();
+        io.emit("bingoOver", {
+          gameId,
+          winnerName: null,
+          message: "Bingo cancelled because no players remain.",
+        });
+      }
+    }
+  }
+
+  // Deal payout closures capture an email list before their reveal timer fires.
+  // Cancelling the free, house-funded show is the only safe way to guarantee a
+  // removed identity is never paid or retained by a delayed callback.
+  if (deal?.players?.has(email)) {
+    const gameId = deal.id;
+    deal.players.delete(email);
+    deal.misses?.delete(email);
+    deal.votes?.delete(email);
+    deal.dealVotes?.delete(email);
+    dealStop();
+    io.emit("dealOver", {
+      gameId,
+      mode: "cancelled",
+      per: 0,
+      message: "Deal or No Deal was cancelled because a participant account was removed. No payout was made.",
+    });
+  }
 }
 
 // email → { oldId, name, x, y, dir, timer }. A gracefully-disconnected player is
@@ -2954,8 +3037,8 @@ async function recordWin(socketId, gameKey, emailFallback = null) {
 // Upsert a person's profile on registration, keyed by email. Existing rows keep
 // their coins / cosmetics / approved / announcer status — only the editable
 // profile fields (name, character, appearance) are refreshed.
-async function upsertPlayerProfile(reg) {
-  const { rows } = await pool.query(
+async function upsertPlayerProfile(reg, db = pool) {
+  const { rows } = await db.query(
     `INSERT INTO jpo_players
        (email, first_name, last_name, name, nickname, character, hair_idx, skin_idx, shirt_idx, pants_idx, department)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -3046,6 +3129,716 @@ function dropLiveByEmail(email, exceptId) {
     if (stale) stale.disconnect(true);
   }
 }
+
+const DELETED_ACCOUNT_NAME = "Deleted player";
+const DELETED_ACCOUNT_TEXT = "[Content removed when this account was anonymized.]";
+
+function anonymizeIdentityJson(value, oldEmail, anonymousEmail, linked = false) {
+  if (Array.isArray(value)) {
+    return value.map((item) => anonymizeIdentityJson(item, oldEmail, anonymousEmail, linked));
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value !== "string") return value;
+    if (value.toLowerCase() === oldEmail) return anonymousEmail;
+    return value.toLowerCase().includes(oldEmail)
+      ? value.replaceAll(oldEmail, anonymousEmail)
+      : value;
+  }
+
+  const entries = Object.entries(value);
+  const objectLinked = linked || entries.some(([key, val]) => {
+    if (key.toLowerCase() === oldEmail) return true;
+    return key.toLowerCase().includes("email")
+      && typeof val === "string"
+      && val.toLowerCase() === oldEmail;
+  });
+  const out = {};
+  for (const [key, val] of entries) {
+    const nextKey = key.toLowerCase() === oldEmail ? anonymousEmail : key;
+    const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, "");
+    if (typeof val === "string" && val.toLowerCase() === oldEmail) {
+      out[nextKey] = anonymousEmail;
+    } else if (
+      objectLinked
+      && ["name", "nickname", "firstname", "lastname", "fullname", "displayname"].includes(normalizedKey)
+    ) {
+      out[nextKey] = DELETED_ACCOUNT_NAME;
+    } else {
+      out[nextKey] = anonymizeIdentityJson(val, oldEmail, anonymousEmail, objectLinked);
+    }
+  }
+  return out;
+}
+
+function accountIdentityNames(row) {
+  return [...new Set([
+    row?.name,
+    row?.nickname,
+    row?.first_name,
+    row?.last_name,
+    [row?.first_name, row?.last_name].filter(Boolean).join(" "),
+  ].map((v) => String(v || "").trim()).filter((v) => v && v !== DELETED_ACCOUNT_NAME))];
+}
+
+async function anonymizeAccountTx(client, oldEmail, anonymousEmail, disabledPasswordHash) {
+  // Marketplace lock order matches store settlement: listings first, then bids,
+  // then player rows. This prevents account removal from deadlocking a sale.
+  await client.query(
+    `SELECT l.id
+       FROM jpo_store_listings l
+      WHERE l.seller_email = $1
+         OR EXISTS (
+           SELECT 1 FROM jpo_store_bids b
+            WHERE b.listing_id = l.id AND b.bidder_email = $1
+         )
+      ORDER BY l.id
+      FOR UPDATE OF l`,
+    [oldEmail],
+  );
+  const { rows } = await client.query(
+    `SELECT * FROM jpo_players WHERE email = $1 FOR UPDATE`,
+    [oldEmail],
+  );
+  const row = rows[0];
+  if (!row) return null;
+
+  const refundedEmails = new Set();
+  const { rows: sellerListings } = await client.query(
+    `SELECT id, item_id FROM jpo_store_listings
+      WHERE seller_email = $1 ORDER BY id FOR UPDATE`,
+    [oldEmail],
+  );
+  for (const listing of sellerListings) {
+    const { rows: bids } = await client.query(
+      `SELECT bidder_email, amount FROM jpo_store_bids
+        WHERE listing_id = $1 ORDER BY bidder_email FOR UPDATE`,
+      [listing.id],
+    );
+    for (const bid of bids) {
+      await client.query(
+        `UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`,
+        [bid.amount, bid.bidder_email],
+      );
+      await client.query(
+        `INSERT INTO jpo_store_msgs (email, message) VALUES ($1, $2)`,
+        [bid.bidder_email, `Bid refunded: ${Number(bid.amount).toLocaleString()} coins back (seller account removed).`],
+      );
+      refundedEmails.add(bid.bidder_email);
+    }
+    await client.query(`DELETE FROM jpo_store_listings WHERE id = $1`, [listing.id]);
+  }
+
+  const { rows: withdrawnBids } = await client.query(
+    `DELETE FROM jpo_store_bids WHERE bidder_email = $1 RETURNING amount`,
+    [oldEmail],
+  );
+  const withdrawnTotal = withdrawnBids.reduce((sum, bid) => sum + Number(bid.amount || 0), 0);
+  if (withdrawnTotal > 0) {
+    await client.query(
+      `UPDATE jpo_players SET coins = coins + $1 WHERE email = $2`,
+      [withdrawnTotal, oldEmail],
+    );
+  }
+
+  // Authored free text is removed where the author is unambiguous.
+  await client.query(
+    `UPDATE jpo_whispers
+        SET from_email=$2, from_name=$3, message=NULL, img=NULL
+      WHERE from_email=$1`,
+    [oldEmail, anonymousEmail, DELETED_ACCOUNT_NAME],
+  );
+  await client.query(
+    `UPDATE jpo_whispers
+        SET to_email=$2, to_name=$3
+      WHERE to_email=$1`,
+    [oldEmail, anonymousEmail, DELETED_ACCOUNT_NAME],
+  );
+  await client.query(
+    `UPDATE jpo_coach SET email=$2, intake=NULL WHERE email=$1`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(
+    `UPDATE jpo_buddies
+        SET email=CASE WHEN email=$1 THEN $2 ELSE email END,
+            buddy_email=CASE WHEN buddy_email=$1 THEN $2 ELSE buddy_email END,
+            quiz_answers=CASE WHEN email=$1 THEN NULL ELSE quiz_answers END
+      WHERE email=$1 OR buddy_email=$1`,
+    [oldEmail, anonymousEmail],
+  );
+
+  const { rows: entrantRows } = await client.query(
+    `SELECT event_id, entrant FROM jpo_grand_event_entries
+      WHERE email=$1 FOR UPDATE`,
+    [oldEmail],
+  );
+  for (const entrant of entrantRows) {
+    await client.query(
+      `UPDATE jpo_grand_event_entries
+          SET entrant=$3::jsonb
+        WHERE event_id=$1 AND email=$2`,
+      [
+        entrant.event_id,
+        oldEmail,
+        JSON.stringify(anonymizeIdentityJson(entrant.entrant, oldEmail, anonymousEmail, true)),
+      ],
+    );
+  }
+  const { rows: eventRows } = await client.query(
+    `SELECT id, snapshot FROM jpo_grand_events
+      WHERE snapshot::text ILIKE '%' || $1 || '%'
+      FOR UPDATE`,
+    [oldEmail],
+  );
+  for (const event of eventRows) {
+    await client.query(
+      `UPDATE jpo_grand_events SET snapshot=$2::jsonb WHERE id=$1`,
+      [event.id, JSON.stringify(anonymizeIdentityJson(event.snapshot, oldEmail, anonymousEmail))],
+    );
+  }
+
+  await client.query(`UPDATE jpo_activity_daily SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(`UPDATE jpo_cod_quiz SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(`UPDATE jpo_gift_notices SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(
+    `UPDATE jpo_gift_notices
+        SET from_email=$2, from_name=$3
+      WHERE from_email=$1`,
+    [oldEmail, anonymousEmail, DELETED_ACCOUNT_NAME],
+  );
+  await client.query(
+    `UPDATE jpo_announcements
+        SET author_email=$2, name=$3, text=$4
+      WHERE author_email=$1`,
+    [oldEmail, anonymousEmail, DELETED_ACCOUNT_NAME, DELETED_ACCOUNT_TEXT],
+  );
+  await client.query(
+    `UPDATE jpo_pair_plays
+        SET email_a=CASE WHEN email_a=$1 THEN $2 ELSE email_a END,
+            email_b=CASE WHEN email_b=$1 THEN $2 ELSE email_b END
+      WHERE email_a=$1 OR email_b=$1`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(`UPDATE jpo_pet_battle_caps SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(
+    `UPDATE jpo_pet_battle_pairs
+        SET email_a=CASE WHEN email_a=$1 THEN $2 ELSE email_a END,
+            email_b=CASE WHEN email_b=$1 THEN $2 ELSE email_b END
+      WHERE email_a=$1 OR email_b=$1`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(`UPDATE jpo_pet_battles SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(`UPDATE jpo_race_settlements SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(`UPDATE jpo_store_msgs SET email=$2 WHERE email=$1`, [oldEmail, anonymousEmail]);
+  await client.query(
+    `UPDATE jpo_grand_event_entries SET email=$2 WHERE email=$1`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(
+    `UPDATE jpo_grand_event_payouts
+        SET email=$2, payout_key=replace(payout_key, $1, $2)
+      WHERE email=$1 OR position($1 in payout_key) > 0`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(
+    `UPDATE jpo_grand_events
+        SET champion_email=CASE WHEN champion_email=$1 THEN $2 ELSE champion_email END,
+            created_by=replace(created_by, $1, $2)
+      WHERE champion_email=$1 OR position($1 in created_by) > 0`,
+    [oldEmail, anonymousEmail],
+  );
+  await client.query(
+    `UPDATE jpo_buddy_caps SET key=replace(key, $1, $2)
+      WHERE position($1 in key) > 0`,
+    [oldEmail, anonymousEmail],
+  );
+
+  // Older audit rows can contain the email inside free-form text. Redact the
+  // whole target detail instead of retaining a hidden old→anonymous mapping.
+  await client.query(
+    `UPDATE jpo_admin_log
+        SET admin_name=CASE
+              WHEN position($1 in lower(admin_name)) > 0 THEN $2
+              ELSE admin_name
+            END,
+            detail=CASE
+              WHEN position($1 in lower(detail)) > 0 THEN $3
+              ELSE detail
+            END
+      WHERE position($1 in lower(admin_name)) > 0
+         OR position($1 in lower(detail)) > 0`,
+    [oldEmail, DELETED_ACCOUNT_NAME, DELETED_ACCOUNT_TEXT],
+  );
+  await client.query(
+    `UPDATE jpo_price_alerts SET changed_by=$2
+      WHERE position($1 in lower(changed_by)) > 0`,
+    [oldEmail, DELETED_ACCOUNT_NAME],
+  );
+
+  const names = accountIdentityNames(row);
+  if (names.length) {
+    // Legacy rows predate durable author-email attribution. If a display name
+    // is shared, there is no honest way to identify which legacy row belonged
+    // to the removed player, so redact every unattributed match conservatively.
+    // Attributed rows above remain exact and preserve the other player's data.
+    await client.query(
+      `UPDATE jpo_announcements
+          SET name=$2, text=$3
+        WHERE author_email IS NULL
+          AND lower(name)=ANY($1::text[])`,
+      [names.map((name) => name.toLowerCase()), DELETED_ACCOUNT_NAME, DELETED_ACCOUNT_TEXT],
+    );
+    await client.query(
+      `UPDATE jpo_gift_notices
+          SET from_name=$2
+        WHERE from_email IS NULL
+          AND lower(from_name)=ANY($1::text[])`,
+      [names.map((name) => name.toLowerCase()), DELETED_ACCOUNT_NAME],
+    );
+  }
+
+  const { rows: anonymizedRows } = await client.query(
+    `UPDATE jpo_players
+        SET email=$2,
+            first_name='Deleted',
+            last_name='',
+            name=$3,
+            nickname='',
+            department='',
+            hobby='',
+            pet_names='{}'::jsonb,
+            password_hash=$4,
+            password_set_at=now(),
+            approved=false,
+            dismissed=true,
+            is_announcer=false,
+            x=$5,
+            y=$6,
+            dir='down',
+            anim='idle',
+            earn_until=NULL,
+            updated_at=now()
+      WHERE email=$1
+      RETURNING email`,
+    [
+      oldEmail,
+      anonymousEmail,
+      DELETED_ACCOUNT_NAME,
+      disabledPasswordHash,
+      GRASS_SPAWN.x,
+      GRASS_SPAWN.y,
+    ],
+  );
+  if (!anonymizedRows[0]) throw new Error("Account disappeared during anonymization.");
+  return { row, refundedEmails: [...refundedEmails] };
+}
+
+async function prepareAccountRemovalLocally(email) {
+  holdAccountRemovalEmail(email);
+  for (const ownerId of owners) {
+    if (String(players[ownerId]?.email || "").toLowerCase() === email) {
+      return { ok: false, reason: "An active owner account cannot be removed." };
+    }
+  }
+  if (grandEvent?.entrants?.has(email)) {
+    return { ok: false, reason: "The account is entered in an active Pet Wars event." };
+  }
+  if (standardRaceHasEmail(email)) {
+    return { ok: false, reason: "The account is entered in an active Pet Race or race bet." };
+  }
+  return { ok: true };
+}
+
+async function teardownAccountLocally(email, replacementEmail = null) {
+  holdAccountRemovalEmail(email);
+  if (replacementEmail && process.env.TEST_FORCE_ACCOUNT_TEARDOWN_FAILURE === "1") {
+    throw new Error("Forced committed-phase teardown failure for integration testing.");
+  }
+  removeEmailFromEphemeralGames(email);
+  const targetIds = liveSocketsForEmail(email, null);
+  for (const id of targetIds) {
+    const settle = async () => {
+      const trade = tradeBySocket.get(id);
+      if (trade?.state === "pending") clearTrade(trade, "Trade cancelled — an account was removed.");
+      const p = players[id];
+      if (p) {
+        if (replacementEmail) p.email = replacementEmail;
+        await activityFlushSocket(id, replacementEmail || email)
+          .catch((err) => console.error("activity account-removal flush failed:", err));
+        activityBySocket.delete(id);
+      }
+      if (pending[id] && replacementEmail) pending[id].email = replacementEmail;
+      await forfeitMatchForLeave(id);
+      await petBattleForfeitForLeave(id);
+      await raceDuelForfeit(id);
+    };
+    await Promise.race([
+      settle(),
+      delay(4_000).then(() => { throw new Error("local account settlement timed out"); }),
+    ]).catch((err) => {
+      // Access revocation must not wait forever on an ancillary payout write.
+      // Every settlement already sees the anonymous replacement email; if it
+      // finishes later it cannot recreate the removed identity.
+      console.error("account-removal local settlement incomplete:", err);
+    });
+    io.to(id).emit("accountRemoved");
+  }
+  if (replacementEmail) dropLiveByEmail(replacementEmail, null);
+  dropLiveByEmail(email, null);
+  cancelGrace(email);
+  roundLeaveGoneByEmail(email);
+  return { ok: true };
+}
+
+async function publishAccountRemoval(message) {
+  await pool.query(
+    `SELECT pg_notify('jpo_account_removal', $1)`,
+    [JSON.stringify(message)],
+  );
+}
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function processAccountRemovalOp(opId) {
+  if (!opId || accountRemovalOpsInFlight.has(opId)) return;
+  accountRemovalOpsInFlight.add(opId);
+  try {
+    const { rows } = await pool.query(
+      `SELECT op_id, email, anonymous_email, state
+         FROM jpo_account_removal_ops
+        WHERE op_id=$1 AND (expires_at IS NULL OR expires_at > now())`,
+      [opId],
+    );
+    const op = rows[0];
+    if (!op) return;
+    if (op.state === "preparing") {
+      if (accountRemovalHandledOps.has(op.op_id)) return;
+      holdAccountRemovalEmail(op.email);
+      let result;
+      try {
+        result = await prepareAccountRemovalLocally(op.email);
+      } catch (err) {
+        console.error("cross-instance account prepare failed:", err);
+        result = { ok: false, reason: "A server instance could not quiesce the account." };
+      }
+      await pool.query(
+        `INSERT INTO jpo_account_removal_acks (op_id, instance_id, ok, reason, acked_at)
+         VALUES ($1,$2,$3,$4,now())
+         ON CONFLICT (op_id, instance_id) DO UPDATE
+           SET ok=EXCLUDED.ok, reason=EXCLUDED.reason, acked_at=now()`,
+        [op.op_id, INSTANCE_ID, !!result.ok, result.reason || ""],
+      );
+      accountRemovalHandledOps.set(op.op_id, op.email);
+      return;
+    }
+    if (op.state === "committed") {
+      const oldEmail = accountRemovalHandledOps.get(op.op_id);
+      if (oldEmail) {
+        await teardownAccountLocally(oldEmail, op.anonymous_email);
+        releaseAccountRemovalEmail(oldEmail);
+        accountRemovalHandledOps.delete(op.op_id);
+      }
+      await pool.query(
+        `UPDATE jpo_account_removal_acks
+            SET completed_at=now()
+          WHERE op_id=$1 AND instance_id=$2 AND ok=true`,
+        [op.op_id, INSTANCE_ID],
+      );
+    }
+  } finally {
+    accountRemovalOpsInFlight.delete(opId);
+  }
+}
+
+async function pollAccountRemovalOps() {
+  failClosedIfAccountRemovalLeaseExpired();
+  const { rows } = await pool.query(
+    `SELECT op_id FROM jpo_account_removal_ops
+      WHERE expires_at IS NULL OR expires_at > now()
+      ORDER BY created_at`,
+  );
+  const active = new Set(rows.map((row) => row.op_id));
+  for (const row of rows) await processAccountRemovalOp(row.op_id);
+  for (const [opId, email] of accountRemovalHandledOps) {
+    if (active.has(opId)) continue;
+    accountRemovalHandledOps.delete(opId);
+    releaseAccountRemovalEmail(email);
+  }
+  await pool.query(
+    `DELETE FROM jpo_account_removal_ops
+      WHERE state='preparing' AND expires_at <= now()`,
+  );
+  await pool.query(
+    `UPDATE jpo_server_instances s
+        SET fenced=true
+       FROM jpo_account_removal_targets t
+       JOIN jpo_account_removal_ops o ON o.op_id=t.op_id AND o.state='committed'
+       LEFT JOIN jpo_account_removal_acks a
+         ON a.op_id=t.op_id AND a.instance_id=t.instance_id
+      WHERE s.instance_id=t.instance_id
+        AND a.completed_at IS NULL
+        AND s.heartbeat_at < now() - interval '6 seconds'`,
+  );
+  await pool.query(
+    `DELETE FROM jpo_account_removal_ops o
+      WHERE o.state='committed'
+        AND NOT EXISTS (
+          SELECT 1
+            FROM jpo_account_removal_targets t
+            LEFT JOIN jpo_account_removal_acks a
+              ON a.op_id=t.op_id AND a.instance_id=t.instance_id
+            LEFT JOIN jpo_server_instances s ON s.instance_id=t.instance_id
+           WHERE t.op_id=o.op_id
+             AND a.completed_at IS NULL
+              AND s.instance_id IS NOT NULL
+              AND s.fenced=false
+        )`,
+  );
+}
+
+async function createAccountRemovalBarrier(opId, email) {
+  const barrierClient = await pool.connect();
+  try {
+    await barrierClient.query("BEGIN");
+    await barrierClient.query(
+      `INSERT INTO jpo_account_removal_ops (op_id, email, email_token, state, created_at, expires_at)
+       VALUES ($1,$2,$3,'preparing',now(),now() + interval '5 minutes')`,
+      [opId, email, accountRemovalEmailToken(email)],
+    );
+    await barrierClient.query(
+      `INSERT INTO jpo_account_removal_targets (op_id, instance_id)
+       SELECT $1, instance_id
+         FROM jpo_server_instances
+        WHERE fenced=false
+          AND (heartbeat_at > now() - interval '6 seconds' OR instance_id = $2)`,
+      [opId, INSTANCE_ID],
+    );
+    await barrierClient.query("COMMIT");
+  } catch (err) {
+    await barrierClient.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    barrierClient.release();
+  }
+}
+
+async function waitForAccountRemovalBarrier(opId, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { rows } = await pool.query(
+      `SELECT t.instance_id, a.ok, a.reason, a.acked_at
+         FROM jpo_account_removal_targets t
+         LEFT JOIN jpo_account_removal_acks a
+           ON a.op_id=t.op_id AND a.instance_id=t.instance_id
+        WHERE t.op_id=$1`,
+      [opId],
+    );
+    if (!rows.length) throw new Error("No live server instances joined the account-removal barrier.");
+    const refused = rows.find((row) => row.acked_at && !row.ok);
+    if (refused) throw new Error(refused.reason || "A live server instance refused account teardown.");
+    if (rows.every((row) => row.acked_at && row.ok)) return;
+    await delay(100);
+  }
+  throw new Error("Not every live server instance acknowledged account teardown.");
+}
+
+async function waitForAccountRemovalCompletion(opId) {
+  for (;;) {
+    try {
+      await pool.query(
+        `UPDATE jpo_server_instances s
+            SET fenced=true
+           FROM jpo_account_removal_targets t
+           LEFT JOIN jpo_account_removal_acks a
+             ON a.op_id=t.op_id AND a.instance_id=t.instance_id
+          WHERE t.op_id=$1
+            AND s.instance_id=t.instance_id
+            AND a.completed_at IS NULL
+            AND s.heartbeat_at < now() - interval '6 seconds'`,
+        [opId],
+      );
+      const { rows } = await pool.query(
+        `SELECT t.instance_id, a.completed_at, s.instance_id AS lease_instance_id, s.fenced
+           FROM jpo_account_removal_targets t
+           LEFT JOIN jpo_account_removal_acks a
+             ON a.op_id=t.op_id AND a.instance_id=t.instance_id
+           LEFT JOIN jpo_server_instances s ON s.instance_id=t.instance_id
+          WHERE t.op_id=$1`,
+        [opId],
+      );
+      if (!rows.length) {
+        const exists = (await pool.query(
+          `SELECT 1 FROM jpo_account_removal_ops WHERE op_id=$1`,
+          [opId],
+        )).rows[0];
+        if (!exists) return true;
+      } else {
+        const complete = rows.every((row) => row.completed_at || row.fenced || !row.lease_instance_id);
+        if (complete) return true;
+      }
+    } catch (err) {
+      // The identity remains guarded and the session-level email lock remains
+      // held while DB coordination recovers. Never turn a query blip into a
+      // premature success.
+      console.error("account-removal completion check failed:", err);
+    }
+    await delay(100);
+  }
+}
+
+async function handleAccountRemovalNotification(message) {
+  const email = String(message?.email || "").trim().toLowerCase();
+  if (!email || !EMAIL_RE.test(email)) return;
+  if (message.phase === "abort" || message.phase === "finished") {
+    releaseAccountRemovalEmail(email);
+    return;
+  }
+  if (!["prepare", "complete"].includes(message.phase) || typeof message.opId !== "string") return;
+  await processAccountRemovalOp(message.opId);
+}
+
+let accountRemovalListenerReconnectTimer = null;
+async function startAccountRemovalListener() {
+  try {
+    const listener = await pool.connect();
+    let reconnectQueued = false;
+    const queueReconnect = (err) => {
+      if (reconnectQueued) return;
+      reconnectQueued = true;
+      if (err) console.error("account-removal listener disconnected:", err);
+      clearTimeout(accountRemovalListenerReconnectTimer);
+      accountRemovalListenerReconnectTimer = setTimeout(startAccountRemovalListener, 1_000);
+      accountRemovalListenerReconnectTimer.unref?.();
+    };
+    listener.once("error", queueReconnect);
+    listener.once("end", () => queueReconnect());
+    listener.on("notification", (notice) => {
+      let message;
+      try { message = JSON.parse(notice.payload || "{}"); }
+      catch { return; }
+      if (notice.channel === "jpo_account_removal") {
+        handleAccountRemovalNotification(message)
+          .catch((err) => console.error("account-removal notification failed:", err));
+      }
+    });
+    await listener.query("LISTEN jpo_account_removal");
+  } catch (err) {
+    console.error("account-removal listener start failed:", err);
+    clearTimeout(accountRemovalListenerReconnectTimer);
+    accountRemovalListenerReconnectTimer = setTimeout(startAccountRemovalListener, 1_000);
+    accountRemovalListenerReconnectTimer.unref?.();
+  }
+}
+
+let accountRemovalLeaseHealthyUntil = 0;
+let accountRemovalLeaseFailedClosed = false;
+let accountRemovalOpPollRunning = false;
+
+async function registerAccountRemovalInstance() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // A removal holds the exclusive form of this lock through its commit.
+    // New processes cannot register or begin serving halfway through a barrier.
+    await client.query(
+      `SELECT pg_advisory_xact_lock_shared(hashtextextended('jpo-account-removal-membership', 0))`,
+    );
+    await client.query(
+      `INSERT INTO jpo_server_instances (instance_id, started_at, heartbeat_at, fenced)
+       VALUES ($1,now(),now(),false)
+       ON CONFLICT (instance_id) DO UPDATE
+         SET started_at=now(), heartbeat_at=now(), fenced=false`,
+      [INSTANCE_ID],
+    );
+    await client.query("COMMIT");
+    accountRemovalLeaseHealthyUntil = Date.now() + 4_000;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function heartbeatAccountRemovalInstance() {
+  // Check the LOCAL deadline before touching the DB. A paused event loop must
+  // fail closed on recovery; it may not renew first and thereby resurrect old
+  // sockets after another instance fenced its stale lease.
+  failClosedIfAccountRemovalLeaseExpired();
+  const { rowCount } = await pool.query(
+    `UPDATE jpo_server_instances
+        SET heartbeat_at=now()
+      WHERE instance_id=$1 AND fenced=false`,
+    [INSTANCE_ID],
+  );
+  if (!rowCount) {
+    failClosedAccountRemovalLease("account-removal coordination lease was fenced");
+  } else {
+    accountRemovalLeaseHealthyUntil = Date.now() + 4_000;
+  }
+  accountRemovalLeaseFailedClosed = false;
+}
+
+function failClosedAccountRemovalLease(reason) {
+  if (!accountRemovalLeaseFailedClosed) {
+    console.error(`${reason}; terminating this process before any stale socket can resume`);
+  }
+  accountRemovalLeaseFailedClosed = true;
+  // A process that missed its lease may have missed a committed removal too.
+  // Exiting without running Socket.IO disconnect handlers discards every stale
+  // in-memory session/game atomically and prevents any old-email settlement
+  // write. The platform starts a clean process with a new fenced lease.
+  process.exit(1);
+}
+
+function failClosedIfAccountRemovalLeaseExpired() {
+  if (Date.now() <= accountRemovalLeaseHealthyUntil || accountRemovalLeaseFailedClosed) return;
+  failClosedAccountRemovalLease("account-removal coordination lease expired");
+}
+
+function startAccountRemovalBackgroundWork() {
+  const heartbeatTimer = setInterval(() => {
+    heartbeatAccountRemovalInstance()
+      .catch((err) => console.error("account-removal instance heartbeat failed:", err))
+      .finally(failClosedIfAccountRemovalLeaseExpired);
+  }, 1_000);
+  heartbeatTimer.unref?.();
+
+  const pollTimer = setInterval(async () => {
+    if (accountRemovalOpPollRunning) return;
+    accountRemovalOpPollRunning = true;
+    try {
+      await pollAccountRemovalOps();
+    } catch (err) {
+      console.error("account-removal operation poll failed:", err);
+    } finally {
+      accountRemovalOpPollRunning = false;
+    }
+  }, 200);
+  pollTimer.unref?.();
+}
+
+let accountValiditySweepRunning = false;
+setInterval(async () => {
+  if (accountValiditySweepRunning) return;
+  const emails = [...new Set(Object.values(players).map((p) => p.email).filter(Boolean))];
+  if (!emails.length) return;
+  accountValiditySweepRunning = true;
+  try {
+    const { rows } = await pool.query(
+      `SELECT email FROM jpo_players
+        WHERE email=ANY($1::text[]) AND approved=true AND dismissed=false`,
+      [emails],
+    );
+    const valid = new Set(rows.map((row) => row.email));
+    for (const email of emails) {
+      if (!valid.has(email)) await teardownAccountLocally(email);
+    }
+  } catch (err) {
+    console.error("account validity sweep failed:", err);
+  } finally {
+    accountValiditySweepRunning = false;
+  }
+}, 1_500).unref?.();
 
 // Cancel a pending grace hold for an email (called when they reconnect): stop the
 // removal timer and clear the frozen old sprite from every client, so restore can
@@ -3535,7 +4328,7 @@ function forfeitMatchForLeave(id) {
     return;
   }
   if (m.state !== "picking" && m.state !== "playing") return;   // settling/done: result stands
-  finishMatch(m, {
+  return finishMatch(m, {
     winnerId: rpsOtherId(m, id), loserId: id, forfeit: true,
     extras: () => ({ left: true }),
   }).catch((err) => console.error("leave-forfeit settle failed:", err));
@@ -4343,7 +5136,7 @@ function petBattleForfeitForLeave(id) {
   if (b.state !== "picking" && b.state !== "resolving" && b.state !== "starting") return;  // settling/done stands
   const leaverSide = b.sides.challenger.id === id ? "challenger" : "opponent";
   const winnerSide = petBattleOtherId2(leaverSide);
-  petBattleFinish(b, { reason: "forfeit", winnerSide, forfeit: true })
+  return petBattleFinish(b, { reason: "forfeit", winnerSide, forfeit: true })
     .catch((err) => console.error("pet battle leave-forfeit failed:", err));
 }
 
@@ -6388,6 +7181,17 @@ function raceCancel(reason) {
   console.log('Race: cancelled (' + reason + ')');
 }
 
+function standardRaceHasEmail(email) {
+  if (!race || race.duelIds) return false;
+  for (const [id, entrant] of race.entrants || []) {
+    if (entrant?.email === email || players[id]?.email === email) return true;
+  }
+  for (const bet of race.bets?.values?.() || []) {
+    if (bet?.email === email) return true;
+  }
+  return false;
+}
+
 // Called from the disconnect handler (before players[id] is deleted) when one
 // side of an active duel race bails out. Survivor is declared the winner and
 // receives the full wager; leaver gets nothing and sees the forfeit screen.
@@ -6942,7 +7746,21 @@ function voicePairOk(aId, bId) {
   return dx * dx + dy * dy <= r * r;
 }
 
+io.use((_socket, next) => {
+  if (accountRemovalLeaseFailedClosed || Date.now() > accountRemovalLeaseHealthyUntil) {
+    next(new Error("Server identity coordination is temporarily unavailable."));
+    return;
+  }
+  next();
+});
+
 io.on("connection", (socket) => {
+  socket.use((_event, next) => {
+    if (accountRemovalLeaseFailedClosed || Date.now() > accountRemovalLeaseHealthyUntil) return;
+    const email = String(players[socket.id]?.email || pending[socket.id]?.email || "").toLowerCase();
+    if (email && accountRemovalEmails.has(email)) return;
+    next();
+  });
   console.log("Socket connected:", socket.id);
 
   // Build handshake — how "everyone gets the fix" works without chasing
@@ -7059,91 +7877,112 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const { rows: existingRows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
-      const existing = existingRows[0];
-
-      if (existing && existing.password_hash) {
-        // Established account: verify BEFORE any mutation or live-session drop.
-        const ok = await verifyPassword(pw, existing.password_hash);
-        if (!ok) {
-          socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
-          console.log(`Auth failed (register): <${em}>`);
+      let row;
+      const registrationClient = await pool.connect();
+      let accountLockHeld = false;
+      try {
+        // A DB advisory lock serializes register/remove across every server
+        // process. If removal wins, this re-reads after anonymization and creates
+        // a genuinely new pending account with the submitted password.
+        await registrationClient.query(
+          `SELECT pg_advisory_lock(hashtextextended($1, 0))`,
+          [em],
+        );
+        accountLockHeld = true;
+        if (await accountRemovalStillCompleting(registrationClient, em)) {
+          socket.emit("authFailed", { message: "This account removal is still finishing. Try again in a moment." });
           return;
         }
-      } else if (existing) {
-        // Legacy passwordless account: claim it atomically. If another socket
-        // wins the race, fall back to verifying against the winner's hash.
-        const hash = await hashPassword(pw);
-        const { rows: claimed } = await pool.query(
-          `UPDATE jpo_players
-              SET password_hash = $2, password_set_at = now(), updated_at = now()
-            WHERE email = $1 AND password_hash IS NULL
-            RETURNING email`,
-          [em, hash],
+        const { rows: existingRows } = await registrationClient.query(
+          `SELECT * FROM jpo_players WHERE email = $1`,
+          [em],
         );
-        if (!claimed[0]) {
-          const { rows: rr } = await pool.query(`SELECT password_hash FROM jpo_players WHERE email = $1`, [em]);
-          const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
+        const existing = existingRows[0];
+
+        if (existing && existing.password_hash) {
+          // Established account: verify BEFORE any mutation or live-session drop.
+          const ok = await verifyPassword(pw, existing.password_hash);
           if (!ok) {
             socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+            console.log(`Auth failed (register): <${em}>`);
             return;
           }
-        } else {
-          console.log(`Password set (claimed legacy account): <${em}>`);
-        }
-      }
-
-      // Authenticated (or brand-new email) from here on.
-      dropLiveByEmail(em, socket.id);
-
-      let row;
-      if (existing) {
-        row = await upsertPlayerProfile(reg);
-      } else {
-        // New account: create profile + password in one insert. A concurrent
-        // first-register of the same email resolves via ON CONFLICT in
-        // upsertPlayerProfile-like semantics: keep it simple — insert, and on
-        // conflict fall back to the claim/verify path by re-running register
-        // logic is overkill for a first-touch race; the profile upsert plus an
-        // atomic passwordless claim covers it.
-        const hash = await hashPassword(pw);
-        row = await upsertPlayerProfile(reg);
-        const { rows: claimed } = await pool.query(
-          `UPDATE jpo_players
-              SET password_hash = $2, password_set_at = now(), updated_at = now()
-            WHERE email = $1 AND password_hash IS NULL
-            RETURNING *`,
-          [em, hash],
-        );
-        if (claimed[0]) {
-          row = claimed[0];
-        } else {
-          // Lost a same-instant race: someone else set a password first — verify.
-          const { rows: rr } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
-          const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
-          if (!ok) {
-            // dropLiveByEmail above parked the old session's round spot as
-            // `gone` expecting OUR restore to rebind it — this exit has no
-            // successor, so apply the old leave rules now (no-op if none).
-            roundLeaveGoneByEmail(em);
-            socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
-            return;
+        } else if (existing) {
+          // Legacy passwordless account: the advisory lock makes this claim
+          // single-writer even across separate app instances.
+          const hash = await hashPassword(pw);
+          const { rows: claimed } = await registrationClient.query(
+            `UPDATE jpo_players
+                SET password_hash = $2, password_set_at = now(), updated_at = now()
+              WHERE email = $1 AND password_hash IS NULL
+              RETURNING email`,
+            [em, hash],
+          );
+          if (!claimed[0]) {
+            const { rows: rr } = await registrationClient.query(
+              `SELECT password_hash FROM jpo_players WHERE email = $1`,
+              [em],
+            );
+            const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
+            if (!ok) {
+              socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+              return;
+            }
+          } else {
+            console.log(`Password set (claimed legacy account): <${em}>`);
           }
-          row = rr[0];
         }
-      }
 
-      // Known + approved email → restore straight into the office (this is the
-      // "resume where they left off" path). Everyone else waits for approval.
-      if (row.approved) {
-        await restorePlayer(socket, row);
-        _notifyAdmins();
-        console.log(`Restored: ${row.name} <${em}>`);
-      } else {
-        pending[socket.id] = reg;
-        socket.emit("registrationPending");
-        _notifyAdmins();
-        console.log(`Pending: ${name} <${em}>`);
+        if (existing) {
+          row = await upsertPlayerProfile(reg, registrationClient);
+        } else {
+          const hash = await hashPassword(pw);
+          row = await upsertPlayerProfile(reg, registrationClient);
+          const { rows: claimed } = await registrationClient.query(
+            `UPDATE jpo_players
+                SET password_hash = $2, password_set_at = now(), updated_at = now()
+              WHERE email = $1 AND password_hash IS NULL
+              RETURNING *`,
+            [em, hash],
+          );
+          if (claimed[0]) {
+            row = claimed[0];
+          } else {
+            const { rows: rr } = await registrationClient.query(
+              `SELECT * FROM jpo_players WHERE email = $1`,
+              [em],
+            );
+            const ok = rr[0] && await verifyPassword(pw, rr[0].password_hash);
+            if (!ok) {
+              socket.emit("authFailed", { message: "Wrong password for this email. Use Sign in, or ask an admin to reset it." });
+              return;
+            }
+            row = rr[0];
+          }
+        }
+
+        // Keep the same DB lock through live-session restoration. Removal
+        // cannot broadcast teardown between the credential read and the new
+        // socket becoming visible on this instance.
+        dropLiveByEmail(em, socket.id);
+        if (row.approved) {
+          await restorePlayer(socket, row);
+          _notifyAdmins();
+          console.log(`Restored: ${row.name} <${em}>`);
+        } else {
+          pending[socket.id] = reg;
+          socket.emit("registrationPending");
+          _notifyAdmins();
+          console.log(`Pending: ${name} <${em}>`);
+        }
+      } finally {
+        if (accountLockHeld) {
+          await registrationClient.query(
+            `SELECT pg_advisory_unlock(hashtextextended($1, 0))`,
+            [em],
+          ).catch((err) => console.error("registration account unlock failed:", err));
+        }
+        registrationClient.release();
       }
     } catch (err) {
       console.error("register failed:", err);
@@ -7167,47 +8006,76 @@ io.on("connection", (socket) => {
       em = (email || "").trim().slice(0, 80).toLowerCase();
       const pw = typeof password === "string" ? password.slice(0, PASSWORD_MAX) : "";
       if (!em || !pw) { socket.emit("loginFailed", { message: "Email and password are required." }); return; }
+      if (accountRemovalEmails.has(em)) {
+        socket.emit("loginFailed", { message: "This account is being removed." });
+        return;
+      }
       if (!authAllowed(em)) {
         socket.emit("loginFailed", { message: "Too many attempts — wait 30 seconds and try again." });
         return;
       }
 
-      const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
-      const row = rows[0];
-      if (!row) { socket.emit("loginFailed", { message: "No account with that email — use Join to register." }); return; }
-      if (!row.password_hash) {
-        socket.emit("loginFailed", { message: "This account has no password yet — use Join once to set one." });
-        return;
-      }
-      const ok = await verifyPassword(pw, row.password_hash);
-      if (!ok) {
-        socket.emit("loginFailed", { message: "Wrong password." });
-        console.log(`Auth failed (login): <${em}>`);
-        return;
-      }
+      const loginClient = await pool.connect();
+      let accountLockHeld = false;
+      try {
+        await loginClient.query(
+          `SELECT pg_advisory_lock(hashtextextended($1, 0))`,
+          [em],
+        );
+        accountLockHeld = true;
+        if (accountRemovalEmails.has(em)) {
+          socket.emit("loginFailed", { message: "This account is being removed." });
+          return;
+        }
+        if (await accountRemovalStillCompleting(loginClient, em)) {
+          socket.emit("loginFailed", { message: "This account removal is still finishing." });
+          return;
+        }
+        const { rows } = await loginClient.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+        const row = rows[0];
+        if (!row) { socket.emit("loginFailed", { message: "No account with that email — use Join to register." }); return; }
+        if (!row.password_hash) {
+          socket.emit("loginFailed", { message: "This account has no password yet — use Join once to set one." });
+          return;
+        }
+        const ok = await verifyPassword(pw, row.password_hash);
+        if (!ok) {
+          socket.emit("loginFailed", { message: "Wrong password." });
+          console.log(`Auth failed (login): <${em}>`);
+          return;
+        }
 
-      // Authenticated: now it's safe to drop any older live session.
-      dropLiveByEmail(em, socket.id);
-
-      if (row.approved) {
-        await restorePlayer(socket, row);
-        _notifyAdmins();
-        console.log(`Signed in: ${row.name} <${em}>`);
-      } else {
-        cancelGrace(em);
-        roundLeaveGoneByEmail(em);   // ends in the pending queue, not a restore — the deferred round spot leaves now
-        pending[socket.id] = {
-          firstName: row.first_name, lastName: row.last_name, email: row.email,
-          character: row.character, name: row.name, nickname: row.nickname,
-          hairIdx: row.hair_idx, skinIdx: row.skin_idx,
-          shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
-        };
-        // Actively coming back = re-enter the approval queue: clear any
-        // earlier admin dismissal so the DB-backed pending list shows them.
-        if (row.dismissed) await pool.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
-        socket.emit("registrationPending");
-        _notifyAdmins();
-        console.log(`Signed in (pending approval): ${row.name} <${em}>`);
+        // Hold the identity lock until this socket is fully restored, so a
+        // removal on another process cannot slip between auth and visibility.
+        dropLiveByEmail(em, socket.id);
+        if (row.approved) {
+          await restorePlayer(socket, row);
+          _notifyAdmins();
+          console.log(`Signed in: ${row.name} <${em}>`);
+        } else {
+          cancelGrace(em);
+          roundLeaveGoneByEmail(em);
+          pending[socket.id] = {
+            firstName: row.first_name, lastName: row.last_name, email: row.email,
+            character: row.character, name: row.name, nickname: row.nickname,
+            hairIdx: row.hair_idx, skinIdx: row.skin_idx,
+            shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
+          };
+          if (row.dismissed) {
+            await loginClient.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
+          }
+          socket.emit("registrationPending");
+          _notifyAdmins();
+          console.log(`Signed in (pending approval): ${row.name} <${em}>`);
+        }
+      } finally {
+        if (accountLockHeld) {
+          await loginClient.query(
+            `SELECT pg_advisory_unlock(hashtextextended($1, 0))`,
+            [em],
+          ).catch((err) => console.error("login account unlock failed:", err));
+        }
+        loginClient.release();
       }
     } catch (err) {
       console.error("login failed:", err);
@@ -7273,44 +8141,59 @@ io.on("connection", (socket) => {
       const data = verifyToken(token);
       if (!data) { socket.emit("resumeFailed"); return; }
       em = data.email;
+      if (accountRemovalEmails.has(em)) { socket.emit("resumeFailed"); return; }
 
-      const { rows } = await pool.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
-      const row = rows[0];
-      if (!row) { socket.emit("resumeFailed"); return; }
+      const resumeClient = await pool.connect();
+      let accountLockHeld = false;
+      try {
+        await resumeClient.query(
+          `SELECT pg_advisory_lock(hashtextextended($1, 0))`,
+          [em],
+        );
+        accountLockHeld = true;
+        if (accountRemovalEmails.has(em)) { socket.emit("resumeFailed"); return; }
+        if (await accountRemovalStillCompleting(resumeClient, em)) { socket.emit("resumeFailed"); return; }
+        const { rows } = await resumeClient.query(`SELECT * FROM jpo_players WHERE email = $1`, [em]);
+        const row = rows[0];
+        if (!row) { socket.emit("resumeFailed"); return; }
 
-      // Tokens are session credentials now: any token issued BEFORE the account's
-      // password was (re)set is void — a pre-password bystander token (or a
-      // reset-out attacker's token) can't bypass the password gate. Checked
-      // BEFORE dropLiveByEmail so a voided token can't disconnect the real player.
-      if (row.password_set_at && data.iat < new Date(row.password_set_at).getTime()) {
-        socket.emit("resumeFailed");
-        return;
-      }
+        // Tokens are session credentials now: any token issued BEFORE the account's
+        // password was (re)set is void — a pre-password bystander token (or a
+        // reset-out attacker's token) can't bypass the password gate.
+        if (row.password_set_at && data.iat < new Date(row.password_set_at).getTime()) {
+          socket.emit("resumeFailed");
+          return;
+        }
 
-      // One live session per email — drop any stale live duplicate.
-      dropLiveByEmail(em, socket.id);
-
-      if (row.approved) {
-        await restorePlayer(socket, row);
-        _notifyAdmins();
-        console.log(`Resumed: ${row.name} <${em}>`);
-      } else {
-        // Approved-then-revoked (kicked) or still awaiting first approval: rebuild
-        // the pending entry from the row so admins can (re-)approve them.
-        cancelGrace(em);
-        roundLeaveGoneByEmail(em);   // ends in the pending queue, not a restore — the deferred round spot leaves now
-        pending[socket.id] = {
-          firstName: row.first_name, lastName: row.last_name, email: row.email,
-          character: row.character, name: row.name, nickname: row.nickname,
-          hairIdx: row.hair_idx, skinIdx: row.skin_idx,
-          shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
-        };
-        // Actively coming back = re-enter the approval queue: clear any
-        // earlier admin dismissal so the DB-backed pending list shows them.
-        if (row.dismissed) await pool.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
-        socket.emit("registrationPending");
-        _notifyAdmins();
-        console.log(`Resume pending (not approved): ${row.name} <${em}>`);
+        dropLiveByEmail(em, socket.id);
+        if (row.approved) {
+          await restorePlayer(socket, row);
+          _notifyAdmins();
+          console.log(`Resumed: ${row.name} <${em}>`);
+        } else {
+          cancelGrace(em);
+          roundLeaveGoneByEmail(em);
+          pending[socket.id] = {
+            firstName: row.first_name, lastName: row.last_name, email: row.email,
+            character: row.character, name: row.name, nickname: row.nickname,
+            hairIdx: row.hair_idx, skinIdx: row.skin_idx,
+            shirtIdx: row.shirt_idx, pantsIdx: row.pants_idx,
+          };
+          if (row.dismissed) {
+            await resumeClient.query(`UPDATE jpo_players SET dismissed = false, updated_at = now() WHERE email = $1`, [em]);
+          }
+          socket.emit("registrationPending");
+          _notifyAdmins();
+          console.log(`Resume pending (not approved): ${row.name} <${em}>`);
+        }
+      } finally {
+        if (accountLockHeld) {
+          await resumeClient.query(
+            `SELECT pg_advisory_unlock(hashtextextended($1, 0))`,
+            [em],
+          ).catch((err) => console.error("resume account unlock failed:", err));
+        }
+        resumeClient.release();
       }
     } catch (err) {
       console.error("resumeSession failed:", err);
@@ -7904,7 +8787,7 @@ io.on("connection", (socket) => {
     if (race.entrants.has(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     const stage = petStageFor(p);
-    race.entrants.set(socket.id, { name: p.name, petId: p.pet, petStage: stage, speed: racePetSpeed(p.pet, stage) });
+    race.entrants.set(socket.id, { name: p.name, email: p.email || null, petId: p.pet, petStage: stage, speed: racePetSpeed(p.pet, stage) });
     raceIO().emit('raceEntrantUpdate', { entrants: raceEntrantList() });
     socket.emit('raceJoinOk', {});
     console.log('Race join: ' + p.name + ' with ' + p.pet + ' s' + stage);
@@ -8446,6 +9329,200 @@ io.on("connection", (socket) => {
         online:     onlineEmails.has((r.email || "").toLowerCase()),
       })));
     } catch (err) { console.error("adminRegisteredList failed:", err); }
+  });
+
+  socket.on("ownerRemoveAccount", async (payload) => {
+    if (!owners.has(socket.id)) {
+      socket.emit("ownerRemoveAccountResult", { ok: false, message: "Owner access is required." });
+      return;
+    }
+    const email = String(payload?.email || "").trim().slice(0, 80).toLowerCase();
+    const confirmEmail = String(payload?.confirmEmail || "").trim().slice(0, 80).toLowerCase();
+    if (!email || !EMAIL_RE.test(email) || email !== confirmEmail) {
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "Type the player's full email exactly to confirm removal.",
+      });
+      return;
+    }
+    if (email.endsWith("@deleted.invalid")) {
+      socket.emit("ownerRemoveAccountResult", { ok: false, message: "That account is already anonymous." });
+      return;
+    }
+    if (accountRemovalEmails.has(email)) {
+      socket.emit("ownerRemoveAccountResult", { ok: false, message: "That account removal is already running." });
+      return;
+    }
+
+    const requesterEmail = String(players[socket.id]?.email || "").toLowerCase();
+    const protectedEmails = new Set(
+      [...owners]
+        .map((id) => String(players[id]?.email || "").toLowerCase())
+        .filter(Boolean),
+    );
+    for (const configured of String(process.env.OWNER_ACCOUNT_EMAILS || "").split(",")) {
+      const normalized = configured.trim().toLowerCase();
+      if (normalized) protectedEmails.add(normalized);
+    }
+    if (email === requesterEmail || protectedEmails.has(email)) {
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "The current owner account cannot be removed.",
+      });
+      return;
+    }
+
+    let preview;
+    try {
+      preview = (await pool.query(
+        `SELECT email, approved, dismissed FROM jpo_players WHERE email=$1`,
+        [email],
+      )).rows[0];
+    } catch (err) {
+      console.error("ownerRemoveAccount lookup failed:", err);
+      socket.emit("ownerRemoveAccountResult", { ok: false, message: "Couldn't check that account — try again." });
+      return;
+    }
+    if (!preview || !preview.approved || preview.dismissed) {
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "That registered account no longer exists.",
+      });
+      return;
+    }
+    if (grandEvent?.entrants?.has(email)) {
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "Wait until this player's Pet Wars event is fully closed, then remove the account.",
+      });
+      return;
+    }
+    if (standardRaceHasEmail(email)) {
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "Wait until this player's active Pet Race or race bet is settled, then remove the account.",
+      });
+      return;
+    }
+
+    holdAccountRemovalEmail(email);
+    let client;
+    const removalOpId = crypto.randomUUID();
+    let anonymizationCommitted = false;
+    let accountSessionLockHeld = false;
+    try {
+      const anonymousEmail = `deleted+${crypto.randomUUID().replaceAll("-", "")}@deleted.invalid`;
+      const disabledPasswordHash = await hashPassword(`removed:${crypto.randomUUID()}:${crypto.randomUUID()}`);
+      client = await pool.connect();
+      await client.query("BEGIN");
+      // Freeze serving-instance membership through COMMIT. A starting process
+      // must take the shared form before it registers/listens/serves, so it can
+      // never appear halfway through this removal barrier.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('jpo-account-removal-membership', 0))`,
+      );
+      // Serialize all identity entry for this email. Register/login/resume take
+      // the matching session lock and cannot restore stale credentials.
+      await client.query(
+        `SELECT pg_advisory_lock(hashtextextended($1, 0))`,
+        [email],
+      );
+      accountSessionLockHeld = true;
+      const lockedPreview = (await client.query(
+        `SELECT approved, dismissed FROM jpo_players WHERE email=$1`,
+        [email],
+      )).rows[0];
+      if (!lockedPreview || !lockedPreview.approved || lockedPreview.dismissed) {
+        throw new Error("Account no longer exists.");
+      }
+      if (grandEvent?.entrants?.has(email)) {
+        throw new Error("Account entered a Pet Wars event before removal began.");
+      }
+      if (standardRaceHasEmail(email)) {
+        throw new Error("Account entered a Pet Race before removal began.");
+      }
+
+      // The operation + target membership are durable. NOTIFY is only a
+      // low-latency wake-up; each process also polls this table, and removal
+      // fails closed unless every leased target writes a durable ACK.
+      await createAccountRemovalBarrier(removalOpId, email);
+      await publishAccountRemoval({ phase: "prepare", opId: removalOpId, email });
+      await processAccountRemovalOp(removalOpId);
+      await waitForAccountRemovalBarrier(removalOpId);
+      if (process.env.TEST_FORCE_ACCOUNT_ANONYMIZE_FAILURE === "1") {
+        throw new Error("Forced account anonymization failure for integration testing.");
+      }
+
+      const result = await anonymizeAccountTx(
+        client,
+        email,
+        anonymousEmail,
+        disabledPasswordHash,
+      );
+      if (!result) throw new Error("Account no longer exists.");
+      if (!owners.has(socket.id)) throw new Error("Owner authorization ended before commit.");
+      // Remove the durable old-email copy in the SAME commit that anonymizes
+      // the account. The non-identifying committed op remains briefly so every
+      // prepared instance can finish local teardown and acknowledge it.
+      await client.query(
+        `UPDATE jpo_account_removal_ops
+            SET state='committed', email=NULL, anonymous_email=$2,
+                expires_at=NULL
+          WHERE op_id=$1`,
+        [removalOpId, anonymousEmail],
+      );
+      await client.query("COMMIT");
+      anonymizationCommitted = true;
+      await publishAccountRemoval({ phase: "complete", opId: removalOpId, email })
+        .catch((err) => console.error("account-removal completion broadcast failed:", err));
+      await processAccountRemovalOp(removalOpId)
+        .catch((err) => console.error("local account-removal completion will retry:", err));
+      await waitForAccountRemovalCompletion(removalOpId);
+      await pool.query(`DELETE FROM jpo_account_removal_ops WHERE op_id=$1`, [removalOpId]);
+      await publishAccountRemoval({ phase: "finished", opId: removalOpId, email })
+        .catch((err) => console.error("account-removal finished broadcast failed:", err));
+
+      for (const refundedEmail of result.refundedEmails) await syncCoins(refundedEmail);
+      await pushMarket();
+      marketPing();
+      io.emit("announcementsUpdate", await fetchAnnouncements());
+      _notifyAdmins();
+      logAdmin(socket, "Account removed", "Sign-in revoked and identity anonymized.");
+      console.log("Owner removed and anonymized one registered player account");
+      socket.emit("ownerRemoveAccountResult", {
+        ok: true,
+        message: "Account removed. Sign-in is revoked and retained history is anonymous.",
+        removedEmail: email,
+      });
+    } catch (err) {
+      try { await client?.query("ROLLBACK"); } catch {}
+      console.error("ownerRemoveAccount failed:", err);
+      if (anonymizationCommitted) {
+        socket.emit("ownerRemoveAccountResult", {
+          ok: true,
+          message: "Account removed and anonymized. Server cleanup will continue automatically.",
+          removedEmail: email,
+        });
+        return;
+      }
+      await pool.query(`DELETE FROM jpo_account_removal_ops WHERE op_id=$1`, [removalOpId])
+        .catch((cleanupErr) => console.error("account-removal barrier cleanup failed:", cleanupErr));
+      await publishAccountRemoval({ phase: "abort", opId: removalOpId, email })
+        .catch((notifyErr) => console.error("account-removal abort broadcast failed:", notifyErr));
+      socket.emit("ownerRemoveAccountResult", {
+        ok: false,
+        message: "Couldn't anonymize that account. No account, game, trade, or activity data was changed. Try again.",
+      });
+    } finally {
+      if (accountSessionLockHeld) {
+        await client?.query(
+          `SELECT pg_advisory_unlock(hashtextextended($1, 0))`,
+          [email],
+        ).catch((err) => console.error("account-removal identity unlock failed:", err));
+      }
+      client?.release();
+      if (!anonymizationCommitted) releaseAccountRemovalEmail(email);
+    }
   });
 
   socket.on("adminRefresh", () => {
@@ -10013,8 +11090,8 @@ io.on("connection", (socket) => {
     const name = p?.name || "Admin";
     try {
       await pool.query(
-        `INSERT INTO jpo_announcements (name, text, board) VALUES ($1,$2,$3)`,
-        [name, clean, boardId],
+        `INSERT INTO jpo_announcements (name, text, board, author_email) VALUES ($1,$2,$3,$4)`,
+        [name, clean, boardId, p?.email || null],
       );
       io.emit("announcementsUpdate", await fetchAnnouncements());
       console.log(`Announcement by ${name} [${boardId}]: ${clean.slice(0, 40)}`);
@@ -10677,8 +11754,9 @@ io.on("connection", (socket) => {
       if (target.email) {
         try {
           const { rows: gn } = await pool.query(
-            `INSERT INTO jpo_gift_notices (email, from_name, amount) VALUES ($1, $2, $3) RETURNING id, ts`,
-            [target.email, p.name, moved]);
+            `INSERT INTO jpo_gift_notices (email, from_name, from_email, amount)
+             VALUES ($1, $2, $3, $4) RETURNING id, ts`,
+            [target.email, p.name, p.email || null, moved]);
           pool.query(
             `DELETE FROM jpo_gift_notices WHERE email = $1 AND id NOT IN
                (SELECT id FROM jpo_gift_notices WHERE email = $1 ORDER BY id DESC LIMIT ${GIFT_NOTICE_MAX})`,
@@ -12226,11 +13304,16 @@ try {
     id serial PRIMARY KEY,
     email text NOT NULL,
     from_name text NOT NULL,
+    from_email text,
     amount integer NOT NULL,
     ts timestamptz NOT NULL DEFAULT now()
   )`);
+  await pool.query(`ALTER TABLE jpo_gift_notices ADD COLUMN IF NOT EXISTS from_email text`);
+  // New authored rows carry durable identity attribution. Legacy rows remain
+  // NULL and are conservatively redacted by display name during removal.
+  await pool.query(`ALTER TABLE jpo_announcements ADD COLUMN IF NOT EXISTS author_email text`);
 } catch (err) {
-  console.error("schema nudge (gift notices) failed:", err);
+  console.error("schema nudge (authored identity attribution) failed:", err);
 }
 try {
   // Shared-treat earnings buff expiry — persisted so refreshes/restarts
@@ -12341,7 +13424,71 @@ try {
   console.error("Grand Event restore failed:", err);
 }
 
+// Cross-instance account-removal barrier. The operation row is transient and
+// is deleted in the same transaction that anonymizes the account; only
+// non-identifying server leases remain between removals.
+await pool.query(`CREATE TABLE IF NOT EXISTS jpo_server_instances (
+  instance_id text PRIMARY KEY,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  heartbeat_at timestamptz NOT NULL DEFAULT now(),
+  fenced boolean NOT NULL DEFAULT false
+)`);
+await pool.query(`ALTER TABLE jpo_server_instances ADD COLUMN IF NOT EXISTS fenced boolean NOT NULL DEFAULT false`);
+await pool.query(`CREATE TABLE IF NOT EXISTS jpo_account_removal_ops (
+  op_id text PRIMARY KEY,
+  email text,
+  email_token text,
+  anonymous_email text,
+  state text NOT NULL DEFAULT 'preparing',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz
+)`);
+await pool.query(`ALTER TABLE jpo_account_removal_ops ALTER COLUMN email DROP NOT NULL`);
+await pool.query(`ALTER TABLE jpo_account_removal_ops ALTER COLUMN expires_at DROP NOT NULL`);
+await pool.query(`ALTER TABLE jpo_account_removal_ops ADD COLUMN IF NOT EXISTS email_token text`);
+await pool.query(`ALTER TABLE jpo_account_removal_ops ADD COLUMN IF NOT EXISTS anonymous_email text`);
+await pool.query(`ALTER TABLE jpo_account_removal_ops ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'preparing'`);
+await pool.query(`CREATE TABLE IF NOT EXISTS jpo_account_removal_targets (
+  op_id text NOT NULL REFERENCES jpo_account_removal_ops(op_id) ON DELETE CASCADE,
+  instance_id text NOT NULL,
+  PRIMARY KEY (op_id, instance_id)
+)`);
+await pool.query(`CREATE TABLE IF NOT EXISTS jpo_account_removal_acks (
+  op_id text NOT NULL REFERENCES jpo_account_removal_ops(op_id) ON DELETE CASCADE,
+  instance_id text NOT NULL,
+  ok boolean NOT NULL,
+  reason text NOT NULL DEFAULT '',
+  acked_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  PRIMARY KEY (op_id, instance_id)
+)`);
+await pool.query(`ALTER TABLE jpo_account_removal_acks ADD COLUMN IF NOT EXISTS completed_at timestamptz`);
+await pool.query(`DELETE FROM jpo_account_removal_ops WHERE expires_at <= now()`);
+await pool.query(`DELETE FROM jpo_server_instances WHERE heartbeat_at < now() - interval '1 day'`);
+await registerAccountRemovalInstance();
+if (process.env.TEST_DISABLE_ACCOUNT_REMOVAL_LISTENER !== "1") {
+  await startAccountRemovalListener();
+}
+await pollAccountRemovalOps();
+startAccountRemovalBackgroundWork();
+
 const port = process.env.PORT || 3000;
 httpServer.listen(port, () => {
   console.log(`JPO Huddle server running on port ${port}`);
 });
+
+let accountRemovalShutdownStarted = false;
+async function unregisterAccountRemovalInstanceAndExit() {
+  if (accountRemovalShutdownStarted) return;
+  accountRemovalShutdownStarted = true;
+  const hardExit = setTimeout(() => process.exit(0), 1_500);
+  hardExit.unref?.();
+  try {
+    await pool.query(`DELETE FROM jpo_server_instances WHERE instance_id=$1`, [INSTANCE_ID]);
+  } catch (err) {
+    console.error("account-removal instance unregister failed:", err);
+  }
+  process.exit(0);
+}
+process.once("SIGTERM", unregisterAccountRemovalInstanceAndExit);
+process.once("SIGINT", unregisterAccountRemovalInstanceAndExit);
