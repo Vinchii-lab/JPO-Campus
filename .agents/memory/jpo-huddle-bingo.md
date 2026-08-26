@@ -21,6 +21,12 @@ The announcer uses the bright Coral voice and a commentary schedule: every ball 
 
 **How to apply:** schedule commentary 4–7 calls apart, let special numbers override it, grow more dramatic after 40 Blackout calls, and keep false-claim/winner reactions separate from the draw path.
 
+Announcer Tagalog must sound conversational rather than translated or formal. Repeated false claims are tracked per player and may trigger a named “tantanan mo / huwag atat / bukas ka na tatama” callout with a short laugh.
+
+**Why:** phrases such as “confidence lang ang kumpleto” sounded unnatural; “confidence lang ang baon” and direct barkada teasing better match the desired Filipino radio-DJ energy.
+
+**How to apply:** use everyday idioms and occasional real laughter, avoid English calques, and escalate from a generic first false-claim reaction to a named repeat-offender roast.
+
 Joined players may be roasted by display name only about their visibly equipped game-avatar gear. Never roast or infer real-life appearance, and never reuse a personalized clip in another game.
 
 **Why:** avatar outfit mismatches are the desired personalized comedy, but real-person appearance and cross-game named audio would cross the line.
