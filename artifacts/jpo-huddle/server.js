@@ -334,12 +334,10 @@ const BINGO_BOT_ID = "__jpo_bingo_bot__";
 const BINGO_BOT_NAME = "Bingo Bot 🤖";
 let bingoAnnouncerGlobalInFlight = 0;
 const BINGO_ANNOUNCER_MOODS = [
-  "barangay fiesta emcee",
-  "playful pageant host",
-  "dramatic teleserye narrator",
-  "sosyal conyo party host",
-  "showbiz gossip reporter",
-  "strict but funny Filipino tita",
+  "clear professional game host",
+  "warm understated Bingo caller",
+  "crisp radio-style announcer",
+  "relaxed and confident game-night host",
 ];
 const bingoAnnouncerRecent = [];
 // Once a number has been voiced successfully, retain that exact-ball clip as a
@@ -378,7 +376,6 @@ async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
-  const special = count === 1 || count % 5 === 0 || [1, 7, 11, 18, 21, 50, 69, 75].includes(n);
   const recent = bingoAnnouncerRecent.slice(-24).join("\n");
   const controller = new AbortController();
   game.announcerControllers.add(controller);
@@ -395,9 +392,10 @@ async function bingoAnnouncerGenerate(game, n, count) {
           {
             role: "system",
             content:
-              "You are the lovable, quick-witted Filipino camp emcee for an office Bingo game. " +
-              "Speak natural Taglish with warm barangay/pageant energy, crisp diction, playful timing, and no robotic tone. " +
-              "Make coworkers laugh without insulting a person, using profanity, sexual content, stereotypes, or protected-group slurs. " +
+              "You are a polished Filipino host calling numbers for an office Bingo game. " +
+              "Sound warm, confident, natural, and understated, with crisp diction and no robotic tone. " +
+              "Use light natural Taglish only when it sounds effortless. Do not tell jokes, make puns, use character voices, " +
+              "make dramatic reactions, or reference teleseryes, pageants, gossip, office work, lunch, overtime, or Filipino stereotypes. " +
               "Never claim someone is close to winning because you are not given private card progress. " +
               "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
           },
@@ -406,9 +404,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
             content:
               `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
               `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
-              (special
-                ? "Add one fresh, workplace-safe Filipino/Taglish punchline tied to Bingo, office life, or this being a long game. Keep the whole line under 7 seconds. "
-                : "Keep it energetic and very short—about 2 seconds—with only a tiny fresh flourish. ") +
+              "Keep it to about 2 seconds. Usually say only the ball; at most add one neutral two- or three-word hosting phrase. " +
               `Say ${letter}-${n} clearly enough that nobody can miss the letter or number. Do not repeat these recent lines:\n${recent || "(none yet)"}`,
           },
         ],
