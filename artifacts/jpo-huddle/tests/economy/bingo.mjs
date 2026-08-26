@@ -61,7 +61,7 @@ function hasLine(card, daubs) {
 // ── throwaway fast-timer server ──
 const child = spawn("node", ["server.js"], {
   cwd: "/home/runner/workspace/artifacts/jpo-huddle",
-  env: { ...process.env, PORT, BINGO_JOIN_MS: "2500", BINGO_CALL_MS: "120", BINGO_ANNOUNCER_DISABLED: "1" },
+  env: { ...process.env, PORT, BINGO_JOIN_MS: "2500", BINGO_CALL_MS: "120", BINGO_ANNOUNCER_DISABLED: "1", BINGO_BOT_DISABLED: "1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 child.stderr.on("data", (d) => process.stderr.write(`[srv] ${d}`));

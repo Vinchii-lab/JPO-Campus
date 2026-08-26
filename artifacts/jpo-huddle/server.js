@@ -330,6 +330,8 @@ const BINGO_ANNOUNCER_ENABLED = process.env.BINGO_ANNOUNCER_DISABLED !== "1"
 const BINGO_ANNOUNCER_PREFETCH = 6;
 const BINGO_ANNOUNCER_DAILY_MAX = Math.max(75, Number(process.env.BINGO_ANNOUNCER_DAILY_MAX) || 900);
 const BINGO_ANNOUNCER_MAX_BYTES = 200_000;
+const BINGO_BOT_ID = "__jpo_bingo_bot__";
+const BINGO_BOT_NAME = "Bingo Bot 🤖";
 let bingoAnnouncerGlobalInFlight = 0;
 const BINGO_ANNOUNCER_MOODS = [
   "barangay fiesta emcee",
@@ -519,6 +521,11 @@ function bingoCallNext() {
     // visual Bingo continues at the exact established cadence.
     const clip = bingoAnnouncerTakeReady(game, n);
     game.called.push(n);
+    // The owner-only practice bot marks valid calls server-side but never
+    // claims, wins, or receives coins. It exists solely as a second seat so
+    // the host can test a round without opening another browser/account.
+    const bot = game.players.get(BINGO_BOT_ID);
+    if (bot?.card.some((row) => row.includes(n))) bot.daubs.add(n);
     io.emit("bingoCall", {
       gameId: game.id,
       n,
@@ -8055,8 +8062,13 @@ io.on("connection", (socket) => {
     const rule = payload?.rule === "blackout" ? "blackout" : "line";
     const pool = Array.from({ length: 75 }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const bingoPlayers = new Map();
+    const botJoined = process.env.BINGO_BOT_DISABLED !== "1";
+    if (botJoined) {
+      bingoPlayers.set(BINGO_BOT_ID, { name: BINGO_BOT_NAME, card: makeBingoCard(), daubs: new Set(), bot: true });
+    }
     bingo = {
-      id: nextBingoGameId(), hostEmail, state: "joining", mode, prize, players: new Map(), pool, called: [],
+      id: nextBingoGameId(), hostEmail, state: "joining", mode, prize, players: bingoPlayers, pool, called: [],
       callMs, rule,
       calling: false,
       announcerClips: new Map(),
@@ -8069,7 +8081,13 @@ io.on("connection", (socket) => {
     };
     bingoAnnouncerPrepare(bingo);
     io.emit("bingoLobby", { gameId: bingo.id, prize, rule, msLeft: BINGO_JOIN_MS });
-    socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", isHost: true, message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : `auto-calling every ${callMs / 1000}s`}, ${rule === "blackout" ? "BLACKOUT — full card wins" : "any line wins"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join. You're spectating unless you choose Join.` });
+    if (bingoPlayers.size) {
+      io.emit("bingoNames", { gameId: bingo.id, names: [...bingoPlayers.values()].map((v) => v.name) });
+    }
+    socket.emit("adminBingoResult", {
+      ok: true, mode, active: true, phase: "joining", isHost: true,
+      message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : `auto-calling every ${callMs / 1000}s`}, ${rule === "blackout" ? "BLACKOUT — full card wins" : "any line wins"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join. ${botJoined ? `${BINGO_BOT_NAME} is already in — click Join to play and hear the announcer.` : "You're spectating unless you choose Join."}`,
+    });
     logAdmin(socket, "Bingo started", `Prize ${prize.toLocaleString()} coins, ${mode === "auto" ? `auto every ${callMs / 1000}s` : "manual calling"}, ${rule}`);
     console.log(`ADMIN bingo start: prize ${prize}, ${mode}, ${rule}, ${callMs}ms`);
   });

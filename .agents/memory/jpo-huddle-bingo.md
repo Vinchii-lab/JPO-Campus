@@ -9,8 +9,14 @@ Starting Bingo makes that person the host/spectator, not a player. Only an expli
 
 **How to apply:** keep hosting and player enrollment as separate server-authorized roles. Any in-memory Bingo game ID sent to long-lived clients must be unique across server boots, not only monotonic within one process.
 
-The Bingo announcer is an optional performance layer, never part of the draw path. AI calls are prepared ahead of authoritative draws; a late, failed, oversized, or budget-exhausted clip must not delay a number, daub, claim, or payout. Audio payloads go only to sockets whose account explicitly joined, while the mute preference stays local to each browser and defaults on for new players.
+The Bingo announcer is an optional performance layer, never part of the draw path. A late or failed clip must not delay a number, daub, claim, or payout. Audio goes only to accounts that explicitly joined, while mute stays local to each browser and defaults on for new players.
 
 **Why:** coworkers play multiple Blackout rounds per day, so fixed scripts become stale, but generative voice can be slow or unavailable and must never damage the game. Nonparticipants may be working and should not hear or receive the performance.
 
-**How to apply:** keep a bounded rolling prebuffer and generation budget, retain successful exact-number clips as no-cost fallbacks across games, deliver audio through joined-only socket events, and use the Join click as the browser audio-unlock gesture.
+**How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
+
+The server-controlled Bingo practice bot may fill the second seat in an admin-hosted round and mark valid calls, but it must never claim, win, or receive coins.
+
+**Why:** the host needs to test the announcer with one browser without creating a second account, while the bot must not affect the economy or beat a human player.
+
+**How to apply:** treat the bot as an ephemeral non-account participant and exclude it from every claim and payout path.
