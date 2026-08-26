@@ -26,4 +26,3 @@
 - [JPO Huddle proximity voice](jpo-huddle-voice.md) — answerer adopts offer's transceiver; senders = fresh clone per press (never toggle enabled); zombie pairs self-heal via totalAudioEnergy; every drop sends bye.
 - [JPO Huddle Grand Event](jpo-huddle-grand-event.md) — persist outcomes before rewards; spectator/quit is a separate account-keyed viewer preference, never a bracket or escrow mutation.
 - [JPO Huddle Bingo roles & restarts](jpo-huddle-bingo.md) — starter is a host/spectator unless they Join; boot-scoped game IDs prevent old cards surviving a server restart.
-- [JPO Huddle activity reporting](jpo-huddle-activity-reporting.md) — aggregate-only means daily counters only: no raw events, per-person timestamps, or live active/idle status.
