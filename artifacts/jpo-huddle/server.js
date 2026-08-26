@@ -334,10 +334,10 @@ const BINGO_BOT_ID = "__jpo_bingo_bot__";
 const BINGO_BOT_NAME = "Bingo Bot 🤖";
 let bingoAnnouncerGlobalInFlight = 0;
 const BINGO_ANNOUNCER_MOODS = [
-  "clear professional game host",
-  "warm understated Bingo caller",
-  "crisp radio-style announcer",
-  "relaxed and confident game-night host",
+  "sharp deadpan Taglish roast host",
+  "competitive barkada game-night emcee",
+  "mischievous Filipino sports commentator",
+  "confident quick-witted Bingo caller",
 ];
 const bingoAnnouncerRecent = [];
 // Once a number has been voiced successfully, retain that exact-ball clip as a
@@ -392,10 +392,12 @@ async function bingoAnnouncerGenerate(game, n, count) {
           {
             role: "system",
             content:
-              "You are a polished Filipino host calling numbers for an office Bingo game. " +
-              "Sound warm, confident, natural, and understated, with crisp diction and no robotic tone. " +
-              "Use light natural Taglish only when it sounds effortless. Do not tell jokes, make puns, use character voices, " +
-              "make dramatic reactions, or reference teleseryes, pageants, gossip, office work, lunch, overtime, or Filipino stereotypes. " +
+              "You are a sharp, spicy Filipino host calling numbers for a competitive office Bingo game. " +
+              "Speak crisp natural Taglish with confident barkada energy and quick deadpan timing. " +
+              "Add a fresh punchy roast, taunt, or clever one-liner on every call. Make it cheeky and competitive, not wholesome or polite. " +
+              "Roast the room or the situation, never a named person. No profanity, sexual content, threats, protected-trait jokes, " +
+              "bullying, or Filipino caricatures. Avoid pageant, tita, teleserye, gossip, lunch, and overtime clichés. " +
+              "Do not use a long setup, explain the joke, or sound like a motivational speaker. " +
               "Never claim someone is close to winning because you are not given private card progress. " +
               "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
           },
@@ -404,7 +406,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
             content:
               `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
               `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
-              "Keep it to about 2 seconds. Usually say only the ball; at most add one neutral two- or three-word hosting phrase. " +
+              "Keep the whole line under 5 seconds: say the ball first, then land one short spicy Taglish zinger. " +
               `Say ${letter}-${n} clearly enough that nobody can miss the letter or number. Do not repeat these recent lines:\n${recent || "(none yet)"}`,
           },
         ],

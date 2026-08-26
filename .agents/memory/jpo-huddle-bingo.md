@@ -15,11 +15,11 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer tone must be polished and understated, usually speaking only the exact ball. Avoid camp characters, forced jokes, puns, and office/lunch/overtime/teleserye/pageant references.
+The announcer tone should be spicy rather than corny: short, sharp Taglish roasts and competitive barkada energy, without camp characters or long cheesy setups.
 
-**Why:** the deliberately campy Filipino-host version was judged too corny in live use.
+**Why:** an understated exact-ball-only version felt too bland, while the earlier pageant/tita/teleserye style felt corny. The desired middle is punchy and cheeky.
 
-**How to apply:** use crisp natural delivery with only occasional neutral hosting phrases; do not reintroduce caricature-style moods.
+**How to apply:** lead with the exact ball, then one brief room-level zinger; avoid named-person insults, profanity, stereotypes, and recurring office/lunch/overtime clichés.
 
 The server-controlled Bingo practice bot may fill the second seat in an admin-hosted round and mark valid calls, but it must never claim, win, or receive coins.
 
