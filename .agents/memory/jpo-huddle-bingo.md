@@ -21,6 +21,12 @@ The announcer tone should be spicy rather than corny: short, sharp Taglish roast
 
 **How to apply:** lead with the exact ball, then one brief room-level zinger; avoid named-person insults, profanity, stereotypes, and recurring office/lunch/overtime clichés.
 
+Joined players may be roasted by display name only about their visibly equipped game-avatar gear. Never roast or infer real-life appearance, and never reuse a personalized clip in another game.
+
+**Why:** avatar outfit mismatches are the desired personalized comedy, but real-person appearance and cross-game named audio would cross the line.
+
+**How to apply:** provide only visible gear labels for current joined players; exclude emails and private card state, and keep personalized clips game-scoped.
+
 The server-controlled Bingo practice bot may fill the second seat in an admin-hosted round and mark valid calls, but it must never claim, win, or receive coins.
 
 **Why:** the host needs to test the announcer with one browser without creating a second account, while the bot must not affect the economy or beat a human player.

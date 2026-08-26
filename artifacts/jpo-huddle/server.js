@@ -372,11 +372,38 @@ function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   }
   return true;
 }
+function bingoAnnouncerGearLabel(id) {
+  return String(id || "")
+    .replace(/^petacc_/, "pet ")
+    .replace(/^pet_/, "")
+    .replace(/wings$/, " wings")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .trim();
+}
+function bingoAnnouncerRoster(game) {
+  const roster = [];
+  for (const [email, seat] of game.players) {
+    if (seat.bot) continue;
+    const live = Object.values(players).find((p) => p?.email === email);
+    if (!live) continue;
+    const gear = [
+      live.equipped,
+      live.wings,
+      ...Object.values(live.slots || {}),
+      live.pet,
+      live.petAcc,
+    ].filter(Boolean).map(bingoAnnouncerGearLabel);
+    roster.push(`${String(seat.name || "Player").slice(0, 40)}: ${gear.length ? gear.join(", ") : "simple outfit with no accessories"}`);
+  }
+  return roster.slice(0, 20);
+}
 async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
   const recent = bingoAnnouncerRecent.slice(-24).join("\n");
+  const roster = bingoAnnouncerRoster(game);
   const controller = new AbortController();
   game.announcerControllers.add(controller);
   bingoAnnouncerGlobalInFlight++;
@@ -395,7 +422,9 @@ async function bingoAnnouncerGenerate(game, n, count) {
               "You are a sharp, spicy Filipino host calling numbers for a competitive office Bingo game. " +
               "Speak crisp natural Taglish with confident barkada energy and quick deadpan timing. " +
               "Add a fresh punchy roast, taunt, or clever one-liner on every call. Make it cheeky and competitive, not wholesome or polite. " +
-              "Roast the room or the situation, never a named person. No profanity, sexual content, threats, protected-trait jokes, " +
+              "You may roast a joined player by display name, but ONLY about the visible game-avatar gear provided in the roster. " +
+              "Never joke about a real person's body, face, age, identity, ability, or other real-life appearance. " +
+              "No profanity, sexual content, threats, protected-trait jokes, " +
               "bullying, or Filipino caricatures. Avoid pageant, tita, teleserye, gossip, lunch, and overtime clichés. " +
               "Do not use a long setup, explain the joke, or sound like a motivational speaker. " +
               "Never claim someone is close to winning because you are not given private card progress. " +
@@ -407,7 +436,11 @@ async function bingoAnnouncerGenerate(game, n, count) {
               `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
               `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
               "Keep the whole line under 5 seconds: say the ball first, then land one short spicy Taglish zinger. " +
-              `Say ${letter}-${n} clearly enough that nobody can miss the letter or number. Do not repeat these recent lines:\n${recent || "(none yet)"}`,
+              "When the roster has distinctive gear, roast one player's outfit combination by display name—for example, wings that clash with their clothes. " +
+              "If nobody has distinctive gear, roast the room or the game instead. Never invent gear. " +
+              `Say ${letter}-${n} clearly enough that nobody can miss the letter or number.\n` +
+              `Joined avatar roster (display name and visible game gear only):\n${roster.join("\n") || "(no human avatar gear available)"}\n` +
+              `Do not repeat these recent lines:\n${recent || "(none yet)"}`,
           },
         ],
       }, { signal: controller.signal });
@@ -423,7 +456,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
     }
     bingoAnnouncerRecent.push(transcript);
     if (bingoAnnouncerRecent.length > 240) bingoAnnouncerRecent.splice(0, bingoAnnouncerRecent.length - 240);
-    return { audioData: audio.data, line: transcript };
+    return { audioData: audio.data, line: transcript, reusable: roster.length === 0 };
   } catch (err) {
     if (!controller.signal.aborted || bingo === game) {
       console.error(`Bingo announcer failed for ${letter}-${n}:`, err?.message || err);
@@ -447,7 +480,8 @@ function bingoAnnouncerPrepare(game) {
     bingoAnnouncerGenerate(game, n, count).then((clip) => {
       record.status = "ready";
       record.clip = clip;
-      if (clip) bingoAnnouncerCore.set(n, clip);
+      // Never reuse a named/avatar-specific roast in a later game.
+      if (clip?.reusable) bingoAnnouncerCore.set(n, clip);
     }).finally(() => {
       game.announcerInFlight = Math.max(0, game.announcerInFlight - 1);
       if (bingo === game) bingoAnnouncerPrepare(game);
@@ -490,6 +524,7 @@ function bingoHasBlackout(card, daubs) {
 function bingoStop() {
   if (!bingo) return;
   clearTimeout(bingo.joinTimer);
+  clearTimeout(bingo.announcerPrefetchTimer);
   clearInterval(bingo.callTimer);
   for (const controller of bingo.announcerControllers || []) controller.abort();
   bingo.announcerControllers?.clear();
@@ -8075,9 +8110,12 @@ io.on("connection", (socket) => {
       announcerMood: BINGO_ANNOUNCER_MOODS[bingoGameSeq % BINGO_ANNOUNCER_MOODS.length],
       announcerGameNumber: bingoAnnouncerGameNumber(),
       joinDeadline: Date.now() + BINGO_JOIN_MS,
-      joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,
+      joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS),
+      announcerPrefetchTimer: setTimeout(() => {
+        if (bingo?.id) bingoAnnouncerPrepare(bingo);
+      }, Math.max(0, BINGO_JOIN_MS - 10_000)),
+      callTimer: null,
     };
-    bingoAnnouncerPrepare(bingo);
     io.emit("bingoLobby", { gameId: bingo.id, prize, rule, msLeft: BINGO_JOIN_MS });
     if (bingoPlayers.size) {
       io.emit("bingoNames", { gameId: bingo.id, names: [...bingoPlayers.values()].map((v) => v.name) });
@@ -8129,6 +8167,7 @@ io.on("connection", (socket) => {
     if (bingo.players.has(p.email)) return;
     const card = makeBingoCard();
     bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
+    if (bingo.joinDeadline - Date.now() <= 10_000) bingoAnnouncerPrepare(bingo);
     socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, rule: bingo.rule, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     io.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
     console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
