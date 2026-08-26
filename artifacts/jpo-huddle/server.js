@@ -324,6 +324,140 @@ const nextBingoGameId = () => `${BINGO_BOOT_NONCE}:${++bingoGameSeq}`;
 const BINGO_JOIN_MS = Number(process.env.BINGO_JOIN_MS) || 60_000;
 const BINGO_CALL_MS = Number(process.env.BINGO_CALL_MS) || 4_000;
 const BINGO_PRIZE_MIN = 100, BINGO_PRIZE_MAX = 100_000;
+const BINGO_ANNOUNCER_ENABLED = process.env.BINGO_ANNOUNCER_DISABLED !== "1"
+  && !!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  && !!process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+const BINGO_ANNOUNCER_PREFETCH = 6;
+const BINGO_ANNOUNCER_DAILY_MAX = Math.max(75, Number(process.env.BINGO_ANNOUNCER_DAILY_MAX) || 900);
+const BINGO_ANNOUNCER_MAX_BYTES = 200_000;
+let bingoAnnouncerGlobalInFlight = 0;
+const BINGO_ANNOUNCER_MOODS = [
+  "barangay fiesta emcee",
+  "playful pageant host",
+  "dramatic teleserye narrator",
+  "sosyal conyo party host",
+  "showbiz gossip reporter",
+  "strict but funny Filipino tita",
+];
+const bingoAnnouncerRecent = [];
+// Once a number has been voiced successfully, retain that exact-ball clip as a
+// no-cost fallback for later games/provider hiccups. A full Blackout naturally
+// warms all 75 entries; the current game's fresh clip still wins when ready.
+const bingoAnnouncerCore = new Map(); // n -> { audioData, line }
+let bingoGamesTodayKey = "", bingoGamesToday = 0;
+let bingoAnnouncerBudgetKey = "", bingoAnnouncerGeneratedToday = 0;
+function bingoAnnouncerGameNumber() {
+  const key = new Date().toISOString().slice(0, 10);
+  if (key !== bingoGamesTodayKey) { bingoGamesTodayKey = key; bingoGamesToday = 0; }
+  return ++bingoGamesToday;
+}
+function bingoAnnouncerClaimBudget() {
+  const key = new Date().toISOString().slice(0, 10);
+  if (key !== bingoAnnouncerBudgetKey) { bingoAnnouncerBudgetKey = key; bingoAnnouncerGeneratedToday = 0; }
+  if (bingoAnnouncerGeneratedToday >= BINGO_ANNOUNCER_DAILY_MAX) return false;
+  bingoAnnouncerGeneratedToday++;
+  return true;
+}
+function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
+  const text = String(transcript || "").toUpperCase().replace(/[–—−]/g, "-");
+  const digits = String(n).split("");
+  const exact = new RegExp(`\\b${letter}\\s*[-:]?\\s*${n}\\b`).test(text);
+  const digitByDigit = digits.length === 2
+    && new RegExp(`\\b${letter}\\s*[-:]?\\s*${digits[0]}\\s*[- ]\\s*${digits[1]}\\b`).test(text);
+  if (!exact && !digitByDigit) return false;
+  // Reject any additional clearly formatted Bingo ball that contradicts the
+  // authoritative one. Number jokes and "call 5 of 75" remain allowed.
+  for (const match of text.matchAll(/\b([BINGO])\s*[-:]\s*(\d{1,2})\b/g)) {
+    if (match[1] !== letter || Number(match[2]) !== n) return false;
+  }
+  return true;
+}
+async function bingoAnnouncerGenerate(game, n, count) {
+  if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
+  if (!bingoAnnouncerClaimBudget()) return null;
+  const letter = "BINGO"[Math.floor((n - 1) / 15)];
+  const special = count === 1 || count % 5 === 0 || [1, 7, 11, 18, 21, 50, 69, 75].includes(n);
+  const recent = bingoAnnouncerRecent.slice(-24).join("\n");
+  const controller = new AbortController();
+  game.announcerControllers.add(controller);
+  bingoAnnouncerGlobalInFlight++;
+  const timeout = setTimeout(() => controller.abort(), 18_000);
+  try {
+    const ai = coachAiClient();
+    if (!ai) return null;
+    const rsp = await ai.chat.completions.create({
+        model: "gpt-audio",
+        modalities: ["text", "audio"],
+        audio: { voice: "coral", format: "mp3" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are the lovable, quick-witted Filipino camp emcee for an office Bingo game. " +
+              "Speak natural Taglish with warm barangay/pageant energy, crisp diction, playful timing, and no robotic tone. " +
+              "Make coworkers laugh without insulting a person, using profanity, sexual content, stereotypes, or protected-group slurs. " +
+              "Never claim someone is close to winning because you are not given private card progress. " +
+              "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
+          },
+          {
+            role: "user",
+            content:
+              `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
+              `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
+              (special
+                ? "Add one fresh, workplace-safe Filipino/Taglish punchline tied to Bingo, office life, or this being a long game. Keep the whole line under 7 seconds. "
+                : "Keep it energetic and very short—about 2 seconds—with only a tiny fresh flourish. ") +
+              `Say ${letter}-${n} clearly enough that nobody can miss the letter or number. Do not repeat these recent lines:\n${recent || "(none yet)"}`,
+          },
+        ],
+      }, { signal: controller.signal });
+    const audio = rsp.choices?.[0]?.message?.audio;
+    if (!audio?.data) throw new Error("Bingo announcer returned no audio");
+    const audioBytes = Buffer.byteLength(audio.data, "base64");
+    if (audioBytes < 1_000 || audioBytes > BINGO_ANNOUNCER_MAX_BYTES) {
+      throw new Error(`Bingo announcer clip size ${audioBytes} is outside limits`);
+    }
+    const transcript = String(audio.transcript || `${letter}-${n}`).trim().slice(0, 300);
+    if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n)) {
+      throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}`);
+    }
+    bingoAnnouncerRecent.push(transcript);
+    if (bingoAnnouncerRecent.length > 240) bingoAnnouncerRecent.splice(0, bingoAnnouncerRecent.length - 240);
+    return { audioData: audio.data, line: transcript };
+  } catch (err) {
+    if (!controller.signal.aborted || bingo === game) {
+      console.error(`Bingo announcer failed for ${letter}-${n}:`, err?.message || err);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+    game.announcerControllers.delete(controller);
+    bingoAnnouncerGlobalInFlight = Math.max(0, bingoAnnouncerGlobalInFlight - 1);
+  }
+}
+function bingoAnnouncerPrepare(game) {
+  if (!BINGO_ANNOUNCER_ENABLED || !game?.announcerClips) return;
+  for (const [i, n] of game.pool.slice(0, BINGO_ANNOUNCER_PREFETCH).entries()) {
+    if (game.announcerInFlight >= BINGO_ANNOUNCER_PREFETCH || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) break;
+    if (game.announcerClips.has(n)) continue;
+    const count = game.called.length + i + 1;
+    const record = { status: "pending", clip: null };
+    game.announcerClips.set(n, record);
+    game.announcerInFlight++;
+    bingoAnnouncerGenerate(game, n, count).then((clip) => {
+      record.status = "ready";
+      record.clip = clip;
+      if (clip) bingoAnnouncerCore.set(n, clip);
+    }).finally(() => {
+      game.announcerInFlight = Math.max(0, game.announcerInFlight - 1);
+      if (bingo === game) bingoAnnouncerPrepare(game);
+    });
+  }
+}
+function bingoAnnouncerTakeReady(game, n) {
+  const record = game?.announcerClips?.get(n);
+  return (record?.status === "ready" && record.clip) ? record.clip : (bingoAnnouncerCore.get(n) || null);
+}
 function makeBingoCard() {
   // Column-ranged like real bingo: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75.
   // card[row][col]; center (2,2) is FREE = 0.
@@ -357,6 +491,8 @@ function bingoStop() {
   if (!bingo) return;
   clearTimeout(bingo.joinTimer);
   clearInterval(bingo.callTimer);
+  for (const controller of bingo.announcerControllers || []) controller.abort();
+  bingo.announcerControllers?.clear();
   bingo = null;
 }
 // Hosting is separate from playing. The person who opens Bingo stays a
@@ -368,15 +504,45 @@ function isBingoHost(socket) {
 // Draw + broadcast the next ball. Shared by the auto interval and the
 // admin's manual "call next number" button.
 function bingoCallNext() {
-  if (!bingo || bingo.state !== "active") return;
-  const n = bingo.pool.shift();
+  if (!bingo || bingo.state !== "active" || bingo.calling) return;
+  const game = bingo;
+  game.calling = true;
+  const n = game.pool.shift();
   if (n === undefined) {
-    io.emit("bingoOver", { gameId: bingo.id, winnerName: null, message: "All 75 numbers called — no bingo! The office keeps its coins." });
+    io.emit("bingoOver", { gameId: game.id, winnerName: null, message: "All 75 numbers called — no bingo! The office keeps its coins." });
     bingoStop();
     return;
   }
-  bingo.called.push(n);
-  io.emit("bingoCall", { gameId: bingo.id, n, letter: "BINGO"[Math.floor((n - 1) / 15)], count: bingo.called.length });
+  try {
+    // Never await AI on the authoritative path. The join countdown and rolling
+    // six-ball buffer make clips ready in normal play; if one is late/failed,
+    // visual Bingo continues at the exact established cadence.
+    const clip = bingoAnnouncerTakeReady(game, n);
+    game.called.push(n);
+    io.emit("bingoCall", {
+      gameId: game.id,
+      n,
+      letter: "BINGO"[Math.floor((n - 1) / 15)],
+      count: game.called.length,
+    });
+    // The visual call is office-wide for existing spectator behavior, but the
+    // performance itself goes only to sockets whose account explicitly joined.
+    if (clip?.audioData) {
+      for (const [socketId, player] of Object.entries(players)) {
+        if (player?.email && game.players.has(player.email)) {
+          io.to(socketId).emit("bingoAnnouncer", {
+            gameId: game.id,
+            n,
+            audioData: clip.audioData,
+            announcerLine: clip.line,
+          });
+        }
+      }
+    }
+    bingoAnnouncerPrepare(game);
+  } finally {
+    if (bingo === game) game.calling = false;
+  }
 }
 // auto → interval calls; manual → the admin host presses "call next".
 function bingoSetMode(mode) {
@@ -7892,9 +8058,16 @@ io.on("connection", (socket) => {
     bingo = {
       id: nextBingoGameId(), hostEmail, state: "joining", mode, prize, players: new Map(), pool, called: [],
       callMs, rule,
+      calling: false,
+      announcerClips: new Map(),
+      announcerInFlight: 0,
+      announcerControllers: new Set(),
+      announcerMood: BINGO_ANNOUNCER_MOODS[bingoGameSeq % BINGO_ANNOUNCER_MOODS.length],
+      announcerGameNumber: bingoAnnouncerGameNumber(),
       joinDeadline: Date.now() + BINGO_JOIN_MS,
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS), callTimer: null,
     };
+    bingoAnnouncerPrepare(bingo);
     io.emit("bingoLobby", { gameId: bingo.id, prize, rule, msLeft: BINGO_JOIN_MS });
     socket.emit("adminBingoResult", { ok: true, mode, active: true, phase: "joining", isHost: true, message: `Bingo announced (${mode === "manual" ? "YOU call the numbers" : `auto-calling every ${callMs / 1000}s`}, ${rule === "blackout" ? "BLACKOUT — full card wins" : "any line wins"}) — ${prize.toLocaleString()} coin prize, ${BINGO_JOIN_MS / 1000}s to join. You're spectating unless you choose Join.` });
     logAdmin(socket, "Bingo started", `Prize ${prize.toLocaleString()} coins, ${mode === "auto" ? `auto every ${callMs / 1000}s` : "manual calling"}, ${rule}`);

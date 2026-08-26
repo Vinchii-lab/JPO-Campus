@@ -3347,11 +3347,13 @@
       <span style="font-weight:700;">🎱 BINGO</span>
       <span id="bingo-prize-label" style="color:#ffd76a;font-size:12px;"></span>
       <span style="flex:1"></span>
+      <button id="bingo-announcer-toggle" type="button" style="display:none;background:#2b2250;border:1px solid #4a3d78;border-radius:7px;color:#ffd76a;cursor:pointer;font-size:14px;padding:3px 7px;" title="Mute Bingo caller">🔊</button>
       <button id="bingo-min-btn" style="background:none;border:none;color:#bba9ff;cursor:pointer;font-size:14px;">▾</button>
     </div>
     <div id="bingo-body" style="padding:10px;">
       <div id="bingo-call" style="text-align:center;font-size:26px;font-weight:800;color:#ffd76a;min-height:34px;">—</div>
       <div id="bingo-call-sub" style="text-align:center;font-size:11px;color:#8f83b8;margin-bottom:8px;">waiting for the game to start…</div>
+      <div id="bingo-announcer-line" style="display:none;text-align:center;font-size:12px;color:#f4d4ff;margin:-2px 8px 9px;font-style:italic;line-height:1.35;"></div>
       <div id="bingo-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;"></div>
       <button id="bingo-claim-btn" class="rps-btn primary" type="button" style="width:100%;margin-top:10px;">BINGO! 🎉</button>
       <div id="bingo-host-row" style="display:none;margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
@@ -9156,6 +9158,77 @@
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
     let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line', _bingoIsHost = false, _bingoSpectating = false;
+    let _bingoAnnouncerMuted = localStorage.getItem('jpo_bingo_announcer_muted') === '1';
+    let _bingoAnnouncerAudio = null, _bingoAnnouncerQueue = [], _bingoAnnouncerPlaying = false;
+    function _bingoAnnouncerRefresh() {
+      const btn = document.getElementById('bingo-announcer-toggle');
+      if (!btn) return;
+      btn.style.display = _bingoCard ? 'block' : 'none';
+      btn.textContent = _bingoAnnouncerMuted ? '🔇' : '🔊';
+      btn.title = _bingoAnnouncerMuted ? 'Turn on Bingo caller' : 'Mute Bingo caller';
+    }
+    function _bingoAnnouncerUnlock() {
+      if (!_bingoAnnouncerAudio) {
+        _bingoAnnouncerAudio = new Audio();
+        _bingoAnnouncerAudio.preload = 'auto';
+      }
+      // The Join click is a user gesture, so use it to unlock future automatic
+      // calls without making players complete a separate audio setup step.
+      const a = _bingoAnnouncerAudio;
+      const wasMuted = a.muted;
+      a.muted = true;
+      a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA';
+      const p = a.play();
+      if (p?.then) p.then(() => { a.pause(); a.currentTime = 0; a.muted = wasMuted; }).catch(() => { a.muted = wasMuted; });
+    }
+    function _bingoAnnouncerStop() {
+      _bingoAnnouncerQueue = [];
+      _bingoAnnouncerPlaying = false;
+      if (_bingoAnnouncerAudio) {
+        _bingoAnnouncerAudio.onended = null;
+        _bingoAnnouncerAudio.onerror = null;
+        _bingoAnnouncerAudio.pause();
+        _bingoAnnouncerAudio.removeAttribute('src');
+        _bingoAnnouncerAudio.load();
+      }
+      const line = document.getElementById('bingo-announcer-line');
+      if (line) { line.textContent = ''; line.style.display = 'none'; }
+    }
+    function _bingoAnnouncerPlayNext() {
+      if (_bingoAnnouncerMuted || _bingoAnnouncerPlaying || !_bingoCard) return;
+      const item = _bingoAnnouncerQueue.shift();
+      if (!item) return;
+      if (!_bingoAnnouncerAudio) _bingoAnnouncerAudio = new Audio();
+      const a = _bingoAnnouncerAudio;
+      const line = document.getElementById('bingo-announcer-line');
+      if (line && item.line) { line.textContent = `“${item.line}”`; line.style.display = 'block'; }
+      _bingoAnnouncerPlaying = true;
+      a.muted = false;
+      a.src = item.url;
+      a.onended = () => { _bingoAnnouncerPlaying = false; _bingoAnnouncerPlayNext(); };
+      a.onerror = () => { _bingoAnnouncerPlaying = false; _bingoAnnouncerPlayNext(); };
+      const p = a.play();
+      if (p?.catch) p.catch(() => {
+        _bingoAnnouncerPlaying = false;
+        if (line) {
+          line.textContent = '🔇 Tap the speaker once to enable the Bingo caller.';
+          line.style.display = 'block';
+        }
+      });
+    }
+    function _bingoAnnouncerEnqueue(audioData, line) {
+      if (!_bingoCard || _bingoAnnouncerMuted || !audioData) return;
+      _bingoAnnouncerQueue.push({ url: `data:audio/mpeg;base64,${audioData}`, line: line || '' });
+      _bingoAnnouncerPlayNext();
+    }
+    document.getElementById('bingo-announcer-toggle').addEventListener('click', () => {
+      _bingoAnnouncerMuted = !_bingoAnnouncerMuted;
+      localStorage.setItem('jpo_bingo_announcer_muted', _bingoAnnouncerMuted ? '1' : '0');
+      if (_bingoAnnouncerMuted) _bingoAnnouncerStop();
+      else { _bingoAnnouncerUnlock(); _bingoAnnouncerPlayNext(); }
+      _bingoAnnouncerRefresh();
+    });
+    _bingoAnnouncerRefresh();
     // Only the actual starter gets host controls. Starting a game never deals
     // that person a card; joining Bingo remains a separate explicit action.
     function _bingoHostRefresh() {
@@ -9169,6 +9242,7 @@
         document.getElementById('bingo-panel').style.display = 'block';
       }
       document.getElementById('bingo-claim-btn').style.display = _bingoCard ? 'block' : 'none';
+      _bingoAnnouncerRefresh();
     }
     let _bingoLobbyTimer = null;
     const _bgEl = (id) => document.getElementById(id);
@@ -10300,6 +10374,8 @@
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
       _bingoActive = false; _bingoPhase = null; _bingoIsHost = false; _bingoSpectating = false;
+      _bingoAnnouncerStop();
+      _bingoAnnouncerRefresh();
       document.getElementById('bingo-host-row').style.display = 'none';
       _bgEl('bingo-grid').style.display = 'grid';
       _bgEl('bingo-howto-block').style.display = '';
@@ -10350,7 +10426,10 @@
       clearInterval(_bingoLobbyTimer);
       _bingoLobbyTimer = setInterval(tick, 500); tick();
     });
-    _bgEl('bingo-join-btn').addEventListener('click', () => socket.emit('bingoJoin'));
+    _bgEl('bingo-join-btn').addEventListener('click', () => {
+      _bingoAnnouncerUnlock();
+      socket.emit('bingoJoin');
+    });
     // The panel sits over the game world — swallow pointer events so a daub
     // click can't ALSO hit the avatar/canvas underneath (opened profiles etc).
     for (const id of ['bingo-panel', 'bingo-lobby']) {
@@ -10472,6 +10551,10 @@
         ? `call ${count}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`
         : `call ${count}/75 — spectating the players.`;
       _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
+    });
+    socket.on('bingoAnnouncer', ({ gameId, audioData, announcerLine } = {}) => {
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
+      _bingoAnnouncerEnqueue(audioData, announcerLine);
     });
     socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
     socket.on('bingoError', ({ message } = {}) => { if (message) _rpsToast(`🎱 ${message}`); });
