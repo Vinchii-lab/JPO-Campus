@@ -9159,7 +9159,7 @@
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
     let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line', _bingoIsHost = false, _bingoSpectating = false;
     let _bingoAnnouncerMuted = localStorage.getItem('jpo_bingo_announcer_muted') === '1';
-    let _bingoAnnouncerAudio = null, _bingoAnnouncerQueue = [], _bingoAnnouncerPlaying = false;
+    let _bingoAnnouncerAudio = null, _bingoAnnouncerQueue = [], _bingoAnnouncerPlaying = false, _bingoAnnouncerMomentUntil = 0;
     function _bingoAnnouncerRefresh() {
       const btn = document.getElementById('bingo-announcer-toggle');
       if (!btn) return;
@@ -9195,7 +9195,9 @@
       if (line) { line.textContent = ''; line.style.display = 'none'; }
     }
     function _bingoAnnouncerPlayNext() {
-      if (_bingoAnnouncerMuted || _bingoAnnouncerPlaying || !_bingoCard) return;
+      if (_bingoAnnouncerMuted || _bingoAnnouncerPlaying) return;
+      const waiting = _bingoAnnouncerQueue[0];
+      if (!_bingoCard && !(waiting?.force && Date.now() <= _bingoAnnouncerMomentUntil)) return;
       const item = _bingoAnnouncerQueue.shift();
       if (!item) return;
       if (!_bingoAnnouncerAudio) _bingoAnnouncerAudio = new Audio();
@@ -9216,9 +9218,9 @@
         }
       });
     }
-    function _bingoAnnouncerEnqueue(audioData, line) {
-      if (!_bingoCard || _bingoAnnouncerMuted || !audioData) return;
-      _bingoAnnouncerQueue.push({ url: `data:audio/mpeg;base64,${audioData}`, line: line || '' });
+    function _bingoAnnouncerEnqueue(audioData, line, force = false) {
+      if ((!_bingoCard && !(force && Date.now() <= _bingoAnnouncerMomentUntil)) || _bingoAnnouncerMuted || !audioData) return;
+      _bingoAnnouncerQueue.push({ url: `data:audio/mpeg;base64,${audioData}`, line: line || '', force });
       _bingoAnnouncerPlayNext();
     }
     document.getElementById('bingo-announcer-toggle').addEventListener('click', () => {
@@ -10552,9 +10554,9 @@
         : `call ${count}/75 — spectating the players.`;
       _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
     });
-    socket.on('bingoAnnouncer', ({ gameId, audioData, announcerLine } = {}) => {
+    socket.on('bingoAnnouncer', ({ gameId, audioData, announcerLine, kind } = {}) => {
       if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
-      _bingoAnnouncerEnqueue(audioData, announcerLine);
+      _bingoAnnouncerEnqueue(audioData, announcerLine, kind === 'moment');
     });
     socket.on('bingoDaubOk', ({ n } = {}) => { _bingoDaubs.add(n); _bingoRenderGrid(); });
     socket.on('bingoError', ({ message } = {}) => { if (message) _rpsToast(`🎱 ${message}`); });
@@ -10589,6 +10591,7 @@
       // A late "game over" from an OLD game (e.g. a slow payout) must never
       // tear down the UI of a newer game we've since joined.
       if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
+      if (_bingoCard) _bingoAnnouncerMomentUntil = Date.now() + 30000;
       if (winnerName) _bingoWinBanner(`🎉 BINGO! ${winnerName} wins ${(prize ?? 0).toLocaleString()} coins! 🎱`);
       else if (message) _rpsToast(`🎱 ${message}`);
       const lp = document.getElementById('bingo-lobby-players'); if (lp) lp.textContent = '';

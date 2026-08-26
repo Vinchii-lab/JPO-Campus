@@ -15,11 +15,11 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer should use the bright Coral voice and paced variety: about 60% clean calls, 30% Pinoy number-meme calls, and 10% avatar/pet roasts; profanity occurs only about twice per game.
+The announcer uses the bright Coral voice and a commentary schedule: every ball is clear, most stay under 3 seconds, and a longer joke appears every 4–7 calls plus special-number moments.
 
-**Why:** an always-on roast spectacle became tiring, player-only jokes ignored number memes (69, 18, 75, “trenta na”), and both Onyx and Ash missed the preferred lively original voice.
+**Why:** rigid content ratios lost the original caller rhythm. The desired flow mixes brief calls, Pinoy number memes (69, 18, 75, “trenta na”), escalating Blackout drama, and immediate claim/win reactions.
 
-**How to apply:** rotate clean, number-meme, and avatar calls deterministically; rotate avatar targets in order, and keep lighter profanity to roughly two avatar calls per 75 balls.
+**How to apply:** schedule commentary 4–7 calls apart, let special numbers override it, grow more dramatic after 40 Blackout calls, and keep false-claim/winner reactions separate from the draw path.
 
 Joined players may be roasted by display name only about their visibly equipped game-avatar gear. Never roast or infer real-life appearance, and never reuse a personalized clip in another game.
 
