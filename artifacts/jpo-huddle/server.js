@@ -334,10 +334,10 @@ const BINGO_BOT_ID = "__jpo_bingo_bot__";
 const BINGO_BOT_NAME = "Bingo Bot 🤖";
 let bingoAnnouncerGlobalInFlight = 0;
 const BINGO_ANNOUNCER_MOODS = [
-  "sharp deadpan Taglish roast host",
-  "competitive barkada game-night emcee",
-  "mischievous Filipino sports commentator",
-  "confident quick-witted Bingo caller",
+  "lively barkada Bingo caller",
+  "animated street game host",
+  "fast playful Filipino sports commentator",
+  "energetic roast-comedy caller",
 ];
 const bingoAnnouncerRecent = [];
 // Once a number has been voiced successfully, retain that exact-ball clip as a
@@ -402,12 +402,29 @@ async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
-  const curseCall = count % 3 === 0 || count % 5 === 0;
+  // Deliberate pacing: six clean calls, two number roasts, and two avatar
+  // roasts per ten balls. Only one of those ten gets profanity.
+  const rotation = count % 10;
+  const callMode = rotation === 0 || rotation === 5
+    ? "avatar"
+    : rotation === 2 || rotation === 7
+      ? "number"
+      : "plain";
+  const curseCall = rotation === 0;
   const curseWord = curseCall
     ? ["hayop", "tangina", "putang ina", "gago", "ulol", "kinang ina"][(count + n + game.announcerGameNumber) % 6]
     : "";
   const recent = bingoAnnouncerRecent.slice(-24).join("\n");
-  const roster = bingoAnnouncerRoster(game);
+  const roster = callMode === "avatar" ? bingoAnnouncerRoster(game) : [];
+  const modeInstruction = callMode === "plain"
+    ? `This is a clean call. Say only “${letter}-${n}” with lively rhythm—no joke, roast, player name, curse, or extra commentary.`
+    : callMode === "number"
+      ? `This is a number-roast call. Say ${letter}-${n}, then make one short mean Tagalog/Taglish joke about the NUMBER itself—its sound, shape, reputation, or numerical vibe. Do not mention any player or avatar. Do not curse.`
+      : `This is an avatar-roast call. Say ${letter}-${n}, name one joined player, then roast only their visible avatar gear or pet. ${
+          curseCall
+            ? `Naturally include the exact phrase “${curseWord}” once; do not soften or replace it.`
+            : "Do not curse on this call, but keep the avatar comparison blunt."
+        }`;
   const controller = new AbortController();
   game.announcerControllers.add(controller);
   bingoAnnouncerGlobalInFlight++;
@@ -418,21 +435,20 @@ async function bingoAnnouncerGenerate(game, n, count) {
     const rsp = await ai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
-        audio: { voice: "onyx", format: "mp3" },
+        audio: { voice: "ash", format: "mp3" },
         messages: [
           {
             role: "system",
             content:
-              "You are a savage Filipino kanto roast-comedy host calling numbers for a competitive office Bingo game. " +
-              "Use a deep, rough, raspy male delivery with streetwise Tagalog cadence, exaggerated deadpan pauses, and a sudden hard punchline. " +
-              "Do not imitate or mention any real comedian. Every call needs a brutal direct roast—not a cute joke, clever pun, compliment, or wholesome observation. " +
+              "You are a lively Filipino barkada Bingo caller with fast comic timing, expressive energy, and a bright animated male delivery. " +
+              "Do not use an unnaturally deep, slow, gravelly, or movie-trailer voice. Do not imitate or mention any real comedian. " +
+              "Follow the requested call mode exactly: many calls are intentionally plain, while number roasts and avatar roasts rotate in occasionally. " +
               "You may roast a joined player by display name, but ONLY about the visible game-avatar gear provided in the roster. " +
               "Never joke about a real person's body, face, age, identity, ability, or other real-life appearance. " +
-              "Filipino profanity such as hayop, tangina, putang ina, gago, ulol, and kinang ina is allowed when requested. " +
+              "Filipino profanity is allowed only when the call instructions explicitly require one exact phrase. " +
               "Never use threats, sexual insults, protected-trait slurs, discriminatory language, or attacks unrelated to the avatar. " +
               "Avoid pageant, tita, teleserye, gossip, lunch, meeting, boss, and overtime clichés. " +
-              "Use concrete ugly comparisons: wet chicken, broken appliance, cheap costume, failed superhero, confused animal, or trash in bad weather. " +
-              "Do not soften the ending with 'parang,' 'medyo,' a compliment, or a polite observation. Do not explain the joke or sound motivational. " +
+              "For roasts, use concrete comparisons rather than long setups. Do not explain the joke or sound motivational. " +
               "Never claim someone is close to winning because you are not given private card progress. " +
               "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
           },
@@ -441,16 +457,12 @@ async function bingoAnnouncerGenerate(game, n, count) {
             content:
               `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
               `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
-              "Keep the whole line under 7 seconds: bark the ball first, pause, name one player, then destroy their avatar or pet with one blunt Tagalog roast. " +
-              (curseCall
-                ? `This is a curse call: naturally include the exact phrase “${curseWord}” once. Do not replace it with a softer word. `
-                : "Do not curse on this call, but keep the comparison insulting and merciless. ") +
-              "When the roster has distinctive gear, roast one player's outfit combination by display name—for example, absurd wings, clothes that clash, or a pet behaving stupidly. " +
-              "Target intensity: “G-52! Vince—putang ina ng phoenix mo, mukhang basang manok na pinilit lumipad.” " +
-              "Create a new line at that aggression level; do not copy the example verbatim. " +
-              "If nobody has distinctive gear, roast the room or the game instead. Never invent gear. " +
+              `${modeInstruction} Keep plain calls under 2 seconds and roast calls under 6 seconds. ` +
+              "For avatar roasts, never invent gear; if the roster is empty, roast the game instead. " +
               `Say ${letter}-${n} clearly enough that nobody can miss the letter or number.\n` +
-              `Joined avatar roster (display name and visible game gear only):\n${roster.join("\n") || "(no human avatar gear available)"}\n` +
+              (callMode === "avatar"
+                ? `Joined avatar roster (display name and visible game gear only):\n${roster.join("\n") || "(no human avatar gear available)"}\n`
+                : "") +
               `Do not repeat these recent lines:\n${recent || "(none yet)"}`,
           },
         ],
@@ -467,7 +479,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
     }
     bingoAnnouncerRecent.push(transcript);
     if (bingoAnnouncerRecent.length > 240) bingoAnnouncerRecent.splice(0, bingoAnnouncerRecent.length - 240);
-    return { audioData: audio.data, line: transcript, reusable: roster.length === 0 };
+    return { audioData: audio.data, line: transcript, reusable: callMode !== "avatar" };
   } catch (err) {
     if (!controller.signal.aborted || bingo === game) {
       console.error(`Bingo announcer failed for ${letter}-${n}:`, err?.message || err);
