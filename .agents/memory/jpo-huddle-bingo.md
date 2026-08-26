@@ -15,11 +15,11 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer should use a lively male barkada voice and paced variety: about 60% clean calls, 20% number roasts, and 20% avatar/pet roasts; profanity is occasional, not constant.
+The announcer should use the bright Coral voice and paced variety: about 60% clean calls, 30% Pinoy number-meme calls, and 10% avatar/pet roasts; profanity occurs only about twice per game.
 
-**Why:** an always-on roast spectacle became tiring, player-only jokes ignored the numbers, and the deep voice felt too heavy. The desired experience has contrast and energetic timing.
+**Why:** an always-on roast spectacle became tiring, player-only jokes ignored number memes (69, 18, 75, “trenta na”), and both Onyx and Ash missed the preferred lively original voice.
 
-**How to apply:** rotate clean calls, number-focused jokes, and avatar-focused roasts deterministically; keep strong profanity to a minority of avatar calls, never slurs, threats, or real-life traits.
+**How to apply:** rotate clean, number-meme, and avatar calls deterministically; rotate avatar targets in order, and keep lighter profanity to roughly two avatar calls per 75 balls.
 
 Joined players may be roasted by display name only about their visibly equipped game-avatar gear. Never roast or infer real-life appearance, and never reuse a personalized clip in another game.
 

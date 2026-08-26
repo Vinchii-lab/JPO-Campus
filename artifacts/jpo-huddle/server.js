@@ -340,6 +340,12 @@ const BINGO_ANNOUNCER_MOODS = [
   "energetic roast-comedy caller",
 ];
 const bingoAnnouncerRecent = [];
+const BINGO_NUMBER_MEME_HINTS = {
+  18: "Use the Filipino debut/legal-age association. Keep it teasing and current, not ceremonial.",
+  30: "Use a 'trenta na' / 'trentahin' Filipino meme angle about entering the thirties. Keep it short.",
+  69: "Use the universally cheeky 'nice' or 'sweet spot' association without becoming sexually explicit.",
+  75: "Roast it as the highest number in the Bingo range. Never say it is the final DRAW or that the game is ending, because balls are randomized.",
+};
 // Once a number has been voiced successfully, retain that exact-ball clip as a
 // no-cost fallback for later games/provider hiccups. A full Blackout naturally
 // warms all 75 entries; the current game's fresh clip still wins when ready.
@@ -402,24 +408,32 @@ async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
-  // Deliberate pacing: six clean calls, two number roasts, and two avatar
-  // roasts per ten balls. Only one of those ten gets profanity.
+  // Deliberate pacing: six clean calls, three number-meme calls, and one
+  // avatar roast per ten balls. Profanity appears only twice in 75 calls.
   const rotation = count % 10;
-  const callMode = rotation === 0 || rotation === 5
+  const forcedNumberMeme = BINGO_NUMBER_MEME_HINTS[n] || "";
+  const callMode = forcedNumberMeme
+    ? "number"
+    : rotation === 5
     ? "avatar"
-    : rotation === 2 || rotation === 7
+    : rotation === 2 || rotation === 7 || rotation === 9
       ? "number"
       : "plain";
-  const curseCall = rotation === 0;
+  const curseCall = callMode === "avatar" && count % 40 === 25;
   const curseWord = curseCall
-    ? ["hayop", "tangina", "putang ina", "gago", "ulol", "kinang ina"][(count + n + game.announcerGameNumber) % 6]
+    ? ["hayop", "bwisit", "lintik", "kinang ina"][(count + n + game.announcerGameNumber) % 4]
     : "";
   const recent = bingoAnnouncerRecent.slice(-24).join("\n");
-  const roster = callMode === "avatar" ? bingoAnnouncerRoster(game) : [];
+  const fullRoster = callMode === "avatar" ? bingoAnnouncerRoster(game) : [];
+  const roster = fullRoster.length
+    ? [fullRoster[game.announcerRoastIndex++ % fullRoster.length]]
+    : [];
   const modeInstruction = callMode === "plain"
     ? `This is a clean call. Say only “${letter}-${n}” with lively rhythm—no joke, roast, player name, curse, or extra commentary.`
     : callMode === "number"
-      ? `This is a number-roast call. Say ${letter}-${n}, then make one short mean Tagalog/Taglish joke about the NUMBER itself—its sound, shape, reputation, or numerical vibe. Do not mention any player or avatar. Do not curse.`
+      ? `This is a number-meme call. Say ${letter}-${n}, then make one short current-feeling Filipino internet joke about the NUMBER itself. ${
+          forcedNumberMeme ? `Required angle for this number: ${forcedNumberMeme} ` : ""
+        }For other numbers, use their sound, shape, sequence, or familiar Filipino phrasing. Do not force an unrelated association, explain the meme, mention a player/avatar, or curse.`
       : `This is an avatar-roast call. Say ${letter}-${n}, name one joined player, then roast only their visible avatar gear or pet. ${
           curseCall
             ? `Naturally include the exact phrase “${curseWord}” once; do not soften or replace it.`
@@ -435,13 +449,14 @@ async function bingoAnnouncerGenerate(game, n, count) {
     const rsp = await ai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
-        audio: { voice: "ash", format: "mp3" },
+        audio: { voice: "coral", format: "mp3" },
         messages: [
           {
             role: "system",
             content:
-              "You are a lively Filipino barkada Bingo caller with fast comic timing, expressive energy, and a bright animated male delivery. " +
+              "You are a lively Filipino barkada Bingo caller with fast comic timing, expressive energy, and a bright animated delivery. " +
               "Do not use an unnaturally deep, slow, gravelly, or movie-trailer voice. Do not imitate or mention any real comedian. " +
+              "Do not name or reference real celebrities, influencers, politicians, or other public figures. " +
               "Follow the requested call mode exactly: many calls are intentionally plain, while number roasts and avatar roasts rotate in occasionally. " +
               "You may roast a joined player by display name, but ONLY about the visible game-avatar gear provided in the roster. " +
               "Never joke about a real person's body, face, age, identity, ability, or other real-life appearance. " +
@@ -8130,6 +8145,7 @@ io.on("connection", (socket) => {
       announcerClips: new Map(),
       announcerInFlight: 0,
       announcerControllers: new Set(),
+      announcerRoastIndex: 0,
       announcerMood: BINGO_ANNOUNCER_MOODS[bingoGameSeq % BINGO_ANNOUNCER_MOODS.length],
       announcerGameNumber: bingoAnnouncerGameNumber(),
       joinDeadline: Date.now() + BINGO_JOIN_MS,
