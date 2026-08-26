@@ -573,3 +573,10 @@ uri = "file://artifacts/jpo-huddle/design/rain_dance_check.png"
 type = "image"
 title = "Rain dance 🌧️🐸"
 description = "Left: stage-2 Frog with his little drizzle cloud. Right: King Frog summoning his storm cloud mid-dance. Rain, splashes, and lightning flickers play live in-game."
+
+[[outputs]]
+id = "6PlcWWNpsW3NfHc9GDrs0"
+uri = "file://artifacts/jpo-huddle/public/audio/bingo-background.mp3"
+type = "audio"
+title = "quiet Bingo background music"
+description = "Generated music: Original seamless looping instrumental background bed for a lively Filipino office Bingo game and radio variety segment. Bright playful percussion, light bass, subtle tropical-pop an…"

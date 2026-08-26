@@ -9160,6 +9160,32 @@
     let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line', _bingoIsHost = false, _bingoSpectating = false;
     let _bingoAnnouncerMuted = localStorage.getItem('jpo_bingo_announcer_muted') === '1';
     let _bingoAnnouncerAudio = null, _bingoAnnouncerQueue = [], _bingoAnnouncerPlaying = false, _bingoAnnouncerMomentUntil = 0;
+    let _bingoMusicAudio = null;
+    const BINGO_MUSIC_VOLUME = 0.07;
+    const BINGO_MUSIC_DUCKED_VOLUME = 0.018;
+    function _bingoMusicEnsure() {
+      if (_bingoMusicAudio) return _bingoMusicAudio;
+      _bingoMusicAudio = new Audio('audio/bingo-background.mp3');
+      _bingoMusicAudio.loop = true;
+      _bingoMusicAudio.preload = 'auto';
+      _bingoMusicAudio.volume = BINGO_MUSIC_VOLUME;
+      return _bingoMusicAudio;
+    }
+    function _bingoMusicStart() {
+      if (_bingoAnnouncerMuted) return;
+      const music = _bingoMusicEnsure();
+      music.volume = _bingoAnnouncerPlaying ? BINGO_MUSIC_DUCKED_VOLUME : BINGO_MUSIC_VOLUME;
+      const p = music.play();
+      if (p?.catch) p.catch(() => {});
+    }
+    function _bingoMusicDuck(ducked) {
+      if (_bingoMusicAudio) _bingoMusicAudio.volume = ducked ? BINGO_MUSIC_DUCKED_VOLUME : BINGO_MUSIC_VOLUME;
+    }
+    function _bingoMusicStop() {
+      if (!_bingoMusicAudio) return;
+      _bingoMusicAudio.pause();
+      _bingoMusicAudio.currentTime = 0;
+    }
     function _bingoAnnouncerRefresh() {
       const btn = document.getElementById('bingo-announcer-toggle');
       if (!btn) return;
@@ -9184,6 +9210,7 @@
     function _bingoAnnouncerStop() {
       _bingoAnnouncerQueue = [];
       _bingoAnnouncerPlaying = false;
+      _bingoMusicStop();
       if (_bingoAnnouncerAudio) {
         _bingoAnnouncerAudio.onended = null;
         _bingoAnnouncerAudio.onerror = null;
@@ -9205,13 +9232,15 @@
       const line = document.getElementById('bingo-announcer-line');
       if (line && item.line) { line.textContent = `“${item.line}”`; line.style.display = 'block'; }
       _bingoAnnouncerPlaying = true;
+      _bingoMusicDuck(true);
       a.muted = false;
       a.src = item.url;
-      a.onended = () => { _bingoAnnouncerPlaying = false; _bingoAnnouncerPlayNext(); };
-      a.onerror = () => { _bingoAnnouncerPlaying = false; _bingoAnnouncerPlayNext(); };
+      a.onended = () => { _bingoAnnouncerPlaying = false; _bingoMusicDuck(false); _bingoAnnouncerPlayNext(); };
+      a.onerror = () => { _bingoAnnouncerPlaying = false; _bingoMusicDuck(false); _bingoAnnouncerPlayNext(); };
       const p = a.play();
       if (p?.catch) p.catch(() => {
         _bingoAnnouncerPlaying = false;
+        _bingoMusicDuck(false);
         if (line) {
           line.textContent = '🔇 Tap the speaker once to enable the Bingo caller.';
           line.style.display = 'block';
@@ -9227,7 +9256,7 @@
       _bingoAnnouncerMuted = !_bingoAnnouncerMuted;
       localStorage.setItem('jpo_bingo_announcer_muted', _bingoAnnouncerMuted ? '1' : '0');
       if (_bingoAnnouncerMuted) _bingoAnnouncerStop();
-      else { _bingoAnnouncerUnlock(); _bingoAnnouncerPlayNext(); }
+      else { _bingoAnnouncerUnlock(); if (_bingoCard) _bingoMusicStart(); _bingoAnnouncerPlayNext(); }
       _bingoAnnouncerRefresh();
     });
     _bingoAnnouncerRefresh();
@@ -10430,6 +10459,7 @@
     });
     _bgEl('bingo-join-btn').addEventListener('click', () => {
       _bingoAnnouncerUnlock();
+      _bingoMusicStart();
       socket.emit('bingoJoin');
     });
     // The panel sits over the game world — swallow pointer events so a daub
