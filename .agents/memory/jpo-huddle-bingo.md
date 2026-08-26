@@ -15,11 +15,11 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer tone should be genuinely mean barkada trashtalk rather than corny or cute: blunt avatar/pet roasts, with occasional mild Filipino profanity.
+The announcer tone should be savage kanto-style barkada trashtalk rather than corny or cute: blunt avatar/pet roasts, with frequent Filipino profanity and rough deadpan delivery.
 
-**Why:** both understated calls and clever/cute roasts felt too soft. The desired style is closer to “Hayop na phoenix na ’yan. Lumilipad nang umuulan.”
+**Why:** understated, clever, and mildly profane versions all felt too soft. The desired intensity is brutal avatar comedy with a deep, raspy, streetwise cadence—not an exact real-person voice.
 
-**How to apply:** lead with the exact ball, name a joined player, then roast visible avatar gear or pets; allow “hayop,” “bwisit,” “lintik,” or “kinang ina” occasionally, never slurs or real-life traits.
+**How to apply:** bark the exact ball, name a joined player, then use an ugly concrete comparison about visible gear/pets; rotate strong profanity, never slurs, threats, or real-life traits.
 
 Joined players may be roasted by display name only about their visibly equipped game-avatar gear. Never roast or infer real-life appearance, and never reuse a personalized clip in another game.
 
