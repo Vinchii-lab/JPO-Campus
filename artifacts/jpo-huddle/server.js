@@ -341,14 +341,14 @@ const BINGO_ANNOUNCER_MOODS = [
   "energetic roast-comedy caller",
 ];
 const BINGO_GAME_ASIDES = [
-  "Tahimik bigla. Kabado na?",
-  "Relax, hindi board exam ’to.",
-  "Wala pa rin? Aray naman.",
-  "Uy, seryoso na sila.",
-  "Check mabuti. Baka tulog ka.",
-  "Ang tahimik. May nagdadasal na.",
-  "Kapit lang. Baka this year.",
-  "Card check. Huwag puro tingin.",
+  "Maya na ang tantos, may call na kayo.",
+  "ACW muna bago Bingo.",
+  "May call waiting. Balik sa queue.",
+  "QA is watching. Ayusin ang card.",
+  "Break later. Queue muna.",
+  "Attendance check. Baka naka-AUX.",
+  "Wrap-up muna. Huwag atat.",
+  "May escalation. Bingo later.",
 ];
 function bingoAnnouncerCommentaryCalls(gameNumber) {
   const calls = new Set();
@@ -499,6 +499,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
   const spokenLetter = letter === "O" ? "Ow" : letter;
   const spokenBall = `${spokenLetter}-${n}`;
+  const displayBall = `${letter}-${n}`;
   const context = bingoAnnouncerContext(game, n, count);
   const progressComment = !!context.selectedProgress;
   const commentary = progressComment || game.announcerCommentaryCalls.has(count);
@@ -507,7 +508,8 @@ async function bingoAnnouncerGenerate(game, n, count) {
     : commentary
       ? BINGO_GAME_ASIDES[(count + game.announcerGameNumber) % BINGO_GAME_ASIDES.length]
       : "";
-  const expectedLine = `${spokenBall}!${aside ? ` ${aside}` : ""}`;
+  const expectedSpokenLine = `${spokenBall}!${aside ? ` ${aside}` : ""}`;
+  const expectedDisplayLine = `${displayBall}!${aside ? ` ${aside}` : ""}`;
   const controller = new AbortController();
   game.announcerControllers.add(controller);
   bingoAnnouncerGlobalInFlight++;
@@ -533,7 +535,7 @@ async function bingoAnnouncerGenerate(game, n, count) {
           {
             role: "user",
             content:
-              `Say exactly: ${expectedLine}`,
+              `Say exactly: ${expectedSpokenLine}`,
           },
         ],
       }, { signal: controller.signal });
@@ -548,12 +550,12 @@ async function bingoAnnouncerGenerate(game, n, count) {
     if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n)) {
       throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}`);
     }
-    if (bingoAnnouncerNormalizeLine(transcript) !== bingoAnnouncerNormalizeLine(expectedLine)) {
+    if (bingoAnnouncerNormalizeLine(transcript) !== bingoAnnouncerNormalizeLine(expectedSpokenLine)) {
       throw new Error(`Bingo announcer rewrote the curated line for ${letter}-${n}`);
     }
-    game.announcerRecent.push(transcript);
+    game.announcerRecent.push(expectedDisplayLine);
     if (game.announcerRecent.length > 120) game.announcerRecent.splice(0, game.announcerRecent.length - 120);
-    return { audioData: audio.data, line: transcript };
+    return { audioData: audio.data, line: expectedDisplayLine };
   } catch (err) {
     if (!controller.signal.aborted || bingo === game) {
       console.error(`Bingo announcer failed for ${letter}-${n}:`, err?.message || err);
@@ -630,7 +632,10 @@ async function bingoAnnouncerGenerateMoment({ gameId, emails, instruction, guard
     if (guard && !guard()) return;
     if (policy.forbidBalls && bingoAnnouncerTranscriptHasBall(line)) throw new Error("Bingo announcer moment mentioned a ball");
     if (policy.requiredName && !bingoAnnouncerNameAppears(line, policy.requiredName)) throw new Error("Bingo announcer moment omitted the required player name");
-    if (policy.kind === "false-claim" && !/(?:BINGO\s+RAW|FALSE\s+BINGO|HINDI\s+PA|WALA\s+PA)/i.test(line)) {
+    if (policy.expectedLine && bingoAnnouncerNormalizeLine(line) !== bingoAnnouncerNormalizeLine(policy.expectedLine)) {
+      throw new Error("Bingo announcer moment rewrote the supplied line");
+    }
+    if (policy.kind === "false-claim" && !/MAMA\s+MO\s+BINGO/i.test(line)) {
       throw new Error("Bingo announcer false-claim moment omitted the false-claim cue");
     }
     if (policy.kind === "winner" && !/(?:CONFIRMED|NANALO|WINNER|BINGO)/i.test(line)) {
@@ -8381,8 +8386,7 @@ io.on("connection", (socket) => {
       const game = bingo, now = Date.now();
       const falseClaims = (game.announcerFalseClaims.get(em) || 0) + 1;
       game.announcerFalseClaims.set(em, falseClaims);
-      const repeatOffender = falseClaims >= 3;
-      if (now - game.announcerLastFalseClaimAt >= 8_000 && (falseClaims === 1 || repeatOffender)) {
+      if (now - game.announcerLastFalseClaimAt >= 8_000) {
         game.announcerLastFalseClaimAt = now;
         void bingoAnnouncerGenerateMoment({
           gameId: game.id,
@@ -8392,14 +8396,12 @@ io.on("connection", (socket) => {
           policy: {
             kind: "false-claim",
             forbidBalls: true,
-            requiredName: repeatOffender ? bp.name : null,
+            requiredName: bp.name,
+            expectedLine: `${String(bp.name).slice(0, 40)}, mama mo Bingo! Hahaha!`,
           },
-          instruction: repeatOffender
-            ? `Player display name “${String(bp.name).slice(0, 40)}” has now pressed the Bingo button ${falseClaims} times without a valid ${game.rule === "blackout" ? "Blackout" : "line"}. ` +
-              "Call them out by name in very natural conversational Tagalog. Target style: “Lysha, tantanan mo kaka-pindot sa Bingo button. Bukas ka na tatama!” " +
-              "Make a fresh version, tease them for being atat, and end with one short genuine laugh. Keep it under 8 seconds; no ball announcement."
-            : `React to this player's first false ${game.rule === "blackout" ? "Blackout " : ""}Bingo claim. Start with “BINGO raw!” Pause like you are verifying, ` +
-              "then say naturally: “Ay, hindi pa pala. Confidence lang ang baon!” Add one short laugh. Keep it under 7 seconds; no ball announcement.",
+          instruction:
+            `Say exactly: “${String(bp.name).slice(0, 40)}, mama mo Bingo! Hahaha!” ` +
+            "Call out the supplied player name clearly. Do not add, remove, rewrite, or announce a ball.",
         });
       }
       return;
