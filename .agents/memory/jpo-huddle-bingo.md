@@ -27,6 +27,12 @@ The owner-host may privately preview the already-shuffled next ball during manua
 
 **How to apply:** keep previews owner/host-only, bind each prepared line to the exact next pool value, use it once, and fall back safely without delaying the authoritative draw if voice preparation is late or fails.
 
+Bingo host authority must survive a socket reconnect during the join countdown. Capture whether the starter was the owner in the game state and restore host UI/permissions by the authenticated player email.
+
+**Why:** admin/owner sets are socket-scoped; a brief disconnect otherwise leaves the same joined account playing without host controls even though the game still identifies that email as its host.
+
+**How to apply:** send host flags with card resync, re-send the private next-ball preview to a reconnecting owner-host, and authorize ongoing host actions from the game’s captured host identity rather than the original socket ID.
+
 Announcer Tagalog must sound conversational rather than translated or formal. Repeated false claims are tracked per player and may trigger a named “tantanan mo / huwag atat / bukas ka na tatama” callout with a short laugh.
 
 **Why:** phrases such as “confidence lang ang kumpleto” sounded unnatural; “confidence lang ang baon” and direct barkada teasing better match the desired Filipino radio-DJ energy.
