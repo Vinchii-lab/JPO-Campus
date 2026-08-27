@@ -3358,6 +3358,14 @@
       <button id="bingo-claim-btn" class="rps-btn primary" type="button" style="width:100%;margin-top:10px;">BINGO! 🎉</button>
       <div id="bingo-host-row" style="display:none;margin-top:10px;padding-top:8px;border-top:1px solid #352a5c;">
         <div style="font-size:11px;font-weight:700;color:#ffd76a;margin-bottom:6px;">🎤 Host controls</div>
+        <div id="bingo-owner-script" style="display:none;margin-bottom:8px;padding:8px;border:1px solid #4a3d78;border-radius:8px;background:#211a3d;">
+          <div style="font-size:11px;color:#bba9ff;margin-bottom:5px;">Next ball: <strong id="bingo-owner-next" style="color:#ffd76a;">—</strong> <span style="color:#766a9c;">(only you can see this)</span></div>
+          <input id="bingo-owner-line" type="text" maxlength="120" autocomplete="off"
+                 placeholder="Commentary only — the ball is added automatically"
+                 style="box-sizing:border-box;width:100%;padding:7px 8px;border:1px solid #4a3d78;border-radius:6px;background:#17112e;color:#fff;font-size:12px;" />
+          <button id="bingo-owner-prepare" type="button" style="width:100%;margin-top:6px;padding:7px;border-radius:6px;border:1px solid #8e72ff;background:#443477;color:#fff;font-weight:700;cursor:pointer;">Prepare Coral line</button>
+          <div id="bingo-owner-status" style="min-height:15px;margin-top:5px;font-size:10px;color:#8f83b8;"></div>
+        </div>
         <button id="bingo-host-call" type="button" style="width:100%;padding:10px 0;border-radius:8px;border:1px solid #ffb400;background:#5a4300;color:#ffd76a;font-weight:800;font-size:14px;cursor:pointer;">📢 Call next ball</button>
         <button id="bingo-host-switch" type="button" style="width:100%;margin-top:6px;padding:6px 0;border-radius:8px;border:1px solid #4a3d78;background:#2b2250;color:#bba9ff;font-size:12px;cursor:pointer;">Switch to auto</button>
       </div>
@@ -9157,7 +9165,7 @@
     // ── Office Bingo ────────────────────────────────────────────────────
     // Server owns cards/calls/wins; this is just the daubing UI. Manual daub
     // only: clicking a cell sends bingoDaub, the cell marks on bingoDaubOk.
-    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line', _bingoIsHost = false, _bingoSpectating = false;
+    let _bingoCard = null, _bingoDaubs = new Set(), _bingoCalled = [], _bingoState = null, _bingoGameId = null, _bingoMode = 'auto', _bingoActive = false, _bingoPhase = null, _bingoRule = 'line', _bingoIsHost = false, _bingoSpectating = false, _bingoOwnerNext = null;
     let _bingoAnnouncerMuted = localStorage.getItem('jpo_bingo_announcer_muted') === '1';
     let _bingoAnnouncerAudio = null, _bingoAnnouncerQueue = [], _bingoAnnouncerPlaying = false, _bingoAnnouncerMomentUntil = 0;
     let _bingoMusicAudio = null;
@@ -9270,6 +9278,8 @@
         // join countdown the server refuses to deal, so don't show a dead button.
         document.getElementById('bingo-host-call').style.display = (_bingoMode === 'manual' && _bingoPhase === 'active') ? 'block' : 'none';
         document.getElementById('bingo-host-switch').textContent = _bingoMode === 'manual' ? '🤖 Switch to auto-calling' : '🎤 Switch to manual (I call)';
+        const script = document.getElementById('bingo-owner-script');
+        script.style.display = (_bingoMode === 'manual' && _bingoPhase === 'active' && _bingoOwnerNext) ? 'block' : 'none';
         document.getElementById('bingo-panel').style.display = 'block';
       }
       document.getElementById('bingo-claim-btn').style.display = _bingoCard ? 'block' : 'none';
@@ -9305,6 +9315,21 @@
     // this script's scope, so raw onclick="socket.emit(...)" silently fails.
     window.ownerBingoCall   = () => socket.emit('adminBingoCall');
     window.ownerBingoCancel = () => socket.emit('adminBingoCancel');
+    function ownerBingoPrepareLine() {
+      if (!_bingoOwnerNext) return;
+      socket.emit('adminBingoAnnouncerLine', {
+        n: _bingoOwnerNext.n,
+        commentary: _bgEl('bingo-owner-line').value,
+      });
+    }
+    window.ownerBingoPrepareLine = ownerBingoPrepareLine;
+    _bgEl('bingo-owner-prepare').addEventListener('click', ownerBingoPrepareLine);
+    _bgEl('bingo-owner-line').addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); ownerBingoPrepareLine(); }
+    });
+    _bgEl('bingo-owner-line').addEventListener('focus', () => _phaserKbd?.disableGlobalCapture());
+    _bgEl('bingo-owner-line').addEventListener('blur', () => _phaserKbd?.enableGlobalCapture());
 
     // ── Red Light, Green Light: F8 controls ─────────────────────────────
     window.ownerStartRlgl = () => {
@@ -10404,7 +10429,7 @@
       _bgEl('bingo-panel').style.display = 'none';
       clearInterval(_bingoLobbyTimer); _bingoLobbyTimer = null;
       _bingoCard = null; _bingoDaubs = new Set(); _bingoCalled = []; _bingoState = null; _bingoGameId = null;
-      _bingoActive = false; _bingoPhase = null; _bingoIsHost = false; _bingoSpectating = false;
+      _bingoActive = false; _bingoPhase = null; _bingoIsHost = false; _bingoSpectating = false; _bingoOwnerNext = null;
       _bingoAnnouncerStop();
       _bingoAnnouncerRefresh();
       document.getElementById('bingo-host-row').style.display = 'none';
@@ -10583,6 +10608,31 @@
         ? `call ${count}/75 — ${_bingoRule === 'blackout' ? 'BLACKOUT: fill the WHOLE card!' : 'click your numbers!'}`
         : `call ${count}/75 — spectating the players.`;
       _bgEl('bingo-called-list').textContent = `Called: ${_bingoCalled.join(', ')}`;
+      if (_bingoOwnerNext?.n === n) {
+        _bingoOwnerNext = null;
+        _bgEl('bingo-owner-line').value = '';
+        _bgEl('bingo-owner-status').textContent = '';
+        _bingoHostRefresh();
+      }
+    });
+    socket.on('bingoOwnerNext', ({ gameId, n, letter, commentary, status } = {}) => {
+      if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
+      _bingoOwnerNext = { gameId, n, letter, commentary: commentary || '', status: status || 'empty' };
+      _bgEl('bingo-owner-next').textContent = `${letter}-${n}`;
+      _bgEl('bingo-owner-line').value = commentary || '';
+      _bgEl('bingo-owner-status').textContent = status === 'ready'
+        ? '✅ Ready — Call next ball when you want.'
+        : status === 'preparing'
+          ? '⏳ Coral is preparing your exact line…'
+          : status === 'failed'
+            ? '⚠️ Voice preparation failed. Edit and try again.'
+            : 'Type a line, then press Enter or Prepare.';
+      _bingoHostRefresh();
+    });
+    socket.on('bingoOwnerLineResult', ({ ok, message } = {}) => {
+      _bgEl('bingo-owner-status').textContent = message || '';
+      _bgEl('bingo-owner-status').style.color = ok ? '#67d391' : '#ff8f8f';
+      if (message) _rpsToast(`${ok ? '🎙️' : '⚠️'} ${message}`);
     });
     socket.on('bingoAnnouncer', ({ gameId, audioData, announcerLine, kind } = {}) => {
       if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;

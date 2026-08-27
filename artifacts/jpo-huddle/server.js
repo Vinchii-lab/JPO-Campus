@@ -493,7 +493,7 @@ function bingoAnnouncerContext(game, n, count) {
     falseClaims,
   };
 }
-async function bingoAnnouncerGenerate(game, n, count) {
+async function bingoAnnouncerGenerate(game, n, count, ownerAside = null) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
@@ -501,9 +501,11 @@ async function bingoAnnouncerGenerate(game, n, count) {
   const spokenBall = `${spokenLetter}-${n}`;
   const displayBall = `${letter}-${n}`;
   const context = bingoAnnouncerContext(game, n, count);
-  const progressComment = !!context.selectedProgress;
-  const commentary = progressComment || game.announcerCommentaryCalls.has(count);
-  const aside = progressComment
+  const progressComment = !ownerAside && !!context.selectedProgress;
+  const commentary = !!ownerAside || progressComment || game.announcerCommentaryCalls.has(count);
+  const aside = ownerAside
+    ? ownerAside
+    : progressComment
     ? `${context.selectedProgress.name}, ${context.selectedProgress.away === 1 ? "one away. Huminga ka." : "two away. Relax lang."}`
     : commentary
       ? BINGO_GAME_ASIDES[(count + game.announcerGameNumber) % BINGO_GAME_ASIDES.length]
@@ -715,6 +717,27 @@ function isBingoHost(socket) {
   const email = players[socket.id]?.email;
   return !!(bingo && email && bingo.hostEmail === email);
 }
+function bingoOwnerNextPayload(game) {
+  const n = game?.pool?.[0];
+  if (!game || game.state !== "active" || game.mode !== "manual" || n == null) return null;
+  const prepared = game.announcerOwnerLine?.n === n ? game.announcerOwnerLine : null;
+  return {
+    gameId: game.id,
+    n,
+    letter: "BINGO"[Math.floor((n - 1) / 15)],
+    commentary: prepared?.text || "",
+    status: prepared?.status || "empty",
+  };
+}
+function bingoEmitOwnerNext(game) {
+  const payload = bingoOwnerNextPayload(game);
+  if (!payload) return;
+  for (const [socketId, player] of Object.entries(players)) {
+    if (player?.email === game.hostEmail && owners.has(socketId)) {
+      io.to(socketId).emit("bingoOwnerNext", payload);
+    }
+  }
+}
 // Draw + broadcast the next ball. Shared by the auto interval and the
 // admin's manual "call next number" button.
 function bingoCallNext() {
@@ -731,7 +754,9 @@ function bingoCallNext() {
     // Never await AI on the authoritative path. The join countdown and rolling
     // six-ball buffer make clips ready in normal play; if one is late/failed,
     // visual Bingo continues at the exact established cadence.
-    const clip = bingoAnnouncerTakeReady(game, n);
+    const ownerLine = game.announcerOwnerLine?.n === n ? game.announcerOwnerLine : null;
+    const clip = ownerLine ? ownerLine.clip : bingoAnnouncerTakeReady(game, n);
+    game.announcerOwnerLine = null;
     game.called.push(n);
     // The owner-only practice bot marks valid calls server-side but never
     // claims, wins, or receives coins. It exists solely as a second seat so
@@ -759,6 +784,7 @@ function bingoCallNext() {
       }
     }
     bingoAnnouncerPrepare(game);
+    bingoEmitOwnerNext(game);
   } finally {
     if (bingo === game) game.calling = false;
   }
@@ -770,6 +796,8 @@ function bingoSetMode(mode) {
   clearInterval(bingo.callTimer);
   bingo.callTimer = (mode === "auto" && bingo.state === "active")
     ? setInterval(bingoCallNext, bingo.callMs || BINGO_CALL_MS) : null;
+  if (mode !== "manual") bingo.announcerOwnerLine = null;
+  else bingoEmitOwnerNext(bingo);
 }
 // Join window over → start calling (needs 2+ players for a real game).
 function bingoBegin() {
@@ -784,6 +812,7 @@ function bingoBegin() {
   io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, rule: bingo.rule, names: [...bingo.players.values()].map((v) => v.name) });
   console.log(`BINGO active: ${bingo.players.size} players (${bingo.mode} calling)`);
   bingoSetMode(bingo.mode);
+  bingoEmitOwnerNext(bingo);
 }
 
 // ── Deal or No Deal (OWNER-hosted show, ephemeral) ──────────────────────────
@@ -7605,6 +7634,10 @@ io.on("connection", (socket) => {
     // A refreshed host (silent re-auth) gets their bingo host controls back.
     if (bingo && bingo.state === "active") {
       socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, isHost: isBingoHost(socket), message: `Bingo is live (${bingo.mode} calling).` });
+      if (isOwner && isBingoHost(socket)) {
+        const next = bingoOwnerNextPayload(bingo);
+        if (next) socket.emit("bingoOwnerNext", next);
+      }
     }
   });
 
@@ -8295,6 +8328,8 @@ io.on("connection", (socket) => {
       announcerLastFalseClaimAt: 0,
       announcerFalseClaims: new Map(),
       announcerRecent: [],
+      announcerOwnerLine: null,
+      announcerOwnerVersion: 0,
       startedAt: null,
       joinDeadline: Date.now() + BINGO_JOIN_MS,
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS),
@@ -8335,6 +8370,53 @@ io.on("connection", (socket) => {
       const last = bingo.called[bingo.called.length - 1];
       socket.emit("adminBingoResult", { ok: true, mode: "manual", active: true, phase: "active", message: `Called ${"BINGO"[Math.floor((last - 1) / 15)]}-${last} (${bingo.called.length}/75).` });
     }
+  });
+  socket.on("adminBingoAnnouncerLine", (payload) => {
+    if (!owners.has(socket.id)) return;
+    if (!bingo || bingo.state !== "active" || bingo.mode !== "manual") {
+      socket.emit("bingoOwnerLineResult", { ok: false, message: "Owner lines are available during manual calling." });
+      return;
+    }
+    if (!isBingoHost(socket)) {
+      socket.emit("bingoOwnerLineResult", { ok: false, message: "Only the owner who started this game can prepare the next line." });
+      return;
+    }
+    const next = bingo.pool[0];
+    if (next == null || Number(payload?.n) !== next) {
+      socket.emit("bingoOwnerLineResult", { ok: false, message: "That ball is no longer next. Check the updated preview." });
+      bingoEmitOwnerNext(bingo);
+      return;
+    }
+    const text = String(payload?.commentary || "").replace(/\s+/g, " ").trim();
+    if (text.length > 120) {
+      socket.emit("bingoOwnerLineResult", { ok: false, message: "Keep the commentary to 120 characters or less." });
+      return;
+    }
+    if (text && bingoAnnouncerTranscriptHasBall(text)) {
+      socket.emit("bingoOwnerLineResult", { ok: false, message: "Type commentary only—the next ball is added automatically." });
+      return;
+    }
+    const game = bingo;
+    const version = ++game.announcerOwnerVersion;
+    if (!text) {
+      game.announcerOwnerLine = null;
+      socket.emit("bingoOwnerLineResult", { ok: true, message: "Custom line cleared. The normal caller will handle the next ball." });
+      bingoEmitOwnerNext(game);
+      return;
+    }
+    game.announcerOwnerLine = { n: next, text, status: "preparing", clip: null, version };
+    socket.emit("bingoOwnerLineResult", { ok: true, message: `Preparing ${"BINGO"[Math.floor((next - 1) / 15)]}-${next}…` });
+    bingoEmitOwnerNext(game);
+    void bingoAnnouncerGenerate(game, next, game.called.length + 1, text).then((clip) => {
+      if (bingo !== game || game.announcerOwnerLine?.version !== version || game.pool[0] !== next) return;
+      game.announcerOwnerLine.clip = clip;
+      game.announcerOwnerLine.status = clip ? "ready" : "failed";
+      socket.emit("bingoOwnerLineResult", {
+        ok: !!clip,
+        message: clip ? `Custom line ready for ${"BINGO"[Math.floor((next - 1) / 15)]}-${next}.` : "Coral could not prepare that line. Edit it and try again.",
+      });
+      bingoEmitOwnerNext(game);
+    });
   });
   // Flip auto ↔ manual mid-game (e.g. host goes AFK → let it run itself).
   socket.on("adminBingoMode", (payload) => {

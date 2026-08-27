@@ -15,11 +15,17 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer uses Coral, reads numbers in English, and pronounces the O column as “Ow.” Draw commentary uses only server-curated, kanto-punchy Taglish asides; Coral performs the exact line rather than inventing number jokes.
+The announcer uses Coral, reads numbers in English, and pronounces the O column as “Ow” while displaying “O.” Draw commentary uses server-curated, BPO-focused, kanto-punchy Taglish; Coral performs the exact line rather than inventing jokes.
 
 **Why:** generated number puns became long, confusing, and unnatural (“translated” or random associations). The user prefers fewer jokes over any line that needs explaining.
 
 **How to apply:** keep most calls to the ball only; every 4–7 calls add one clear micro-aside, with no number pun, mini-story, translation, or second punchline. Reject any audio transcript that rewrites the curated line.
+
+The owner-host may privately preview the already-shuffled next ball during manual Bingo and prepare commentary for that ball. The server adds and locks the ball call; the owner types only the words after it.
+
+**Why:** owner-written lines are more authentic to the team than generated humor, but free-form full calls could announce the wrong ball or drift when the pool advances.
+
+**How to apply:** keep previews owner/host-only, bind each prepared line to the exact next pool value, use it once, and fall back safely without delaying the authoritative draw if voice preparation is late or fails.
 
 Announcer Tagalog must sound conversational rather than translated or formal. Repeated false claims are tracked per player and may trigger a named “tantanan mo / huwag atat / bukas ka na tatama” callout with a short laugh.
 
