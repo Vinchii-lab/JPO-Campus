@@ -731,9 +731,9 @@ function bingoOwnerNextPayload(game) {
 }
 function bingoEmitOwnerNext(game) {
   const payload = bingoOwnerNextPayload(game);
-  if (!payload) return;
+  if (!payload || !game.hostIsOwner) return;
   for (const [socketId, player] of Object.entries(players)) {
-    if (player?.email === game.hostEmail && owners.has(socketId)) {
+    if (player?.email === game.hostEmail) {
       io.to(socketId).emit("bingoOwnerNext", payload);
     }
   }
@@ -7923,16 +7923,17 @@ io.on("connection", (socket) => {
     const em = players[socket.id]?.email;
     if (bingo && em && bingo.players.has(em)) {
       const bp = bingo.players.get(em);
-      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode, rule: bingo.rule, msLeft: bingo.state === "joining" ? Math.max(0, bingo.joinDeadline - Date.now()) : 0 });
+      socket.emit("bingoCard", { gameId: bingo.id, card: bp.card, daubs: [...bp.daubs], called: bingo.called, prize: bingo.prize, state: bingo.state, mode: bingo.mode, rule: bingo.rule, isHost: isBingoHost(socket), ownerHost: isBingoHost(socket) && bingo.hostIsOwner, msLeft: bingo.state === "joining" ? Math.max(0, bingo.joinDeadline - Date.now()) : 0 });
     } else if (bingo && bingo.state === "joining") {
       socket.emit("bingoLobby", { gameId: bingo.id, prize: bingo.prize, rule: bingo.rule, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
-    } else if (bingo && bingo.state === "active" && admins.has(socket.id)) {
+    } else if (bingo && bingo.state === "active" && (admins.has(socket.id) || isBingoHost(socket))) {
       // Rebuild the read-only spectator view after an admin refresh/reconnect.
       socket.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, rule: bingo.rule, called: bingo.called, names: [...bingo.players.values()].map((v) => v.name) });
     }
-    if (bingo && admins.has(socket.id)) {
+    if (bingo && (admins.has(socket.id) || isBingoHost(socket))) {
       socket.emit("adminBingoResult", { ok: true, mode: bingo.mode, active: true, phase: bingo.state, isHost: isBingoHost(socket), message: bingo.state === "active" ? `Bingo is live (${bingo.mode} calling).` : "Bingo lobby is open — game starts soon." });
     }
+    if (bingo && isBingoHost(socket)) bingoEmitOwnerNext(bingo);
     // Refresh/reconnect keeps the "who's playing" list current for everyone.
     if (bingo) socket.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
     // No game running? Say so explicitly. A server restart mid-game (e.g. a
@@ -8315,7 +8316,7 @@ io.on("connection", (socket) => {
     }
     const announcerGameNumber = bingoAnnouncerGameNumber();
     bingo = {
-      id: nextBingoGameId(), hostEmail, state: "joining", mode, prize, players: bingoPlayers, pool, called: [],
+      id: nextBingoGameId(), hostEmail, hostIsOwner: owners.has(socket.id), state: "joining", mode, prize, players: bingoPlayers, pool, called: [],
       callMs, rule,
       calling: false,
       announcerClips: new Map(),
@@ -8350,7 +8351,7 @@ io.on("connection", (socket) => {
     console.log(`ADMIN bingo start: prize ${prize}, ${mode}, ${rule}, ${callMs}ms`);
   });
   socket.on("adminBingoCancel", () => {
-    if (!admins.has(socket.id) || !bingo) return;
+    if (!bingo) return;
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can cancel it." }); return; }
     const gameId = bingo.id;
     bingoStop();
@@ -8361,7 +8362,6 @@ io.on("connection", (socket) => {
   });
   // Host mode: the admin deals the next ball by hand.
   socket.on("adminBingoCall", () => {
-    if (!admins.has(socket.id)) return;
     if (!bingo || bingo.state !== "active") { socket.emit("adminBingoResult", { ok: false, message: "No active game to call for." }); return; }
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can call numbers." }); return; }
     if (bingo.mode !== "manual") { socket.emit("adminBingoResult", { ok: false, message: "Auto-calling is on — switch to manual first." }); return; }
@@ -8372,12 +8372,11 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("adminBingoAnnouncerLine", (payload) => {
-    if (!owners.has(socket.id)) return;
     if (!bingo || bingo.state !== "active" || bingo.mode !== "manual") {
       socket.emit("bingoOwnerLineResult", { ok: false, message: "Owner lines are available during manual calling." });
       return;
     }
-    if (!isBingoHost(socket)) {
+    if (!isBingoHost(socket) || !bingo.hostIsOwner) {
       socket.emit("bingoOwnerLineResult", { ok: false, message: "Only the owner who started this game can prepare the next line." });
       return;
     }
@@ -8420,7 +8419,7 @@ io.on("connection", (socket) => {
   });
   // Flip auto ↔ manual mid-game (e.g. host goes AFK → let it run itself).
   socket.on("adminBingoMode", (payload) => {
-    if (!admins.has(socket.id) || !bingo) return;
+    if (!bingo) return;
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can change calling mode." }); return; }
     const mode = payload?.mode === "manual" ? "manual" : "auto";
     bingoSetMode(mode);
@@ -8437,7 +8436,7 @@ io.on("connection", (socket) => {
     const card = makeBingoCard();
     bingo.players.set(p.email, { name: p.name, card, daubs: new Set() });
     if (bingo.joinDeadline - Date.now() <= 10_000) bingoAnnouncerPrepare(bingo);
-    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, rule: bingo.rule, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
+    socket.emit("bingoCard", { gameId: bingo.id, card, daubs: [], called: [], prize: bingo.prize, state: "joining", mode: bingo.mode, rule: bingo.rule, isHost: isBingoHost(socket), ownerHost: isBingoHost(socket) && bingo.hostIsOwner, msLeft: Math.max(0, bingo.joinDeadline - Date.now()) });
     io.emit("bingoNames", { gameId: bingo.id, names: [...bingo.players.values()].map((v) => v.name) });
     console.log(`BINGO join: ${p.name} (${bingo.players.size} in)`);
   });

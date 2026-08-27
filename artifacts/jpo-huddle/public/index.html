@@ -10529,12 +10529,14 @@
       }
     }
     _bingoRenderHowto();
-    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, msLeft } = {}) => {
+    socket.on('bingoCard', ({ gameId, card, daubs, called, prize, state, mode, rule, isHost, ownerHost, msLeft } = {}) => {
       _bingoDropStale(gameId);
       _bingoCard = card; _bingoDaubs = new Set(daubs || []); _bingoCalled = called || []; _bingoState = state;
       _bingoSpectating = false;
       _bingoMode = mode || _bingoMode;
       _bingoRule = rule || _bingoRule;
+      if (typeof isHost === 'boolean') _bingoIsHost = isHost;
+      if (!ownerHost) _bingoOwnerNext = null;
       _bingoRenderHowto();
       _bingoGameId = gameId ?? _bingoGameId;
       _bgEl('bingo-lobby').style.display = 'none';
@@ -10617,6 +10619,7 @@
     });
     socket.on('bingoOwnerNext', ({ gameId, n, letter, commentary, status } = {}) => {
       if (gameId != null && _bingoGameId != null && gameId !== _bingoGameId) return;
+      _bingoIsHost = true;
       _bingoOwnerNext = { gameId, n, letter, commentary: commentary || '', status: status || 'empty' };
       _bgEl('bingo-owner-next').textContent = `${letter}-${n}`;
       _bgEl('bingo-owner-line').value = commentary || '';
