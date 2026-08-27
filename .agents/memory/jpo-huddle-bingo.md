@@ -39,6 +39,12 @@ Live office Bingo uses real joined players only. Bingo Bot is disabled by defaul
 
 **How to apply:** never let the bot auto-join normal games or satisfy the minimum-player requirement; keep any bot usage isolated to deliberate testing.
 
+Paid Bingo winners get a static, original 2–3 second instrumental videoke perfect-score fanfare, not a generated Coral congratulations speech.
+
+**Why:** the generated winner monologue was too long; the owner prefers the familiar quick “dun dun dun” videoke payoff with no “one hundred” voice.
+
+**How to apply:** emit the prebuilt sting immediately after a successful payout to joined players only; keep the visual winner banner and payout details unchanged.
+
 Bingo host authority must survive a socket reconnect during the join countdown. Capture whether the starter was the owner in the game state and restore host UI/permissions by the authenticated player email.
 
 **Why:** admin/owner sets are socket-scoped; a brief disconnect otherwise leaves the same joined account playing without host controls even though the game still identifies that email as its host.

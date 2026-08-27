@@ -331,6 +331,9 @@ const BINGO_ANNOUNCER_PREFETCH = 6;
 const BINGO_ANNOUNCER_CALL_CONCURRENCY = 5; // reserve one global slot for claim/winner reactions
 const BINGO_ANNOUNCER_DAILY_MAX = Math.max(75, Number(process.env.BINGO_ANNOUNCER_DAILY_MAX) || 900);
 const BINGO_ANNOUNCER_MAX_BYTES = 200_000;
+const BINGO_WIN_STING_AUDIO = readFileSync(
+  path.join(__dirname, "public", "audio", "bingo-videoke-win.mp3"),
+).toString("base64");
 const BINGO_BOT_ID = "__jpo_bingo_bot__";
 const BINGO_BOT_NAME = "Bingo Bot 🤖";
 let bingoAnnouncerGlobalInFlight = 0;
@@ -8565,15 +8568,11 @@ io.on("connection", (socket) => {
     }
     if (paid) {
       io.emit("bingoOver", { gameId, winnerName, prize, line, message: `🎉 BINGO! ${winnerName} wins ${prize.toLocaleString()} coins (${line})!` });
-      void bingoAnnouncerGenerateMoment({
-        gameId,
-        emails: announcerEmails,
-        policy: { kind: "winner", forbidBalls: true, requiredName: winnerName },
-        instruction:
-          `Announce the verified Bingo winner named “${String(winnerName).slice(0, 40)}”. ` +
-          "Open with “Confirmed! Hindi fake news!” then name the winner and celebrate them in one natural, lively Taglish radio-DJ line under 9 seconds. " +
-          "Add one short delighted laugh; avoid formal or translated-sounding Filipino. " +
-          "Do not recite the game number, line/round metadata, or prize amount, and do not announce a ball.",
+      // A paid winner gets the familiar short videoke-style perfect-score
+      // fanfare. It is static and immediate: no generated speech, no delay.
+      bingoAnnouncerEmitMoment(gameId, announcerEmails, {
+        audioData: BINGO_WIN_STING_AUDIO,
+        line: "",
       });
       console.log(`BINGO winner: ${winnerName} +${prize} (${line})`);
     } else {

@@ -580,3 +580,17 @@ uri = "file://artifacts/jpo-huddle/public/audio/bingo-background.mp3"
 type = "audio"
 title = "quiet Bingo background music"
 description = "Generated music: Original seamless looping instrumental background bed for a lively Filipino office Bingo game and radio variety segment. Bright playful percussion, light bass, subtle tropical-pop an…"
+
+[[outputs]]
+id = "u5hf6EULslZhTyK5z20NS"
+uri = "file://attached_assets/generated_audio/bingo_videoke_fanfare.mp3"
+type = "audio"
+title = "bingo videoke perfect score fanfare"
+description = "Generated sound effect: Original short Filipino videoke-machine perfect-score celebration sting, bright cheesy digital brass fanfare, sparkling ascending synth notes, tiny drum flourish and triumphan…"
+
+[[outputs]]
+id = "VmPM4sRR0cO_zS5HPdlVF"
+uri = "file://artifacts/jpo-huddle/public/audio/bingo-videoke-win.mp3"
+type = "audio"
+title = "Bingo Videoke Winner Sting"
+description = "2.5-second instrumental videoke-style perfect-score fanfare used when a paid Bingo winner is confirmed."
