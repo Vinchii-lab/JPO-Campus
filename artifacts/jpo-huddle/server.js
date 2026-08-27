@@ -340,26 +340,16 @@ const BINGO_ANNOUNCER_MOODS = [
   "fast playful Filipino sports commentator",
   "energetic roast-comedy caller",
 ];
-const BINGO_NUMBER_MEME_HINTS = {
-  1: "A playful 'number one / sana all' angle is available, but make it fresh.",
-  5: "A five fingers / still no jackpot association is available.",
-  7: "Use lucky seven with a fresh skeptical or love-life twist.",
-  10: "A ten fingers / still no Bingo association is available.",
-  18: "Use the Filipino debut/legal-age association. Keep it teasing and current, not ceremonial.",
-  22: "Use the repeated two / 'dalawa-dalawa' sound or pattern for fresh wordplay.",
-  30: "Use a 'trenta na' / 'trentahin' Filipino meme angle about entering the thirties. Keep it short.",
-  33: "The familiar 'Jesus age' association is available; keep it playful and never preachy.",
-  34: "A brief 'huwag mag-isip ng masama' double-meaning setup is available, but keep it innocent.",
-  40: "Use a natural 'forty na / tuloy ang laban' observation without insulting a real player's age.",
-  42: "A light answer-to-everything or existential joke is available.",
-  50: "Use halfway / kalahati na rin ang pag-asa as inspiration, not a fixed script.",
-  58: "Use 'hindi pa sixty pero ramdam na' as a number joke, never as a real-player age attack.",
-  59: "Use 'isang taon na lang sixty' as a number joke, never as a real-player age attack.",
-  68: "Use a very brief one-away-from-69 tease; suggestive only, never explicit.",
-  69: "Use the universally cheeky 'nice' or 'sweet spot' association without becoming sexually explicit.",
-  74: "Use a restrained end-of-range or mildly existential joke without claiming the game is ending.",
-  75: "Roast it as the highest number in the Bingo range. Never say it is the final DRAW or that the game is ending, because balls are randomized.",
-};
+const BINGO_GAME_ASIDES = [
+  "Tahimik bigla. Kabado na?",
+  "Relax, hindi board exam ’to.",
+  "Wala pa rin? Aray naman.",
+  "Uy, seryoso na sila.",
+  "Check mabuti. Baka tulog ka.",
+  "Ang tahimik. May nagdadasal na.",
+  "Kapit lang. Baka this year.",
+  "Card check. Huwag puro tingin.",
+];
 function bingoAnnouncerCommentaryCalls(gameNumber) {
   const calls = new Set();
   let at = 4 + (gameNumber % 4), step = 0;
@@ -386,14 +376,16 @@ function bingoAnnouncerClaimBudget() {
 function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   const text = String(transcript || "").toUpperCase().replace(/[–—−]/g, "-");
   const digits = String(n).split("");
-  const exact = new RegExp(`\\b${letter}[\\s\\-:,.'’]*${n}\\b`).test(text);
+  const spokenLetter = letter === "O" ? "(?:O|OW)" : letter;
+  const exact = new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${n}\\b`).test(text);
   const digitByDigit = digits.length === 2
-    && new RegExp(`\\b${letter}[\\s\\-:,.'’]*${digits[0]}[\\s\\-:,.'’]+${digits[1]}\\b`).test(text);
+    && new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${digits[0]}[\\s\\-:,.'’]+${digits[1]}\\b`).test(text);
   if (!exact && !digitByDigit) return false;
   // Reject any additional Bingo ball, including common no-dash and spoken
   // transcript forms such as "G55", "G 55", and "O, 69".
-  for (const match of text.matchAll(/\b([BINGO])[\s\-:,.'’]*(\d{1,2})\b/g)) {
-    if (match[1] !== letter || Number(match[2]) !== n) return false;
+  for (const match of text.matchAll(/\b(OW|[BINGO])[\s\-:,.'’]*(\d{1,2})\b/g)) {
+    const matchedLetter = match[1] === "OW" ? "O" : match[1];
+    if (matchedLetter !== letter || Number(match[2]) !== n) return false;
   }
   // A draw clip may build suspense but may never invent a verified result.
   const falseResult =
@@ -406,12 +398,15 @@ function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   return true;
 }
 function bingoAnnouncerTranscriptHasBall(transcript) {
-  return /\b[BINGO][\s\-:,.'’]*\d{1,2}\b/i.test(String(transcript || ""));
+  return /\b(?:OW|[BINGO])[\s\-:,.'’]*\d{1,2}\b/i.test(String(transcript || ""));
 }
 function bingoAnnouncerNameAppears(transcript, name) {
   const first = String(name || "").trim().split(/\s+/)[0].replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
   const text = String(transcript || "").replace(/[^\p{L}\p{N}\s]/gu, " ").toLocaleLowerCase();
   return !!first && text.split(/\s+/).includes(first);
+}
+function bingoAnnouncerNormalizeLine(line) {
+  return String(line || "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 function bingoAnnouncerGearLabel(id) {
   return String(id || "")
@@ -502,39 +497,17 @@ async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
+  const spokenLetter = letter === "O" ? "Ow" : letter;
+  const spokenBall = `${spokenLetter}-${n}`;
   const context = bingoAnnouncerContext(game, n, count);
-  const forcedNumberMeme = BINGO_NUMBER_MEME_HINTS[n] || "";
   const progressComment = !!context.selectedProgress;
-  const commentary = progressComment || !!forcedNumberMeme || game.announcerCommentaryCalls.has(count);
-  const avatarComment = commentary && !progressComment && !forcedNumberMeme && count % 4 === 0;
-  const laughComment = commentary && count % 2 === 0;
-  const recent = game.announcerRecent.slice(-24).join("\n");
-  const fullRoster = avatarComment ? bingoAnnouncerRoster(game) : [];
-  const roster = fullRoster.length
-    ? [fullRoster[game.announcerRoastIndex++ % fullRoster.length]]
-    : [];
-  const humorModes = [
-    "number wordplay or a culturally recognizable Bingo association",
-    "a tiny absurd mini-story about what the room is doing",
-    "a reaction to the recent balls or uneven B-I-N-G-O letter distribution",
-    "mock suspense or a fake dramatic prediction that NEVER names a future ball",
-    "a mildly dark but harmless joke about the long game or bad luck",
-    "an innocent green-minded double meaning that stays suggestive, never explicit",
-    "one completely straight call followed by a dry unexpected aside",
-  ];
-  const humorMode = humorModes[(n + count + game.announcerGameNumber) % humorModes.length];
-  const modeInstruction = !commentary
-    ? (count % 3 === 0
-        ? `Give one quick caller variation such as “Next ball—${letter}-${n}!” or “Sa letrang ${letter}… ${letter}-${n}!” You may add at most three neutral words like “check your cards, mga mare.”`
-        : `Announce only “${letter}-${n}” or “Sa letrang ${letter}… ${letter}-${n}.” No joke or commentary.`)
-    : progressComment
-      ? `After clearly announcing ${letter}-${n}, dramatically but truthfully say ${context.selectedProgress.name}'s card now has only ${context.selectedProgress.away === 1 ? "one uncalled number" : "two uncalled numbers"} left for ${game.rule === "blackout" ? "Blackout" : "a line"}. ` +
-        "Do not reveal which number they need, do not imply their manual marks are complete, and do not tell them to claim yet."
-      : forcedNumberMeme
-      ? `After clearly announcing ${letter}-${n}, add one short current-feeling Filipino number-meme line. Required angle: ${forcedNumberMeme}`
-      : roster.length
-        ? `After clearly announcing ${letter}-${n}, make one quick playful roast about this joined player's visible avatar gear or pet. Keep profanity rare and mild.`
-        : `After clearly announcing ${letter}-${n}, improvise one fresh ${humorMode}. Match the ${context.stage} stage: opening is relaxed, middle is more energetic, late is dramatic, and endgame can go full game-show.`;
+  const commentary = progressComment || game.announcerCommentaryCalls.has(count);
+  const aside = progressComment
+    ? `${context.selectedProgress.name}, ${context.selectedProgress.away === 1 ? "one away. Huminga ka." : "two away. Relax lang."}`
+    : commentary
+      ? BINGO_GAME_ASIDES[(count + game.announcerGameNumber) % BINGO_GAME_ASIDES.length]
+      : "";
+  const expectedLine = `${spokenBall}!${aside ? ` ${aside}` : ""}`;
   const controller = new AbortController();
   game.announcerControllers.add(controller);
   bingoAnnouncerGlobalInFlight++;
@@ -550,46 +523,17 @@ async function bingoAnnouncerGenerate(game, n, count) {
           {
             role: "system",
             content:
-              "You are a veteran Filipino barangay-style Bingo emcee: loud, playful, witty, spontaneous, slightly chaotic, and dramatically invested for no reason. " +
-              "The vibe is a funny birthday-party caller who somehow always knows the game, not an AI reading a joke database. " +
+              "You are performing one prewritten Filipino Bingo call in a lively, natural Taglish radio voice. " +
               "Do not use an unnaturally deep, slow, gravelly, or movie-trailer voice. Do not imitate or mention any real comedian. " +
-              "Do not name or reference real celebrities, influencers, politicians, or other public figures. " +
-              "The letter and number are always the priority. Most calls must be short and immediately move on; only scheduled commentary calls get a joke. " +
-              "Sound like a naturally funny Filipino radio DJ talking to barkada: conversational Tagalog/Taglish, loose ad-libs, and real Pinoy phrasing. " +
-              "Avoid formal Filipino, direct English-to-Tagalog translations, corporate wording, and phrases no Filipino would naturally say. " +
-              "Prefer everyday expressions such as “ano ba ’yan,” “tantanan mo,” “huwag atat,” “baon,” and “bukas ka na tatama” when they fit. " +
-              "Commentary should be primarily natural Tagalog/Taglish, never a long English sentence. A brief genuine laugh or chuckle is welcome on funny moments, but not every call. " +
-              "Vary structure unpredictably: sometimes just the ball, sometimes a short joke, dry aside, mini-story, player reaction, suspense, or game-state observation. " +
-              "Occasional mild sarcasm, harmless dark humor, and innocent double meaning are allowed; never make them constant or explicit. " +
-              "You may roast a joined player by display name, but ONLY about verified game behavior, verified proximity supplied below, or visible game-avatar gear. " +
-              "Never joke about a real person's body, face, age, identity, ability, or other real-life appearance. " +
-              "Keep profanity rare and mild; never force it into ordinary calls. " +
-              "Never use threats, sexual insults, protected-trait slurs, discriminatory language, or attacks unrelated to the avatar. " +
-              "Avoid repetitive pageant, tita, teleserye, gossip, lunch, meeting, boss, and overtime clichés. " +
-              "For roasts, use concrete comparisons rather than long setups. Do not explain the joke or sound motivational. " +
-              "Never reveal card contents or a missing number. Only claim a player is close when VERIFIED PROXIMITY explicitly says so. " +
-              "Never predict a future ball, call any ball the final draw, or declare a winner before a verified claim. " +
-              "Use game context silently; never recite metadata such as call counts, elapsed seconds, letter-count JSON, or the word “verified.” " +
-              "Do not awkwardly translate or restate the number after its clear letter-number call unless the wordplay genuinely needs it. " +
-              "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
+              "Read every number in ENGLISH. Never translate, repeat, or restate the called number in Tagalog. " +
+              "For the O column, pronounce and transcribe the letter as “Ow,” not “Oh” and not plain “O.” " +
+              "Say the supplied line EXACTLY. Do not add, remove, rewrite, translate, explain, laugh, or improvise. " +
+              "Output only that exact spoken line.",
           },
           {
             role: "user",
             content:
-              `Call the exact ball ${letter}-${n}. This is call ${count} of 75 in a ${game.rule === "blackout" ? "BLACKOUT" : "line"} game, ` +
-              `game ${game.announcerGameNumber} today. Perform as a ${game.announcerMood}. ` +
-              `${modeInstruction} Keep ordinary calls under 3 seconds and commentary calls under 7 seconds. ` +
-              (laughComment ? "Let out one short natural laugh or amused chuckle after the punchline. " : "") +
-              "For avatar comments, never invent gear. " +
-              `Say ${letter}-${n} clearly enough that nobody can miss the letter or number.\n` +
-              (avatarComment
-                ? `Joined avatar roster (display name and visible game gear only):\n${roster.join("\n") || "(no human avatar gear available)"}\n`
-                : "") +
-              `VERIFIED GAME CONTEXT (presentation only; never expose hidden card details):\n` +
-              `stage=${context.stage}; elapsed≈${context.elapsedSeconds}s; human players=${context.playerCount}; recent balls=${context.recentBalls.join(", ") || "none"}; ` +
-              `letter counts=${JSON.stringify(context.distribution)}; false claims=${context.falseClaims.join(", ") || "none"}; ` +
-              `VERIFIED PROXIMITY=${context.selectedProgress ? `${context.selectedProgress.name} is ${context.selectedProgress.away} uncalled number(s) from the win condition after ${letter}-${n}` : "none"}.\n` +
-              `Do not repeat these recent lines:\n${recent || "(none yet)"}`,
+              `Say exactly: ${expectedLine}`,
           },
         ],
       }, { signal: controller.signal });
@@ -603,6 +547,9 @@ async function bingoAnnouncerGenerate(game, n, count) {
     if (!transcript) throw new Error("Bingo announcer returned audio without a transcript");
     if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n)) {
       throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}`);
+    }
+    if (bingoAnnouncerNormalizeLine(transcript) !== bingoAnnouncerNormalizeLine(expectedLine)) {
+      throw new Error(`Bingo announcer rewrote the curated line for ${letter}-${n}`);
     }
     game.announcerRecent.push(transcript);
     if (game.announcerRecent.length > 120) game.announcerRecent.splice(0, game.announcerRecent.length - 120);

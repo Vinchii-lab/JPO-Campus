@@ -15,11 +15,11 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer uses the bright Coral voice and a commentary schedule: every ball is clear, most stay under 3 seconds, and a longer joke appears every 4–7 calls plus special-number moments.
+The announcer uses Coral, reads numbers in English, and pronounces the O column as “Ow.” Draw commentary uses only server-curated, kanto-punchy Taglish asides; Coral performs the exact line rather than inventing number jokes.
 
-**Why:** rigid content ratios lost the original caller rhythm. The desired flow mixes brief calls, Pinoy number memes (69, 18, 75, “trenta na”), escalating Blackout drama, and immediate claim/win reactions.
+**Why:** generated number puns became long, confusing, and unnatural (“translated” or random associations). The user prefers fewer jokes over any line that needs explaining.
 
-**How to apply:** schedule commentary 4–7 calls apart, let special numbers override it, grow more dramatic after 40 Blackout calls, and keep false-claim/winner reactions separate from the draw path.
+**How to apply:** keep most calls to the ball only; every 4–7 calls add one clear micro-aside, with no number pun, mini-story, translation, or second punchline. Reject any audio transcript that rewrites the curated line.
 
 Announcer Tagalog must sound conversational rather than translated or formal. Repeated false claims are tracked per player and may trigger a named “tantanan mo / huwag atat / bukas ka na tatama” callout with a short laugh.
 
