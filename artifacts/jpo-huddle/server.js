@@ -8335,7 +8335,9 @@ io.on("connection", (socket) => {
     const pool = Array.from({ length: 75 }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     const bingoPlayers = new Map();
-    const botJoined = process.env.BINGO_BOT_DISABLED !== "1";
+    // Real office games use real players only. The practice bot is opt-in for
+    // isolated testing and never appears in a normal live game.
+    const botJoined = process.env.BINGO_BOT_ENABLED === "1";
     if (botJoined) {
       bingoPlayers.set(BINGO_BOT_ID, { name: BINGO_BOT_NAME, card: makeBingoCard(), daubs: new Set(), bot: true });
     }

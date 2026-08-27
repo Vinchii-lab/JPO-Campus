@@ -33,6 +33,12 @@ Owner-authored lines may deliberately use fake-result language such as “May tu
 
 **How to apply:** relax only the result-word check for exact owner-provided commentary; continue validating the locked ball, rejecting rewritten text, and keeping automated draw lines under the strict result guard.
 
+Live office Bingo uses real joined players only. Bingo Bot is disabled by default and may exist only behind an explicit test-only opt-in.
+
+**Why:** including the practice bot in real games inflated the participant count and made a live office event look inauthentic.
+
+**How to apply:** never let the bot auto-join normal games or satisfy the minimum-player requirement; keep any bot usage isolated to deliberate testing.
+
 Bingo host authority must survive a socket reconnect during the join countdown. Capture whether the starter was the owner in the game state and restore host UI/permissions by the authenticated player email.
 
 **Why:** admin/owner sets are socket-scoped; a brief disconnect otherwise leaves the same joined account playing without host controls even though the game still identifies that email as its host.
