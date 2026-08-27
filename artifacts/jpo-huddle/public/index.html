@@ -3361,9 +3361,9 @@
         <div id="bingo-owner-script" style="display:none;margin-bottom:8px;padding:8px;border:1px solid #4a3d78;border-radius:8px;background:#211a3d;">
           <div style="font-size:11px;color:#bba9ff;margin-bottom:5px;">Next ball: <strong id="bingo-owner-next" style="color:#ffd76a;">—</strong> <span style="color:#766a9c;">(only you can see this)</span></div>
           <input id="bingo-owner-line" type="text" maxlength="120" autocomplete="off"
-                 placeholder="Commentary only — the ball is added automatically"
+                 placeholder="Commentary, or the full matching line"
                  style="box-sizing:border-box;width:100%;padding:7px 8px;border:1px solid #4a3d78;border-radius:6px;background:#17112e;color:#fff;font-size:12px;" />
-          <button id="bingo-owner-prepare" type="button" style="width:100%;margin-top:6px;padding:7px;border-radius:6px;border:1px solid #8e72ff;background:#443477;color:#fff;font-weight:700;cursor:pointer;">Prepare Coral line</button>
+          <button id="bingo-owner-prepare" type="button" style="width:100%;margin-top:6px;padding:7px;border-radius:6px;border:1px solid #8e72ff;background:#443477;color:#fff;font-weight:700;cursor:pointer;">Prepare Coral line, then Call</button>
           <div id="bingo-owner-status" style="min-height:15px;margin-top:5px;font-size:10px;color:#8f83b8;"></div>
         </div>
         <button id="bingo-host-call" type="button" style="width:100%;padding:10px 0;border-radius:8px;border:1px solid #ffb400;background:#5a4300;color:#ffd76a;font-weight:800;font-size:14px;cursor:pointer;">📢 Call next ball</button>
@@ -10626,7 +10626,7 @@
       _bgEl('bingo-owner-status').textContent = status === 'ready'
         ? '✅ Ready — Call next ball when you want.'
         : status === 'preparing'
-          ? '⏳ Coral is preparing your exact line…'
+          ? '⏳ Preparing—usually 3–10 seconds, up to 18. Wait before calling.'
           : status === 'failed'
             ? '⚠️ Voice preparation failed. Edit and try again.'
             : 'Type a line, then press Enter or Prepare.';

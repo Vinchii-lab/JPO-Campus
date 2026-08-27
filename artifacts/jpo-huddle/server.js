@@ -376,15 +376,15 @@ function bingoAnnouncerClaimBudget() {
 function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   const text = String(transcript || "").toUpperCase().replace(/[–—−]/g, "-");
   const digits = String(n).split("");
-  const spokenLetter = letter === "O" ? "(?:O|OW)" : letter;
+  const spokenLetter = letter === "O" ? "(?:O|OH|OW)" : letter;
   const exact = new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${n}\\b`).test(text);
   const digitByDigit = digits.length === 2
     && new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${digits[0]}[\\s\\-:,.'’]+${digits[1]}\\b`).test(text);
   if (!exact && !digitByDigit) return false;
   // Reject any additional Bingo ball, including common no-dash and spoken
   // transcript forms such as "G55", "G 55", and "O, 69".
-  for (const match of text.matchAll(/\b(OW|[BINGO])[\s\-:,.'’]*(\d{1,2})\b/g)) {
-    const matchedLetter = match[1] === "OW" ? "O" : match[1];
+  for (const match of text.matchAll(/\b(OH|OW|[BINGO])[\s\-:,.'’]*(\d{1,2})\b/g)) {
+    const matchedLetter = match[1] === "OW" || match[1] === "OH" ? "O" : match[1];
     if (matchedLetter !== letter || Number(match[2]) !== n) return false;
   }
   // A draw clip may build suspense but may never invent a verified result.
@@ -398,7 +398,7 @@ function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   return true;
 }
 function bingoAnnouncerTranscriptHasBall(transcript) {
-  return /\b(?:OW|[BINGO])[\s\-:,.'’]*\d{1,2}\b/i.test(String(transcript || ""));
+  return /\b(?:OH|OW|[BINGO])[\s\-:,.'’]*\d{1,2}\b/i.test(String(transcript || ""));
 }
 function bingoAnnouncerNameAppears(transcript, name) {
   const first = String(name || "").trim().split(/\s+/)[0].replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
@@ -406,7 +406,11 @@ function bingoAnnouncerNameAppears(transcript, name) {
   return !!first && text.split(/\s+/).includes(first);
 }
 function bingoAnnouncerNormalizeLine(line) {
-  return String(line || "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return String(line || "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/^(?:oh|ow)(?=\s+\d{1,2}\b)/, "o");
 }
 function bingoAnnouncerGearLabel(id) {
   return String(id || "")
@@ -497,7 +501,7 @@ async function bingoAnnouncerGenerate(game, n, count, ownerAside = null) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
-  const spokenLetter = letter === "O" ? "Ow" : letter;
+  const spokenLetter = letter === "O" ? "Oh" : letter;
   const spokenBall = `${spokenLetter}-${n}`;
   const displayBall = `${letter}-${n}`;
   const context = bingoAnnouncerContext(game, n, count);
@@ -530,7 +534,7 @@ async function bingoAnnouncerGenerate(game, n, count, ownerAside = null) {
               "You are performing one prewritten Filipino Bingo call in a lively, natural Taglish radio voice. " +
               "Do not use an unnaturally deep, slow, gravelly, or movie-trailer voice. Do not imitate or mention any real comedian. " +
               "Read every number in ENGLISH. Never translate, repeat, or restate the called number in Tagalog. " +
-              "For the O column, pronounce and transcribe the letter as “Ow,” not “Oh” and not plain “O.” " +
+              "For the O column, pronounce the letter like the English word “Oh” (the letter O), never like “ow” or “aw.” " +
               "Say the supplied line EXACTLY. Do not add, remove, rewrite, translate, explain, laugh, or improvise. " +
               "Output only that exact spoken line.",
           },
@@ -8365,6 +8369,16 @@ io.on("connection", (socket) => {
     if (!bingo || bingo.state !== "active") { socket.emit("adminBingoResult", { ok: false, message: "No active game to call for." }); return; }
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can call numbers." }); return; }
     if (bingo.mode !== "manual") { socket.emit("adminBingoResult", { ok: false, message: "Auto-calling is on — switch to manual first." }); return; }
+    const ownerLine = bingo.announcerOwnerLine;
+    if (ownerLine?.n === bingo.pool[0] && ownerLine.status !== "ready") {
+      socket.emit("adminBingoResult", {
+        ok: false,
+        message: ownerLine.status === "preparing"
+          ? "Coral is still preparing your line. Wait for Ready, or clear the text to use the normal call."
+          : "That Coral line failed. Edit and prepare it again, or clear the text to use the normal call.",
+      });
+      return;
+    }
     bingoCallNext();
     if (bingo) {
       const last = bingo.called[bingo.called.length - 1];
@@ -8386,20 +8400,31 @@ io.on("connection", (socket) => {
       bingoEmitOwnerNext(bingo);
       return;
     }
-    const text = String(payload?.commentary || "").replace(/\s+/g, " ").trim();
+    const submitted = String(payload?.commentary || "").replace(/\s+/g, " ").trim();
+    const letter = "BINGO"[Math.floor((next - 1) / 15)];
+    const spokenLetters = letter === "O" ? "(?:O|OH|OW)" : letter;
+    const matchingBallPrefix = new RegExp(`^${spokenLetters}[\\s\\-:,.'’]*${next}\\b[\\s!,:;.'’\\-–—]*`, "i");
+    let text = submitted;
+    if (bingoAnnouncerTranscriptHasBall(submitted)) {
+      if (!matchingBallPrefix.test(submitted)) {
+        socket.emit("bingoOwnerLineResult", { ok: false, message: `The only ball allowed here is the previewed ${letter}-${next}.` });
+        return;
+      }
+      text = submitted.replace(matchingBallPrefix, "").trim();
+      if (bingoAnnouncerTranscriptHasBall(text)) {
+        socket.emit("bingoOwnerLineResult", { ok: false, message: "Use only one ball call. The app adds it automatically." });
+        return;
+      }
+    }
     if (text.length > 120) {
       socket.emit("bingoOwnerLineResult", { ok: false, message: "Keep the commentary to 120 characters or less." });
-      return;
-    }
-    if (text && bingoAnnouncerTranscriptHasBall(text)) {
-      socket.emit("bingoOwnerLineResult", { ok: false, message: "Type commentary only—the next ball is added automatically." });
       return;
     }
     const game = bingo;
     const version = ++game.announcerOwnerVersion;
     if (!text) {
       game.announcerOwnerLine = null;
-      socket.emit("bingoOwnerLineResult", { ok: true, message: "Custom line cleared. The normal caller will handle the next ball." });
+      socket.emit("bingoOwnerLineResult", { ok: true, message: submitted ? `${letter}-${next} accepted. The normal Coral call is ready to use.` : "Custom line cleared. The normal caller will handle the next ball." });
       bingoEmitOwnerNext(game);
       return;
     }

@@ -15,7 +15,7 @@ The Bingo announcer is an optional performance layer, never part of the draw pat
 
 **How to apply:** keep authoritative game state independent from generated media, preserve joined-only delivery, and use the Join click as the browser audio-unlock gesture.
 
-The announcer uses Coral, reads numbers in English, and pronounces the O column as “Ow” while displaying “O.” Draw commentary uses server-curated, BPO-focused, kanto-punchy Taglish; Coral performs the exact line rather than inventing jokes.
+The announcer uses Coral, reads numbers in English, and pronounces the O column as the English word “Oh” while displaying “O.” Draw commentary uses server-curated, BPO-focused, kanto-punchy Taglish; Coral performs the exact line rather than inventing jokes.
 
 **Why:** generated number puns became long, confusing, and unnatural (“translated” or random associations). The user prefers fewer jokes over any line that needs explaining.
 
@@ -25,7 +25,7 @@ The owner-host may privately preview the already-shuffled next ball during manua
 
 **Why:** owner-written lines are more authentic to the team than generated humor, but free-form full calls could announce the wrong ball or drift when the pool advances.
 
-**How to apply:** keep previews owner/host-only, bind each prepared line to the exact next pool value, use it once, and fall back safely without delaying the authoritative draw if voice preparation is late or fails.
+**How to apply:** keep previews owner/host-only, bind each prepared line to the exact next pool value, use it once, accept a matching ball prefix, and block a manual draw while that prepared line is not ready so it cannot be silently skipped.
 
 Bingo host authority must survive a socket reconnect during the join countdown. Capture whether the starter was the owner in the game state and restore host UI/permissions by the authenticated player email.
 
