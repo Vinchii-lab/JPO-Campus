@@ -38,3 +38,15 @@ The server-controlled Bingo practice bot may fill the second seat in an admin-ho
 **Why:** the host needs to test the announcer with one browser without creating a second account, while the bot must not affect the economy or beat a human player.
 
 **How to apply:** treat the bot as an ephemeral non-account participant and exclude it from every claim and payout path.
+
+Announcer proximity is presentation-only and must come from the authoritative shuffled call prefix projected through the candidate prefetched ball. Only announce new one/two-uncalled-number transitions; exclude the bot, never expose the missing number, and never turn zero uncalled numbers into a claim instruction.
+
+**Why:** prefetch runs ahead of the visible draw, while manual daubs can lag called numbers. Treating “all card numbers called” as a verified claim can prompt a false Bingo, and exposing the needed number leaks private card state.
+
+**How to apply:** compare missing counts before/after the candidate ball for each current human card, phrase the result as uncalled-card-number proximity, and leave all winner declarations to the paid valid-claim path.
+
+Generated speech and all player context must stay within the current game. Prior winners, player names, and personalized lines must never carry into a later game; important claim reactions take priority over optional future-call speech.
+
+**Why:** cross-game context can expose a coworker to unrelated participants or the AI provider, while unsafe generated speech can misstate authoritative game truth.
+
+**How to apply:** provide only current-game context, fail closed on absent or contradictory transcripts, and never let speculative draw narration outrank a verified claim or payout reaction.

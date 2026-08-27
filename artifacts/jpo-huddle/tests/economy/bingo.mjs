@@ -5,6 +5,7 @@
 // Run: node tests/economy/bingo.mjs   (needs DATABASE_URL + ADMIN_PASSWORD)
 import { io } from "socket.io-client";
 import { spawn } from "child_process";
+import { readFile } from "fs/promises";
 import { createRequire } from "module";
 const require = createRequire("/home/runner/workspace/artifacts/jpo-huddle/server.js");
 const pg = require("pg");
@@ -22,6 +23,11 @@ const E_D = `bgo-d-${rand}@justpressone.com`;  // second admin, spectates
 const fails = [];
 const ok = (cond, label) => { console.log((cond ? "  ✓ " : "  ✗ ") + label); if (!cond) fails.push(label); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const serverSource = await readFile("/home/runner/workspace/artifacts/jpo-huddle/server.js", "utf8");
+ok(
+  !/bingoAnnouncerLastWinner|lastWinner\s*:|previous winner/i.test(serverSource),
+  "a new game cannot inherit a prior winner's name in announcer context",
+);
 
 function queue(socket, name) {
   const q = { items: [], waiters: [] };

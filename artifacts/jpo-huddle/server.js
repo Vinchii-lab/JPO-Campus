@@ -328,6 +328,7 @@ const BINGO_ANNOUNCER_ENABLED = process.env.BINGO_ANNOUNCER_DISABLED !== "1"
   && !!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
   && !!process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
 const BINGO_ANNOUNCER_PREFETCH = 6;
+const BINGO_ANNOUNCER_CALL_CONCURRENCY = 5; // reserve one global slot for claim/winner reactions
 const BINGO_ANNOUNCER_DAILY_MAX = Math.max(75, Number(process.env.BINGO_ANNOUNCER_DAILY_MAX) || 900);
 const BINGO_ANNOUNCER_MAX_BYTES = 200_000;
 const BINGO_BOT_ID = "__jpo_bingo_bot__";
@@ -339,11 +340,24 @@ const BINGO_ANNOUNCER_MOODS = [
   "fast playful Filipino sports commentator",
   "energetic roast-comedy caller",
 ];
-const bingoAnnouncerRecent = [];
 const BINGO_NUMBER_MEME_HINTS = {
+  1: "A playful 'number one / sana all' angle is available, but make it fresh.",
+  5: "A five fingers / still no jackpot association is available.",
+  7: "Use lucky seven with a fresh skeptical or love-life twist.",
+  10: "A ten fingers / still no Bingo association is available.",
   18: "Use the Filipino debut/legal-age association. Keep it teasing and current, not ceremonial.",
+  22: "Use the repeated two / 'dalawa-dalawa' sound or pattern for fresh wordplay.",
   30: "Use a 'trenta na' / 'trentahin' Filipino meme angle about entering the thirties. Keep it short.",
+  33: "The familiar 'Jesus age' association is available; keep it playful and never preachy.",
+  34: "A brief 'huwag mag-isip ng masama' double-meaning setup is available, but keep it innocent.",
+  40: "Use a natural 'forty na / tuloy ang laban' observation without insulting a real player's age.",
+  42: "A light answer-to-everything or existential joke is available.",
+  50: "Use halfway / kalahati na rin ang pag-asa as inspiration, not a fixed script.",
+  58: "Use 'hindi pa sixty pero ramdam na' as a number joke, never as a real-player age attack.",
+  59: "Use 'isang taon na lang sixty' as a number joke, never as a real-player age attack.",
+  68: "Use a very brief one-away-from-69 tease; suggestive only, never explicit.",
   69: "Use the universally cheeky 'nice' or 'sweet spot' association without becoming sexually explicit.",
+  74: "Use a restrained end-of-range or mildly existential joke without claiming the game is ending.",
   75: "Roast it as the highest number in the Bingo range. Never say it is the final DRAW or that the game is ending, because balls are randomized.",
 };
 function bingoAnnouncerCommentaryCalls(gameNumber) {
@@ -355,10 +369,6 @@ function bingoAnnouncerCommentaryCalls(gameNumber) {
   }
   return calls;
 }
-// Once a number has been voiced successfully, retain that exact-ball clip as a
-// no-cost fallback for later games/provider hiccups. A full Blackout naturally
-// warms all 75 entries; the current game's fresh clip still wins when ready.
-const bingoAnnouncerCore = new Map(); // n -> { audioData, line }
 let bingoGamesTodayKey = "", bingoGamesToday = 0;
 let bingoAnnouncerBudgetKey = "", bingoAnnouncerGeneratedToday = 0;
 function bingoAnnouncerGameNumber() {
@@ -376,16 +386,32 @@ function bingoAnnouncerClaimBudget() {
 function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
   const text = String(transcript || "").toUpperCase().replace(/[–—−]/g, "-");
   const digits = String(n).split("");
-  const exact = new RegExp(`\\b${letter}\\s*[-:]?\\s*${n}\\b`).test(text);
+  const exact = new RegExp(`\\b${letter}[\\s\\-:,.'’]*${n}\\b`).test(text);
   const digitByDigit = digits.length === 2
-    && new RegExp(`\\b${letter}\\s*[-:]?\\s*${digits[0]}\\s*[- ]\\s*${digits[1]}\\b`).test(text);
+    && new RegExp(`\\b${letter}[\\s\\-:,.'’]*${digits[0]}[\\s\\-:,.'’]+${digits[1]}\\b`).test(text);
   if (!exact && !digitByDigit) return false;
-  // Reject any additional clearly formatted Bingo ball that contradicts the
-  // authoritative one. Number jokes and "call 5 of 75" remain allowed.
-  for (const match of text.matchAll(/\b([BINGO])\s*[-:]\s*(\d{1,2})\b/g)) {
+  // Reject any additional Bingo ball, including common no-dash and spoken
+  // transcript forms such as "G55", "G 55", and "O, 69".
+  for (const match of text.matchAll(/\b([BINGO])[\s\-:,.'’]*(\d{1,2})\b/g)) {
     if (match[1] !== letter || Number(match[2]) !== n) return false;
   }
+  // A draw clip may build suspense but may never invent a verified result.
+  const falseResult =
+    /\b(?:NANALO|WINNER|CONFIRMED)\b/.test(text)
+    || /\b(?:MAY|MERON(?:\s+NANG)?)\s+(?:PANALO|TUMAMA|BINGO)\b/.test(text)
+    || /\b(?:PANALO|WINNER|BINGO)\s+NA\b/.test(text)
+    || /\bSI\s+[\p{L}\p{N}_'-]+\s+(?:ANG|AY)\s+(?:PANALO|WINNER|NANALO)\b/u.test(text)
+    || /\bBINGO\s*!/.test(text);
+  if (falseResult) return false;
   return true;
+}
+function bingoAnnouncerTranscriptHasBall(transcript) {
+  return /\b[BINGO][\s\-:,.'’]*\d{1,2}\b/i.test(String(transcript || ""));
+}
+function bingoAnnouncerNameAppears(transcript, name) {
+  const first = String(name || "").trim().split(/\s+/)[0].replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
+  const text = String(transcript || "").replace(/[^\p{L}\p{N}\s]/gu, " ").toLocaleLowerCase();
+  return !!first && text.split(/\s+/).includes(first);
 }
 function bingoAnnouncerGearLabel(id) {
   return String(id || "")
@@ -413,31 +439,102 @@ function bingoAnnouncerRoster(game) {
   }
   return roster.slice(0, 20);
 }
+const BINGO_LINE_PATTERNS = [
+  ...Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => [r, c])),
+  ...Array.from({ length: 5 }, (_, c) => Array.from({ length: 5 }, (_, r) => [r, c])),
+  Array.from({ length: 5 }, (_, i) => [i, i]),
+  Array.from({ length: 5 }, (_, i) => [i, 4 - i]),
+];
+function bingoAnnouncerMissingCount(card, called, rule) {
+  if (rule === "blackout") {
+    return card.flat().filter((value) => value !== 0 && !called.has(value)).length;
+  }
+  return Math.min(...BINGO_LINE_PATTERNS.map((pattern) =>
+    pattern.reduce((missing, [r, c]) => {
+      const value = card[r][c];
+      return missing + (value !== 0 && !called.has(value) ? 1 : 0);
+    }, 0)));
+}
+function bingoAnnouncerContext(game, n, count) {
+  const poolIndex = Math.max(0, game.pool.indexOf(n));
+  const projectedNumbers = [...game.called, ...game.pool.slice(0, poolIndex + 1)];
+  const beforeNumbers = projectedNumbers.slice(0, -1);
+  const called = new Set(projectedNumbers);
+  const before = new Set(beforeNumbers);
+  const progress = [];
+  for (const [, seat] of game.players) {
+    if (seat.bot) continue;
+    const was = bingoAnnouncerMissingCount(seat.card, before, game.rule);
+    const now = bingoAnnouncerMissingCount(seat.card, called, game.rule);
+    if (now < was && now >= 1 && now <= 2) {
+      progress.push({ name: String(seat.name || "Player").slice(0, 40), away: now });
+    }
+  }
+  const selectedProgress = progress.length
+    ? progress[(count + game.announcerGameNumber) % progress.length]
+    : null;
+  const humans = [...game.players.values()].filter((seat) => !seat.bot);
+  const falseClaims = [];
+  for (const [email, attempts] of game.announcerFalseClaims) {
+    if (!attempts) continue;
+    const seat = game.players.get(email);
+    if (seat && !seat.bot) falseClaims.push(`${String(seat.name).slice(0, 40)}: ${attempts}`);
+  }
+  const startedAt = game.startedAt || Date.now();
+  const futureCalls = Math.max(0, projectedNumbers.length - game.called.length);
+  const elapsedSeconds = Math.max(0, Math.round((Date.now() - startedAt + futureCalls * (game.callMs || BINGO_CALL_MS)) / 1000));
+  const stage = count <= 15 ? "opening" : count <= 39 ? "middle" : count <= 59 ? "late" : "endgame";
+  const distribution = Object.fromEntries("BINGO".split("").map((letter, column) => [
+    letter,
+    projectedNumbers.filter((value) => Math.floor((value - 1) / 15) === column).length,
+  ]));
+  return {
+    stage,
+    elapsedSeconds,
+    playerCount: humans.length,
+    recentBalls: beforeNumbers.slice(-6).map((value) => `${"BINGO"[Math.floor((value - 1) / 15)]}-${value}`),
+    distribution,
+    selectedProgress,
+    falseClaims,
+  };
+}
 async function bingoAnnouncerGenerate(game, n, count) {
   if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return null;
   if (!bingoAnnouncerClaimBudget()) return null;
   const letter = "BINGO"[Math.floor((n - 1) / 15)];
+  const context = bingoAnnouncerContext(game, n, count);
   const forcedNumberMeme = BINGO_NUMBER_MEME_HINTS[n] || "";
-  const commentary = !!forcedNumberMeme || game.announcerCommentaryCalls.has(count);
-  const avatarComment = commentary && !forcedNumberMeme && count % 3 === 0;
+  const progressComment = !!context.selectedProgress;
+  const commentary = progressComment || !!forcedNumberMeme || game.announcerCommentaryCalls.has(count);
+  const avatarComment = commentary && !progressComment && !forcedNumberMeme && count % 4 === 0;
   const laughComment = commentary && count % 2 === 0;
-  const recent = bingoAnnouncerRecent.slice(-24).join("\n");
+  const recent = game.announcerRecent.slice(-24).join("\n");
   const fullRoster = avatarComment ? bingoAnnouncerRoster(game) : [];
   const roster = fullRoster.length
     ? [fullRoster[game.announcerRoastIndex++ % fullRoster.length]]
     : [];
-  const lateBlackout = game.rule === "blackout" && count >= 40;
+  const humorModes = [
+    "number wordplay or a culturally recognizable Bingo association",
+    "a tiny absurd mini-story about what the room is doing",
+    "a reaction to the recent balls or uneven B-I-N-G-O letter distribution",
+    "mock suspense or a fake dramatic prediction that NEVER names a future ball",
+    "a mildly dark but harmless joke about the long game or bad luck",
+    "an innocent green-minded double meaning that stays suggestive, never explicit",
+    "one completely straight call followed by a dry unexpected aside",
+  ];
+  const humorMode = humorModes[(n + count + game.announcerGameNumber) % humorModes.length];
   const modeInstruction = !commentary
     ? (count % 3 === 0
         ? `Give one quick caller variation such as “Next ball—${letter}-${n}!” or “Sa letrang ${letter}… ${letter}-${n}!” You may add at most three neutral words like “check your cards, mga mare.”`
         : `Announce only “${letter}-${n}” or “Sa letrang ${letter}… ${letter}-${n}.” No joke or commentary.`)
-    : forcedNumberMeme
+    : progressComment
+      ? `After clearly announcing ${letter}-${n}, dramatically but truthfully say ${context.selectedProgress.name}'s card now has only ${context.selectedProgress.away === 1 ? "one uncalled number" : "two uncalled numbers"} left for ${game.rule === "blackout" ? "Blackout" : "a line"}. ` +
+        "Do not reveal which number they need, do not imply their manual marks are complete, and do not tell them to claim yet."
+      : forcedNumberMeme
       ? `After clearly announcing ${letter}-${n}, add one short current-feeling Filipino number-meme line. Required angle: ${forcedNumberMeme}`
       : roster.length
         ? `After clearly announcing ${letter}-${n}, make one quick playful roast about this joined player's visible avatar gear or pet. Keep profanity rare and mild.`
-        : lateBlackout
-          ? `After clearly announcing ${letter}-${n}, add one increasingly dramatic Blackout comment. This is call ${count} of 75 in game ${game.announcerGameNumber} today. Joke about how long Blackout takes, dinner, emails, or everyone becoming tense; do not claim exact private card progress.`
-          : `After clearly announcing ${letter}-${n}, add one fresh Filipino/Taglish office-Bingo comment. This is call ${count} of 75 in game ${game.announcerGameNumber} today. Rotate naturally among work, email, repeated games, card confusion, and “mga mare” humor.`;
+        : `After clearly announcing ${letter}-${n}, improvise one fresh ${humorMode}. Match the ${context.stage} stage: opening is relaxed, middle is more energetic, late is dramatic, and endgame can go full game-show.`;
   const controller = new AbortController();
   game.announcerControllers.add(controller);
   bingoAnnouncerGlobalInFlight++;
@@ -453,7 +550,8 @@ async function bingoAnnouncerGenerate(game, n, count) {
           {
             role: "system",
             content:
-              "You are a lively Filipino barkada Bingo caller with fast comic timing, expressive energy, and a bright animated delivery. " +
+              "You are a veteran Filipino barangay-style Bingo emcee: loud, playful, witty, spontaneous, slightly chaotic, and dramatically invested for no reason. " +
+              "The vibe is a funny birthday-party caller who somehow always knows the game, not an AI reading a joke database. " +
               "Do not use an unnaturally deep, slow, gravelly, or movie-trailer voice. Do not imitate or mention any real comedian. " +
               "Do not name or reference real celebrities, influencers, politicians, or other public figures. " +
               "The letter and number are always the priority. Most calls must be short and immediately move on; only scheduled commentary calls get a joke. " +
@@ -461,13 +559,18 @@ async function bingoAnnouncerGenerate(game, n, count) {
               "Avoid formal Filipino, direct English-to-Tagalog translations, corporate wording, and phrases no Filipino would naturally say. " +
               "Prefer everyday expressions such as “ano ba ’yan,” “tantanan mo,” “huwag atat,” “baon,” and “bukas ka na tatama” when they fit. " +
               "Commentary should be primarily natural Tagalog/Taglish, never a long English sentence. A brief genuine laugh or chuckle is welcome on funny moments, but not every call. " +
-              "You may roast a joined player by display name, but ONLY about the visible game-avatar gear provided in the roster. " +
+              "Vary structure unpredictably: sometimes just the ball, sometimes a short joke, dry aside, mini-story, player reaction, suspense, or game-state observation. " +
+              "Occasional mild sarcasm, harmless dark humor, and innocent double meaning are allowed; never make them constant or explicit. " +
+              "You may roast a joined player by display name, but ONLY about verified game behavior, verified proximity supplied below, or visible game-avatar gear. " +
               "Never joke about a real person's body, face, age, identity, ability, or other real-life appearance. " +
               "Keep profanity rare and mild; never force it into ordinary calls. " +
               "Never use threats, sexual insults, protected-trait slurs, discriminatory language, or attacks unrelated to the avatar. " +
-              "Avoid pageant, tita, teleserye, gossip, lunch, meeting, boss, and overtime clichés. " +
+              "Avoid repetitive pageant, tita, teleserye, gossip, lunch, meeting, boss, and overtime clichés. " +
               "For roasts, use concrete comparisons rather than long setups. Do not explain the joke or sound motivational. " +
-              "Never claim someone is close to winning because you are not given private card progress. " +
+              "Never reveal card contents or a missing number. Only claim a player is close when VERIFIED PROXIMITY explicitly says so. " +
+              "Never predict a future ball, call any ball the final draw, or declare a winner before a verified claim. " +
+              "Use game context silently; never recite metadata such as call counts, elapsed seconds, letter-count JSON, or the word “verified.” " +
+              "Do not awkwardly translate or restate the number after its clear letter-number call unless the wordplay genuinely needs it. " +
               "Output only the one line you will speak—no labels, stage directions, quotation marks, or explanation.",
           },
           {
@@ -482,6 +585,10 @@ async function bingoAnnouncerGenerate(game, n, count) {
               (avatarComment
                 ? `Joined avatar roster (display name and visible game gear only):\n${roster.join("\n") || "(no human avatar gear available)"}\n`
                 : "") +
+              `VERIFIED GAME CONTEXT (presentation only; never expose hidden card details):\n` +
+              `stage=${context.stage}; elapsed≈${context.elapsedSeconds}s; human players=${context.playerCount}; recent balls=${context.recentBalls.join(", ") || "none"}; ` +
+              `letter counts=${JSON.stringify(context.distribution)}; false claims=${context.falseClaims.join(", ") || "none"}; ` +
+              `VERIFIED PROXIMITY=${context.selectedProgress ? `${context.selectedProgress.name} is ${context.selectedProgress.away} uncalled number(s) from the win condition after ${letter}-${n}` : "none"}.\n` +
               `Do not repeat these recent lines:\n${recent || "(none yet)"}`,
           },
         ],
@@ -492,13 +599,14 @@ async function bingoAnnouncerGenerate(game, n, count) {
     if (audioBytes < 1_000 || audioBytes > BINGO_ANNOUNCER_MAX_BYTES) {
       throw new Error(`Bingo announcer clip size ${audioBytes} is outside limits`);
     }
-    const transcript = String(audio.transcript || `${letter}-${n}`).trim().slice(0, 300);
+    const transcript = String(audio.transcript || "").trim().slice(0, 300);
+    if (!transcript) throw new Error("Bingo announcer returned audio without a transcript");
     if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n)) {
       throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}`);
     }
-    bingoAnnouncerRecent.push(transcript);
-    if (bingoAnnouncerRecent.length > 240) bingoAnnouncerRecent.splice(0, bingoAnnouncerRecent.length - 240);
-    return { audioData: audio.data, line: transcript, reusable: !commentary };
+    game.announcerRecent.push(transcript);
+    if (game.announcerRecent.length > 120) game.announcerRecent.splice(0, game.announcerRecent.length - 120);
+    return { audioData: audio.data, line: transcript };
   } catch (err) {
     if (!controller.signal.aborted || bingo === game) {
       console.error(`Bingo announcer failed for ${letter}-${n}:`, err?.message || err);
@@ -526,8 +634,20 @@ function bingoAnnouncerEmitMoment(gameId, emails, clip) {
     }
   }
 }
-async function bingoAnnouncerGenerateMoment({ gameId, emails, instruction, guard }) {
-  if (!BINGO_ANNOUNCER_ENABLED || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) return;
+async function bingoAnnouncerGenerateMoment({ gameId, emails, instruction, guard, policy = {}, priorityGame = null }) {
+  if (!BINGO_ANNOUNCER_ENABLED) return;
+  // Important reactions outrank one future ordinary call. Abort at most one
+  // prefetch, then yield briefly for its finally block to release the global
+  // slot. This function is always fire-and-forget, so gameplay never waits.
+  if (bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH && priorityGame?.announcerControllers?.size) {
+    priorityGame.announcerControllers.values().next().value?.abort();
+  }
+  const slotDeadline = Date.now() + 1_500;
+  while (bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH && Date.now() < slotDeadline) {
+    if (guard && !guard()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH || (guard && !guard())) return;
   if (!bingoAnnouncerClaimBudget()) return;
   const controller = new AbortController();
   bingoAnnouncerGlobalInFlight++;
@@ -553,11 +673,22 @@ async function bingoAnnouncerGenerateMoment({ gameId, emails, instruction, guard
       ],
     }, { signal: controller.signal });
     const audio = rsp.choices?.[0]?.message?.audio;
-    if (!audio?.data) return;
+    if (!audio?.data) throw new Error("Bingo announcer moment returned no audio");
     const audioBytes = Buffer.byteLength(audio.data, "base64");
-    if (audioBytes < 1_000 || audioBytes > BINGO_ANNOUNCER_MAX_BYTES) return;
+    if (audioBytes < 1_000 || audioBytes > BINGO_ANNOUNCER_MAX_BYTES) {
+      throw new Error(`Bingo announcer moment clip size ${audioBytes} is outside limits`);
+    }
     const line = String(audio.transcript || "").trim().slice(0, 300);
-    if (!line || (guard && !guard())) return;
+    if (!line) throw new Error("Bingo announcer moment returned no transcript");
+    if (guard && !guard()) return;
+    if (policy.forbidBalls && bingoAnnouncerTranscriptHasBall(line)) throw new Error("Bingo announcer moment mentioned a ball");
+    if (policy.requiredName && !bingoAnnouncerNameAppears(line, policy.requiredName)) throw new Error("Bingo announcer moment omitted the required player name");
+    if (policy.kind === "false-claim" && !/(?:BINGO\s+RAW|FALSE\s+BINGO|HINDI\s+PA|WALA\s+PA)/i.test(line)) {
+      throw new Error("Bingo announcer false-claim moment omitted the false-claim cue");
+    }
+    if (policy.kind === "winner" && !/(?:CONFIRMED|NANALO|WINNER|BINGO)/i.test(line)) {
+      throw new Error("Bingo announcer winner moment omitted the winner cue");
+    }
     bingoAnnouncerEmitMoment(gameId, emails, { audioData: audio.data, line });
   } catch (err) {
     if (!controller.signal.aborted) console.error("Bingo announcer moment failed:", err?.message || err);
@@ -569,7 +700,7 @@ async function bingoAnnouncerGenerateMoment({ gameId, emails, instruction, guard
 function bingoAnnouncerPrepare(game) {
   if (!BINGO_ANNOUNCER_ENABLED || !game?.announcerClips) return;
   for (const [i, n] of game.pool.slice(0, BINGO_ANNOUNCER_PREFETCH).entries()) {
-    if (game.announcerInFlight >= BINGO_ANNOUNCER_PREFETCH || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_PREFETCH) break;
+    if (game.announcerInFlight >= BINGO_ANNOUNCER_CALL_CONCURRENCY || bingoAnnouncerGlobalInFlight >= BINGO_ANNOUNCER_CALL_CONCURRENCY) break;
     if (game.announcerClips.has(n)) continue;
     const count = game.called.length + i + 1;
     const record = { status: "pending", clip: null };
@@ -578,8 +709,6 @@ function bingoAnnouncerPrepare(game) {
     bingoAnnouncerGenerate(game, n, count).then((clip) => {
       record.status = "ready";
       record.clip = clip;
-      // Never reuse a named/avatar-specific roast in a later game.
-      if (clip?.reusable) bingoAnnouncerCore.set(n, clip);
     }).finally(() => {
       game.announcerInFlight = Math.max(0, game.announcerInFlight - 1);
       if (bingo === game) bingoAnnouncerPrepare(game);
@@ -588,7 +717,7 @@ function bingoAnnouncerPrepare(game) {
 }
 function bingoAnnouncerTakeReady(game, n) {
   const record = game?.announcerClips?.get(n);
-  return (record?.status === "ready" && record.clip) ? record.clip : (bingoAnnouncerCore.get(n) || null);
+  return (record?.status === "ready" && record.clip) ? record.clip : null;
 }
 function makeBingoCard() {
   // Column-ranged like real bingo: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75.
@@ -699,6 +828,7 @@ function bingoBegin() {
     return;
   }
   bingo.state = "active";
+  bingo.startedAt = Date.now();
   io.emit("bingoStart", { gameId: bingo.id, playerCount: bingo.players.size, prize: bingo.prize, mode: bingo.mode, rule: bingo.rule, names: [...bingo.players.values()].map((v) => v.name) });
   console.log(`BINGO active: ${bingo.players.size} players (${bingo.mode} calling)`);
   bingoSetMode(bingo.mode);
@@ -8212,6 +8342,8 @@ io.on("connection", (socket) => {
       announcerCommentaryCalls: bingoAnnouncerCommentaryCalls(announcerGameNumber),
       announcerLastFalseClaimAt: 0,
       announcerFalseClaims: new Map(),
+      announcerRecent: [],
+      startedAt: null,
       joinDeadline: Date.now() + BINGO_JOIN_MS,
       joinTimer: setTimeout(bingoBegin, BINGO_JOIN_MS),
       announcerPrefetchTimer: setTimeout(() => {
@@ -8309,6 +8441,12 @@ io.on("connection", (socket) => {
           gameId: game.id,
           emails: bingoAnnouncerJoinedEmails(game),
           guard: () => bingo === game,
+          priorityGame: game,
+          policy: {
+            kind: "false-claim",
+            forbidBalls: true,
+            requiredName: repeatOffender ? bp.name : null,
+          },
           instruction: repeatOffender
             ? `Player display name “${String(bp.name).slice(0, 40)}” has now pressed the Bingo button ${falseClaims} times without a valid ${game.rule === "blackout" ? "Blackout" : "line"}. ` +
               "Call them out by name in very natural conversational Tagalog. Target style: “Lysha, tantanan mo kaka-pindot sa Bingo button. Bukas ka na tatama!” " +
@@ -8323,7 +8461,7 @@ io.on("connection", (socket) => {
     // racing second claim loses. Capture what we need, then pay, THEN announce
     // — the announcement must reflect what actually happened in the DB, and it
     // carries the gameId so it can never clobber a newer game's UI.
-    const { prize, id: gameId, announcerGameNumber } = bingo;
+    const { prize, id: gameId } = bingo;
     const winnerName = bp.name;
     const announcerEmails = bingoAnnouncerJoinedEmails(bingo);
     bingoStop();
@@ -8347,11 +8485,12 @@ io.on("connection", (socket) => {
       void bingoAnnouncerGenerateMoment({
         gameId,
         emails: announcerEmails,
+        policy: { kind: "winner", forbidBalls: true, requiredName: winnerName },
         instruction:
-          `Announce a VERIFIED ${line} Bingo winner named “${String(winnerName).slice(0, 40)}” in game ${announcerGameNumber} today. ` +
+          `Announce the verified Bingo winner named “${String(winnerName).slice(0, 40)}”. ` +
           "Open with “Confirmed! Hindi fake news!” then name the winner and celebrate them in one natural, lively Taglish radio-DJ line under 9 seconds. " +
           "Add one short delighted laugh; avoid formal or translated-sounding Filipino. " +
-          "Do not mention the prize amount and do not announce a ball.",
+          "Do not recite the game number, line/round metadata, or prize amount, and do not announce a ball.",
       });
       console.log(`BINGO winner: ${winnerName} +${prize} (${line})`);
     } else {
