@@ -373,10 +373,16 @@ function bingoAnnouncerClaimBudget() {
   bingoAnnouncerGeneratedToday++;
   return true;
 }
-function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
-  const text = String(transcript || "").toUpperCase().replace(/[–—−]/g, "-");
+function bingoAnnouncerEnglishNumber(n) {
+  const small = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  if (n < 20) return small[n];
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy"];
+  return `${tens[Math.floor(n / 10)]}${n % 10 ? ` ${small[n % 10]}` : ""}`;
+}
+function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n, { allowResultWords = false } = {}) {
+  const text = bingoAnnouncerNormalizeLine(transcript).toUpperCase();
   const digits = String(n).split("");
-  const spokenLetter = letter === "O" ? "(?:O|OH|OW)" : letter;
+  const spokenLetter = letter;
   const exact = new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${n}\\b`).test(text);
   const digitByDigit = digits.length === 2
     && new RegExp(`\\b${spokenLetter}[\\s\\-:,.'’]*${digits[0]}[\\s\\-:,.'’]+${digits[1]}\\b`).test(text);
@@ -394,7 +400,7 @@ function bingoAnnouncerTranscriptMatchesBall(transcript, letter, n) {
     || /\b(?:PANALO|WINNER|BINGO)\s+NA\b/.test(text)
     || /\bSI\s+[\p{L}\p{N}_'-]+\s+(?:ANG|AY)\s+(?:PANALO|WINNER|NANALO)\b/u.test(text)
     || /\bBINGO\s*!/.test(text);
-  if (falseResult) return false;
+  if (falseResult && !allowResultWords) return false;
   return true;
 }
 function bingoAnnouncerTranscriptHasBall(transcript) {
@@ -406,11 +412,25 @@ function bingoAnnouncerNameAppears(transcript, name) {
   return !!first && text.split(/\s+/).includes(first);
 }
 function bingoAnnouncerNormalizeLine(line) {
-  return String(line || "")
+  let normalized = String(line || "")
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/^(?:oh|ow)(?=\s+\d{1,2}\b)/, "o");
+  // Audio transcripts frequently spell a spoken call as "N forty three"
+  // even when Coral was given "N-43". Canonicalize only the leading,
+  // authoritative Bingo call; commentary remains exact and protected.
+  for (let n = 75; n >= 1; n--) {
+    const letter = "bingo"[Math.floor((n - 1) / 15)];
+    const spokenLetter = letter === "o" ? "(?:o|oh|ow)" : letter;
+    const words = bingoAnnouncerEnglishNumber(n).replace(/\s+/g, "\\s+");
+    const re = new RegExp(`^${spokenLetter}\\s+${words}\\b`);
+    if (re.test(normalized)) {
+      normalized = normalized.replace(re, `${letter} ${n}`);
+      break;
+    }
+  }
+  return normalized;
 }
 function bingoAnnouncerGearLabel(id) {
   return String(id || "")
@@ -553,8 +573,9 @@ async function bingoAnnouncerGenerate(game, n, count, ownerAside = null) {
     }
     const transcript = String(audio.transcript || "").trim().slice(0, 300);
     if (!transcript) throw new Error("Bingo announcer returned audio without a transcript");
-    if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n)) {
-      throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}`);
+    if (!bingoAnnouncerTranscriptMatchesBall(transcript, letter, n, { allowResultWords: !!ownerAside })) {
+      const debugTranscript = process.env.BINGO_ANNOUNCER_DEBUG_TRANSCRIPT === "1" ? `: ${JSON.stringify(transcript)}` : "";
+      throw new Error(`Bingo announcer transcript did not verify ${letter}-${n}${debugTranscript}`);
     }
     if (bingoAnnouncerNormalizeLine(transcript) !== bingoAnnouncerNormalizeLine(expectedSpokenLine)) {
       throw new Error(`Bingo announcer rewrote the curated line for ${letter}-${n}`);
@@ -8431,7 +8452,12 @@ io.on("connection", (socket) => {
     game.announcerOwnerLine = { n: next, text, status: "preparing", clip: null, version };
     socket.emit("bingoOwnerLineResult", { ok: true, message: `Preparing ${"BINGO"[Math.floor((next - 1) / 15)]}-${next}…` });
     bingoEmitOwnerNext(game);
-    void bingoAnnouncerGenerate(game, next, game.called.length + 1, text).then((clip) => {
+    void (async () => {
+      let clip = null;
+      for (let attempt = 0; attempt < 2 && !clip; attempt++) {
+        if (bingo !== game || game.announcerOwnerLine?.version !== version || game.pool[0] !== next) return;
+        clip = await bingoAnnouncerGenerate(game, next, game.called.length + 1, text);
+      }
       if (bingo !== game || game.announcerOwnerLine?.version !== version || game.pool[0] !== next) return;
       game.announcerOwnerLine.clip = clip;
       game.announcerOwnerLine.status = clip ? "ready" : "failed";
@@ -8440,7 +8466,7 @@ io.on("connection", (socket) => {
         message: clip ? `Custom line ready for ${"BINGO"[Math.floor((next - 1) / 15)]}-${next}.` : "Coral could not prepare that line. Edit it and try again.",
       });
       bingoEmitOwnerNext(game);
-    });
+    })();
   });
   // Flip auto ↔ manual mid-game (e.g. host goes AFK → let it run itself).
   socket.on("adminBingoMode", (payload) => {

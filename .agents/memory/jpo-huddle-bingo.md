@@ -27,6 +27,12 @@ The owner-host may privately preview the already-shuffled next ball during manua
 
 **How to apply:** keep previews owner/host-only, bind each prepared line to the exact next pool value, use it once, accept a matching ball prefix, and block a manual draw while that prepared line is not ready so it cannot be silently skipped.
 
+Owner-authored lines may deliberately use fake-result language such as “May tumama na” for pranks; automatic/generated lines must still reject any unverified winner claim.
+
+**Why:** the owner asked for hidden prank control, while AI-authored fake results would misrepresent authoritative game state.
+
+**How to apply:** relax only the result-word check for exact owner-provided commentary; continue validating the locked ball, rejecting rewritten text, and keeping automated draw lines under the strict result guard.
+
 Bingo host authority must survive a socket reconnect during the join countdown. Capture whether the starter was the owner in the game state and restore host UI/permissions by the authenticated player email.
 
 **Why:** admin/owner sets are socket-scoped; a brief disconnect otherwise leaves the same joined account playing without host controls even though the game still identifies that email as its host.
