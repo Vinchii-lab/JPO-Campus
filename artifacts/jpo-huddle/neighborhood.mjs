@@ -22,6 +22,33 @@ export function homeExteriorColor(value) {
     ? value
     : DEFAULT_HOME_EXTERIOR_COLOR;
 }
+
+// Server-owned component definitions. Clients may render these values, but
+// purchase requests carry only the component id and are always priced here.
+export const HOME_CONSTRUCTION_COMPONENTS = Object.freeze({
+  floor: { id: "floor", label: "Floor & foundation", price: 200 },
+  walls: { id: "walls", label: "Walls", price: 400 },
+  roof: { id: "roof", label: "Roof", price: 600 },
+});
+
+export function homeConstructionStage(home = {}) {
+  if (home.roof_built || home.roofBuilt) return "complete";
+  if (home.walls_built || home.wallsBuilt) return "walls";
+  if (home.floor_built || home.floorBuilt) return "floor";
+  return "empty";
+}
+
+export function homeConstruction(home = {}) {
+  const stage = homeConstructionStage(home);
+  return {
+    stage,
+    complete: stage === "complete",
+    floorBuilt: stage !== "empty",
+    wallsBuilt: stage === "walls" || stage === "complete",
+    roofBuilt: stage === "complete",
+    components: Object.values(HOME_CONSTRUCTION_COMPONENTS),
+  };
+}
 // Player positions are foot-centre coordinates. Both movement validation and
 // the client Arcade collider use this radius, rather than separate magic
 // margins that drift at facades and door thresholds.
@@ -67,12 +94,16 @@ export function streetDefinition(entries = []) {
       label: `${home.name || home.ownerEmail}'s home`,
     };
     return {
-      ...home, lot: slot, x, bottom, northSide, door,
+      ...home, construction: home.construction || homeConstruction(home), lot: slot, x, bottom, northSide, door,
       returnSpawn: { x, y: northSide ? bottom + 32 : bottom - 122, dir: northSide ? "down" : "up" },
       yard: Array.isArray(home.yard) ? home.yard : [],
     };
   });
-  const blockers = residenceBlockers(lots.map((lot) => [lot.x, lot.bottom]));
+  // A foundation is an outdoor lot and walls provide the first solid
+  // obstruction. A completed roof is separately required before the doorway
+  // exists, so nobody can transition into an unfinished saved interior.
+  const blockers = residenceBlockers(lots.filter((lot) => lot.construction?.wallsBuilt)
+    .map((lot) => [lot.x, lot.bottom]));
   const yardBlockers = lots.flatMap((lot) => (lot.yard || []).flatMap((placed) => {
     const item = FURNITURE_CATALOG[placed.furnitureId];
     if (!item) return [];
@@ -87,7 +118,7 @@ export function streetDefinition(entries = []) {
       furnitureId: placed.furnitureId,
     }];
   }));
-  const doors = lots.map((lot) => lot.door);
+  const doors = lots.filter((lot) => lot.construction?.complete).map((lot) => lot.door);
   const height = segmentCount * 960 + 96;
   return { bounds: { width: 1440, height }, blockers: [...blockers, ...yardBlockers], doors, lots };
 }
@@ -310,11 +341,20 @@ export function layoutBlockers(layout) {
 
 export async function ensureHome(pool, email) {
   await pool.query(
-    `INSERT INTO jpo_homes (owner_email) VALUES ($1) ON CONFLICT (owner_email) DO NOTHING`,
+    // `ON CONFLICT DO NOTHING` alone still evaluates the lot identity before
+    // discovering an existing owner, burning a durable street slot on every
+    // snapshot/access read. Avoid proposing an insert unless the row is absent;
+    // keep the conflict clause for the legitimate first-home race.
+    `INSERT INTO jpo_homes (owner_email)
+       SELECT $1
+       WHERE NOT EXISTS (SELECT 1 FROM jpo_homes WHERE owner_email=$1)
+       ON CONFLICT (owner_email) DO NOTHING`,
     [email],
   );
   const { rows } = await pool.query(
-    `SELECT owner_email, lot_index, access_mode, layout_revision, exterior_color FROM jpo_homes WHERE owner_email=$1`,
+    `SELECT owner_email, lot_index, access_mode, layout_revision, exterior_color,
+            floor_built, walls_built, roof_built, construction_updated_at
+       FROM jpo_homes WHERE owner_email=$1`,
     [email],
   );
   return rows[0] || null;
@@ -323,6 +363,7 @@ export async function ensureHome(pool, email) {
 export async function homeAccess(pool, ownerEmail, visitorEmail) {
   const home = await ensureHome(pool, ownerEmail);
   if (!home) return { ok: false, code: "not_found" };
+  if (!homeConstruction(home).complete) return { ok: false, code: "unfinished", home };
   if (ownerEmail === visitorEmail || home.access_mode === "public") return { ok: true, home };
   if (home.access_mode !== "invite_only") return { ok: false, code: "denied", home };
   const { rows } = await pool.query(
@@ -423,6 +464,13 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
     // Old home rows created before this optional column's default is applied
     // remain visually teal without needing a backfill.
     exteriorColor: homeExteriorColor(home.exterior_color),
+    construction: homeConstruction(home),
+    // Saved furniture is never discarded during construction. This count makes
+    // its dormant status explicit on the outdoor construction panel without
+    // exposing a visitor's private inventory.
+    archivedFurnitureCount: homeConstruction(home).complete || ownerEmail === viewerEmail
+      ? inventory.length + layout.length + yard.length
+      : undefined,
     canEdit: ownerEmail === viewerEmail, inventory, layout, yard, invitations,
   };
 }
@@ -436,10 +484,16 @@ export async function homeDirectory(pool, viewerEmail) {
   // street request. This is not startup DDL and gives each actual resident a
   // durable address before their first visit.
   await pool.query(`INSERT INTO jpo_homes (owner_email)
-                    SELECT email FROM jpo_players WHERE approved=true
+                    SELECT p.email
+                      FROM jpo_players p
+                     WHERE p.approved=true
+                       AND NOT EXISTS (
+                         SELECT 1 FROM jpo_homes h WHERE h.owner_email=p.email
+                       )
                     ON CONFLICT (owner_email) DO NOTHING`);
   const { rows } = await pool.query(
     `SELECT h.owner_email, h.lot_index, h.access_mode, h.exterior_color,
+            h.floor_built, h.walls_built, h.roof_built,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
        FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
        WHERE p.approved=true
@@ -469,6 +523,7 @@ export async function homeDirectory(pool, viewerEmail) {
     homes: rows.map((row) => ({
       ownerEmail: row.owner_email, lotIndex: Number(row.lot_index), name: row.name, accessMode: row.access_mode,
       exteriorColor: homeExteriorColor(row.exterior_color),
+      construction: homeConstruction(row),
       yard: yards.get(row.owner_email) || [],
     })),
     page: 0, pageSize: total, total, pageCount: 1,

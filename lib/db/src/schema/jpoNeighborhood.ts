@@ -26,6 +26,13 @@ export const jpoHomesTable = pgTable("jpo_homes", {
   // Nullable for existing rows during the publish-managed migration; callers
   // display null as the native teal starter roof.
   exteriorColor: text("exterior_color").default("teal"),
+  // Construction is deliberately component-based. Existing starter-home rows
+  // default to an empty owned lot; furniture/layout rows remain untouched and
+  // become available again after the roof is complete.
+  floorBuilt: boolean("floor_built").notNull().default(false),
+  wallsBuilt: boolean("walls_built").notNull().default(false),
+  roofBuilt: boolean("roof_built").notNull().default(false),
+  constructionUpdatedAt: timestamp("construction_updated_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("jpo_homes_lot_index_unique").on(t.lotIndex)]);

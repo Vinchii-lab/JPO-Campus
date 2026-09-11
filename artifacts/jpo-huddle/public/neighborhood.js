@@ -19,6 +19,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let editorOpen = false;
   let currentLocation = 'office';
   let directory = [];
+  let nearbyConstructionLot = null;
   let directoryRequestId = 0;
   let activeDirectoryRequestId = 0;
   // A socket result can arrive while the prior map's cosmetic fade is still
@@ -94,11 +95,58 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   })[char]);
   const isHome = () => currentLocation.startsWith('home:');
   const isResidentialBlock = () => currentLocation === 'neighborhood';
+  const ownHome = () => homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail ? homeState : null;
   const travel = (destination, options = {}) => socket.emit('locationTransition', { destination, ...options });
   const requestDirectory = () => {
     activeDirectoryRequestId = ++directoryRequestId;
     socket.emit('homeDirectoryRequest', { requestId: activeDirectoryRequestId });
   };
+  window.jpoSetConstructionLot = (lot) => {
+    const ownerEmail = lot?.ownerEmail || null;
+    if ((nearbyConstructionLot?.ownerEmail || null) === ownerEmail) return;
+    nearbyConstructionLot = lot || null;
+    if (isResidentialBlock()) renderHome();
+  };
+
+  function constructionMarkup() {
+    const owned = ownHome();
+    const listedLot = directory.find((home) => home.ownerEmail === globals()._playerEmail);
+    const construction = owned?.construction || listedLot?.construction;
+    if (!listedLot || !construction) return '';
+    const components = Array.isArray(construction.components) ? construction.components : [];
+    const states = {
+      floor: !!construction.floorBuilt,
+      walls: !!construction.wallsBuilt,
+      roof: !!construction.roofBuilt,
+    };
+    const next = components.find((component) => !states[component.id])?.id || null;
+    const nearLot = nearbyConstructionLot?.ownerEmail === listedLot.ownerEmail;
+    const stageName = construction.stage === 'complete' ? 'Complete' :
+      construction.stage === 'walls' ? 'Walls raised' :
+      construction.stage === 'floor' ? 'Foundation laid' : 'Empty lot';
+    const steps = components.map((component) => {
+      const built = states[component.id];
+      const canBuy = nearLot && component.id === next;
+      const status = built ? 'Built' : component.id === next ? 'Next' : 'Locked';
+      return '<span class="home-item construction-step ' + (built ? 'built' : '') + '">' +
+        '<span>' + escapeHtml(component.label) + ' · ' + Number(component.price).toLocaleString() +
+        ' coins <small>' + status + '</small></span>' +
+        '<button type="button" data-build="' + escapeHtml(component.id) + '"' +
+        (canBuy ? '' : ' disabled') + '>' + (built ? 'Built' : component.id === next ? 'Build' : 'In order') + '</button></span>';
+    }).join('');
+    const archive = Number(owned?.archivedFurnitureCount || 0);
+    return '<div class="home-section construction-panel">' +
+      '<small>YOUR LOT · ' + stageName + '</small>' +
+      '<small class="construction-copy">' + (nearLot
+        ? 'You are at your lot sign. Components use coins and must be built in order.'
+        : 'Walk to your own lot sign to unlock the next build control.') + '</small>' +
+      steps +
+      (construction.complete
+        ? '<small class="construction-complete">Roof complete — your home door is open and all saved furnishings are active.</small>'
+        : '<small class="construction-archive">Archived furnishings: ' + archive +
+          '. Existing indoor and yard items are kept, not deleted, and return when the roof is complete.</small>') +
+      '</div>';
+  }
 
   function renderHome() {
     if (!isHome() || !homeState) {
@@ -117,6 +165,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           escapeHtml(home.name || home.ownerEmail) + ' <small>(' + escapeHtml(home.accessMode) + ')</small></span>').join('') :
           '<small>No homes available yet.</small>') +
         '</div>' +
+        constructionMarkup() +
         (homeState?.canEdit
           ? '<div class="home-section"><small>Your fenced yard · choose an owned item, then click a clear square in your yard.</small>' +
             (Array.isArray(homeState.inventory) && homeState.inventory.length
@@ -151,6 +200,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           selectedZone = 'yard';
           toast('Click an open square in your fenced yard.');
           renderHome();
+        };
+      });
+      homePanel.querySelectorAll('[data-build]').forEach((button) => {
+        button.onclick = () => {
+          const componentId = button.dataset.build;
+          if (componentId && window.confirm('Build this component with coins? This is a one-time purchase.')) {
+            socket.emit('homeConstructionPurchase', { componentId });
+          }
         };
       });
       homePanel.querySelectorAll('[data-return]').forEach((button) => {
@@ -299,6 +356,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     directory = Array.isArray(payload) ? payload : (Array.isArray(payload?.homes) ? payload.homes : []);
     if (payload?.error) toast(payload.error);
     window._neighborhoodScene?.updateResidenceDirectory(directory);
+    if (isResidentialBlock()) socket.emit('homeSnapshotRequest');
     renderHome();
   });
   socket.on('homeSnapshot', (state) => {
@@ -315,6 +373,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (result?.home) homeState = result.home;
     if (result?.message) toast(result.message);
     if (isHome()) renderHome();
+  });
+  socket.on('homeConstructionResult', (result) => {
+    if (result?.home) homeState = result.home;
+    if (result?.message) toast(result.message);
+    if (isResidentialBlock()) renderHome();
   });
   socket.on('homeActionResult', (result) => {
     // A mutation always ends its placement gesture. This prevents a stale
@@ -453,9 +516,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.localCosmeticDef = this.localWingsDef = null;
       this.localSlotObjs = {};
       this.ghost = null;
+      this.portalCues = [];
       this.player = null;
       this.localNameTag = null;
       this.interactHint = null;
+      this._groundTiles = null;
+      this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
       this.keys = this.wasd = this.keyE = null;
       window._neighborhoodScene = this;
@@ -539,8 +605,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // A street with many accounts can be several map segments tall. The old
       // implementation retained thousands of Graphics commands for its ground
       // (fill, outline, and grass details per 48px cell). Bake only the
-      // repeatable five-cell palette cycle, then let one TileSprite repeat it;
-      // this is a tiny source texture, not a world-sized render texture.
+      // repeatable five-cell palette cycle. Do not make a TileSprite as large
+      // as the world: Canvas renderers allocate its backing canvas at display
+      // size, and permanent sparse lot indices can make that world very tall.
       const key = 'neighborhood-ground:' + base.toString(16) + ':' + alternate.toString(16);
       if (!this.textures.exists(key)) {
         const art = this.make.graphics({ x: 0, y: 0, add: false });
@@ -562,7 +629,53 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         art.generateTexture(key, period, period);
         art.destroy();
       }
-      return this.add.tileSprite(this.mapWidth / 2, this.mapHeight / 2, this.mapWidth, this.mapHeight, key).setDepth(0);
+      // Cover only the screen with fixed-camera pieces. Each backing canvas is
+      // capped at 1024px in either dimension, regardless of world height; the
+      // tile offset is synchronized to camera travel in update().
+      const maxCanvasSide = 1024;
+      const viewportWidth = Math.max(1, this.scale?.width || maxCanvasSide);
+      const viewportHeight = Math.max(1, this.scale?.height || 768);
+      this._groundViewport = { width: viewportWidth, height: viewportHeight, base, alternate };
+      const tiles = [];
+      for (let y = 0; y < viewportHeight; y += maxCanvasSide) {
+        for (let x = 0; x < viewportWidth; x += maxCanvasSide) {
+          const width = Math.min(maxCanvasSide, viewportWidth - x);
+          const height = Math.min(maxCanvasSide, viewportHeight - y);
+          const tile = this.add.tileSprite(x + width / 2, y + height / 2, width, height, key)
+            .setScrollFactor(0).setDepth(0);
+          tile._groundScreenX = x;
+          tile._groundScreenY = y;
+          tile._groundWidth = width;
+          tile._groundHeight = height;
+          tiles.push(tile);
+        }
+      }
+      this._groundTiles = tiles;
+      return tiles;
+    }
+
+    _syncTileField() {
+      if (!this._groundTiles?.length) return;
+      const camera = this.cameras.main;
+      const viewport = this._groundViewport;
+      if (viewport && (viewport.width !== this.scale.width || viewport.height !== this.scale.height)) {
+        this._groundTiles.forEach(tile => tile.destroy());
+        this._tileField(viewport.base, viewport.alternate);
+      }
+      const zoom = camera.zoom || 1;
+      const originX = (camera.width || this.scale.width) * (camera.originX ?? 0.5);
+      const originY = (camera.height || this.scale.height) * (camera.originY ?? 0.5);
+      this._groundTiles.forEach((tile) => {
+        // ScrollFactor(0) ignores scroll, not camera zoom. Invert that zoom
+        // around its origin so the bounded canvases cover the entire screen.
+        tile.setScale(1 / zoom);
+        tile.setPosition(
+          originX + (tile._groundScreenX + tile._groundWidth / 2 - originX) / zoom,
+          originY + (tile._groundScreenY + tile._groundHeight / 2 - originY) / zoom);
+        tile.tileScaleX = tile.tileScaleY = zoom;
+        tile.tilePositionX = (camera.scrollX + originX) * zoom + tile._groundScreenX - originX;
+        tile.tilePositionY = (camera.scrollY + originY) * zoom + tile._groundScreenY - originY;
+      });
     }
 
     _streetYardKey(yard) {
@@ -591,11 +704,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
     }
 
-    _roadDetails(horizontal, vertical, crosswalks = []) {
+    _roadDetails(horizontal, vertical, crosswalks = [], rangeStart = 0, rangeEnd = this.mapHeight) {
       const marks = this.add.graphics().setDepth(1.5);
       marks.lineStyle(3, 0xf5e7a8, 0.7);
       if (horizontal) for (let x = 24; x < this.mapWidth - 24; x += 56) marks.lineBetween(x, horizontal, x + 28, horizontal);
-      if (vertical) for (let y = 24; y < this.mapHeight - 24; y += 56) marks.lineBetween(vertical, y, vertical, y + 28);
+      if (vertical) for (let y = rangeStart + 24; y < rangeEnd - 24; y += 56) marks.lineBetween(vertical, y, vertical, y + 28);
       marks.fillStyle(0xf8f2d1, 0.75);
       for (const { x, y, vertical: isVertical } of crosswalks) {
         for (let n = -3; n <= 3; n++) {
@@ -603,6 +716,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           else marks.fillRect(x - 18, y + n * 10 - 3, 36, 6);
         }
       }
+      return marks;
     }
 
     _path(rect, fill = 0xd8ccb3, border = 0x9b927e) {
@@ -613,6 +727,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         art.lineStyle(1, border, 0.26).lineBetween(x, rect.y, x, rect.y + rect.height);
       for (let y = rect.y + 24; y < rect.y + rect.height; y += 48)
         art.lineStyle(1, border, 0.26).lineBetween(rect.x, y, rect.x + rect.width, y);
+      return art;
     }
 
     _exterior(kind, x, y, scale = 2, _depth = 4, exteriorColor = null) {
@@ -633,33 +748,105 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _drawNeighborhood() {
       this._tileField(0x77a45f, 0x6f9b59);
       const lots = Array.isArray(this.info.streetLots) ? this.info.streetLots : [];
-      const segments = Math.max(1, Math.ceil(lots.length / 8));
-      for (let segment = 0; segment < segments; segment++) {
-        const base = segment * 960;
-        this._path({ x: 0, y: base + 432, width: this.mapWidth, height: 144 }, 0x55616a, 0x3f4950);
-        this._path({ x: 0, y: base + 408, width: this.mapWidth, height: 24 }, 0xd8ccb3);
-        this._path({ x: 0, y: base + 576, width: this.mapWidth, height: 24 }, 0xd8ccb3);
-        this._path({ x: 552, y: base, width: 48, height: 432 });
-        this._path({ x: 552, y: base + 576, width: 48, height: 384 });
-        this._roadDetails(base + 504, 576, [{ x: 540, y: base + 420 }, { x: 612, y: base + 588 }]);
-        [[90, base + 228], [1090, base + 228], [90, base + 760], [1090, base + 760]]
-          .forEach(([x, y]) => this._exterior('tree', x, y));
-        [[270, base + 420], [486, base + 420], [810, base + 420], [1110, base + 420],
-          [270, base + 600], [486, base + 600], [810, base + 600], [1110, base + 600]]
-          .forEach(([x, y]) => this._exterior('lamp', x, y, 2));
-      }
+      // `lot` values are durable and therefore sparse after deleted test or
+      // former accounts. Bounds come from the server's highest canonical lot,
+      // not the number of directory entries.
+      this.streetSegmentCount = Math.max(1, Math.ceil(Math.max(0, this.mapHeight - 96) / 960));
+      this._streetScenerySegments = new Map();
+      this._syncStreetScenery();
       this.streetLotsVisual = [];
       lots.forEach((lot) => {
         this._path({ x: lot.x - 36, y: lot.northSide ? lot.bottom - 90 : lot.bottom - 236,
           width: 72, height: lot.northSide ? 198 : 246 });
-        const house = this._exterior('house', lot.x, lot.bottom, 2, 4, lot.exteriorColor || 'teal');
-        const sign = this._sign(lot.x, lot.bottom - 102, 'LOT ' + lot.lot + '\n' + String(lot.name || lot.ownerEmail).slice(0, 24));
+        const stage = lot.construction?.stage || 'empty';
+        const structure = this._drawResidenceStage(lot);
+        const sign = this._sign(lot.x, lot.bottom - 102, this._residenceSignText(lot));
         this.streetLotsVisual.push({
-          lot, house, sign, color: lot.exteriorColor || 'teal',
+          lot, structure, sign, stage, color: lot.exteriorColor || 'teal',
           yardKey: this._streetYardKey(lot.yard), yard: this._drawStreetYard(lot),
         });
       });
       this._sign(720, 72, 'WILLOW WALK · ONE SHARED STREET');
+    }
+
+    _drawStreetSegment(segment) {
+      const base = segment * 960;
+      const objects = [
+        this._path({ x: 0, y: base + 432, width: this.mapWidth, height: 144 }, 0x55616a, 0x3f4950),
+        this._path({ x: 0, y: base + 408, width: this.mapWidth, height: 24 }, 0xd8ccb3),
+        this._path({ x: 0, y: base + 576, width: this.mapWidth, height: 24 }, 0xd8ccb3),
+        this._path({ x: 552, y: base, width: 48, height: 432 }),
+        this._path({ x: 552, y: base + 576, width: 48, height: 384 }),
+        this._roadDetails(base + 504, 576, [{ x: 540, y: base + 420 }, { x: 612, y: base + 588 }], base, base + 960),
+      ];
+      [[90, base + 228], [1090, base + 228], [90, base + 760], [1090, base + 760]]
+        .forEach(([x, y]) => objects.push(this._exterior('tree', x, y)));
+      [[270, base + 420], [486, base + 420], [810, base + 420], [1110, base + 420],
+        [270, base + 600], [486, base + 600], [810, base + 600], [1110, base + 600]]
+        .forEach(([x, y]) => objects.push(this._exterior('lamp', x, y, 2)));
+      return objects;
+    }
+
+    _syncStreetScenery() {
+      if (!this._streetScenerySegments || !this.streetSegmentCount) return;
+      const camera = this.cameras.main;
+      const top = camera.worldView?.top ?? camera.scrollY ?? 0;
+      const bottom = camera.worldView?.bottom ?? (top + (this.scale?.height || 768) / (camera.zoom || 1));
+      // One segment of prefetch on either side avoids an exposed road edge
+      // during camera motion, while bounding scenery objects as the street
+      // grows from sparse, permanent lot indices.
+      const first = Math.max(0, Math.floor(top / 960) - 1);
+      const last = Math.min(this.streetSegmentCount - 1, Math.floor(bottom / 960) + 1);
+      const wanted = new Set();
+      for (let segment = first; segment <= last; segment++) wanted.add(segment);
+      this._streetScenerySegments.forEach((objects, segment) => {
+        if (wanted.has(segment)) return;
+        objects.forEach((object) => object?.destroy?.());
+        this._streetScenerySegments.delete(segment);
+      });
+      wanted.forEach((segment) => {
+        if (!this._streetScenerySegments.has(segment)) {
+          this._streetScenerySegments.set(segment, this._drawStreetSegment(segment));
+        }
+      });
+    }
+
+    _residenceSignText(lot) {
+      const stage = lot.construction?.stage || 'empty';
+      const label = stage === 'complete' ? 'HOME' : stage === 'walls' ? 'WALLS' :
+        stage === 'floor' ? 'FOUNDATION' : 'EMPTY LOT';
+      return 'LOT ' + lot.lot + ' · ' + label + '\n' + String(lot.name || lot.ownerEmail).slice(0, 24);
+    }
+
+    _drawResidenceStage(lot) {
+      const stage = lot.construction?.stage || 'empty';
+      const objects = [];
+      const left = lot.x - 96;
+      const top = lot.bottom - 192;
+      // The lot marker makes the empty owned plot explicit without introducing
+      // a flattened house image. Foundation and wall phases use the supplied
+      // native 16×16 room tiles at the same integer scale as interiors.
+      const marker = this.add.graphics().setDepth(lot.bottom - 3);
+      marker.lineStyle(2, stage === 'empty' ? 0xd7c18e : 0x725542, 0.9)
+        .strokeRect(left, lot.bottom - 144, 192, 144);
+      if (stage === 'empty') {
+        marker.fillStyle(0x6d9855, 0.25).fillRect(left, lot.bottom - 144, 192, 144);
+        objects.push(marker);
+        return objects;
+      }
+      for (let row = 0; row < 3; row++) for (let col = 0; col < 4; col++) {
+        objects.push(this.add.image(left + 24 + col * 48, lot.bottom - 120 + row * 48, 'int_home_floor')
+          .setScale(INTERIOR_ART_SCALE).setDepth(lot.bottom - 2));
+      }
+      objects.push(marker);
+      if (stage === 'floor') return objects;
+      for (let row = 0; row < 2; row++) for (let col = 0; col < 4; col++) {
+        objects.push(this.add.image(left + 24 + col * 48, top + 24 + row * 48, 'int_home_wall')
+          .setScale(INTERIOR_ART_SCALE).setDepth(top + 96 + row));
+      }
+      if (stage === 'walls') return objects;
+      objects.forEach((object) => object.destroy());
+      return [this._exterior('house', lot.x, lot.bottom, 2, 4, lot.exteriorColor || 'teal')];
     }
 
     _drawStreetYard(lot) {
@@ -719,15 +906,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const homes = Array.isArray(entries) ? entries : [];
       const homesByOwner = new Map(homes.map((home) => [home.ownerEmail, home]));
       let yardChanged = false;
+      let stageChanged = false;
       this.streetLotsVisual.forEach((visual) => {
         const current = homesByOwner.get(visual.lot.ownerEmail);
         if (!current || current.ownerEmail !== visual.lot.ownerEmail) return;
         const color = current.exteriorColor || 'teal';
-        if (visual.color !== color) {
-          window.jpoHouseColors?.applyHomeColor(visual.house, color);
+        const stage = current.construction?.stage || 'empty';
+        if (visual.stage !== stage || (stage === 'complete' && visual.color !== color)) {
+          visual.structure?.forEach((object) => object.destroy());
+          visual.structure = this._drawResidenceStage({ ...visual.lot, ...current });
+          stageChanged = stageChanged || visual.stage !== stage;
+          visual.stage = stage;
           visual.color = color;
         }
-        const signText = 'LOT ' + visual.lot.lot + '\n' + String(current.name || current.ownerEmail).slice(0, 24);
+        const signText = this._residenceSignText({ ...visual.lot, ...current });
         if (visual.sign?.text !== signText) visual.sign?.setText(signText);
         const yardKey = this._streetYardKey(current.yard);
         if (visual.yardKey !== yardKey) {
@@ -738,11 +930,22 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         }
         visual.lot = { ...visual.lot, ...current };
       });
+      this.info.streetLots = this.streetLotsVisual.map((visual) => visual.lot);
       // Rebuild only from the updated authoritative lot data. This keeps
       // client Arcade collision aligned with the server's street snapshot
       // after an owner places or stores an outdoor item.
-      if (yardChanged && this._yardBlocks && this.info.geometry) {
-        const fixed = (this.info.geometry.blockers || []).filter((block) => !block.furnitureId);
+      if ((yardChanged || stageChanged) && this._yardBlocks && this.info.geometry) {
+        // This mirrors the compact authoritative facade geometry. Rebuilding is
+        // limited to an actual yard or construction-stage update, never a move.
+        const fixed = this.streetLotsVisual.filter((visual) => visual.stage === 'walls' || visual.stage === 'complete')
+          .flatMap((visual) => {
+            const { x, bottom } = visual.lot;
+            return [
+              { x: x - 112, y: bottom - 234, width: 224, height: 145 },
+              { x: x - 112, y: bottom - 89, width: 76, height: 90 },
+              { x: x + 36, y: bottom - 89, width: 76, height: 90 },
+            ];
+          });
         const yardBlocks = this.streetLotsVisual.flatMap((visual) => (visual.lot.yard || []).flatMap((placed) => {
           const def = furnitureCatalog[placed.furnitureId];
           if (!def) return [];
@@ -754,6 +957,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           }];
         }));
         this.info.geometry.blockers = [...fixed, ...yardBlocks];
+        if (stageChanged && this._geometryBlocks) {
+          this._geometryBlocks.clear(true, true);
+          fixed.forEach((block) => this._addBlock(this._geometryBlocks, block));
+          this.doors = this.streetLotsVisual
+            .filter((visual) => visual.stage === 'complete')
+            .map((visual) => visual.lot.door);
+          this.portalCues?.forEach((object) => object.destroy());
+          this.portalCues = [];
+          this._drawPortalCues();
+        }
         this._yardBlocks.clear(true, true);
         yardBlocks.forEach((block) => this._addBlock(this._yardBlocks, block));
       }
@@ -799,9 +1012,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' : portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
-        this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
+        const text = this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
         }).setOrigin(0.5, 1).setDepth(2000);
+        this.portalCues?.push(cue, text);
       }
     }
 
@@ -1162,6 +1376,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     update(_time, delta) {
       if (!this.player) return;
+      this._syncTileField();
+      this._syncStreetScenery();
+      if (this.location === 'neighborhood') {
+        const ownLot = (this.info.streetLots || []).find((lot) => lot.ownerEmail === globals()._playerEmail);
+        const near = ownLot && Math.hypot(this.player.x - ownLot.returnSpawn.x, this.player.y - ownLot.returnSpawn.y) <= 180
+          ? ownLot : null;
+        if ((this._constructionLotOwner || null) !== (near?.ownerEmail || null)) {
+          this._constructionLotOwner = near?.ownerEmail || null;
+          window.jpoSetConstructionLot?.(near);
+        }
+      } else if (this._constructionLotOwner) {
+        this._constructionLotOwner = null;
+        window.jpoSetConstructionLot?.(null);
+      }
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
       const { SPEED, touchMove = {} } = globals();
       const left = !typing && (this.keys.left.isDown || this.wasd.left.isDown || touchMove.left);
@@ -1231,7 +1459,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         return this.player.x >= inner.left && this.player.x <= inner.right &&
           this.player.y >= inner.top && this.player.y <= inner.bottom;
       });
+      const unfinishedLot = this.location === 'neighborhood' && (this.info.streetLots || []).find((lot) =>
+        !lot.construction?.complete &&
+        Math.hypot(this.player.x - lot.returnSpawn.x, this.player.y - lot.returnSpawn.y) <= 105,
+      );
       if (door) this.interactHint.setText('Walking through…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (unfinishedLot) this.interactHint.setText(unfinishedLot.ownerEmail === globals()._playerEmail
+        ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
+        .setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this.sitting) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (seat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else this.interactHint.setVisible(false);
@@ -1294,6 +1529,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._resetTransientTravel();
       this._removePlacementInput();
       this._clearGhost();
+      this.portalCues?.forEach((object) => object.destroy());
+      this.portalCues = [];
+      window.jpoSetConstructionLot?.(null);
       this._clearLocalPresentation();
       Object.keys(this.remotes).forEach((id) => this._removeRemote(id));
       this.remotes = {};
@@ -1303,6 +1541,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.player = null;
       this.localNameTag = null;
       this.interactHint = null;
+      this._groundTiles = null;
+      this._streetScenerySegments?.forEach((objects) => objects.forEach((object) => object?.destroy?.()));
+      this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
       this.keys = this.wasd = this.keyE = null;
       if (window._neighborhoodScene === this) window._neighborhoodScene = null;

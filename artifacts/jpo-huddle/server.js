@@ -15,6 +15,7 @@ import {
 } from "./grand-event-rules.mjs";
 import {
   ACTOR_FOOT_RADIUS,
+  HOME_CONSTRUCTION_COMPONENTS,
   HOME_EXTERIOR_COLORS,
   FURNITURE_CATALOG,
   LOCATION_GEOMETRY,
@@ -9279,7 +9280,9 @@ io.on("connection", (socket) => {
         if (!access.ok) {
           socket.emit("locationTransitionResult", {
             ok: false, code: access.code || "denied",
-            message: access.code === "not_found" ? "This home no longer exists." : "This home is not open to visitors.",
+            message: access.code === "not_found" ? "This home no longer exists."
+              : access.code === "unfinished" ? "This lot is still under construction. Build the roof before entering."
+              : "This home is not open to visitors.",
           });
           return false;
         }
@@ -9342,11 +9345,15 @@ io.on("connection", (socket) => {
 
   socket.on("homeSnapshotRequest", async () => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
-    if (!p?.email || parsed?.kind !== "home") return;
+    if (!p?.email || (!parsed || (parsed.kind !== "home" && parsed.id !== "neighborhood"))) return;
     try {
-      const snapshot = await withHomeOperation(parsed.ownerEmail, async () => {
-        const access = await homeAccess(pool, parsed.ownerEmail, p.email);
-        return access.ok ? homeSnapshot(pool, parsed.ownerEmail, p.email) : null;
+      // The owner's outdoor panel needs its construction/archive state too.
+      // No other home's snapshot is ever disclosed while on the shared street.
+      const ownerEmail = parsed.id === "neighborhood" ? p.email : parsed.ownerEmail;
+      const snapshot = await withHomeOperation(ownerEmail, async () => {
+        if (parsed.id === "neighborhood") return homeSnapshot(pool, ownerEmail, p.email);
+        const access = await homeAccess(pool, ownerEmail, p.email);
+        return access.ok ? homeSnapshot(pool, ownerEmail, p.email) : null;
       });
       if (players[socket.id] === p && locationOf(p) === parsed.id && snapshot) socket.emit("homeSnapshot", snapshot);
     }
@@ -9370,6 +9377,102 @@ io.on("connection", (socket) => {
         homes: [], page: 0, pageCount: 1, total: 0, error: "Could not load the home directory.",
         ...(responseRequestId === undefined ? {} : { requestId: responseRequestId }),
       });
+    }
+  });
+
+  socket.on("homeConstructionPurchase", async (payload) => {
+    const p = players[socket.id];
+    const componentId = typeof payload?.componentId === "string" ? payload.componentId : "";
+    const component = HOME_CONSTRUCTION_COMPONENTS[componentId];
+    if (!p?.email || locationOf(p) !== "neighborhood" || !component || !takeToken(buyBucket)) return;
+    if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
+      socket.emit("homeConstructionResult", { ok: false, code: "busy", message: "Finish your current activity before building." });
+      return;
+    }
+    try {
+      await refreshStreetHomes();
+      const lot = streetLotForOwner(streetHomes, p.email);
+      // The interaction point comes from the owner's current canonical lot,
+      // never a browser-provided owner id or a fixed "my home" entrance.
+      if (!lot || Math.hypot(p.x - lot.returnSpawn.x, p.y - lot.returnSpawn.y) > 180) {
+        socket.emit("homeConstructionResult", {
+          ok: false, code: "distance", message: "Walk up to your own lot sign to build.",
+        });
+        return;
+      }
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await ensureHome(client, p.email);
+        const { rows } = await client.query(
+          `SELECT floor_built, walls_built, roof_built FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`,
+          [p.email],
+        );
+        const home = rows[0];
+        const ordered = [
+          ["floor", "floor_built"],
+          ["walls", "walls_built"],
+          ["roof", "roof_built"],
+        ];
+        const next = ordered.find(([, column]) => !home?.[column]);
+        if (!next || componentId !== next[0]) {
+          await client.query("ROLLBACK");
+          socket.emit("homeConstructionResult", {
+            ok: false, code: next ? "out_of_order" : "complete",
+            message: next
+              ? `Build ${HOME_CONSTRUCTION_COMPONENTS[next[0]].label} before this component.`
+              : "Your home is already complete; no coins were spent.",
+          });
+          return;
+        }
+        // This conditional debit and the locked home row make repeated clicks,
+        // concurrent sockets, and stale clients unable to buy a component twice.
+        const debit = await client.query(
+          `UPDATE jpo_players SET coins=coins-$2, updated_at=now()
+             WHERE email=$1 AND coins >= $2 RETURNING coins`,
+          [p.email, component.price],
+        );
+        if (!debit.rows[0]) {
+          await client.query("ROLLBACK");
+          socket.emit("homeConstructionResult", {
+            ok: false, code: "insufficient", message: `Not enough coins for ${component.label} (${component.price} coins).`,
+          });
+          return;
+        }
+        await client.query(
+          `UPDATE jpo_homes SET ${next[1]}=true, construction_updated_at=now(), updated_at=now() WHERE owner_email=$1`,
+          [p.email],
+        );
+        await client.query("COMMIT");
+        p.coins = debit.rows[0].coins;
+        const snapshot = await homeSnapshot(pool, p.email, p.email);
+        // Invalidate before acknowledging success: an immediate directory read
+        // (or a second tab reacting to this result) must never receive the
+        // pre-build cached street with a missing completed door.
+        invalidateStreetHomes();
+        await refreshStreetHomes();
+        socket.emit("coinUpdate", { coins: p.coins });
+        socket.emit("homeConstructionResult", {
+          ok: true, component: componentId, coins: p.coins, home: snapshot,
+          message: snapshot.construction.complete
+            ? "Roof complete — your saved interior and furnishings are available again."
+            : `${component.label} built.`,
+        });
+        socket.emit("homeSnapshot", snapshot);
+        await emitHomeSnapshotToOccupants(p.email);
+        // The immutable street snapshot was rebuilt after commit above, before
+        // the acknowledgement, so every connected resident now receives the
+        // same stage and fresh collision/door data.
+        io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error("home construction purchase failed:", err);
+      socket.emit("homeConstructionResult", { ok: false, code: "unavailable", message: "Construction could not be completed." });
     }
   });
 

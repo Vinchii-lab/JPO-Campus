@@ -26,4 +26,10 @@ The residential goal is player-built homes, not repeated finished house facades 
 
 **Why:** After seeing the shared street, the user explicitly rejected its prebuilt houses. The earlier approval of exterior art was not approval to give every player an identical completed building.
 
-**How to apply:** Establish the intended construction controls before replacing the current homes, and preserve existing ownership and purchased items during any conversion.
+**How to apply:** The user clarified that the finished house keeps the same basic design, with color customization; players buy floor, walls, roof, then furniture using coins. Do not substitute a freeform wall editor. Preserve ownership and saved furniture while unfinished interiors are unavailable.
+
+Keep street rendering bounded to the camera viewport, even with sparse permanent lot numbers. Account provisioning must not consume new identity values for homes that already exist.
+
+**Why:** Repeated conflict-only inserts exhausted thousands of lot numbers for a small population. A world-sized TileSprite then allocated an enormous backing canvas, crashing scene creation before the player existed. A small repeating source texture alone does not bound Canvas memory.
+
+**How to apply:** Filter existing rows before attempting inserts; retain concurrency conflict protection. Bound ground canvases and scenery chunks, account for camera zoom on fixed-scroll ground, and avoid full-world road-mark loops within each chunk.
