@@ -9152,7 +9152,7 @@ io.on("connection", (socket) => {
   // Transitions are the only way locationId changes.  Client scene switches
   // are presentation-only; this handler owns the room, spawn and access gate.
   let locationTransitionSequence = 0;
-  const transitionTo = async (destination, reason = null) => {
+  const transitionTo = async (destination, reason = null, residencePage = 0) => {
     const p = players[socket.id];
     const target = parseLocation(destination);
     const sequence = ++locationTransitionSequence;
@@ -9175,6 +9175,25 @@ io.on("connection", (socket) => {
     let home = null;
     try {
       if (target.kind === "home") {
+        // A residence portal is an exact visible directory slot, not a generic
+        // "open any email while standing here" permission bypass. Re-resolve
+        // the requested page on the server and require the email to match the
+        // portal's numbered lot before checking access. If a page changed in
+        // the brief interval after it was painted, reject rather than taking a
+        // visitor into a differently labelled house.
+        if (portal.residence) {
+          const page = Number.isInteger(residencePage) ? Math.max(0, Math.min(residencePage, 10_000)) : 0;
+          const directory = await homeDirectory(pool, p.email, page);
+          if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
+          const listedHome = directory.homes[(Number(portal.lot) || 1) - 1];
+          if (!listedHome || listedHome.ownerEmail !== target.ownerEmail) {
+            socket.emit("locationTransitionResult", {
+              ok: false, code: "residence_changed",
+              message: "That residence directory changed. Please use the labelled doorway again.",
+            });
+            return false;
+          }
+        }
         const access = await withHomeOperation(target.ownerEmail, async () => {
           const checked = await homeAccess(pool, target.ownerEmail, p.email);
           return checked.ok
@@ -9240,7 +9259,8 @@ io.on("connection", (socket) => {
 
   socket.on("locationTransition", (payload) => {
     const destination = typeof payload?.destination === "string" ? payload.destination : "";
-    void transitionTo(destination);
+    const residencePage = Number(payload?.residencePage);
+    void transitionTo(destination, null, Number.isInteger(residencePage) ? residencePage : 0);
   });
 
   socket.on("homeSnapshotRequest", async () => {
@@ -9260,16 +9280,22 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p?.email) return;
     const requestedPage = Number(payload?.page);
+    const requestId = Number(payload?.requestId);
+    const responseRequestId = Number.isInteger(requestId) && requestId >= 0 ? requestId : undefined;
     try {
       // A starter home belongs to every real approved account. Initialising the
       // requester's row here makes their own residence available even before
       // their first doorway visit; no names or decorative residents are made up.
       await ensureHome(pool, p.email);
-      socket.emit("homeDirectory", await homeDirectory(pool, p.email,
-        Number.isInteger(requestedPage) ? Math.max(0, Math.min(requestedPage, 10_000)) : 0));
+      const directory = await homeDirectory(pool, p.email,
+        Number.isInteger(requestedPage) ? Math.max(0, Math.min(requestedPage, 10_000)) : 0);
+      socket.emit("homeDirectory", responseRequestId === undefined ? directory : { ...directory, requestId: responseRequestId });
     } catch (err) {
       console.error("home directory failed:", err);
-      socket.emit("homeDirectory", { homes: [], page: 0, pageCount: 1, total: 0, error: "Could not load the home directory." });
+      socket.emit("homeDirectory", {
+        homes: [], page: 0, pageCount: 1, total: 0, error: "Could not load the home directory.",
+        ...(responseRequestId === undefined ? {} : { requestId: responseRequestId }),
+      });
     }
   });
 

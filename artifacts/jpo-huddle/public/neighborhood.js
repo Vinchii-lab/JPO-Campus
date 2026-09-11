@@ -20,6 +20,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let directory = [];
   let directoryPage = 0;
   let directoryMeta = { page: 0, pageCount: 1, total: 0 };
+  let directoryRequestId = 0;
+  let activeDirectoryRequestId = 0;
+  // Player sprites, interior tiles, and the verified furniture singles are
+  // authored on the same 16px grid. Keep their one shared integer scale here;
+  // exterior buildings intentionally use their separate, larger source art.
+  const INTERIOR_ART_SCALE = 3;
+  const FURNITURE_ASSET_REVISION = 'native-3x-living-room-20260827';
   // A city transition includes this server-authoritative value so the personal
   // house is colored before the owner has entered its interior this session.
   let ownExteriorColor = 'teal';
@@ -82,11 +89,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[char]);
   const isHome = () => currentLocation.startsWith('home:');
-  const isResidentialBlock = () => ['city', 'maple-row', 'juniper-square'].includes(currentLocation);
-  const travel = (destination) => socket.emit('locationTransition', { destination });
+  const isResidentialBlock = () => ['maple-row', 'juniper-square'].includes(currentLocation);
+  const travel = (destination, options = {}) => socket.emit('locationTransition', { destination, ...options });
   const requestDirectory = (page = directoryPage) => {
     directoryPage = Math.max(0, Number(page) || 0);
-    socket.emit('homeDirectoryRequest', { page: directoryPage });
+    activeDirectoryRequestId = ++directoryRequestId;
+    socket.emit('homeDirectoryRequest', { page: directoryPage, requestId: activeDirectoryRequestId });
   };
 
   function renderHome() {
@@ -217,7 +225,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       escapeHtml(item.id) + '">Buy</button></span>',
     ).join('') || '<small>The catalog is loading.</small>';
     panel.innerHTML = '<div class="home-panel-head"><b>Huddle Home · Furnishings</b><button type="button" data-close>Close</button></div>' +
-      '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, then enter your home to place it.</small>' + rows + '</div>';
+        '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to Willow Walk, then enter your townhouse to place it.</small>' + rows + '</div>';
     panel.querySelector('[data-close]').onclick = () => { panel.hidden = true; };
     panel.querySelectorAll('[data-buy]').forEach((button) => {
       button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
@@ -242,6 +250,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   requestDirectory();
   socket.on('homeDirectory', (payload) => {
+    // The exterior slots are the current page. Ignore a delayed previous-page
+    // reply rather than repainting numbered doors with a different page after
+    // the player has already changed directory blocks.
+    if (Number.isInteger(payload?.requestId) && payload.requestId !== activeDirectoryRequestId) return;
     directory = Array.isArray(payload) ? payload : (Array.isArray(payload?.homes) ? payload.homes : []);
     directoryMeta = {
       page: Number.isInteger(payload?.page) ? payload.page : directoryPage,
@@ -338,8 +350,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _stepPet(...args) { return this._office('_stepPet', ...args); }
 
     preload() {
+      // These names deliberately do not overlap the old generic `furn_*`
+      // texture keys. The URL revision is equally deliberate: furniture files
+      // were replaced in place and the server legitimately caches PNGs for a
+      // day, which otherwise left an already-open browser decoding the former
+      // oversized artwork under a new scene.
       ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase'].forEach((id) => {
-        this.load.image('furn_' + id, '/assets/neighborhood/furniture/' + id + '.png');
+        this.load.image(this._furnitureTextureKey(id), '/assets/neighborhood/furniture/' + id + '.png?v=' + FURNITURE_ASSET_REVISION);
       });
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.load.image('int_' + id, '/assets/neighborhood/' + id.replace('_', '-') + '-16.png');
@@ -358,11 +375,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // keep their own preparation path and are intentionally untouched.
       const nearest = Phaser.Textures.FilterMode.NEAREST;
       ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase'].forEach((id) => {
-        this.textures.get('furn_' + id)?.setFilter(nearest);
+        this.textures.get(this._furnitureTextureKey(id))?.setFilter(nearest);
       });
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.textures.get('int_' + id)?.setFilter(nearest);
       });
+    }
+
+    _furnitureTextureKey(id) {
+      return 'home-furniture-v2:' + id;
     }
 
     create(data) {
@@ -455,17 +476,17 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // tile occupies one 48px home cell only through integer 3× scaling.
       for (let y = 0; y < this.mapHeight; y += 48) {
         for (let x = 0; x < this.mapWidth; x += 48) {
-          this.add.image(x + 24, y + 24, 'int_' + floorKey).setScale(3).setDepth(0);
+          this.add.image(x + 24, y + 24, 'int_' + floorKey).setScale(INTERIOR_ART_SCALE).setDepth(0);
         }
       }
       for (let x = 0; x < this.mapWidth; x += 48) {
-        this.add.image(x + 24, 24, 'int_' + wallKey).setScale(3).setDepth(1);
+        this.add.image(x + 24, 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
         const overlapsExit = x < exit.x + exit.width && x + 48 > exit.x;
-        if (!overlapsExit) this.add.image(x + 24, this.mapHeight - 24, 'int_' + wallKey).setScale(3).setDepth(1);
+        if (!overlapsExit) this.add.image(x + 24, this.mapHeight - 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
       }
       for (let y = 48; y < this.mapHeight - 48; y += 48) {
-        this.add.image(24, y + 24, 'int_' + wallKey).setScale(3).setDepth(1);
-        this.add.image(this.mapWidth - 24, y + 24, 'int_' + wallKey).setScale(3).setDepth(1);
+        this.add.image(24, y + 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
+        this.add.image(this.mapWidth - 24, y + 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
       }
     }
 
@@ -533,12 +554,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._path({ x: 0, y: 576, width: 1152, height: 24 });
       this._path({ x: 432, y: 0, width: 24, height: 912 });
       this._path({ x: 696, y: 0, width: 24, height: 912 });
-      this._path({ x: 254, y: 340, width: 72, height: 92 });
       this._path({ x: 836, y: 328, width: 72, height: 104 });
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
-      // This is the resident's actual home sprite rather than the neutral
-      // townhouse facade, so its roof always reflects their persisted color.
-      this.ownHomeSprite = this._exterior('house', 290, 340, 2, 4, this.ownExteriorColor);
+      // City is commerce and transit. This closed market facade replaces the
+      // former second, color-mirrored "YOUR HOME" entrance; the owner's only
+      // residential address remains the Willow Walk townhouse.
+      this._exterior('shop', 290, 340);
       this._exterior('shop', 872, 328);
       [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 728], [1048, 736]].forEach(([x, y]) => this._exterior('tree', x, y));
       [[398, 384], [744, 384], [402, 630], [746, 630]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
@@ -546,7 +567,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const plaza = this.add.graphics().setDepth(2);
       plaza.fillStyle(0xbfd3cb, 1).fillCircle(576, 500, 92).lineStyle(4, 0xe9dfb9, 0.8).strokeCircle(576, 500, 92);
       plaza.fillStyle(0x66a7c0, 1).fillCircle(576, 500, 34).lineStyle(3, 0xe9f8ff, 0.85).strokeCircle(576, 500, 34);
-       this._sign(290, 80, 'YOUR HOME');
+       this._sign(290, 80, 'PLAZA MARKET · CLOSED');
       this._sign(872, 88, 'HUDDLE HOME');
       this._sign(576, 302, 'HUDDLE PLAZA');
        this._sign(1084, 420, 'MAPLE ROW →');
@@ -582,13 +603,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       trees.forEach(([x, y]) => this._exterior('tree', x, y));
       [[576, 410], [576, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
       this._roadDetails(504, 576, [{ x: 540, y: 420 }, { x: 612, y: 588 }]);
-      this._sign(576, 72, maple ? 'MAPLE ROW · 8 RESIDENCES' : 'JUNIPER SQUARE · 8 RESIDENCES');
+       this.residenceStreetSign = this._sign(576, 72,
+         (maple ? 'MAPLE ROW' : 'JUNIPER SQUARE') + ' · DIRECTORY BLOCK ' + (directoryMeta.page + 1));
       this._sign(576, 128, 'Each numbered residence and doorway matches the directory.');
     }
 
     setOwnHomeColor(color) {
       this.ownExteriorColor = color || 'teal';
-      if (this.ownHomeSprite) window.jpoHouseColors?.applyHomeColor(this.ownHomeSprite, this.ownExteriorColor);
     }
 
     updateResidenceDirectory(entries) {
@@ -602,6 +623,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           : ('RESIDENCE ' + (lot.index + 1));
         lot.sign?.setText(label);
       });
+      this.residenceStreetSign?.setText((this.location === 'maple-row' ? 'MAPLE ROW' : 'JUNIPER SQUARE') +
+        ' · DIRECTORY BLOCK ' + (directoryMeta.page + 1));
     }
 
     _drawShop() {
@@ -613,7 +636,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       [140, 662].forEach((x) => art.fillStyle(0x9c7357, 1).fillRect(x, 378, 156, 80).lineStyle(2, 0x624431, 1).strokeRect(x, 378, 156, 80));
       art.fillStyle(0xb85f5c, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
       [[96, 350], [864, 350], [96, 640], [864, 640]].forEach(([x, y]) =>
-        this.add.image(x, y, 'furn_fern').setOrigin(0.5, 1).setScale(3).setDepth(y));
+        this.add.image(x, y, this._furnitureTextureKey('fern')).setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y));
        this._sign(480, 112, 'HUDDLE HOME · FURNISHINGS');
        this.add.text(480, 190, 'FURNITURE PRICES IN COINS · crossing this door opens the catalog · purchases go to your home inventory.', {
         fontFamily: 'monospace', fontSize: '12px', color: '#fff7db', backgroundColor: '#493c36cc', padding: { x: 6, y: 4 }, align: 'center',
@@ -633,7 +656,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
        art.fillStyle(0x9e7355, 1).fillRoundedRect(240, 360, 96, 66, 6);
        art.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(240, 360, 96, 66, 6);
       this.add.text(288, 91, 'A QUIET PLACE TO LAND', { fontFamily: 'monospace', fontSize: '13px', color: '#5c4636' }).setOrigin(0.5).setDepth(10);
-       this.add.text(288, 390, 'PLAZA EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
+       this.add.text(288, 390, 'WILLOW EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
     }
 
     _drawPortalCues() {
@@ -641,7 +664,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const cue = this.add.graphics().setDepth(3);
         cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
         cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
-        const label = portal.destination === 'home' ? (portal.residence ? 'RESIDENCE' : 'YOUR HOME') :
+        const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Residence ' + portal.lot) : 'Your townhouse')).toUpperCase() :
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' : portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'maple-row' ? 'MAPLE ROW' : portal.destination === 'juniper-square' ? 'JUNIPER SQ' :
           portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
@@ -745,8 +768,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const gridX = Math.floor(pointer.worldX / 48), gridY = Math.floor(pointer.worldY / 48);
         const footprint = this._footprint(def, selectedRotation);
         const blocked = !this._validPlacement(def, gridX, gridY, selectedRotation);
-        if (!this.ghost) this.ghost = this.add.image(0, 0, 'furn_' + def.id).setAlpha(0.6).setDepth(25);
-        this.ghost.setTexture('furn_' + def.id).setOrigin(0.5, 1).setScale(3).setAngle(selectedRotation)
+        if (!this.ghost) this.ghost = this.add.image(0, 0, this._furnitureTextureKey(def.id)).setAlpha(0.6).setDepth(25);
+        this.ghost.setTexture(this._furnitureTextureKey(def.id)).setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(selectedRotation)
           .setPosition(gridX * 48 + footprint.width * 24, (gridY + footprint.height) * 48);
         if (blocked) this.ghost.setTint(0xff5555); else this.ghost.clearTint();
       };
@@ -800,8 +823,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const footprint = this._footprint(def, uprightRotation);
         const floorCenterX = item.gridX * 48 + footprint.width * 24;
         const floorBaseY = (item.gridY + footprint.height) * 48;
-        const sprite = this.add.image(floorCenterX, floorBaseY, 'furn_' + def.id)
-          .setOrigin(0.5, 1).setScale(3).setAngle(uprightRotation).setDepth(floorBaseY);
+        const sprite = this.add.image(floorCenterX, floorBaseY, this._furnitureTextureKey(def.id))
+          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(uprightRotation).setDepth(floorBaseY);
         sprite.setData('isSeat', def.id === 'oak_chair'); // server currently validates chairs only
         sprite.setData('seatDir', 'down');
         this.furniture.push(sprite);
@@ -969,19 +992,22 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     update(_time, delta) {
       if (!this.player) return;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
-      const left = !typing && (this.keys.left.isDown || this.wasd.left.isDown);
-      const right = !typing && (this.keys.right.isDown || this.wasd.right.isDown);
-      const up = !typing && (this.keys.up.isDown || this.wasd.up.isDown);
-      const down = !typing && (this.keys.down.isDown || this.wasd.down.isDown);
+      const { SPEED, touchMove = {} } = globals();
+      const left = !typing && (this.keys.left.isDown || this.wasd.left.isDown || touchMove.left);
+      const right = !typing && (this.keys.right.isDown || this.wasd.right.isDown || touchMove.right);
+      const up = !typing && (this.keys.up.isDown || this.wasd.up.isDown || touchMove.up);
+      const down = !typing && (this.keys.down.isDown || this.wasd.down.isDown || touchMove.down);
       const body = this.player.body;
       let dir = this.playerDir || 'down';
       let anim = this.sitting ? 'sit' : 'idle';
       body.setVelocity(0, 0);
       if (!this.sitting && !this.transitionRequested) {
-        if (left) { body.setVelocityX(-170); dir = 'left'; anim = 'walk'; }
-        else if (right) { body.setVelocityX(170); dir = 'right'; anim = 'walk'; }
-        else if (up) { body.setVelocityY(-170); dir = 'up'; anim = 'walk'; }
-        else if (down) { body.setVelocityY(170); dir = 'down'; anim = 'walk'; }
+        // Independent axes, matching HQ; diagonals retain the same total speed.
+        if (up) { body.setVelocityY(-SPEED); dir = 'up'; anim = 'walk'; }
+        else if (down) { body.setVelocityY(SPEED); dir = 'down'; anim = 'walk'; }
+        if (left) { body.setVelocityX(-SPEED); dir = 'left'; anim = 'walk'; }
+        else if (right) { body.setVelocityX(SPEED); dir = 'right'; anim = 'walk'; }
+        if ((left || right) && (up || down)) body.velocity.normalize().scale(SPEED);
       }
       ui.classList.toggle('neighborhood-walking', anim === 'walk');
       this.playerDir = dir;
@@ -1067,7 +1093,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
                this._portalTravelTimer = null;
                if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
                window.jpoBeginMapFade?.();
-               travel(destination);
+                travel(destination, door.residence ? { residencePage: directoryMeta.page } : undefined);
              }, 38);
            }, 42);
         }

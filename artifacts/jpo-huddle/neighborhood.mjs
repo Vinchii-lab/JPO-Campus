@@ -23,11 +23,10 @@ export function homeExteriorColor(value) {
 // the client Arcade collider use this radius, rather than separate magic
 // margins that drift at facades and door thresholds.
 export const ACTOR_FOOT_RADIUS = 16;
-// These are physical residential streets, not destination-menu aliases.  A
-// residence still opens only for the directory entry selected by the player;
-// that selection is an email, never a page/slot number, so paging or a newly
-// approved account cannot send somebody to a different home.
-export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["city", "maple-row", "juniper-square"]);
+// These are physical residential streets, not destination-menu aliases.  The
+// plaza is commerce and transit only; Willow Walk is the one personal-home
+// address, while Maple Row and Juniper Square hold the directory residences.
+export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["maple-row", "juniper-square"]);
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
@@ -79,7 +78,9 @@ export const LOCATION_GEOMETRY = Object.freeze({
   },
   city: {
     blockers: [
-      { x: 178, y: 106, width: 224, height: 145 }, { x: 178, y: 251, width: 76, height: 90 }, { x: 326, y: 251, width: 76, height: 90 },
+      // Closed Plaza Market facade. This used to be a second, color-mirrored
+      // entrance to the authenticated player's Willow Walk home.
+      { x: 178, y: 106, width: 224, height: 235 },
       { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
       // Only the fountain core blocks; the surrounding circular plaza and its
       // benches are deliberately walkable/sittable.
@@ -93,7 +94,6 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 472, y: 570, width: 96, height: 30 }, { x: 582, y: 570, width: 96, height: 30 },
     ],
     doors: [
-      { destination: "home", x: 254, y: 250, width: 72, height: 100, label: "Your home" },
       { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
     ],
     seats: [
@@ -137,7 +137,7 @@ export const LOCATION_GEOMETRY = Object.freeze({
     // Starts above the threshold, leaving a full floor-mat depth before the
     // map edge. This makes the automatic walking exit reachable without
     // pressing into an invisible boundary.
-    doors: [{ destination: "city", x: 240, y: 360, width: 96, height: 72, label: "Front door" }],
+    doors: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, label: "Willow Walk exit" }],
   },
 });
 
@@ -153,7 +153,6 @@ export const LOCATION_PORTALS = Object.freeze({
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
     { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "home", x: 254, y: 250, width: 72, height: 100, spawn: { x: 288, y: 312, dir: "down" } },
     { destination: "maple-row", x: 1056, y: 432, width: 96, height: 144, spawn: { x: 96, y: 504, dir: "right" } },
     { destination: "juniper-square", x: 528, y: 816, width: 96, height: 96, spawn: { x: 576, y: 96, dir: "down" } },
   ],
@@ -166,7 +165,7 @@ export const LOCATION_PORTALS = Object.freeze({
     ...residenceDoors().map((door) => ({ ...door, spawn: { x: 288, y: 312, dir: "down" } })),
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
-  home: [{ destination: "city", x: 240, y: 360, width: 96, height: 72, spawn: { x: 290, y: 370, dir: "down" } }],
+  home: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, spawn: { x: 636, y: 372, dir: "down" } }],
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -213,8 +212,8 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   const fromKind = from.kind === "home" ? "home" : from.id;
   const targetKind = target.kind === "home" ? "home" : target.id;
   // Coworker visits are permission-gated by homeAccess in server.js and may
-  // only be entered through a marked residence door in the plaza streets. A
-  // resident's own Willow Walk townhouse remains a direct personal-home door.
+  // only be entered through a marked directory-residence door. A resident's
+  // own Willow Walk townhouse remains the one direct personal-home door.
   if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && !RESIDENTIAL_BLOCK_IDS.includes(fromKind)) return null;
   return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
     portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;

@@ -53,7 +53,7 @@ async function connect(email, first) {
   socket.emit("register", { firstName: first, lastName: "Neighborhood", email, password: "testpass123", character: "adam", department: "IT" });
   const approved = await q.approved.next();
   return {
-    socket, q, location: "office",
+    socket, q, email, location: "office",
     position: [Number.isFinite(approved?.x) ? approved.x : 1272, Number.isFinite(approved?.y) ? approved.y : 2253],
   };
 }
@@ -85,7 +85,7 @@ async function walkRoute(client, points) {
   return at;
 }
 
-function routeToPortal(location, destination, position) {
+function routeToPortal(location, destination, position, residenceLot = 1) {
   if (location === "office" && destination === "neighborhood")
     return [position, ...OFFICE_GARDEN_ROUTE.slice(1), [168, 3600]];
   if (location === "neighborhood" && destination === "city")
@@ -102,30 +102,63 @@ function routeToPortal(location, destination, position) {
     return [position, [432, 550], [1100, 550], [1100, 504]];
   if (location === "maple-row" && destination === "city")
     return [position, [48, 504]];
+  if (location === "maple-row" && destination.startsWith("home:")) {
+    const door = LOCATION_PORTALS["maple-row"].find((portal) => portal.residence && portal.lot === residenceLot);
+    if (!door) throw new Error(`No Maple Row door for residence ${residenceLot}`);
+    const center = [door.x + door.width / 2, door.y + door.height / 2];
+    return [position, [center[0], 504], center];
+  }
   if (location === "city" && destination === "juniper-square")
     return [position, [1056, 550], [432, 550], [432, 864], [576, 864]];
   if (location === "juniper-square" && destination === "city")
     return [position, [576, 48]];
-  if (location === "city" && destination.startsWith("home:"))
-    return position[0] > 500
-      ? [position, [852, 400], [700, 400], [432, 400], [432, 360], [144, 360], [290, 360], [290, 300]]
-      : [position, [290, 360], [290, 300]];
   if (location === "furniture-shop" && destination === "city")
     return [position, [480, 684]];
-  if (location.startsWith("home:") && destination === "city")
+  if (location.startsWith("home:") && destination === "neighborhood")
     return [position, [288, 402]];
   throw new Error(`No authored route from ${location} to ${destination}`);
 }
 
+async function findResidenceSlot(client, ownerEmail) {
+  client.q.directory.clear();
+  for (let page = 0; page < 10_000; page++) {
+    client.socket.emit("homeDirectoryRequest", { page });
+    const listing = await client.q.directory.next();
+    const lot = listing.homes?.findIndex((home) => home.ownerEmail === ownerEmail) ?? -1;
+    if (lot >= 0) return { page: listing.page, lot: lot + 1 };
+    if (page >= (listing.pageCount || 1) - 1) break;
+  }
+  throw new Error(`No visible directory slot for ${ownerEmail}`);
+}
+
 async function moveTo(client, destination, { expectOk = true } = {}) {
-  const route = routeToPortal(client.location, destination, client.position);
+  // Homes are reached only through their real addresses: the owner uses
+  // Willow Walk and guests use a numbered directory residence. City never
+  // mirrors the authenticated player's home.
+  if (client.location === "city" && destination.startsWith("home:")) {
+    if (destination.slice(5).toLowerCase() === client.email) await moveTo(client, "neighborhood");
+    else {
+      client.residenceSlot = await findResidenceSlot(client, destination.slice(5).toLowerCase());
+      await moveTo(client, "maple-row");
+    }
+  }
+  if (client.location.startsWith("home:") && destination === "city") {
+    await moveTo(client, "neighborhood");
+  }
+  const route = routeToPortal(client.location, destination, client.position, client.residenceSlot?.lot);
   await walkRoute(client, route);
-  client.socket.emit("locationTransition", { destination });
+  client.socket.emit("locationTransition", {
+    destination,
+    ...(client.location === "maple-row" && destination.startsWith("home:")
+      ? { residencePage: client.residenceSlot?.page || 0 }
+      : {}),
+  });
   const result = await client.q.transition.next();
   check(result.ok === expectOk && (!expectOk || result.location === destination), `${expectOk ? "walk portal accepted" : "blocked doorway"}: ${destination}`, result);
   if (result.ok) {
     client.location = result.location;
     client.position = [result.spawn.x, result.spawn.y];
+    if (result.location.startsWith("home:")) delete client.residenceSlot;
   } else client.position = route.at(-1);
   return result;
 }
@@ -143,19 +176,18 @@ try {
   check(!validLocationMove(parseLocation("city"), 200, 200) &&
     validLocationMove(parseLocation("city"), 480, 720),
   "city facade blockers reject clipping but preserve plaza spawn");
-  const cityHomeApproach = [355, 345, 330, 300];
   check(
-    cityHomeApproach.every((y) => validLocationMove(parseLocation("city"), 290.333, y)) &&
-      !!portalForTransition("city", `home:${emails[0]}`, 290.333, 300, emails[0]),
-    "city home's centered foot trajectory stays clear beside both facade wings",
-    cityHomeApproach,
+    !LOCATION_PORTALS.city.some((portal) => portal.destination === "home") &&
+      !portalForTransition("city", `home:${emails[0]}`, 290, 300, emails[0]) &&
+      !validLocationMove(parseLocation("city"), 290, 300),
+    "city has a closed market facade, never a mirrored personal-home entrance",
   );
   const testHome = parseLocation("home:test@example.com");
   const homeExitTrajectory = [360, 372, 384, 402, 416];
   check(
     homeExitTrajectory.every((y) => validLocationMove(testHome, 288, y)) &&
-      !!portalForTransition(testHome.id, "city", 288, 384, "test@example.com"),
-    "home floor-mat exit remains walkable from threshold through map edge",
+      !!portalForTransition(testHome.id, "neighborhood", 288, 384, "test@example.com"),
+    "home floor-mat exit remains walkable to its Willow Walk address",
     homeExitTrajectory,
   );
   const shopDoor = { x: 872, y: 286 };
@@ -171,15 +203,17 @@ try {
     const residenceDoors = LOCATION_PORTALS[block].filter((portal) => portal.residence);
     check(
       residenceDoors.length === 8 && residenceDoors.every((door) =>
+        door.label === `Residence ${door.lot}` &&
         validLocationMove(parseLocation(block), door.x + door.width / 2, door.y + door.height / 2) &&
         !!portalForTransition(block, `home:${emails[0]}`, door.x + door.width / 2, door.y + door.height / 2, emails[0])),
-      `${block} has eight matching walkable residence entrances`,
+      `${block} has eight numbered, labelled, walkable residence entrances`,
     );
   }
   check(
-    !!portalForTransition("city", "home:other@justpressone.com", 290, 300, emails[1]) &&
+    !!portalForTransition("maple-row", "home:other@justpressone.com", 180, 300, emails[1]) &&
+      !portalForTransition("city", "home:other@justpressone.com", 290, 300, emails[1]) &&
     !portalForTransition("neighborhood", "home:other@justpressone.com", 636, 293, emails[1]),
-    "a selected guest home is reachable only through the plaza residences doorway",
+    "a guest home is reachable only through a numbered directory residence doorway",
   );
   const chairBlocker = layoutBlockers([{ furnitureId: "oak_chair", gridX: 2, gridY: 2, rotation: 0 }]);
   check(!validLocationMove(parseLocation("home:test@example.com"), 120, 120, chairBlocker) &&

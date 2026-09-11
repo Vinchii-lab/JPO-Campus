@@ -15,3 +15,9 @@ The user approved the original generated exterior sprite style: teal-roof homes,
 Use the user's uploaded 16×16 pack for housing furniture and interior tiles, not the legacy free tiles or guessed sprite-number mappings. Visually verify individual source sprites before labeling them.
 
 **Why:** The user rejected the furniture implementation after mismatched sprite selections and the wrong source scale undermined the purpose of providing the ZIP. Filename suffixes alone did not identify the furniture.
+
+Version asset URLs and Phaser texture keys when replacing artwork with different native dimensions.
+
+**Why:** Replacing furniture files in place while changing to native-scale rendering left browsers using cached, oversized old images. A page/code reload does not necessarily invalidate the image cache.
+
+**How to apply:** Verify decoded texture dimensions, not just files on disk; test already-placed furniture when changing asset scale.
