@@ -309,7 +309,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   function renderShop() {
     let panel = document.getElementById('shop-panel');
-    if (currentLocation !== 'furniture-shop') {
+    if (typeof currentLocation !== 'string' || !currentLocation.endsWith('-shop')) {
       if (panel) panel.hidden = true;
       return;
     }
@@ -324,8 +324,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       Number(item.price).toLocaleString() + ' coins</span><button type="button" data-buy="' +
       escapeHtml(item.id) + '">Buy</button></span>',
     ).join('') || '<small>The catalog is loading.</small>';
-    panel.innerHTML = '<div class="home-panel-head"><b>Huddle Home · Furnishings</b><button type="button" data-close>Close</button></div>' +
-        '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.</small>' + rows + '</div>';
+    const shopCopy = {
+      'furniture-shop': { title: 'Huddle Home', category: 'Furnishings', copy: 'Comfort pieces for your Willow Walk home.' },
+      'garden-shop': { title: 'Willow & Green', category: 'Garden goods', copy: 'Leafy accents and a sunny seat for your home or yard.' },
+      'decor-shop': { title: 'Plaza Decor', category: 'Living-room accents', copy: 'Statement pieces for a warm, lived-in room.' },
+    }[currentLocation] || { title: 'Huddle shop', category: 'Home goods', copy: 'Furniture for your Willow Walk home.' };
+    panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title) + ' · ' + escapeHtml(shopCopy.category) + '</b><button type="button" data-close>Close</button></div>' +
+        '<div class="home-section"><small>' + escapeHtml(shopCopy.copy) + ' Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.</small>' + rows + '</div>';
     panel.querySelector('[data-close]').onclick = () => { panel.hidden = true; };
     panel.querySelectorAll('[data-buy]').forEach((button) => {
       button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
@@ -372,6 +377,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   socket.on('homePurchaseResult', (result) => {
     if (result?.home) homeState = result.home;
     if (result?.message) toast(result.message);
+    else if (result?.ok) {
+      const name = furnitureCatalog[result.item?.furnitureId]?.name || 'Furniture';
+      toast(name + ' purchased — added to your home inventory.');
+    }
     if (isHome()) renderHome();
   });
   socket.on('homeConstructionResult', (result) => {
@@ -523,6 +532,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._groundTiles = null;
       this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
+      this._ambientTweens = [];
       this.keys = this.wasd = this.keyE = null;
       window._neighborhoodScene = this;
       this.info = data?.map || {};
@@ -538,14 +548,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._setNeighborhoodTextureFilters();
       this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
       this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
-      // The shared street deliberately opens out enough to read several real
-      // homes at once; rooms retain the office's normal close scale.
-      this.cameras.main.setZoom(atHome ? 1 : (this.location === 'neighborhood' ? 0.7 : 1));
+      this._fitNeighborhoodCamera();
 
       // All maps are composed here from repeatable tile-sized ground, paths,
       // and separate transparent objects. None uses a baked screenshot/map PNG.
       if (atHome) this._drawHome();
-      else if (this.location === 'furniture-shop') this._drawShop();
+      else if (typeof this.location === 'string' && this.location.endsWith('-shop')) this._drawShop();
       else if (this.location === 'neighborhood') this._drawNeighborhood();
       else this._drawCity();
 
@@ -735,7 +743,32 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // pass naturally behind a roof or tree and in front once below it.
       const sprite = this.add.image(x, y, 'ext_' + kind).setOrigin(0.5, 1).setScale(scale).setDepth(y);
       if (kind === 'house' && exteriorColor) window.jpoHouseColors?.applyHomeColor(sprite, exteriorColor);
+      if (kind === 'lamp' && this.location === 'city') {
+        this._animateNeighborhoodObject(sprite, { alpha: { from: 0.72, to: 1 }, duration: 780, delay: (x + y) % 420 });
+      }
       return sprite;
+    }
+
+    _animateNeighborhoodObject(target, config) {
+      if (!target || !this.tweens) return null;
+      const tween = this.tweens.add({
+        targets: target, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', ...config,
+      });
+      (this._ambientTweens ||= []).push(tween);
+      return tween;
+    }
+
+    _animateFurnitureObject(target, furnitureId, phase = 0) {
+      if (!target) return;
+      if (furnitureId === 'fern') {
+        this._animateNeighborhoodObject(target, {
+          angle: { from: -1.7, to: 1.7 }, duration: 1650, delay: phase % 260,
+        });
+      } else if (furnitureId === 'reading_lamp') {
+        this._animateNeighborhoodObject(target, {
+          alpha: { from: 0.76, to: 1 }, duration: 940, delay: phase % 320,
+        });
+      }
     }
 
     _sign(x, y, text) {
@@ -743,6 +776,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         fontFamily: 'monospace', fontSize: '12px', color: '#fff4cf',
         backgroundColor: '#35424acc', padding: { x: 5, y: 3 },
       }).setOrigin(0.5, 1).setDepth(2000);
+    }
+
+    _fitNeighborhoodCamera() {
+      const camera = this.cameras.main;
+      const width = camera.width || this.scale.width;
+      const height = camera.height || this.scale.height;
+      const outdoors = this.location === 'neighborhood' || this.location === 'city';
+      // Never show beyond the authored road/world edges. Keep the desired
+      // outdoor scale on smaller screens, but fill wide displays rather than
+      // exposing a large unplayable grass area to the right of the street.
+      const zoom = outdoors
+        ? Math.max(0.7, width / this.mapWidth, height / this.mapHeight)
+        : 1;
+      if (camera.zoom !== zoom) camera.setZoom(zoom);
     }
 
     _drawNeighborhood() {
@@ -865,8 +912,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!def) continue;
         const footprint = this._footprint(def, item.rotation);
         const baseY = originY + (item.gridY + footprint.height) * 48;
-        objects.push(this.add.image(originX + item.gridX * 48 + footprint.width * 24, baseY, this._furnitureTextureKey(def.id))
-          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(baseY));
+        const sprite = this.add.image(originX + item.gridX * 48 + footprint.width * 24, baseY, this._furnitureTextureKey(def.id))
+          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(baseY);
+        this._animateFurnitureObject(sprite, def.id, Number(item.gridX || 0) * 80 + Number(item.gridY || 0) * 120);
+        objects.push(sprite);
       }
       return objects;
     }
@@ -879,22 +928,44 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._path({ x: 0, y: 576, width: 1152, height: 24 });
       this._path({ x: 432, y: 0, width: 24, height: 912 });
       this._path({ x: 696, y: 0, width: 24, height: 912 });
+      // Short garden walks lead to the two south-lane shop thresholds without
+      // widening the road or making a new collision shortcut.
       this._path({ x: 836, y: 328, width: 72, height: 104 });
+      this._path({ x: 254, y: 852, width: 72, height: 36 });
+      this._path({ x: 836, y: 852, width: 72, height: 36 });
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
-      // City is commerce and transit. Its closed market is not a second home;
-      // every residential address exists only on Willow Walk.
+      // City is commerce and transit. The market remains a closed facade; the
+      // three actual shop portals belong to Huddle Home and the two south-lane
+      // themed stores.
       this._exterior('shop', 290, 340);
       this._exterior('shop', 872, 328);
-      [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 728], [1048, 736]].forEach(([x, y]) => this._exterior('tree', x, y));
-      [[398, 384], [744, 384], [402, 630], [746, 630]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
-      [[520, 394], [630, 394], [520, 600], [630, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
-      const plaza = this.add.graphics().setDepth(2);
-      plaza.fillStyle(0xbfd3cb, 1).fillCircle(576, 500, 92).lineStyle(4, 0xe9dfb9, 0.8).strokeCircle(576, 500, 92);
-      plaza.fillStyle(0x66a7c0, 1).fillCircle(576, 500, 34).lineStyle(3, 0xe9f8ff, 0.85).strokeCircle(576, 500, 34);
-       this._sign(290, 80, 'PLAZA MARKET · CLOSED');
-       this._sign(872, 88, 'HUDDLE HOME');
-       this._sign(576, 302, 'HUDDLE PLAZA');
-       this._sign(94, 420, '← WILLOW WALK');
+      this._exterior('shop', 290, 860);
+      this._exterior('shop', 872, 860);
+      [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 300], [1048, 300]].forEach(([x, y]) => this._exterior('tree', x, y));
+      [[398, 384], [744, 384], [90, 580], [1062, 580]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      // The seating pockets sit fully outside the crossing roads. Keep the
+      // player seat coordinates in neighborhood.mjs in lockstep with these
+      // visual ground contacts.
+      [[372, 416], [780, 416], [88, 696], [1064, 696]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
+      this._storefrontSign(290, 604, 'WILLOW & GREEN');
+      this._storefrontSign(872, 604, 'PLAZA DECOR');
+      // Keep the intersection open: no fountain disk or invisible core
+      // collider in the roadway. Animated accents belong to the storefronts.
+      this._sign(290, 80, 'PLAZA MARKET · CLOSED');
+      this._sign(872, 88, 'HUDDLE HOME');
+      this._sign(576, 302, 'HUDDLE PLAZA');
+      this._sign(94, 420, '← WILLOW WALK');
+      this._sign(290, 900, 'GARDEN LANE');
+      this._sign(872, 900, 'GARDEN LANE');
+    }
+
+    _storefrontSign(x, y, text) {
+      const sign = this.add.text(x, y, text, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#fff8d3',
+        backgroundColor: '#396451dd', padding: { x: 6, y: 3 },
+      }).setOrigin(0.5, 1).setDepth(2000);
+      this._animateNeighborhoodObject(sign, { alpha: { from: 0.82, to: 1 }, duration: 1200, delay: (x + y) % 300 });
+      return sign;
     }
 
     setOwnHomeColor(color) {
@@ -923,7 +994,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (visual.sign?.text !== signText) visual.sign?.setText(signText);
         const yardKey = this._streetYardKey(current.yard);
         if (visual.yardKey !== yardKey) {
-          visual.yard?.forEach((object) => object.destroy());
+          visual.yard?.forEach((object) => {
+            this.tweens.killTweensOf(object);
+            object.destroy();
+          });
           visual.yard = this._drawStreetYard({ ...visual.lot, ...current });
           visual.yardKey = yardKey;
           yardChanged = true;
@@ -974,34 +1048,98 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _drawShop() {
       this._interiorTileField('shop_floor', 'shop_wall', { x: 408, width: 144 });
+      const themes = {
+        'furniture-shop': {
+          title: 'HUDDLE HOME · FURNISHINGS',
+          intro: 'A warm room of everyday pieces',
+          accent: 0xb85f5c,
+          display: ['oak_chair', 'coffee_table', 'blue_sofa', 'bookcase'],
+        },
+        'garden-shop': {
+          title: 'WILLOW & GREEN · GARDEN GOODS',
+          intro: 'Leafy accents for a brighter home',
+          accent: 0x6d9855,
+          display: ['fern', 'fern', 'oak_chair', 'reading_lamp'],
+        },
+        'decor-shop': {
+          title: 'PLAZA DECOR · LIVING ACCENTS',
+          intro: 'Colorful finishing touches for your room',
+          accent: 0x76627f,
+          display: ['blue_sofa', 'coffee_table', 'bookcase', 'reading_lamp'],
+        },
+      };
+      const theme = themes[this.location] || themes['furniture-shop'];
       const art = this.add.graphics().setDepth(2);
       // Counter, display plinths, rugs, and a clear lower exit make this an
       // authored interior instead of a flattened shop design.
       art.fillStyle(0x80583f, 1).fillRect(144, 154, 672, 74).lineStyle(3, 0x533826, 1).strokeRect(144, 154, 672, 74);
       [140, 662].forEach((x) => art.fillStyle(0x9c7357, 1).fillRect(x, 378, 156, 80).lineStyle(2, 0x624431, 1).strokeRect(x, 378, 156, 80));
-      art.fillStyle(0xb85f5c, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
-      [[96, 350], [864, 350], [96, 640], [864, 640]].forEach(([x, y]) =>
-        this.add.image(x, y, this._furnitureTextureKey('fern')).setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y));
-       this._sign(480, 112, 'HUDDLE HOME · FURNISHINGS');
-       this.add.text(480, 190, 'FURNITURE PRICES IN COINS · crossing this door opens the catalog · purchases go to your home inventory.', {
+      art.fillStyle(theme.accent, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
+      const displays = [[200, 458], [310, 458], [650, 458], [760, 458]];
+      theme.display.forEach((id, index) => {
+        const [x, y] = displays[index];
+        const item = this.add.image(x, y, this._furnitureTextureKey(id))
+          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y);
+        this._animateFurnitureObject(item, id, index * 90);
+      });
+      [[96, 350], [864, 350], [96, 640], [864, 640]].forEach(([x, y], index) => {
+        const fern = this.add.image(x, y, this._furnitureTextureKey('fern'))
+          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y);
+        this._animateFurnitureObject(fern, 'fern', index * 120);
+      });
+      this._sign(480, 112, theme.title);
+      this.add.text(480, 190, theme.intro + ' · prices in coins · purchases go to your home inventory.', {
         fontFamily: 'monospace', fontSize: '12px', color: '#fff7db', backgroundColor: '#493c36cc', padding: { x: 6, y: 4 }, align: 'center',
       }).setOrigin(0.5).setDepth(18);
     }
 
     _drawHome() {
       this._interiorTileField('home_floor', 'home_wall', { x: 240, width: 96 });
+      this._drawHomeRoomDivisions();
       const art = this.add.graphics().setDepth(2);
       art.fillStyle(0x9bb3c4, 1).fillRect(92, 52, 98, 18).fillRect(386, 52, 98, 18);
       art.lineStyle(3, 0x725542, 1).strokeRect(92, 52, 98, 18).strokeRect(386, 52, 98, 18);
-      art.fillStyle(0xb96657, 0.8).fillRoundedRect(142, 145, 292, 128, 16);
-      art.lineStyle(3, 0xf2dfba, 0.75).strokeRoundedRect(142, 145, 292, 128, 16);
+       // Keep the living-room rug wholly inside the living/kitchen bounds
+       // (x=240..528); it must not visually straddle the private-room wall.
+       art.fillStyle(0xb96657, 0.8).fillRoundedRect(260, 145, 240, 128, 16);
+       art.lineStyle(3, 0xf2dfba, 0.75).strokeRoundedRect(260, 145, 240, 128, 16);
       art.fillStyle(0x6e4d3b, 1).fillRect(48, 384, 192, 44).fillRect(336, 384, 192, 44);
        // The center is intentionally open from the arrival tile to the
        // threshold: a visible floor mat rather than an edge-only exit.
        art.fillStyle(0x9e7355, 1).fillRoundedRect(240, 360, 96, 66, 6);
        art.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(240, 360, 96, 66, 6);
-      this.add.text(288, 91, 'A QUIET PLACE TO LAND', { fontFamily: 'monospace', fontSize: '13px', color: '#5c4636' }).setOrigin(0.5).setDepth(10);
        this.add.text(288, 390, 'WILLOW EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
+    }
+
+    _drawHomeRoomDivisions() {
+      // Room walls arrive in the authoritative map geometry. Render the
+      // verified uploaded 16px wall tile at the same integer 3x scale used by
+      // the floor and furniture; the omitted doorway cells remain visibly
+      // traversable floor.
+      const walls = this.info.geometry?.roomDividers || [];
+      walls.forEach((wall) => {
+        for (let y = wall.y; y < wall.y + wall.height; y += 48) {
+          for (let x = wall.x; x < wall.x + wall.width; x += 48) {
+            this.add.image(x + 24, y + 24, 'int_home_wall')
+              .setScale(INTERIOR_ART_SCALE).setDepth(4);
+          }
+        }
+      });
+      const rooms = this.info.geometry?.rooms || [];
+      rooms.forEach((room) => {
+        const label = this.add.text(
+          (room.x + room.width / 2) * 48,
+          (room.y + room.height / 2) * 48,
+          String(room.label || room.id || '').toUpperCase(),
+          {
+            fontFamily: 'monospace', fontSize: '10px', color: '#503f39',
+            backgroundColor: '#fff3d966', padding: { x: 4, y: 2 },
+          },
+        ).setOrigin(0.5).setDepth(5);
+        this._animateNeighborhoodObject(label, {
+          alpha: { from: 0.72, to: 0.92 }, duration: 1800, delay: 180,
+        });
+      });
     }
 
     _drawPortalCues() {
@@ -1010,7 +1148,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
         cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
         const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
-          portal.destination === 'furniture-shop' ? 'FURNISHINGS' : portal.destination === 'city' ? 'PLAZA' :
+          portal.destination === 'furniture-shop' ? 'FURNISHINGS' :
+          portal.destination === 'garden-shop' ? 'WILLOW & GREEN' :
+          portal.destination === 'decor-shop' ? 'PLAZA DECOR' :
+          portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
         const text = this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
@@ -1166,7 +1307,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _validPlacement(def, gridX, gridY, rotation) {
       const footprint = this._footprint(def, rotation);
       if (gridX < 0 || gridY < 0 || gridX + footprint.width > 12 || gridY + footprint.height > 9 ||
-          (gridX < 7 && gridX + footprint.width > 5 && gridY < 9 && gridY + footprint.height > 6)) return false;
+          (gridX < 7 && gridX + footprint.width > 5 && gridY < 9 && gridY + footprint.height > 6) ||
+          (this.info.geometry?.roomDividers || []).some((wall) =>
+            gridX * 48 < wall.x + wall.width && (gridX + footprint.width) * 48 > wall.x &&
+            gridY * 48 < wall.y + wall.height && (gridY + footprint.height) * 48 > wall.y) ||
+          (this.info.geometry?.doorways || []).some((doorway) =>
+            gridX < doorway.x + doorway.width && gridX + footprint.width > doorway.x &&
+            gridY < doorway.y + doorway.height && gridY + footprint.height > doorway.y)) return false;
       return !(homeState?.layout || []).some((placed) => {
         if (placed.id === selectedInstance) return false;
         const other = furnitureCatalog[placed.furnitureId];
@@ -1196,7 +1343,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // home snapshot can already be complete at that point, and no second
       // snapshot is guaranteed, so do not suppress the initial furniture build.
       if (!this.location?.startsWith('home:') || !this._furnitureBlocks) return;
-      this.furniture.forEach((object) => object.destroy());
+      this.furniture.forEach((object) => {
+        this.tweens.killTweensOf(object);
+        object.destroy();
+      });
       this.furniture = [];
       this._furnitureBlocks?.clear(true, true);
       for (const item of state?.layout || []) {
@@ -1210,6 +1360,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(uprightRotation).setDepth(floorBaseY);
         sprite.setData('isSeat', def.id === 'oak_chair'); // server currently validates chairs only
         sprite.setData('seatDir', 'down');
+        this._animateFurnitureObject(sprite, def.id, item.gridX * 90 + item.gridY * 130);
         this.furniture.push(sprite);
         this._addBlock(this._furnitureBlocks, {
           x: item.gridX * 48, y: item.gridY * 48, width: footprint.width * 48, height: footprint.height * 48,
@@ -1375,6 +1526,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     update(_time, delta) {
+      this._fitNeighborhoodCamera();
       if (!this.player) return;
       this._syncTileField();
       this._syncStreetScenery();
@@ -1529,6 +1681,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._resetTransientTravel();
       this._removePlacementInput();
       this._clearGhost();
+      (this._ambientTweens || []).forEach((tween) => tween?.remove?.());
+      this._ambientTweens = [];
       this.portalCues?.forEach((object) => object.destroy());
       this.portalCues = [];
       window.jpoSetConstructionLot?.(null);

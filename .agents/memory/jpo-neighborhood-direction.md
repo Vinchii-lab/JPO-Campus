@@ -33,3 +33,9 @@ Keep street rendering bounded to the camera viewport, even with sparse permanent
 **Why:** Repeated conflict-only inserts exhausted thousands of lot numbers for a small population. A world-sized TileSprite then allocated an enormous backing canvas, crashing scene creation before the player existed. A small repeating source texture alone does not bound Canvas memory.
 
 **How to apply:** Filter existing rows before attempting inserts; retain concurrency conflict protection. Bound ground canvases and scenery chunks, account for camera zoom on fixed-scroll ground, and avoid full-world road-mark loops within each chunk.
+
+Outdoor framing must fill the viewport within the authored road edges, rather than expose unplayable grass beyond them. Keep plaza benches and decorative obstacles out of roads.
+
+**Why:** The user rejected the wide empty area caused by fixed outdoor zoom and the fountain/benches obstructing the plaza crossing.
+
+**How to apply:** Treat outdoor zoom as responsive with the map bounds as a minimum coverage constraint. Keep indoor scale unchanged and check wide viewports.

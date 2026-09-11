@@ -16,6 +16,7 @@ function method(name, next) {
 
 const scene = vm.runInNewContext(`(() => {
   class Neighborhood {
+${method('_fitNeighborhoodCamera', '_drawNeighborhood')}
 ${method('_tileField', '_streetYardKey')}
 ${method('_drawNeighborhood', '_residenceSignText')}
     _path() { this.paths = (this.paths || 0) + 1; }
@@ -82,4 +83,23 @@ assert(scene._streetScenerySegments.size <= Math.ceil(scene.scale.height / scene
   'camera travel replaces old scenery instead of accumulating every segment');
 assert(scene.streetLotsVisual[0].sign, 'residence visual retains its sign for live updates');
 
-console.log('PASS: bounded viewport ground/scenery, height-derived streets, and live lot signs');
+scene.cameras.main.setZoom = function (zoom) { this.zoom = zoom; };
+scene.location = 'neighborhood';
+scene.mapWidth = 1440;
+for (const width of [390, 1024, 1920, 2560]) {
+  scene.cameras.main.width = width;
+  scene.cameras.main.height = 900;
+  scene._fitNeighborhoodCamera();
+  assert(width / scene.cameras.main.zoom <= scene.mapWidth,
+    'camera must not reveal grass beyond road endpoints');
+}
+scene.location = 'city';
+scene.mapWidth = 1152;
+scene.mapHeight = 912;
+scene._fitNeighborhoodCamera();
+assert(scene.cameras.main.height / scene.cameras.main.zoom <= scene.mapHeight);
+scene.location = 'home:owner';
+scene._fitNeighborhoodCamera();
+assert.equal(scene.cameras.main.zoom, 1, 'interiors keep normal scale');
+
+console.log('PASS: bounded viewport ground/scenery, responsive framing, height-derived streets, and live lot signs');

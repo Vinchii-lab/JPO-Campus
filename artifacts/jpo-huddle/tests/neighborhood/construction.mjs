@@ -4,7 +4,7 @@
 // is intentionally left to the browser scene test surface.
 import { io } from "socket.io-client";
 import pg from "pg";
-import { streetDefinition } from "../../neighborhood.mjs";
+import { HOME_CONSTRUCTION_COMPONENTS, streetDefinition } from "../../neighborhood.mjs";
 
 const port = process.env.TEST_PORT;
 if (!port || !process.env.DATABASE_URL) throw new Error("TEST_PORT and DATABASE_URL are required");
@@ -18,6 +18,14 @@ const check = (ok, message, actual) => {
   console.log(`${ok ? "✓" : "✗"} ${message}`);
   if (!ok) failures.push(`${message}${actual ? `: ${JSON.stringify(actual)}` : ""}`);
 };
+check(
+  HOME_CONSTRUCTION_COMPONENTS.floor.price === 20000 &&
+    HOME_CONSTRUCTION_COMPONENTS.walls.price === 25000 &&
+    HOME_CONSTRUCTION_COMPONENTS.roof.price === 35000 &&
+    Object.values(HOME_CONSTRUCTION_COMPONENTS).reduce((sum, component) => sum + component.price, 0) === 80000,
+  "construction stages total exactly 80,000 coins",
+  HOME_CONSTRUCTION_COMPONENTS,
+);
 
 function inbox(socket, event) {
   const items = [];
@@ -115,7 +123,7 @@ try {
   await db.query(`DELETE FROM jpo_players WHERE email = ANY($1)`, [emails]);
   await db.query(
     `INSERT INTO jpo_players (email, first_name, last_name, name, character, approved, department, coins)
-       VALUES ($1,'Builder','Construction','Builder Construction','adam',true,'IT',1200),
+       VALUES ($1,'Builder','Construction','Builder Construction','adam',true,'IT',80000),
               ($2,'Visitor','Construction','Visitor Construction','adam',true,'IT',100)`,
     emails,
   );
@@ -181,9 +189,10 @@ try {
   const finalRow = (await db.query(
     `SELECT floor_built, walls_built, roof_built FROM jpo_homes WHERE owner_email=$1`, [emails[0]],
   )).rows[0];
+  const finalCoins = (await db.query(`SELECT coins FROM jpo_players WHERE email=$1`, [emails[0]])).rows[0].coins;
   check(walls.ok && roof.ok && roof.home?.construction?.complete &&
-    finalRow.floor_built && finalRow.walls_built && finalRow.roof_built,
-  "floor, walls, and roof persist in sequence with a completed snapshot", { walls, roof, finalRow });
+    finalRow.floor_built && finalRow.walls_built && finalRow.roof_built && finalCoins === 0,
+  "floor, walls, and roof persist in sequence and debit exactly 80,000 coins", { walls, roof, finalRow, finalCoins });
 
   // Client street presentation refreshes in response to this public,
   // metadata-free signal. Await it before asking the directory, exactly as the

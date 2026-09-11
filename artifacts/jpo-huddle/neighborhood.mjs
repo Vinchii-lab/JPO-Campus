@@ -2,6 +2,47 @@
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
 export const HOME_GRID = { width: 12, height: 9, cell: 48 };
+// The starter house is intentionally compact, but it is not one undivided
+// room.  Keep room boundaries on whole 16px-art cells (3x presentation scale)
+// so the same coordinates can drive the server collider, the client collider,
+// and placement validation without introducing sub-tile thresholds.
+export const HOME_ROOM_GEOMETRY = Object.freeze({
+  rooms: Object.freeze([
+    Object.freeze({ id: "living-kitchen", label: "Living & kitchen", x: 5, y: 1, width: 6, height: 7 }),
+    Object.freeze({ id: "bedroom", label: "Bedroom", x: 1, y: 1, width: 3, height: 3 }),
+    Object.freeze({ id: "bath", label: "Bath", x: 1, y: 5, width: 3, height: 3 }),
+  ]),
+  // Doorways are the intentionally omitted cells in the solid interior
+  // dividers.  The one-cell (48px) gaps leave 16px of clearance at each side
+  // for the authoritative actor foot radius.
+  doorways: Object.freeze([
+    Object.freeze({ id: "living-bedroom-door", x: 4, y: 2, width: 1, height: 1 }),
+    Object.freeze({ id: "living-bath-door", x: 4, y: 6, width: 1, height: 1 }),
+    Object.freeze({ id: "bedroom-bath-hall", x: 2, y: 4, width: 1, height: 1 }),
+  ]),
+  walls: Object.freeze([
+    // A vertical divider separates the private rooms from living/kitchen.
+    Object.freeze({ id: "living-private-divider", x: 4, y: 1, width: 1, height: 1 }),
+    Object.freeze({ id: "living-private-divider", x: 4, y: 3, width: 1, height: 3 }),
+    Object.freeze({ id: "living-private-divider", x: 4, y: 7, width: 1, height: 1 }),
+    // A horizontal divider gives the bedroom and bath their own rooms.
+    Object.freeze({ id: "bedroom-bath-divider", x: 1, y: 4, width: 1, height: 1 }),
+    Object.freeze({ id: "bedroom-bath-divider", x: 3, y: 4, width: 1, height: 1 }),
+  ]),
+});
+
+// Presentation and collision both consume this derived list.  Keeping the
+// coordinate conversion here avoids a client-only wall that the server would
+// let players walk through (or a server-only wall that strands them).
+export const HOME_INTERIOR_WALL_BLOCKERS = Object.freeze(
+  HOME_ROOM_GEOMETRY.walls.map((wall) => ({
+    x: wall.x * HOME_GRID.cell,
+    y: wall.y * HOME_GRID.cell,
+    width: wall.width * HOME_GRID.cell,
+    height: wall.height * HOME_GRID.cell,
+    roomWall: true,
+  })),
+);
 // The yard uses the same native 16px / 3x presentation cell as the room.  It
 // is deliberately a small, fenced part of a residence lot, not a second map.
 export const YARD_GRID = { width: 4, height: 3, cell: 48 };
@@ -26,9 +67,9 @@ export function homeExteriorColor(value) {
 // Server-owned component definitions. Clients may render these values, but
 // purchase requests carry only the component id and are always priced here.
 export const HOME_CONSTRUCTION_COMPONENTS = Object.freeze({
-  floor: { id: "floor", label: "Floor & foundation", price: 200 },
-  walls: { id: "walls", label: "Walls", price: 400 },
-  roof: { id: "roof", label: "Roof", price: 600 },
+  floor: { id: "floor", label: "Floor & foundation", price: 20000 },
+  walls: { id: "walls", label: "Walls", price: 25000 },
+  roof: { id: "roof", label: "Roof", price: 35000 },
 });
 
 export function homeConstructionStage(home = {}) {
@@ -61,7 +102,40 @@ export const LOCATIONS = Object.freeze({
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
   city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "garden-shop": { id: "garden-shop", label: "Willow & Green", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "decor-shop": { id: "decor-shop", label: "Plaza Decor", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
 });
+
+// The three storefronts share the same durable furniture inventory and coin
+// transaction. A themed shop only changes which existing catalog rows it
+// exposes; it never creates a second pricing or furniture schema.
+export const SHOP_DEFINITIONS = Object.freeze({
+  "furniture-shop": Object.freeze({
+    id: "furniture-shop", title: "Huddle Home", subtitle: "Furnishings",
+    catalogIds: Object.freeze(["oak_chair", "fern", "reading_lamp", "coffee_table", "blue_sofa", "bookcase"]),
+  }),
+  "garden-shop": Object.freeze({
+    id: "garden-shop", title: "Willow & Green", subtitle: "Garden goods",
+    catalogIds: Object.freeze(["fern", "oak_chair", "reading_lamp"]),
+  }),
+  "decor-shop": Object.freeze({
+    id: "decor-shop", title: "Plaza Decor", subtitle: "Living-room accents",
+    catalogIds: Object.freeze(["coffee_table", "blue_sofa", "bookcase", "oak_chair", "reading_lamp"]),
+  }),
+});
+
+export function isShopLocation(value) {
+  return typeof value === "string" && !!SHOP_DEFINITIONS[value];
+}
+
+export function shopCatalog(location) {
+  const id = typeof location === "string" ? location : location?.id;
+  const definition = SHOP_DEFINITIONS[id];
+  if (!definition) return {};
+  return Object.fromEntries(definition.catalogIds
+    .map((furnitureId) => [furnitureId, FURNITURE_CATALOG[furnitureId]])
+    .filter(([, item]) => item));
+}
 const STREET_LOT_OFFSETS = Object.freeze([
   [180, 340], [420, 340], [732, 340], [972, 340],
   [180, 812], [420, 812], [732, 812], [972, 812],
@@ -150,26 +224,45 @@ export const LOCATION_GEOMETRY = Object.freeze({
       // entrance to the authenticated player's Willow Walk home.
       { x: 178, y: 106, width: 224, height: 235 },
       { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
-      // Only the fountain core blocks; the surrounding circular plaza and its
-      // benches are deliberately walkable/sittable.
-      { x: 542, y: 466, width: 68, height: 68 },
+      // Two south-lane storefronts have the same open center threshold as the
+      // supplied shop facade, so their visible doors and server portals agree.
+      { x: 178, y: 622, width: 224, height: 122 }, { x: 178, y: 744, width: 76, height: 100 }, { x: 326, y: 744, width: 76, height: 100 },
+      { x: 760, y: 622, width: 224, height: 122 }, { x: 760, y: 744, width: 76, height: 100 }, { x: 908, y: 744, width: 76, height: 100 },
       { x: 95, y: 186, width: 50, height: 50 }, { x: 420, y: 160, width: 50, height: 50 },
       { x: 680, y: 156, width: 50, height: 50 }, { x: 1007, y: 174, width: 50, height: 50 },
-      { x: 67, y: 678, width: 50, height: 50 }, { x: 1023, y: 686, width: 50, height: 50 },
       { x: 384, y: 354, width: 28, height: 30 }, { x: 730, y: 354, width: 28, height: 30 },
-      { x: 388, y: 600, width: 28, height: 30 }, { x: 732, y: 600, width: 28, height: 30 },
-      { x: 472, y: 364, width: 96, height: 30 }, { x: 582, y: 364, width: 96, height: 30 },
-      { x: 472, y: 570, width: 96, height: 30 }, { x: 582, y: 570, width: 96, height: 30 },
+      { x: 40, y: 660, width: 96, height: 30 }, { x: 1016, y: 660, width: 96, height: 30 },
+      { x: 324, y: 370, width: 96, height: 30 }, { x: 732, y: 370, width: 96, height: 30 },
     ],
     doors: [
       { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
+      { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, label: "Willow & Green" },
+      { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, label: "Plaza Decor" },
     ],
     seats: [
-      { x: 520, y: 410, dir: "down" }, { x: 630, y: 410, dir: "down" },
-      { x: 520, y: 616, dir: "down" }, { x: 630, y: 616, dir: "down" },
+      // Benches sit in grass pockets around the plaza rather than on either
+      // the east/west road or its crossing sidewalks.
+      { x: 372, y: 416, dir: "down" }, { x: 780, y: 416, dir: "down" },
+      { x: 88, y: 712, dir: "down" }, { x: 1064, y: 712, dir: "down" },
     ],
   },
   "furniture-shop": {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 144, y: 154, width: 672, height: 74 }, { x: 140, y: 378, width: 156, height: 80 }, { x: 662, y: 378, width: 156, height: 80 },
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+  },
+  "garden-shop": {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 144, y: 154, width: 672, height: 74 }, { x: 140, y: 378, width: 156, height: 80 }, { x: 662, y: 378, width: 156, height: 80 },
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+  },
+  "decor-shop": {
     blockers: [
       { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
       { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
@@ -181,7 +274,13 @@ export const LOCATION_GEOMETRY = Object.freeze({
     blockers: [
       { x: 0, y: 0, width: 576, height: 48 }, { x: 0, y: 0, width: 48, height: 432 }, { x: 528, y: 0, width: 48, height: 432 },
       { x: 0, y: 384, width: 240, height: 48 }, { x: 336, y: 384, width: 240, height: 48 },
+      ...HOME_INTERIOR_WALL_BLOCKERS,
     ],
+    // The room map is sent with the transition payload so the browser draws
+    // and collides with the exact same supplied wall-tile cells as the server.
+    roomDividers: HOME_INTERIOR_WALL_BLOCKERS,
+    rooms: HOME_ROOM_GEOMETRY.rooms,
+    doorways: HOME_ROOM_GEOMETRY.doorways,
     // Starts above the threshold, leaving a full floor-mat depth before the
     // map edge. This makes the automatic walking exit reachable without
     // pressing into an invisible boundary.
@@ -200,8 +299,12 @@ export const LOCATION_PORTALS = Object.freeze({
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
     { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
+  "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 880, dir: "down" } }],
+  "decor-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 880, dir: "down" } }],
   home: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, spawn: { x: 636, y: 372, dir: "down" } }],
 });
 
@@ -220,7 +323,7 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (value === "office" || value === "neighborhood" || value === "city" || value === "furniture-shop") return { id: value, kind: value };
+  if (value === "office" || value === "neighborhood" || value === "city" || isShopLocation(value)) return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -301,14 +404,25 @@ export function furnitureFootprint(item, rotation) {
   return quarter === 90 ? { width: item.height, height: item.width } : { width: item.width, height: item.height };
 }
 
-export function validPlacement(item, x, y, rotation, otherItems) {
+export function validPlacement(item, x, y, rotation, otherItems = []) {
   if (!item || !item.rotations.includes(rotation) || !Number.isInteger(x) || !Number.isInteger(y)) return false;
   const f = furnitureFootprint(item, rotation);
   // The spawn-to-door entry strip is permanently clear, so furniture can never
   // trap a visitor at arrival or block the front door.
   if (x < 0 || y < 0 || x + f.width > HOME_GRID.width || y + f.height > HOME_GRID.height ||
       // Preserve the spawn and a two-tile route from it to the front door.
-      (x < 7 && x + f.width > 5 && y < 9 && y + f.height > 6)) return false;
+      (x < 7 && x + f.width > 5 && y < 9 && y + f.height > 6) ||
+      // Room-divider cells are real walls, not decorative overlays. Rejecting
+      // them here keeps a saved item from occupying a cell the movement
+      // validator and client Arcade collider consider solid.
+      HOME_ROOM_GEOMETRY.walls.some((wall) =>
+        x < wall.x + wall.width && x + f.width > wall.x &&
+        y < wall.y + wall.height && y + f.height > wall.y)) return false;
+  // A clear cell is still a doorway: furniture there can block the only
+  // route between rooms even though it does not overlap a wall tile.
+  if (HOME_ROOM_GEOMETRY.doorways.some((doorway) =>
+    x < doorway.x + doorway.width && x + f.width > doorway.x &&
+    y < doorway.y + doorway.height && y + f.height > doorway.y)) return false;
   return !otherItems.some((placed) => {
     const of = furnitureFootprint(placed.item, placed.rotation);
     return x < placed.gridX + of.width && x + f.width > placed.gridX &&
@@ -375,8 +489,10 @@ export async function homeAccess(pool, ownerEmail, visitorEmail) {
 
 // A legacy 90°/270° record was made when the UI rotated a bitmap even though
 // no matching directional art existed. Normalize it under the home row lock.
-// If its upright footprint now conflicts, remove only the layout row: the
-// furniture row remains in inventory, so no purchased item is lost.
+// This also repairs layouts that predate the room-divider geometry. If an
+// upright footprint conflicts with a wall or another earlier item, remove only
+// the layout row: the furniture row remains in inventory, so no purchased item
+// is lost while the new rooms become traversable.
 export async function repairLegacyLayout(pool, ownerEmail) {
   const client = await pool.connect();
   try {
@@ -393,32 +509,28 @@ export async function repairLegacyLayout(pool, ownerEmail) {
       [ownerEmail],
     );
     const canonical = new Map([["indoor", []], ["yard", []]]);
-    for (const row of rows) {
-      const item = FURNITURE_CATALOG[row.furniture_id];
-      const zone = row.placement_zone === "yard" ? "yard" : "indoor";
-      if (item && effectiveRotation(item, row.rotation) === Number(row.rotation)) {
-        canonical.get(zone).push({ gridX: row.grid_x, gridY: row.grid_y, rotation: row.rotation, item });
-      }
-    }
     let changed = false;
     for (const row of rows) {
       const item = FURNITURE_CATALOG[row.furniture_id];
-      if (!item || effectiveRotation(item, row.rotation) === Number(row.rotation)) continue;
-      // Treat already canonical entries as fixed occupants; legacy entries are
-      // considered in stable update order so only the conflicting legacy item
-      // is returned to inventory.
+      if (!item) continue;
       const zone = row.placement_zone === "yard" ? "yard" : "indoor";
       const zoneItems = canonical.get(zone);
+      const rotation = effectiveRotation(item, row.rotation);
       const fits = zone === "yard"
-        ? validYardPlacement(item, row.grid_x, row.grid_y, 0, zoneItems)
-        : validPlacement(item, row.grid_x, row.grid_y, 0, zoneItems);
+        ? validYardPlacement(item, row.grid_x, row.grid_y, rotation, zoneItems)
+        : validPlacement(item, row.grid_x, row.grid_y, rotation, zoneItems);
       if (fits) {
-        await client.query(`UPDATE jpo_home_layout_items SET rotation=0, updated_at=now() WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
-        zoneItems.push({ gridX: row.grid_x, gridY: row.grid_y, rotation: 0, item });
+        if (Number(row.rotation) !== rotation) {
+          await client.query(`UPDATE jpo_home_layout_items SET rotation=$2, updated_at=now() WHERE furniture_instance_id=$1`, [row.furniture_instance_id, rotation]);
+          changed = true;
+        }
+        zoneItems.push({ gridX: row.grid_x, gridY: row.grid_y, rotation, item });
       } else {
+        // Deleting only the placement row is the normal "store" flow at the
+        // persistence layer: the owned furniture instance stays inventory.
         await client.query(`DELETE FROM jpo_home_layout_items WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
+        changed = true;
       }
-      changed = true;
     }
     if (changed) await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [ownerEmail]);
     await client.query("COMMIT");

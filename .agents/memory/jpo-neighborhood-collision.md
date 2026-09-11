@@ -23,3 +23,9 @@ Exercise avatar rendering with a cold texture cache when reusing HQ rendering me
 **Why:** HQ's globally cached avatar textures masked missing nested helper bridges until a previously unseen avatar appeared outdoors. Testing only the logged-in avatar missed the crash.
 
 **How to apply:** Include fresh running and sitting sheets with equipped clothing, and check nested method calls use the receiving scene's renderer.
+
+Test full paths through room doorways, not just isolated waypoint positions.
+
+**Why:** Individually valid points on opposite sides of a wall incorrectly passed a room-access test; the route between them was blocked.
+
+**How to apply:** Sample the segments between waypoints at smaller than tile resolution, then confirm narrow doorways against the actual Arcade body in-browser.

@@ -18,6 +18,8 @@ import {
   HOME_CONSTRUCTION_COMPONENTS,
   HOME_EXTERIOR_COLORS,
   FURNITURE_CATALOG,
+  isShopLocation,
+  shopCatalog,
   LOCATION_GEOMETRY,
   LOCATIONS,
   LOCATION_PORTALS,
@@ -9329,7 +9331,8 @@ io.on("connection", (socket) => {
       ok: true, location: target.id, reason, spawn: { x: p.x, y: p.y, dir: p.dir },
       map: info, self: { ...p, homeColor: ownHomeColor }, players: locationPlayers(socket.id), home,
       homeColor: ownHomeColor,
-      catalog: target.kind === "home" || target.kind === "furniture-shop" ? FURNITURE_CATALOG : undefined,
+      catalog: target.kind === "home" ? FURNITURE_CATALOG :
+        isShopLocation(target.id) ? shopCatalog(target.id) : undefined,
     });
     // Existing clients understand this event and remove stale remote sprites.
     socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), target.id));
@@ -9479,8 +9482,9 @@ io.on("connection", (socket) => {
   socket.on("homePurchase", async (payload) => {
     const p = players[socket.id];
     const furnitureId = typeof payload?.furnitureId === "string" ? payload.furnitureId : "";
-    const item = FURNITURE_CATALOG[furnitureId];
-    if (!p?.email || locationOf(p) !== "furniture-shop" || !item || !takeToken(buyBucket)) return;
+    const shopId = locationOf(p);
+    const item = isShopLocation(shopId) ? shopCatalog(shopId)[furnitureId] : null;
+    if (!p?.email || !isShopLocation(shopId) || !item || !takeToken(buyBucket)) return;
     if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
       socket.emit("homePurchaseResult", { ok: false, message: "Finish your current activity before shopping." }); return;
     }
