@@ -29,7 +29,6 @@ import {
   homeAccess,
   homeExteriorColor,
   homeSnapshot,
-  layoutBlockers,
   isHuddleTestIdentity,
   locationSpawn,
   parseLocation,
@@ -42,6 +41,16 @@ import {
   streetLotForOwner,
   streetPortalForTransition,
 } from "./neighborhood.mjs";
+import {
+  furnitureActionDefinition,
+  furnitureActionAnchor,
+  furnitureActionStandCandidates,
+  actionEffectKind,
+  furnitureIsOccupied,
+  furnitureActionWithinRadius,
+  furnitureActionPathClear,
+  furnitureActivityConflictsWithBlock,
+} from "./furniture-actions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -295,6 +304,15 @@ app.post("/admin/purge", express.json(), async (req, res) => {
 // request flood over the internet: frozen sprites + hard lag on production,
 // invisible in dev where localhost round-trips are ~1ms. Art files are stable;
 // when one truly changes, players pick it up within a day.
+// The bath furniture reuses the supplied native bathtub sprite from the
+// verified sprite pack rather than baking a substitute drawing in the client.
+app.use("/assets/room-furniture", express.static(path.join(__dirname, "../api-server/spritesheets"), {
+  setHeaders: (res, filePath) => {
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    }
+  },
+}));
 app.use(express.static(path.join(__dirname, "public"), {
   setHeaders: (res, filePath) => {
     if (/\.(png|jpe?g|gif|webp|svg|mp3|ogg|wav)$/i.test(filePath)) {
@@ -3348,6 +3366,14 @@ function locationRoom(id) { return `location:${id}`; }
 function sameLocation(aId, bId) {
   return !!players[aId] && !!players[bId] && locationOf(players[aId]) === locationOf(players[bId]);
 }
+function durableAnimFor(player) {
+  // Neighborhood furniture activities are deliberately room-ephemeral. A
+  // process restart has no durable furniture instance lock to restore, so an
+  // action must not resurrect as a ghost inside a newly edited home.
+  return parseLocation(locationOf(player))?.kind === "home"
+    ? "idle"
+    : (player?.anim === "sit" ? "sit" : "idle");
+}
 function emitToLocation(locationId, event, payload, exceptId = null) {
   const room = io.to(locationRoom(locationId));
   if (exceptId) room.except(exceptId).emit(event, payload);
@@ -3415,7 +3441,25 @@ function locationInfo(locationId) {
   const key = parsed.kind === "home" ? "home" : parsed.id;
   return { ...base, actorFootRadius: ACTOR_FOOT_RADIUS, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
 }
+// Interaction-capable room pieces are sold at Huddle Home even when older
+// shop rows predate the expanded catalog. Keep this projection server-owned so
+// a forged furniture id cannot buy anything outside the published catalog.
+function homeShopCatalog(locationId) {
+  const catalog = { ...shopCatalog(locationId) };
+  if (locationId === "furniture-shop") {
+    for (const id of ["bed", "bathtub", "television"]) {
+      if (FURNITURE_CATALOG[id]) catalog[id] = FURNITURE_CATALOG[id];
+    }
+  }
+  return catalog;
+}
 const homeLayoutCollisionCache = new Map();
+function indexedHomeLayoutBlockers(layout) {
+  return (layout || []).map((placed) => placedFurnitureBlock(
+    FURNITURE_CATALOG[placed.furnitureId],
+    { ...placed, furniture_instance_id: placed.id, grid_x: placed.gridX, grid_y: placed.gridY },
+  )).filter(Boolean);
+}
 function homeBlockersFor(location) {
   return location?.kind === "home" ? (homeLayoutCollisionCache.get(location.ownerEmail) || []) : [];
 }
@@ -3440,11 +3484,129 @@ function filterPlayersForLocation(snapshot, locationId) {
 async function emitHomeSnapshotToOccupants(ownerEmail) {
   const locationId = `home:${ownerEmail}`;
   const ownerSnapshot = await homeSnapshot(pool, ownerEmail, ownerEmail);
-  homeLayoutCollisionCache.set(ownerEmail, layoutBlockers(ownerSnapshot.layout));
+  homeLayoutCollisionCache.set(ownerEmail, indexedHomeLayoutBlockers(ownerSnapshot.layout));
   for (const [id, viewer] of Object.entries(players)) {
     if (locationOf(viewer) !== locationId) continue;
     io.to(id).emit("homeSnapshot", await homeSnapshot(pool, ownerEmail, viewer.email));
   }
+}
+
+function placedFurnitureBlock(item, row) {
+  if (!item || !row) return null;
+  const rotation = item.rotations?.includes(Number(row.rotation)) ? Number(row.rotation) : 0;
+  const quarter = rotation % 180;
+  const width = quarter === 90 ? item.height : item.width;
+  const height = quarter === 90 ? item.width : item.height;
+  return {
+    x: Number(row.grid_x ?? row.gridX) * HOME_GRID.cell,
+    y: Number(row.grid_y ?? row.gridY) * HOME_GRID.cell,
+    width: width * HOME_GRID.cell,
+    height: height * HOME_GRID.cell,
+    furnitureId: item.id,
+    instanceId: String(row.furniture_instance_id ?? row.id ?? ""),
+  };
+}
+
+function furnitureOccupied(locationId, instanceId, exceptSocketId = null) {
+  return furnitureIsOccupied(players, locationId, instanceId, exceptSocketId);
+}
+
+function activeFurniturePlacementConflict(locationId, instanceId, block) {
+  const occupants = Object.fromEntries(
+    Object.entries(players).filter(([id, player]) => locationOf(player) === locationId),
+  );
+  return furnitureActivityConflictsWithBlock(block, occupants, ACTOR_FOOT_RADIUS);
+}
+
+function furniturePathClear(location, from, to, blockers) {
+  return furnitureActionPathClear(from, to, (x, y) =>
+    validLocationMove(location, x, y, blockers));
+}
+
+function furnitureStandCandidatesForActivity(activity) {
+  const item = FURNITURE_CATALOG[activity?.furnitureId];
+  if (!item || !Number.isInteger(activity?.gridX) || !Number.isInteger(activity?.gridY)) return [];
+  return furnitureActionStandCandidates(
+    { ...item, rotation: activity.rotation },
+    activity.gridX, activity.gridY, HOME_GRID.cell, activity.action,
+  );
+}
+
+function safeFurnitureStand(player, activity, locationId) {
+  const location = parseLocation(locationId);
+  if (!player || !activity || location?.kind !== "home") return null;
+  const targetId = String(activity.instanceId);
+  const allBlockers = [...homeBlockersFor(location)];
+  if (!allBlockers.some((block) => block.instanceId === targetId) && activity.targetBlock) {
+    allBlockers.push(activity.targetBlock);
+  }
+  const blockers = allBlockers.filter((block) => block.instanceId !== targetId);
+  const candidates = [
+    activity.stand,
+    ...furnitureStandCandidatesForActivity(activity),
+  ].filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = `${candidate.x}:${candidate.y}:${candidate.dir || ""}`;
+    if (!seen.has(key)) { seen.add(key); unique.push(candidate); }
+  }
+  const reachable = unique.filter((candidate) =>
+    validLocationMove(location, candidate.x, candidate.y, blockers) &&
+    furniturePathClear(location, player, candidate, blockers));
+  if (reachable.length) {
+    return reachable.sort((a, b) =>
+      Math.hypot(player.x - a.x, player.y - a.y) -
+      Math.hypot(player.x - b.x, player.y - b.y))[0];
+  }
+  // An edited layout can invalidate every authored side stand. Never persist
+  // an actor inside furniture in that case: use the canonical home spawn only
+  // when it is clear of every current blocker.
+  const spawn = locationSpawn(location);
+  if (validLocationMove(location, spawn.x, spawn.y, allBlockers)) return spawn;
+  for (let y = HOME_GRID.cell / 2; y < HOME_GRID.height * HOME_GRID.cell; y += HOME_GRID.cell / 2) {
+    for (let x = HOME_GRID.cell / 2; x < HOME_GRID.width * HOME_GRID.cell; x += HOME_GRID.cell / 2) {
+      if (validLocationMove(location, x, y, allBlockers)) return { x, y, dir: "down" };
+    }
+  }
+  return null;
+}
+
+function furnitureActivityPayload(id, phase, activity = null, player = players[id]) {
+  return {
+    id, phase,
+    instanceId: activity?.instanceId || null,
+    furnitureId: activity?.furnitureId || null,
+    action: activity?.action || null,
+    effect: activity?.effect || null,
+    orientation: activity?.orientation || null,
+    x: Number.isFinite(player?.x) ? player.x : undefined,
+    y: Number.isFinite(player?.y) ? player.y : undefined,
+    dir: player?.dir || "down",
+  };
+}
+
+// All exits funnel through this helper: explicit E, movement, map transition,
+// access ejection, and disconnect cleanup cannot leave a room-wide ghost
+// occupant or a stale non-walkable avatar behind.
+function stopFurnitureActivity(socketId, reason = "exit", moveToStand = true) {
+  const player = players[socketId];
+  const activity = player?.activity;
+  if (!player || !activity) return false;
+  const locationId = locationOf(player);
+  if (moveToStand && parseLocation(locationId)?.kind === "home") {
+    const stand = safeFurnitureStand(player, activity, locationId);
+    if (stand) {
+      player.x = stand.x;
+      player.y = stand.y;
+      player.dir = stand.dir || player.dir;
+    }
+  }
+  player.activity = null;
+  player.anim = "idle";
+  emitToLocation(locationId, "furnitureActivity", furnitureActivityPayload(socketId, "stop", activity, player));
+  emitToLocation(locationId, "playerMoved", { id: socketId, ...player }, socketId);
+  return true;
 }
 
 // Valid win-counter keys: the duel game ids + 'dark' for Office After
@@ -6333,7 +6495,7 @@ setInterval(async () => {
               SET coins = coins + $6, x = $2, y = $3, dir = $4, anim = $5, updated_at = now()
             WHERE email = $1
             RETURNING coins`,
-          [p.email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", p.anim === "sit" ? "sit" : "idle", rate],
+          [p.email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", durableAnimFor(p), rate],
         );
         if (rows[0]) p.coins = rows[0].coins;
       } catch (err) {
@@ -9246,6 +9408,7 @@ io.on("connection", (socket) => {
       return false;
     }
     const oldLocation = locationOf(p);
+    if (p.activity) stopFurnitureActivity(socket.id, "transition");
     // The street has one stable lot per approved account. Refresh before
     // validating a street doorway, so account joins cannot remap a painted
     // doorway to a different person.
@@ -9299,7 +9462,7 @@ io.on("connection", (socket) => {
           return false;
         }
         home = access.snapshot;
-        homeLayoutCollisionCache.set(target.ownerEmail, layoutBlockers(home.layout));
+        homeLayoutCollisionCache.set(target.ownerEmail, indexedHomeLayoutBlockers(home.layout));
       }
     } catch (err) {
       console.error("home access failed:", err);
@@ -9342,7 +9505,7 @@ io.on("connection", (socket) => {
       map: info, self: { ...p, homeColor: ownHomeColor }, players: locationPlayers(socket.id), home,
       homeColor: ownHomeColor,
       catalog: target.kind === "home" ? FURNITURE_CATALOG :
-        isShopLocation(target.id) ? shopCatalog(target.id) : undefined,
+        isShopLocation(target.id) ? homeShopCatalog(target.id) : undefined,
     });
     // Existing clients understand this event and remove stale remote sprites.
     socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), target.id));
@@ -9354,6 +9517,136 @@ io.on("connection", (socket) => {
   socket.on("locationTransition", (payload) => {
     const destination = typeof payload?.destination === "string" ? payload.destination : "";
     void transitionTo(destination);
+  });
+
+  socket.on("furnitureInteract", async (payload) => {
+    const p = players[socket.id];
+    const parsed = parseLocation(locationOf(p));
+    const phase = payload?.phase === "exit" ? "exit" : "start";
+    if (!p || parsed?.kind !== "home" || !p.email || isHuddleTestIdentity(p.email)) {
+      socket.emit("furnitureInteractionResult", {
+        ok: false, code: "location", message: "Furniture can only be used inside an accessible home.",
+      });
+      return;
+    }
+    if (!takeToken(interactBucket)) return;
+    if (phase === "exit") {
+      if (!p.activity) {
+        socket.emit("furnitureInteractionResult", { ok: true, phase: "stop" });
+        return;
+      }
+      const activity = p.activity;
+      stopFurnitureActivity(socket.id, "exit");
+      socket.emit("furnitureInteractionResult", {
+        ok: true, phase: "stop", instanceId: activity.instanceId, action: activity.action,
+        x: p.x, y: p.y, dir: p.dir,
+      });
+      return;
+    }
+    if (p.activity) {
+      socket.emit("furnitureInteractionResult", {
+        ok: false, code: "busy", message: "Stand up before using another piece of furniture.",
+      });
+      return;
+    }
+    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId.slice(0, 80) : "";
+    const actionId = typeof payload?.action === "string" ? payload.action.slice(0, 16) : "";
+    if (!instanceId || !actionId) {
+      socket.emit("furnitureInteractionResult", { ok: false, code: "invalid", message: "That interaction is unavailable." });
+      return;
+    }
+    try {
+      const result = await withHomeOperation(parsed.ownerEmail, async () => {
+        if (players[socket.id] !== p || locationOf(p) !== parsed.id) return { ok: false, code: "stale" };
+        const access = await homeAccess(pool, parsed.ownerEmail, p.email);
+        if (!access.ok) return { ok: false, code: "denied", message: "You no longer have access to this home." };
+        const snapshot = await homeSnapshot(pool, parsed.ownerEmail, p.email);
+        const placed = (snapshot.layout || []).find((entry) => String(entry.id) === instanceId);
+        const item = placed && FURNITURE_CATALOG[placed.furnitureId];
+        const action = furnitureActionDefinition(item, actionId);
+        if (!placed || !item || !action) {
+          return { ok: false, code: "unsupported", message: "That furniture has no usable interaction." };
+        }
+        if (furnitureOccupied(parsed.id, instanceId, socket.id)) {
+          return { ok: false, code: "occupied", message: "Someone else is using that furniture." };
+        }
+        const blockRows = (snapshot.layout || []).map((entry) => ({
+          ...entry,
+          furniture_instance_id: entry.id,
+          grid_x: entry.gridX,
+          grid_y: entry.gridY,
+        }));
+        const blocks = blockRows.map((entry) => placedFurnitureBlock(
+          FURNITURE_CATALOG[entry.furnitureId], entry,
+        )).filter(Boolean);
+        const targetBlock = blocks.find((block) => block.instanceId === instanceId);
+        const otherBlocks = targetBlock ? blocks.filter((block) => block !== targetBlock) : blocks;
+        const placedForGeometry = { ...item, rotation: placed.rotation };
+        const anchor = furnitureActionAnchor(
+          placedForGeometry, placed.gridX, placed.gridY, HOME_GRID.cell, actionId,
+        );
+        if (!furnitureActionWithinRadius(p, anchor, action.radius)) {
+          return { ok: false, code: "distance", message: `Walk closer to ${item.name.toLowerCase()}.` };
+        }
+        // Most action anchors sit on the furniture pad; front-facing actions
+        // (TV) are just beyond it. Exclude only this exact instance while
+        // retaining every other placed blocker.
+        if (!validLocationMove(parsed, anchor.x, anchor.y, otherBlocks)) {
+          return { ok: false, code: "blocked", message: "There is not enough room to use that furniture." };
+        }
+        if (!furniturePathClear(parsed, p, anchor, otherBlocks)) {
+          return { ok: false, code: "blocked", message: "You cannot reach that furniture from here." };
+        }
+        const stands = furnitureActionStandCandidates(
+          placedForGeometry, placed.gridX, placed.gridY, HOME_GRID.cell, actionId,
+        );
+        const stand = stands
+          .filter((candidate) =>
+            validLocationMove(parsed, candidate.x, candidate.y, otherBlocks) &&
+            furniturePathClear(parsed, p, candidate, otherBlocks) &&
+            furniturePathClear(parsed, candidate, anchor, otherBlocks))
+          .sort((left, right) =>
+            Math.hypot(p.x - left.x, p.y - left.y) -
+            Math.hypot(p.x - right.x, p.y - right.y))[0];
+        if (!stand) {
+          return { ok: false, code: "blocked", message: "Leave a little space around that furniture first." };
+        }
+        const activity = {
+          instanceId, furnitureId: placed.furnitureId, action: action.id,
+          effect: actionEffectKind(action.id), locationId: parsed.id,
+          orientation: action.orientation || null,
+          gridX: placed.gridX, gridY: placed.gridY, rotation: placed.rotation,
+          targetBlock,
+          x: anchor.x, y: anchor.y, stand, startedAt: Date.now(),
+        };
+        p.x = anchor.x;
+        p.y = anchor.y;
+        p.dir = action.facing || "down";
+        p.anim = action.anim;
+        p.activity = activity;
+        return { ok: true, activity };
+      });
+      if (!result?.ok) {
+        socket.emit("furnitureInteractionResult", {
+          ok: false, code: result?.code || "unavailable",
+          message: result?.message || "That furniture could not be used.",
+        });
+        return;
+      }
+      const activity = result.activity;
+      emitToLocation(parsed.id, "furnitureActivity", furnitureActivityPayload(
+        socket.id, "start", activity, p,
+      ));
+      emitToLocation(parsed.id, "playerMoved", { id: socket.id, ...p }, socket.id);
+      socket.emit("furnitureInteractionResult", {
+        ok: true, phase: "start", activity, x: p.x, y: p.y, dir: p.dir,
+      });
+    } catch (err) {
+      console.error("furniture interaction failed:", err);
+      socket.emit("furnitureInteractionResult", {
+        ok: false, code: "unavailable", message: "That furniture is unavailable right now.",
+      });
+    }
   });
 
   socket.on("homeSnapshotRequest", async () => {
@@ -9504,7 +9797,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     const furnitureId = typeof payload?.furnitureId === "string" ? payload.furnitureId : "";
     const shopId = locationOf(p);
-    const item = isShopLocation(shopId) ? shopCatalog(shopId)[furnitureId] : null;
+    const item = isShopLocation(shopId) ? homeShopCatalog(shopId)[furnitureId] : null;
     if (p?.email && isHuddleTestIdentity(p.email)) {
       socket.emit("homePurchaseResult", {
         ok: false, code: "test_account", message: "Huddle test accounts do not have neighborhood homes.",
@@ -9557,16 +9850,33 @@ io.on("connection", (socket) => {
     }
     if (!p?.email || !canEditZone || !instanceId ||
         !Number.isInteger(gridX) || !Number.isInteger(gridY) || !Number.isInteger(rotation)) return;
-    const client = await pool.connect();
+    if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
+      socket.emit("homeActionResult", { ok: false, message: "Stand up before moving that furniture." });
+      return;
+    }
     try {
+      await withHomeOperation(p.email, async () => {
+      const client = await pool.connect();
+      try {
       await client.query("BEGIN");
       await ensureHome(client, p.email);
+      if (players[socket.id] !== p || locationOf(p) !== parsed.id) {
+        throw new Error("That layout request is no longer current.");
+      }
       // Serialise per-home edits with the home row lock, then calculate overlap
       // from authoritative rows inside the same transaction.
       await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [p.email]);
       const owned = await client.query(`SELECT furniture_id FROM jpo_home_furniture WHERE id=$1 AND owner_email=$2`, [instanceId, p.email]);
       const item = FURNITURE_CATALOG[owned.rows[0]?.furniture_id];
       if (!item) throw new Error("Furniture is not in your inventory.");
+      if (parsed?.kind === "home") {
+        const proposedBlock = placedFurnitureBlock(item, {
+          furniture_instance_id: instanceId, grid_x: gridX, grid_y: gridY, rotation,
+        });
+        if (activeFurniturePlacementConflict(parsed.id, instanceId, proposedBlock)) {
+          throw new Error("Stand up before placing furniture over an active player.");
+        }
+      }
       const existing = await client.query(
         `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, f.furniture_id
            FROM jpo_home_layout_items l JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
@@ -9593,10 +9903,14 @@ io.on("connection", (socket) => {
       await refreshStreetHomes();
       io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Placed." });
-    } catch (err) {
+      } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
+      throw err;
+      } finally { client.release(); }
+      });
+    } catch (err) {
       socket.emit("homeActionResult", { ok: false, message: err.message || "Could not place that item." });
-    } finally { client.release(); }
+    }
   });
 
   socket.on("homeLayoutReturn", async (payload) => {
@@ -9608,13 +9922,25 @@ io.on("connection", (socket) => {
     }
     if (!p?.email || !((parsed?.kind === "home" && parsed.ownerEmail === p.email) ||
       parsed?.id === "neighborhood") || !instanceId) return;
-    const client = await pool.connect();
+    if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
+      socket.emit("homeActionResult", { ok: false, message: "Someone is using that furniture." });
+      return;
+    }
     try {
+      await withHomeOperation(p.email, async () => {
+      const client = await pool.connect();
+      try {
       await client.query("BEGIN");
       await ensureHome(client, p.email);
+      if (players[socket.id] !== p || locationOf(p) !== parsed.id) {
+        throw new Error("That layout request is no longer current.");
+      }
       // Match placement's per-home row lock.  Without it a return racing a
       // placement can publish revisions/snapshots in the wrong order.
       await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [p.email]);
+       if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
+         throw new Error("Someone is using that furniture.");
+       }
       const changed = await client.query(
         `DELETE FROM jpo_home_layout_items l USING jpo_home_furniture f
           WHERE l.furniture_instance_id=$1 AND f.id=l.furniture_instance_id AND f.owner_email=$2
@@ -9632,10 +9958,14 @@ io.on("connection", (socket) => {
       await refreshStreetHomes();
       io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Returned to inventory." });
-    } catch (err) {
+      } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
+      throw err;
+      } finally { client.release(); }
+      });
+    } catch (err) {
       socket.emit("homeActionResult", { ok: false, message: err.message || "Could not return that item." });
-    } finally { client.release(); }
+    }
   });
 
   socket.on("homeAccessSet", async (payload) => {
@@ -9657,6 +9987,7 @@ io.on("connection", (socket) => {
           if (id === socket.id || locationOf(visitor) !== `home:${p.email}`) continue;
           const access = await homeAccess(pool, p.email, visitor.email);
           if (access.ok || locationOf(players[id]) !== `home:${p.email}`) continue;
+          if (visitor.activity) stopFurnitureActivity(id, "eject");
           emitToLocation(`home:${p.email}`, "playerLeft", id);
           const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
           visitor.locationId = "city";
@@ -9750,6 +10081,7 @@ io.on("connection", (socket) => {
           // The room recheck is essential when transition/access operations
           // queue behind one another.
           if (locationOf(players[id]) !== `home:${p.email}`) continue;
+           if (v.activity) stopFurnitureActivity(id, "revoke");
           emitToLocation(`home:${p.email}`, "playerLeft", id);
           const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
           v.locationId = "city"; const spawn = locationSpawn(parseLocation("city"));
@@ -9787,6 +10119,15 @@ io.on("connection", (socket) => {
     // RLGL: eliminated runners lie where they fell until the attempt ends.
     if (rlglFrozen(socket.id)) return;
 
+    // An action owns the avatar's authoritative anchor. A normal movement
+    // packet is the server-side equivalent of pressing a direction key and
+    // exits it through the same cleanup path as the explicit E action.
+    if (me.activity) {
+      const keepsAction = data.anim === me.anim &&
+        Math.hypot(Number(data.x) - me.x, Number(data.y) - me.y) <= 8;
+      if (!keepsAction) stopFurnitureActivity(socket.id, "movement");
+    }
+
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
     const x = Number(data.x), y = Number(data.y);
@@ -9806,12 +10147,18 @@ io.on("connection", (socket) => {
     // Sitting is a server-checked furniture interaction in homes. A forged
     // `anim:"sit"` in a plaza, shop, or empty floor is discarded; the chair
     // itself is temporarily excluded from collision only for that sit snap.
+    const activeBlock = location?.kind === "home" && me.activity &&
+      blockers.find((b) => b.instanceId === String(me.activity.instanceId));
     const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
       Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);
     const staticSeat = location?.kind !== "home" && !isOfficePlayer(socket.id) &&
       LOCATION_GEOMETRY[location?.id]?.seats?.find((seat) => Math.hypot(x - seat.x, y - seat.y) <= 20);
-    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat) return rejectMove();
-    const movementBlockers = chair ? blockers.filter((b) => b !== chair) : blockers;
+    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat && !me.activity) return rejectMove();
+    const actionAnim = ["lie", "sleep", "shower", "bathe", "watch"].includes(data.anim);
+    if (actionAnim && (!me.activity || data.anim !== me.anim)) return rejectMove();
+    const movementBlockers = activeBlock
+      ? blockers.filter((b) => b !== activeBlock)
+      : (chair ? blockers.filter((b) => b !== chair) : blockers);
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)
       : !location || (location.id === "neighborhood"
@@ -9869,7 +10216,7 @@ io.on("connection", (socket) => {
     const rlglPrevX = me.x, rlglPrevY = me.y;
     me.x = x; me.y = y;
     if (typeof data.dir === "string") me.dir = data.dir;
-    me.anim = data.anim;
+    me.anim = typeof data.anim === "string" ? data.anim : "idle";
     wasSitting = sitting;
     lastMoveAt = now;
     if (LT_METRICS) ltState.mvOk++;
@@ -13015,6 +13362,7 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (p) {
       const locationId = locationOf(p);
+      if (p.activity) stopFurnitureActivity(socket.id, "disconnect");
       delete players[socket.id];
       if (p.email) {
         // Grace period: don't broadcast "left" yet. Keep the avatar visible for
@@ -13043,7 +13391,7 @@ io.on("connection", (socket) => {
         try {
           await pool.query(
             `UPDATE jpo_players SET x = $2, y = $3, dir = $4, anim = $5, updated_at = now() WHERE email = $1`,
-            [email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", p.anim === "sit" ? "sit" : "idle"],
+            [email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", durableAnimFor(p)],
           );
         } catch (err) { console.error("disconnect flush failed:", err); }
       } else {

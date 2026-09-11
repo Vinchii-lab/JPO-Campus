@@ -1,17 +1,4 @@
 window.JpoInteriors = {
-  drawHomeInteriors: function(scene, INTERIOR_ART_SCALE, cellSize) {
-    // Use the same footprints that reserve placement and block movement.
-    // Tall bathroom/bed sprites are three cells, not single-cell wall icons.
-    (scene.info.geometry?.builtInFixtures || []).forEach((fixture) => {
-      const x = (fixture.gridX + fixture.width / 2) * cellSize;
-      const y = (fixture.gridY + fixture.height) * cellSize;
-      scene.add.image(x, y, fixture.texture)
-        .setScale(INTERIOR_ART_SCALE)
-        .setOrigin(0.5, 1)
-        .setDepth(y);
-    });
-  },
-
   drawShopVignettes: function(scene, INTERIOR_ART_SCALE, theme, catalog) {
     const art = scene.add.graphics().setDepth(2);
     

@@ -26,30 +26,9 @@ assert.deepEqual(LOCATION_GEOMETRY.home.roomDividers, HOME_INTERIOR_WALL_BLOCKER
   "the map contract exposes the same wall cells used by the home collider");
 assert.deepEqual(LOCATION_GEOMETRY.home.builtInFixtures, HOME_BUILTIN_FIXTURES,
   "the client receives the exact canonical non-owned fixture list");
-assert.equal(HOME_BUILTIN_FIXTURES.length, 8, "starter floor has the eight supplied fixtures");
-for (const [index, fixture] of HOME_BUILTIN_FIXTURES.entries()) {
-  const blocker = HOME_BUILTIN_FIXTURE_BLOCKERS[index];
-  assert.deepEqual(
-    blocker,
-    {
-      x: fixture.gridX * HOME_GRID.cell, y: fixture.gridY * HOME_GRID.cell,
-      width: fixture.width * HOME_GRID.cell, height: fixture.height * HOME_GRID.cell,
-      fixtureId: fixture.id, builtInFixture: true,
-    },
-    `${fixture.id} blocker is derived from its grid footprint`,
-  );
-  assert(LOCATION_GEOMETRY.home.blockers.some((candidate) =>
-    candidate.builtInFixture && candidate.fixtureId === fixture.id &&
-    candidate.x === blocker.x && candidate.y === blocker.y &&
-    candidate.width === blocker.width && candidate.height === blocker.height),
-  `${fixture.id} blocker is included in the home collision geometry`);
-}
-for (let i = 0; i < HOME_BUILTIN_FIXTURES.length; i++) for (let j = i + 1; j < HOME_BUILTIN_FIXTURES.length; j++) {
-  const a = HOME_BUILTIN_FIXTURES[i], b = HOME_BUILTIN_FIXTURES[j];
-  assert(!(a.gridX < b.gridX + b.width && a.gridX + a.width > b.gridX &&
-    a.gridY < b.gridY + b.height && a.gridY + a.height > b.gridY),
-  `${a.id} and ${b.id} do not overlap`);
-}
+assert.deepEqual(HOME_BUILTIN_FIXTURES, [], "homes are delivered unfurnished");
+assert.deepEqual(HOME_BUILTIN_FIXTURE_BLOCKERS, [], "removed furnishings leave no invisible blockers");
+assert.equal(LOCATION_GEOMETRY.home.blockers.some((block) => block.builtInFixture), false);
 assert.deepEqual(
   { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell },
   { width: 1152, height: 864 },
@@ -125,10 +104,10 @@ assert.equal(validPlacement(chair, 13, 5, 0, []), true,
 assert.equal(validPlacement(chair, 1, 1, 0, []), true,
   "indoor placement accepts a clear bedroom cell");
 assert.equal(validPlacement(chair, 0, 1, 0, []), false, "indoor placement keeps the solid outer wall clear");
-assert.equal(validPlacement(chair, 11, 1, 0, []), false,
-  "indoor placement rejects a non-owned kitchen fixture");
-assert.equal(validPlacement(chair, 2, 2, 0, []), false,
-  "indoor placement rejects the three-cell bedroom bed footprint");
+assert.equal(validPlacement(chair, 11, 1, 0, []), true,
+  "former built-in kitchen space is available for purchased furniture");
+assert.equal(validPlacement(chair, 2, 2, 0, []), true,
+  "former built-in bed space is available for purchased furniture");
 assert.equal(validPlacement(chair, 3, 13, 0, []), true,
   "indoor placement keeps a clear bath cell available around fixtures");
 

@@ -48,22 +48,9 @@ export const HOME_INTERIOR_WALL_BLOCKERS = Object.freeze(
     roomWall: true,
   })),
 );
-// Supplied interior art that belongs to the starter floor is part of the
-// authoritative room, not decorative client-only scenery.  These footprints
-// are intentionally independent of owned furniture: legacy possessions can
-// remain at their saved coordinates unless they overlap one of these fixtures,
-// in which case validPlacement/repairLegacyLayout returns only that placement
-// to the owner's inventory.
-export const HOME_BUILTIN_FIXTURES = Object.freeze([
-  Object.freeze({ id: "kitchen-fridge", texture: "int_kitchen_fridge", gridX: 11, gridY: 1, width: 1, height: 1 }),
-  Object.freeze({ id: "kitchen-counter-1", texture: "int_kitchen_counter", gridX: 12, gridY: 1, width: 1, height: 1 }),
-  Object.freeze({ id: "kitchen-sink", texture: "int_kitchen_sink", gridX: 13, gridY: 1, width: 1, height: 1 }),
-  Object.freeze({ id: "kitchen-counter-2", texture: "int_kitchen_counter", gridX: 14, gridY: 1, width: 1, height: 1 }),
-  Object.freeze({ id: "kitchen-stove", texture: "int_kitchen_stove", gridX: 15, gridY: 1, width: 1, height: 1 }),
-  Object.freeze({ id: "bedroom-bed", texture: "int_bedroom_bed", gridX: 2, gridY: 1, width: 1, height: 3 }),
-  Object.freeze({ id: "bathroom-toilet", texture: "int_bathroom_toilet", gridX: 1, gridY: 10, width: 1, height: 3 }),
-  Object.freeze({ id: "bathroom-sink", texture: "int_bathroom_sink", gridX: 2, gridY: 10, width: 1, height: 3 }),
-]);
+// Homes contain architecture only. All furnishings must be bought and placed
+// by players; empty fixture lists also release formerly reserved floor cells.
+export const HOME_BUILTIN_FIXTURES = Object.freeze([]);
 export const HOME_BUILTIN_FIXTURE_BLOCKERS = Object.freeze(
   HOME_BUILTIN_FIXTURES.map((fixture) => ({
     x: fixture.gridX * HOME_GRID.cell, y: fixture.gridY * HOME_GRID.cell,
@@ -368,12 +355,15 @@ export const FURNITURE_CATALOG = Object.freeze({
   // the original catalog contract: an upper frame (plant leaves, lamp shade)
   // is presentation, never extra blocked floor or changed saved layouts.
   // IDs/prices deliberately remain stable for existing inventory instances.
-  oak_chair:   { id: "oak_chair",   name: "Gold armchair",    price: 90,  width: 1, height: 1, color: "#b98743", rotations: [0] },
+  oak_chair:   { id: "oak_chair",   name: "Gold armchair",    price: 90,  width: 1, height: 1, color: "#b98743", rotations: [0], actions: ["sit"], interaction: { facing: "down" } },
   fern:        { id: "fern",        name: "Potted fern",      price: 130, width: 1, height: 1, color: "#4f9253", rotations: [0] },
   reading_lamp:{ id: "reading_lamp",name: "Coral floor lamp", price: 160, width: 1, height: 1, color: "#d7634b", rotations: [0] },
   coffee_table:{ id: "coffee_table",name: "Plum low table",   price: 280, width: 2, height: 1, color: "#74637e", rotations: [0] },
-  blue_sofa:   { id: "blue_sofa",   name: "Tan lounge sofa", price: 460, width: 2, height: 1, color: "#b77f45", rotations: [0] },
+  blue_sofa:   { id: "blue_sofa",   name: "Tan lounge sofa", price: 460, width: 2, height: 1, color: "#b77f45", rotations: [0], actions: ["sit", "lie"], interaction: { facing: "down", radius: 96 } },
   bookcase:    { id: "bookcase",    name: "Gold bookcase",   price: 520, width: 1, height: 2, color: "#a87542", rotations: [0] },
+  bed:         { id: "bed",         name: "Bedroom bed",     price: 780, width: 1, height: 3, color: "#9d6d65", rotations: [0], asset: "bedroom_bed", actions: ["sleep"], interaction: { facing: "down", radius: 104, orientation: "lengthwise" } },
+  bathtub:     { id: "bathtub",     name: "Claw-foot bath",  price: 640, width: 1, height: 4, color: "#b9d7dc", rotations: [0], asset: "animated_bathtub_with_duck", actions: ["shower", "bathe"], interaction: { facing: "down", radius: 104 } },
+  television:  { id: "television",  name: "Television",      price: 540, width: 1, height: 1, color: "#4c536e", rotations: [0], asset: "TV_Studio_16x16", actions: ["watch"], interaction: { anchor: "front", facing: "up", radius: 96 } },
 });
 
 export function parseLocation(value) {

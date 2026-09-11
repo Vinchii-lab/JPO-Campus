@@ -1419,15 +1419,24 @@
     body.round-dark #darkness { display: block; }
 
     /* ── Minimap (M key) ─────────────────────────────────────────────
-       Whole-office overview with live player dots. Deliberately BLOCKED
-       while an After Dark round is on — seeing everyone's position would
-       ruin the hide-and-hunt. */
+       The same overview is used in HQ and every shared neighborhood
+       location. Deliberately BLOCKED while an After Dark round is on —
+       seeing everyone's position would ruin the hide-and-hunt. */
     #minimap {
       display: none; position: fixed; inset: 0; z-index: 900;
       background: rgba(8, 10, 18, 0.82);
       align-items: center; justify-content: center; flex-direction: column; gap: 10px;
     }
     #minimap.open { display: flex; }
+    #minimap .mm-title {
+      color: #f5ce64; font-family: 'Press Start 2P', monospace;
+      font-size: clamp(12px, 2vw, 16px); text-shadow: 2px 2px 0 #000;
+      letter-spacing: .04em; text-align: center;
+    }
+    #minimap .mm-subtitle {
+      color: #c5d0ee; font: 11px monospace; letter-spacing: .04em;
+      min-height: 14px; text-align: center; text-shadow: 1px 1px 0 #000;
+    }
     #minimapCanvas {
       border: 2px solid #3a4668; border-radius: 10px;
       background: #10131f; box-shadow: 0 12px 48px rgba(0,0,0,.6);
@@ -3124,7 +3133,12 @@
 
   <!-- ── Office After Dark surfaces ── -->
   <div id="darkness"></div>
-  <div id="minimap"><canvas id="minimapCanvas"></canvas><div class="mm-hint">M or Esc to close</div></div>
+  <div id="minimap" role="dialog" aria-modal="true" aria-labelledby="minimapTitle">
+    <div id="minimapTitle" class="mm-title">JPO HQ</div>
+    <div id="minimapSubtitle" class="mm-subtitle" aria-live="polite"></div>
+    <canvas id="minimapCanvas" aria-label="Current location map"></canvas>
+    <div class="mm-hint">M or Esc to close</div>
+  </div>
   <div id="round-chip"></div>
   <div id="round-roster"><div class="rn-rtitle">🌙 IN THE ROUND</div><div id="round-roster-list"></div></div>
   <div id="round-invite">
@@ -7229,14 +7243,27 @@
     });
 
     // ── Minimap (M key) ─────────────────────────────────────────────────
-    // Whole-office overview with live player dots. The static office layout
-    // (Floor / Wall / Furniture) is rasterised ONCE into an offscreen canvas
-    // (1 tile → mmScale px); only the dots are redrawn on a timer while open.
+    // M is a presentation-only overview: it never sends a travel request and
+    // has no destination controls. HQ keeps its existing rasterised map, while
+    // the active shared NeighborhoodScene supplies the current street, plaza,
+    // shop, or home map. The background is cached; player markers are redrawn
+    // on a timer so the overlay follows the live room.
     // BLOCKED during After Dark (lobby AND active) — a live position map
     // would ruin the hide-and-hunt — and force-closed if a round begins.
     let _mmOpen = false, _mmBg = null, _mmTimer = null, _mmScale = 1;
+    let _mmWorldScale = 1, _mmBackgroundToken = '';
+    let _mmCanvasWidth = 1, _mmCanvasHeight = 1;
+    // Canvas dimensions are intentionally bounded independently of CSS. A
+    // street map grows with its canonical lot coordinates, so a one-world-pixel
+    // canvas would turn an extreme (but valid) lot number into a multi-gigabyte
+    // allocation before the browser ever gets a chance to scale it.
+    const MM_MAX_CANVAS_WIDTH = 2048;
+    const MM_MAX_CANVAS_HEIGHT = 2048;
+    const MM_MAX_CANVAS_PIXELS = 4 * 1024 * 1024;
     const _mmEl = document.getElementById('minimap');
     const _mmCv = document.getElementById('minimapCanvas');
+    const _mmTitle = document.getElementById('minimapTitle');
+    const _mmSubtitle = document.getElementById('minimapSubtitle');
     // Pretty background: a pre-rendered shot of the ACTUAL office art
     // (assets/minimap.png, regenerate with the capture script after map edits).
     // The blocky tile raster below stays as the fallback if it fails to load.
@@ -7245,12 +7272,176 @@
     _mmImg.onload = () => { _mmImgOk = true; _mmBg = null; };
     _mmImg.src = '/assets/minimap.png';
 
-    function _mmBuildBg(map) {
-      // Fit the whole map inside ~92vw × 78vh, whole-pixel tiles for crispness.
-      _mmScale = Math.max(1, Math.floor(Math.min(
-        (window.innerWidth * 0.92) / map.width, (window.innerHeight * 0.78) / map.height)));
+    function _mmSceneIsActive(scene) {
+      if (!scene) return false;
+      try {
+        // Phaser exposes isActive() on the ScenePlugin (`scene.scene`), while
+        // the small test/integration scenes may expose it directly.
+        if (typeof scene.isActive === 'function') return !!scene.isActive();
+        if (typeof scene.scene?.isActive === 'function') return !!scene.scene.isActive();
+      } catch (_) {}
+      return false;
+    }
+
+    function _mmExpectedLocation() {
+      const location = window._jpoAuthoritativeLocation;
+      return typeof location === 'string' && location ? location : null;
+    }
+
+    function _mmActiveSceneByKey(key) {
+      const gameScene = window._phaserGame?.scene?.getScene?.(key);
+      if (_mmSceneIsActive(gameScene)) return gameScene;
+      return null;
+    }
+
+    function _mmActiveScene() {
+      // _gameScene intentionally continues to point at OfficeScene even while
+      // it is sleeping. Never use that stale object during a location change:
+      // both the expected server location and Phaser's active lifecycle state
+      // must agree before a map can be opened.
+      const expected = _mmExpectedLocation();
+      const outdoorCandidates = [
+        window._neighborhoodScene,
+        _mmActiveSceneByKey('NeighborhoodScene'),
+      ];
+      const outdoor = outdoorCandidates.find((scene) =>
+        _mmSceneIsActive(scene) && (expected === null || scene?.location === expected) &&
+        Number.isFinite(scene.mapWidth) && scene.mapWidth > 0 &&
+        Number.isFinite(scene.mapHeight) && scene.mapHeight > 0);
+      const officeCandidates = [
+        window._gameScene,
+        _mmActiveSceneByKey('OfficeScene'),
+      ];
+      const office = officeCandidates.find((scene) =>
+        _mmSceneIsActive(scene) && scene?._tileMap);
+      if (expected === 'office') return office || null;
+      if (typeof expected === 'string') return outdoor || null;
+      return outdoor || office || null;
+    }
+
+    function _mmRememberAuthoritativeLocation(location) {
+      if (typeof location !== 'string' || !location) return;
+      window._jpoAuthoritativeLocation = location;
+      // A successful server transition invalidates the old map immediately.
+      // The next M press waits for the expected Phaser scene to be active and
+      // fully created instead of showing a sleeping OfficeScene snapshot.
+      if (_mmOpen) _mmClose();
+    }
+
+    function _mmSceneReady(scene) {
+      if (!scene || !_mmSceneIsActive(scene)) return false;
+      if (_mmIsNeighborhoodScene(scene)) {
+        return !!scene.player && !!scene.info &&
+          Number.isFinite(scene.mapWidth) && scene.mapWidth > 0 &&
+          Number.isFinite(scene.mapHeight) && scene.mapHeight > 0;
+      }
+      return !!scene._tileMap && !!scene.player;
+    }
+
+    // The server's player snapshot and transition result are the authoritative
+    // browser-visible location seam. Scene objects are presentation state and
+    // can briefly outlive their location during a Phaser restart.
+    socket.on('currentPlayers', (players) => {
+      const self = players?.[socket.id];
+      if (self?.locationId) _mmRememberAuthoritativeLocation(self.locationId);
+    });
+    socket.on('locationTransitionResult', (result) => {
+      if (result?.ok && result.location) _mmRememberAuthoritativeLocation(result.location);
+    });
+
+    function _mmIsNeighborhoodScene(scene) {
+      return scene === window._neighborhoodScene || (
+        scene?.scene?.key === 'NeighborhoodScene' && !scene?._tileMap
+      );
+    }
+
+    function _mmIsStreetScene(scene) {
+      return _mmIsNeighborhoodScene(scene) && scene?.location === 'neighborhood';
+    }
+
+    function _mmMapSize(scene) {
+      if (!_mmIsNeighborhoodScene(scene)) {
+        return { width: scene._tileMap.width, height: scene._tileMap.height };
+      }
+      const bounds = scene.info?.bounds || {};
+      const width = Number(scene.mapWidth || bounds.width);
+      const height = Number(scene.mapHeight || bounds.height);
+      return {
+        width: Number.isFinite(width) && width > 0 ? width : 1,
+        height: Number.isFinite(height) && height > 0 ? height : 1,
+      };
+    }
+
+    function _mmNeighborhoodViewport(scene) {
+      const { height: mapHeight } = _mmMapSize(scene);
+      if (!_mmIsStreetScene(scene)) return { originY: 0, height: mapHeight };
+      // Willow Walk is an intentionally sparse, vertically extensible street:
+      // never rasterise its entire canonical extent. Keep a stable two-segment
+      // row chunk (or the whole map when it is smaller) around the local player.
+      const height = Math.min(1920, mapHeight);
+      const maxOrigin = Math.max(0, mapHeight - height);
+      const playerY = Number(scene.player?.y);
+      const row = Number.isFinite(playerY) ? Math.floor(playerY / height) : 0;
+      const originY = Math.min(maxOrigin, Math.max(0, row * height));
+      return { originY, height };
+    }
+
+    function _mmBoundedWorldSize(width, height) {
+      const safeWidth = Math.max(1, Number.isFinite(width) ? width : 1);
+      const safeHeight = Math.max(1, Number.isFinite(height) ? height : 1);
+      const area = safeWidth * safeHeight;
+      const areaScale = Number.isFinite(area)
+        ? Math.sqrt(MM_MAX_CANVAS_PIXELS / Math.max(1, area))
+        : 0;
+      let scale = Math.min(
+        1,
+        MM_MAX_CANVAS_WIDTH / safeWidth,
+        MM_MAX_CANVAS_HEIGHT / safeHeight,
+        areaScale,
+      );
+      if (!Number.isFinite(scale) || scale <= 0) scale = Number.MIN_VALUE;
+      let canvasWidth = Math.max(1, Math.floor(safeWidth * scale));
+      let canvasHeight = Math.max(1, Math.floor(safeHeight * scale));
+      // Flooring normally makes the formula strict already. Keep this final
+      // guard in case floating-point rounding crosses the pixel budget.
+      while (canvasWidth * canvasHeight > MM_MAX_CANVAS_PIXELS) {
+        scale *= 0.999;
+        canvasWidth = Math.max(1, Math.floor(safeWidth * scale));
+        canvasHeight = Math.max(1, Math.floor(safeHeight * scale));
+      }
+      return { scale, width: canvasWidth, height: canvasHeight };
+    }
+
+    function _mmFitScale(scene, width, height) {
+      if (_mmIsNeighborhoodScene(scene)) {
+        const bounded = _mmBoundedWorldSize(width, height);
+        _mmWorldScale = bounded.scale;
+        _mmCanvasWidth = bounded.width;
+        _mmCanvasHeight = bounded.height;
+        _mmScale = 1;
+        return _mmWorldScale;
+      }
+      // HQ keeps several pixels per tile for its small tilemap, but its output
+      // is also bounded by the same canvas safety limits.
+      const desiredScale = Math.max(1, Math.floor(Math.min(
+        (window.innerWidth * 0.92) / width, (window.innerHeight * 0.78) / height)));
+      const bounded = _mmBoundedWorldSize(width * desiredScale, height * desiredScale);
+      _mmCanvasWidth = bounded.width;
+      _mmCanvasHeight = bounded.height;
+      _mmScale = bounded.width / Math.max(1, width);
+      _mmWorldScale = _mmScale / (sceneTileSize(scene) * 3);
+      return _mmScale;
+    }
+
+    function sceneTileSize(scene) {
+      return Number(scene?._tileMap?.tileWidth) || 16;
+    }
+
+    function _mmBuildOfficeBg(scene) {
+      const map = scene._tileMap;
+      _mmFitScale(scene, map.width, map.height);
       const bg = document.createElement('canvas');
-      bg.width = map.width * _mmScale; bg.height = map.height * _mmScale;
+      bg.width = _mmCanvasWidth; bg.height = _mmCanvasHeight;
       const g = bg.getContext('2d');
       if (_mmImgOk) {   // real map art, scaled to fit — no tile raster needed
         g.imageSmoothingEnabled = true;
@@ -7274,34 +7465,220 @@
       return bg;
     }
 
+    function _mmRect(g, rect, fill, stroke = null, line = 1) {
+      if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.y)) return;
+      g.fillStyle = fill;
+      g.fillRect(rect.x, rect.y, rect.width || 0, rect.height || 0);
+      if (stroke) {
+        g.lineWidth = line;
+        g.strokeStyle = stroke;
+        g.strokeRect(rect.x, rect.y, rect.width || 0, rect.height || 0);
+      }
+    }
+
+    function _mmNeighborhoodBase(g, scene, viewport) {
+      const location = scene.location;
+      const width = scene.mapWidth, height = scene.mapHeight;
+      g.fillStyle = location === 'neighborhood' ? '#77a45f'
+        : location === 'city' ? '#83aa68' : location?.endsWith('-shop') ? '#b78b68' : '#c59a72';
+      g.fillRect(0, 0, width, height);
+      if (location === 'neighborhood') {
+        const segmentCount = Math.max(1, Math.ceil(Math.max(0, height - 96) / 960));
+        const startSegment = Math.max(0, Math.floor((viewport?.originY || 0) / 960) - 1);
+        const endSegment = Math.min(segmentCount,
+          Math.ceil(((viewport?.originY || 0) + (viewport?.height || height)) / 960) + 1);
+        // The viewport is small, but retain a stride guard for unusual map
+        // heights and future chunk sizes.
+        const visibleSegments = Math.max(1, endSegment - startSegment);
+        const segmentStride = Math.max(1, Math.ceil(visibleSegments / MM_MAX_CANVAS_HEIGHT));
+        for (let segment = startSegment; segment < endSegment; segment += segmentStride) {
+          const base = segment * 960;
+          _mmRect(g, { x: 0, y: base + 432, width, height: 144 }, '#55616a', '#3f4950', 2);
+          _mmRect(g, { x: 0, y: base + 408, width, height: 24 }, '#d8ccb3', '#9b927e', 1);
+          _mmRect(g, { x: 0, y: base + 576, width, height: 24 }, '#d8ccb3', '#9b927e', 1);
+          _mmRect(g, { x: 552, y: base, width: 48, height: 432 }, '#d8ccb3', '#9b927e', 1);
+          _mmRect(g, { x: 552, y: base + 576, width: 48, height: 384 }, '#d8ccb3', '#9b927e', 1);
+          g.strokeStyle = 'rgba(248,242,209,.65)'; g.lineWidth = 3;
+          for (let x = 24; x < width - 24; x += 56) g.strokeRect(x, base + 504, 28, 1);
+        }
+      } else if (location === 'city') {
+        _mmRect(g, { x: 0, y: 432, width, height: 144 }, '#535e66', '#3e4750', 2);
+        _mmRect(g, { x: 456, y: 0, width: 240, height }, '#535e66', '#3e4750', 2);
+        _mmRect(g, { x: 0, y: 408, width, height: 24 }, '#d8ccb3', '#9b927e', 1);
+        _mmRect(g, { x: 0, y: 576, width, height: 24 }, '#d8ccb3', '#9b927e', 1);
+        _mmRect(g, { x: 432, y: 0, width: 24, height }, '#d8ccb3', '#9b927e', 1);
+        _mmRect(g, { x: 696, y: 0, width: 24, height }, '#d8ccb3', '#9b927e', 1);
+        [[836, 328, 72, 104], [254, 852, 72, 36], [836, 852, 72, 36]]
+          .forEach(([x, y, w, h]) => _mmRect(g, { x, y, width: w, height: h }, '#d8ccb3', '#9b927e', 1));
+      } else {
+        // Interior maps use the exact scene geometry below for their walls and
+        // furniture; this floor tint only supplies the spaces between them.
+        g.strokeStyle = 'rgba(77,48,36,.55)'; g.lineWidth = 6;
+        g.strokeRect(3, 3, width - 6, height - 6);
+      }
+    }
+
+    function _mmDrawTexture(g, scene, object) {
+      const key = object?.texture?.key;
+      if (typeof key !== 'string' ||
+          !(/^(?:ext_|int_|dec_|home-furniture-v2:)/.test(key))) return false;
+      const texture = scene.textures?.get(key);
+      const source = texture?.getSourceImage?.();
+      if (!source) return false;
+      const frame = object.frame;
+      const sx = Number(frame?.cutX) || 0, sy = Number(frame?.cutY) || 0;
+      const sw = Number(frame?.cutWidth) || source.width, sh = Number(frame?.cutHeight) || source.height;
+      const dw = Math.abs(Number(object.displayWidth) || sw), dh = Math.abs(Number(object.displayHeight) || sh);
+      const ox = Number(object.originX);
+      const oy = Number(object.originY);
+      const originX = Number.isFinite(ox) ? ox : 0.5, originY = Number.isFinite(oy) ? oy : 0.5;
+      g.save();
+      g.translate(Number(object.x) || 0, Number(object.y) || 0);
+      if (Number(object.rotation)) g.rotate(object.rotation);
+      if (object.flipX) g.scale(-1, 1);
+      if (object.flipY) g.scale(1, -1);
+      g.drawImage(source, sx, sy, sw, sh, -dw * originX, -dh * originY, dw, dh);
+      g.restore();
+      return true;
+    }
+
+    function _mmSceneArt(g, scene) {
+      // Display-list art is the same loaded texture used by the live map. This
+      // keeps doors, building roofs, interiors, and placed furniture visually
+      // tied to the active scene instead of a stale HQ screenshot.
+      const objects = [...(scene.children?.list || [])]
+        .filter((object) => object?.visible !== false)
+        .sort((a, b) => (Number(a.depth) || 0) - (Number(b.depth) || 0));
+      g.imageSmoothingEnabled = false;
+      objects.forEach((object) => {
+        try { _mmDrawTexture(g, scene, object); } catch (_) { /* optional art */ }
+      });
+    }
+
+    function _mmNeighborhoodGeometry(g, scene, viewport) {
+      const geometry = scene.info?.geometry || {};
+      (geometry.blockers || []).forEach((block) => {
+        if (_mmIsStreetScene(scene) && viewport &&
+            (block.y + (block.height || 0) < viewport.originY ||
+             block.y > viewport.originY + viewport.height)) return;
+        _mmRect(g, block, block.furnitureId ? 'rgba(65,48,38,.48)' : 'rgba(44,55,58,.38)',
+          block.furnitureId ? 'rgba(255,222,137,.9)' : 'rgba(37,48,50,.8)', block.furnitureId ? 2 : 1);
+      });
+      // A residential street can be taller than the initial camera viewport.
+      // Lot yards and lot boundaries are rendered from the same canonical
+      // coordinates that neighborhood.mjs sends to the live scene.
+      if (scene.location === 'neighborhood') {
+        (scene.info?.streetLots || []).forEach((lot) => {
+          if (viewport && (lot.bottom + 240 < viewport.originY ||
+              lot.bottom - 360 > viewport.originY + viewport.height)) return;
+          const originY = lot.northSide ? lot.bottom - 330 : lot.bottom - 66;
+          _mmRect(g, { x: lot.x - 96, y: originY, width: 192, height: 144 },
+            'rgba(109,152,85,.35)', 'rgba(215,193,142,.9)', 2);
+          const stage = lot.construction?.stage || 'empty';
+          _mmRect(g, { x: lot.x - 112, y: lot.bottom - 234, width: 224, height: 145 },
+            stage === 'complete' ? 'rgba(71,106,119,.28)' : 'rgba(116,84,64,.22)',
+            'rgba(73,54,45,.75)', 1);
+          g.font = '10px monospace'; g.textAlign = 'center'; g.fillStyle = '#fff5c7';
+          g.fillText('LOT ' + String(lot.lot || lot.lotIndex || '?'), lot.x, lot.bottom - 246);
+        });
+      }
+      (scene.doors || scene.info?.portals || []).forEach((door) => {
+        if (_mmIsStreetScene(scene) && viewport &&
+            (door.y + (door.height || 0) < viewport.originY ||
+             door.y > viewport.originY + viewport.height)) return;
+        _mmRect(g, door, 'rgba(246,223,117,.58)', '#fff1a8', 2);
+        if (door.label) {
+          g.font = '10px monospace'; g.textAlign = 'center'; g.fillStyle = '#fff7c7';
+          g.fillText(String(door.label).toUpperCase(), door.x + door.width / 2, Math.max(11, door.y - 4));
+        }
+      });
+    }
+
+    function _mmBuildNeighborhoodBg(scene, viewport) {
+      const { width: mapWidth, height: mapHeight } = _mmMapSize(scene);
+      viewport = viewport || _mmNeighborhoodViewport(scene);
+      const width = mapWidth;
+      const height = _mmIsStreetScene(scene) ? viewport.height : mapHeight;
+      _mmFitScale(scene, width, height);
+      const bg = document.createElement('canvas');
+      bg.width = _mmCanvasWidth;
+      bg.height = _mmCanvasHeight;
+      const g = bg.getContext('2d');
+      g.save();
+      g.scale(_mmWorldScale, _mmWorldScale);
+      g.translate(0, -(viewport?.originY || 0));
+      _mmNeighborhoodBase(g, scene, viewport);
+      _mmNeighborhoodGeometry(g, scene, viewport);
+      _mmSceneArt(g, scene);
+      // Keep the highlighted door visible above roof/furniture art.
+      (scene.doors || scene.info?.portals || []).forEach((door) => {
+        _mmRect(g, door, 'rgba(246,223,117,.34)', '#fff1a8', 2);
+      });
+      g.restore();
+      return bg;
+    }
+
+    function _mmNeighborhoodToken(scene, viewport) {
+      const lots = (scene.info?.streetLots || []).map((lot) => [
+        lot.lot, lot.lotIndex, lot.x, lot.bottom, lot.northSide,
+        lot.construction?.stage, lot.exteriorColor,
+        (lot.yard || []).map((item) => [item.furnitureId, item.gridX, item.gridY, item.rotation].join(':')).join(','),
+      ].join(':')).join('|');
+      const furniture = (scene.furniture || []).map((item) => [
+        item.texture?.key, Math.round(item.x), Math.round(item.y), Math.round(item.rotation || 0),
+      ].join(':')).join('|');
+      return [scene.location, scene.mapWidth, scene.mapHeight, lots,
+        (scene.doors || []).map((door) => [door.destination, door.x, door.y, door.width, door.height].join(':')).join('|'),
+        furniture, viewport?.originY || 0, viewport?.height || scene.mapHeight].join('||');
+    }
+
     function _mmDraw() {
-      const sc = window._gameScene;
-      if (!sc || !sc._tileMap) return;
+      const sc = _mmActiveScene();
+      if (!_mmSceneReady(sc)) { _mmClose(); return; }
       if (_roundPhase) { _mmClose(); return; }   // round started while open
-      const map = sc._tileMap;
-      if (!_mmBg) _mmBg = _mmBuildBg(map);
+      const neighborhood = _mmIsNeighborhoodScene(sc);
+      const map = _mmMapSize(sc);
+      const street = _mmIsStreetScene(sc);
+      const viewport = neighborhood ? _mmNeighborhoodViewport(sc) : { originY: 0, height: map.height };
+      const title = street ? 'Nearby blocks' : (sc.info?.label || (neighborhood ? sc.location : 'JPO HQ'));
+      const subtitle = street
+        ? `${sc.info?.label || 'Willow Walk'} · row ${Math.floor(viewport.originY / 1920) + 1}`
+        : '';
+      if (_mmTitle && _mmTitle.textContent !== title) _mmTitle.textContent = title;
+      if (_mmSubtitle && _mmSubtitle.textContent !== subtitle) _mmSubtitle.textContent = subtitle;
+      const token = neighborhood ? _mmNeighborhoodToken(sc, viewport) : 'office:' + map.width + ':' + map.height + ':' + _mmImgOk;
+      if (!_mmBg || token !== _mmBackgroundToken) {
+        _mmBg = neighborhood ? _mmBuildNeighborhoodBg(sc, viewport) : _mmBuildOfficeBg(sc);
+        _mmBackgroundToken = token;
+      }
       _mmCv.width = _mmBg.width; _mmCv.height = _mmBg.height;
       const g = _mmCv.getContext('2d');
       g.drawImage(_mmBg, 0, 0);
-      // world px → minimap px (layers render at setScale(3))
-      const k = _mmScale / (map.tileWidth * 3);
+      const k = neighborhood ? _mmWorldScale : _mmScale / (sceneTileSize(sc) * 3);
       const dot = (x, y, color, ring) => {
-        g.beginPath(); g.arc(x * k, y * k, ring ? 5 : 4, 0, Math.PI * 2);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const localY = y - viewport.originY;
+        if (neighborhood && (localY < 0 || localY > viewport.height)) return;
+        g.beginPath(); g.arc(x * k, localY * k, ring ? 7 : 5, 0, Math.PI * 2);
         g.fillStyle = color; g.fill();
         if (ring) { g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
       };
       const label = (x, y, text) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const localY = y - viewport.originY;
+        if (neighborhood && (localY < 0 || localY > viewport.height)) return;
         g.font = '10px sans-serif'; g.textAlign = 'center';
-        g.fillStyle = 'rgba(0,0,0,.55)';
         const w = g.measureText(text).width;
-        g.fillRect(x * k - w / 2 - 3, y * k - 19, w + 6, 12);
-        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, y * k - 10);
+        g.fillStyle = 'rgba(0,0,0,.62)';
+        g.fillRect(x * k - w / 2 - 3, localY * k - 19, w + 6, 12);
+        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, localY * k - 10);
       };
-      for (const id in sc.otherPlayers) {
-        const e = sc.otherPlayers[id];
-        if (!e || !e.sprite) continue;
-        dot(e.sprite.x, e.sprite.y, '#5ad1ff');
-        label(e.sprite.x, e.sprite.y, e.nameTag?.text || '?');
+      const remotes = neighborhood ? sc.remotes : sc.otherPlayers;
+      for (const id in (remotes || {})) {
+        const entry = remotes[id];
+        if (!entry?.sprite) continue;
+        dot(entry.sprite.x, entry.sprite.y, '#5ad1ff');
+        label(entry.sprite.x, entry.sprite.y, entry.nameTag?.text || entry.name || '?');
       }
       if (sc.player) {
         dot(sc.player.x, sc.player.y, '#ffd84d', true);
@@ -7312,12 +7689,12 @@
     function _mmClose() {
       _mmOpen = false; _mmEl.classList.remove('open');
       if (_mmTimer) { clearInterval(_mmTimer); _mmTimer = null; }
-      _mmBg = null;   // rebuild next open — window may have been resized
+      _mmBg = null; _mmBackgroundToken = ''; // rebuild next open or location change
     }
     function _mmToggle() {
       if (_mmOpen) return _mmClose();
       if (_roundPhase) return;                       // no map during After Dark
-      if (!window._gameScene?._tileMap) return;      // scene not ready yet
+      if (!_mmSceneReady(_mmActiveScene())) return;  // expected scene not ready
       _mmOpen = true; _mmEl.classList.add('open');
       _mmDraw();
       _mmTimer = setInterval(_mmDraw, 400);

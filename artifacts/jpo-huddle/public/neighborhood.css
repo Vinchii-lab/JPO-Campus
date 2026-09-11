@@ -46,31 +46,6 @@
 #neighborhood-panel-toggle { pointer-events: auto; white-space: nowrap; }
 #neighborhood-ui.panels-collapsed #home-panel,
 #neighborhood-ui.panels-collapsed #shop-panel { display: none !important; }
-#neighborhood-zoom {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid #86b9d8;
-  border-radius: 9px;
-  background: #152438f5;
-  font: 12px monospace;
-}
-#neighborhood-zoom[hidden] { display: none; }
-#neighborhood-zoom button {
-  cursor: pointer;
-  color: #fff;
-  background: #285271;
-  border: 1px solid #427a9b;
-  border-radius: 5px;
-  min-width: 36px;
-  min-height: 36px;
-  font: bold 14px monospace;
-}
-#neighborhood-zoom button:disabled { opacity: 0.4; cursor: default; }
-#neighborhood-zoom output { min-width: 44px; text-align: center; }
-#neighborhood-zoom button:focus-visible,
 #neighborhood-panel-toggle:focus-visible { outline: 2px solid #f5ce64; outline-offset: 2px; }
 
 #neighborhood-nav button, #home-panel button, #shop-panel button {

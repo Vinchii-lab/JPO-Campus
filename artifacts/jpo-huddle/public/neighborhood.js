@@ -7,7 +7,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   ui.id = 'neighborhood-ui';
   // This is a location plaque, deliberately not a travel menu.
   ui.innerHTML = '<div id="neighborhood-nav"><span id="neighborhood-title">JPO HQ</span><button id="neighborhood-panel-toggle" type="button" aria-controls="home-panel shop-panel" hidden>Hide panel</button></div>' +
-    '<div id="neighborhood-zoom" role="group" aria-label="Outdoor zoom" hidden><button type="button" data-zoom="out" aria-label="Zoom out">−</button><output aria-label="Zoom level">100%</output><button type="button" data-zoom="in" aria-label="Zoom in">+</button><button type="button" data-zoom="fit" title="Fit the map to your screen">Fit</button></div>' +
     '<div id="home-panel" hidden></div>';
   document.body.appendChild(ui);
 
@@ -23,13 +22,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let panelsCollapsed = false;
   try { panelsCollapsed = localStorage.getItem('jpo-neighborhood-panels-collapsed') === 'true'; } catch (_) {}
   const panelToggle = ui.querySelector('#neighborhood-panel-toggle');
-  const zoomControls = ui.querySelector('#neighborhood-zoom');
   function syncPanelControls() {
     ui.classList.toggle('panels-collapsed', panelsCollapsed);
     panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:') || currentLocation.endsWith('-shop'));
     panelToggle.textContent = panelsCollapsed ? 'Show panel' : 'Hide panel';
     panelToggle.setAttribute('aria-expanded', String(!panelsCollapsed));
-    zoomControls.hidden = currentLocation !== 'neighborhood' && currentLocation !== 'city';
   }
   function setPanelsCollapsed(collapsed) {
     panelsCollapsed = collapsed;
@@ -37,23 +34,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     syncPanelControls();
   }
   panelToggle.onclick = () => setPanelsCollapsed(!panelsCollapsed);
-  function syncZoomControls(scene) {
-    const factor = scene._outdoorZoomFactor || 1.15;
-    const text = Math.round(scene.cameras.main.zoom * 100) + '%';
-    const output = zoomControls.querySelector('output');
-    if (output.textContent !== text) output.textContent = text;
-    zoomControls.querySelector('[data-zoom="out"]').disabled = factor <= 1;
-    zoomControls.querySelector('[data-zoom="in"]').disabled = factor >= 2.8;
-  }
-  zoomControls.querySelectorAll('[data-zoom]').forEach((button) => {
-    button.onclick = () => {
-      const scene = window._neighborhoodScene;
-      if (!scene?.player) return;
-      const factor = scene._outdoorZoomFactor || 1.15;
-      scene._setOutdoorZoom(button.dataset.zoom === 'fit' ? 1 :
-        factor * (button.dataset.zoom === 'in' ? 1.15 : 1 / 1.15));
-    };
-  });
   syncPanelControls();
   let directory = [];
   let nearbyConstructionLot = null;
@@ -468,6 +448,47 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (payload?.refreshDirectory && isResidentialBlock()) requestDirectory();
   });
   socket.on('homeEjected', (result) => toast(result?.message || 'You left the home.'));
+  socket.on('furnitureInteractionResult', (result) => {
+    const scene = window._neighborhoodScene;
+    if (!scene) return;
+    scene._activityPending = false;
+    if (result?.ok && result.phase === 'start' && result.activity) {
+      scene._setLocalActivity(result.activity, result);
+    } else if (result?.ok && result.phase === 'stop') {
+      scene._setLocalActivity(null, result);
+    } else if (!result?.ok && result?.message) {
+      toast(result.message);
+    }
+  });
+  socket.on('furnitureActivity', (payload) => {
+    const scene = window._neighborhoodScene;
+    if (!scene || !payload?.id) return;
+    if (payload.id === socket.id) {
+      if (payload.phase === 'start' && payload.action) {
+        scene._setLocalActivity({
+          instanceId: payload.instanceId, furnitureId: payload.furnitureId,
+          action: payload.action, effect: payload.effect, orientation: payload.orientation,
+          x: payload.x, y: payload.y,
+        }, payload);
+      } else if (payload.phase === 'stop') {
+        scene._setLocalActivity(null, payload);
+      }
+      return;
+    }
+    const remote = scene.remotes[payload.id];
+    if (!remote) return;
+    if (payload.phase === 'start' && payload.action) {
+      remote.activity = {
+        instanceId: payload.instanceId, furnitureId: payload.furnitureId,
+        action: payload.action, effect: payload.effect, orientation: payload.orientation,
+        x: payload.x, y: payload.y,
+      };
+      scene._applyActivityPose(remote, remote.activity, payload.dir || remote.lastDir || 'down');
+    } else if (payload.phase === 'stop') {
+      remote.activity = null;
+      scene._applyActivityPose(remote, null, payload.dir || remote.lastDir || 'down');
+    }
+  });
 
   class NeighborhoodScene extends Phaser.Scene {
     constructor() {
@@ -490,6 +511,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.portalRelease = true;
       this.lastSend = 0;
       this.sitting = false;
+      this.activity = null;
+      this._activityPending = false;
     }
 
     _removePlacementInput() {
@@ -524,8 +547,19 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // were replaced in place and the server legitimately caches PNGs for a
       // day, which otherwise left an already-open browser decoding the former
       // oversized artwork under a new scene.
-      ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase'].forEach((id) => {
-        this.load.image(this._furnitureTextureKey(id), '/assets/neighborhood/furniture/' + id + '.png?v=' + FURNITURE_ASSET_REVISION);
+      const furnitureAssets = {
+        oak_chair: '/assets/neighborhood/furniture/oak_chair.png',
+        fern: '/assets/neighborhood/furniture/fern.png',
+        reading_lamp: '/assets/neighborhood/furniture/reading_lamp.png',
+        coffee_table: '/assets/neighborhood/furniture/coffee_table.png',
+        blue_sofa: '/assets/neighborhood/furniture/blue_sofa.png',
+        bookcase: '/assets/neighborhood/furniture/bookcase.png',
+        bed: '/assets/neighborhood/interiors/bedroom_bed.png',
+        bathtub: '/assets/room-furniture/animated_bathtub_with_duck.png',
+        television: '/assets/TV_Studio_16x16.png',
+      };
+      Object.entries(furnitureAssets).forEach(([id, path]) => {
+        this.load.image(this._furnitureTextureKey(id), path + (path.includes('?') ? '&' : '?') + 'v=' + FURNITURE_ASSET_REVISION);
       });
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.load.image('int_' + id, '/assets/neighborhood/' + id.replace('_', '-') + '-16.png');
@@ -549,7 +583,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // this to the supplied furniture/interior assets; house-color textures
       // keep their own preparation path and are intentionally untouched.
       const nearest = Phaser.Textures.FilterMode.NEAREST;
-      ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase'].forEach((id) => {
+      ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase', 'bed', 'bathtub', 'television'].forEach((id) => {
         this.textures.get(this._furnitureTextureKey(id))?.setFilter(nearest);
       });
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
@@ -594,7 +628,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
       this._ambientTweens = [];
-      this.keys = this.wasd = this.keyE = null;
+      this.keys = this.wasd = this.keyE = this.keyShift = null;
+      this.activity = null;
+      this._activityFx = null;
+      this._activityEffectTween = null;
       window._neighborhoodScene = this;
       this.info = data?.map || {};
       this.location = data?.location || currentLocation;
@@ -649,6 +686,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.keys = this.input.keyboard.createCursorKeys();
       this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
       this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+      this.keyShift = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
       this.lastSend = 0;
       // Arrival points intentionally sit just inside an entry threshold. Do
       // not re-arm it until the player has walked clear, preventing bounce.
@@ -859,7 +897,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         ? Math.max(0.7, width / this.mapWidth, height / this.mapHeight) * this._outdoorZoomFactor
         : 1;
       if (camera.zoom !== zoom) camera.setZoom(zoom);
-      if (outdoors) syncZoomControls(this);
     }
 
     _setOutdoorZoom(factor) {
@@ -1192,26 +1229,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _drawHome() {
       this._interiorTileField('home_floor', 'home_wall', HOME_EXIT);
       this._drawHomeRoomDivisions();
-      const art = this.add.graphics().setDepth(2);
 
-      // Living room rug inside new living room geometry x=11..22, y=1..16 (cells are 48px)
-      // Living bounds: x 528..1056, y 48..768
-      art.fillStyle(0xb96657, 0.8).fillRoundedRect(576, 144, 432, 288, 16);
-      art.lineStyle(3, 0xf2dfba, 0.75).strokeRoundedRect(576, 144, 432, 288, 16);
-
-      // Bedroom rug x=1..9, y=1..8
-      // Bedroom bounds: x 48..432, y 48..384
-      art.fillStyle(0x6e4d3b, 1).fillRect(96, 96, 288, 192);
-
-      // Bath rug x=1..9, y=10..16
-      // Bath bounds: x 48..432, y 480..768
-      art.fillStyle(0x9bb3c4, 1).fillRect(144, 528, 192, 144);
-      art.lineStyle(3, 0x725542, 1).strokeRect(144, 528, 192, 144);
-
-      // The centered 96px exit stays open from the arrival tile to the
-      // threshold: a visible floor mat rather than an edge-only exit.
-      art.fillStyle(0x9e7355, 1).fillRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
-      art.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
+      // The centered exit stays open from the arrival tile to the threshold.
+      // This is the one non-tile cue in an otherwise unfurnished residence.
+      const doorArt = this.add.graphics().setDepth(2);
+      doorArt.fillStyle(0x9e7355, 1).fillRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
+      doorArt.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
       this.add.text(HOME_EXIT.x + HOME_EXIT.width / 2, HOME_EXIT.y + 30, 'WILLOW EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
     }
 
@@ -1229,24 +1252,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           }
         }
       });
-      const rooms = this.info.geometry?.rooms || [];
-      rooms.forEach((room) => {
-        const label = this.add.text(
-          (room.x + room.width / 2) * 48,
-          (room.y + room.height / 2) * 48,
-          String(room.label || room.id || '').toUpperCase(),
-          {
-            fontFamily: 'monospace', fontSize: '10px', color: '#503f39',
-            backgroundColor: '#fff3d966', padding: { x: 4, y: 2 },
-          },
-        ).setOrigin(0.5).setDepth(5);
-        this._animateNeighborhoodObject(label, {
-          alpha: { from: 0.72, to: 0.92 }, duration: 1800, delay: 180,
-        });
-      });
-      if (window.JpoInteriors?.drawHomeInteriors) {
-        window.JpoInteriors.drawHomeInteriors(this, INTERIOR_ART_SCALE, 48);
-      }
     }
 
     _drawPortalCues() {
@@ -1344,6 +1349,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.playerTexKey = this._office('_buildPlayerTex', char, g._playerHairIdx || 0, g._playerSkinIdx || 0,
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || this.playerTexKey;
       this.player.setTexture(this.playerTexKey);
+      this._applyActivityPose(this, this.activity, this.playerDir || 'down');
     }
 
     _clearLocalPresentation() {
@@ -1357,6 +1363,145 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.localCosmetic = this.localWings = this.localPet = null;
       this.localCosmeticDef = this.localWingsDef = null;
       this.localSlotObjs = {};
+    }
+
+    _activityIcon(activity) {
+      return ({
+        sit: '✦', lie: '💤', sleep: '💤', shower: '💧',
+        bathe: '🛁', watch: '📺',
+      })[activity?.action] || '';
+    }
+
+    _clearActivityEffect(entry = null) {
+      const target = entry || this;
+      const fx = target._activityFx;
+      if (fx) {
+        this.tweens?.killTweensOf(fx);
+        fx.destroy?.();
+        target._activityFx = null;
+      }
+      if (target._activityEffectTween) {
+        this.tweens?.remove?.(target._activityEffectTween);
+        target._activityEffectTween = null;
+      }
+    }
+
+    _showActivityEffect(entry, activity) {
+      this._clearActivityEffect(entry);
+      const sprite = entry.sprite || (entry === this ? this.player : null);
+      const icon = this._activityIcon(activity);
+      if (!sprite || !icon) return;
+      const fx = this.add.text(sprite.x, sprite.y - 54, icon, {
+        fontFamily: 'sans-serif', fontSize: '18px', color: '#fff7d6',
+        stroke: '#273247', strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(3002);
+      entry._activityFx = fx;
+      entry._activityEffectTween = this.tweens.add({
+        targets: fx, y: sprite.y - 63, alpha: { from: 0.72, to: 1 },
+        duration: 820, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      });
+    }
+
+    _applyActivityPose(entry, activity, dir = 'down') {
+      const sprite = entry.sprite || (entry === this ? this.player : null);
+      if (!sprite) return;
+      const texKey = entry.playerTexKey || entry.texture || this.playerTexKey;
+      const start = globals().DIR_START || { right: 0, up: 6, left: 12, down: 18 };
+      const action = activity?.action;
+      if (!action) {
+        entry._activityAction = null;
+        sprite.setAngle(0).setScale(3).setFlipX(false);
+        sprite.setTexture(texKey).setFrame(start[dir] ?? start.down);
+        sprite.anims.stop();
+        this._clearActivityEffect(entry);
+        return;
+      }
+      if (action === 'sit') {
+        sprite.setAngle(0).setScale(3).setFlipX(false).setTexture(texKey);
+        const sitDir = dir === 'left' ? 'right' : (dir === 'right' ? 'right' : 'down');
+        const sitKey = `sit_${texKey}_${sitDir}`;
+        if (this.anims.exists(sitKey) &&
+            (sprite.anims.currentAnim?.key !== sitKey || !sprite.anims.isPlaying)) sprite.play(sitKey);
+        else { sprite.anims.stop(); sprite.setFrame(start[dir] ?? start.down); }
+      } else if (action === 'lie' || action === 'sleep') {
+        // There is no separate lie sheet in the supplied avatar pack. Wide
+        // sofas get a horizontal idle-down pose, while the supplied portrait
+        // 16x48 bed keeps the avatar lengthwise instead of turning it 90°
+        // across its one-cell width.
+        const lengthwise = activity?.orientation === 'lengthwise';
+        sprite.anims.stop();
+        sprite.setTexture(texKey).setFrame(start.down)
+          .setScale(2.7).setAngle(lengthwise ? 0 : -90).setFlipX(false);
+      } else {
+        sprite.anims.stop();
+        sprite.setTexture(texKey).setFrame(action === 'watch' ? (start[dir] ?? start.up) : start.down)
+          .setScale(3).setAngle(0).setFlipX(false);
+      }
+      if (entry._activityAction !== action) {
+        entry._activityAction = action;
+        this._showActivityEffect(entry, activity);
+      }
+    }
+
+    _setLocalActivity(activity, payload = {}) {
+      this.activity = activity || null;
+      this.sitting = this.activity?.action === 'sit';
+      if (this.activity) {
+        if (Number.isFinite(payload.x)) this.player.setPosition(payload.x, payload.y);
+        else if (Number.isFinite(this.activity.x)) this.player.setPosition(this.activity.x, this.activity.y);
+        this.playerDir = payload.dir || this.activity.dir || this.playerDir || 'down';
+        this.player.body?.reset(this.player.x, this.player.y);
+        this.player.body.enable = false;
+      } else if (this.player.body) {
+        this.player.body.enable = true;
+      }
+      this._applyActivityPose(this, this.activity, this.playerDir || 'down');
+      if (this.localNameTag) this.localNameTag.setPosition(this.player.x, this.player.y - 40);
+    }
+
+    _nearbyFurnitureAction() {
+      if (!this.player || !this.furniture.length) return null;
+      let best = null;
+      for (const sprite of this.furniture) {
+        const actions = sprite.getData('actions') || [];
+        if (!actions.length) continue;
+        const radius = Number(sprite.getData('actionRadius')) || 86;
+        const anchorY = sprite.getData('anchor') === 'front'
+          ? sprite.y + 18
+          : sprite.y - (sprite.getData('height') || 1) * 24 + 10;
+        const distance = Math.hypot(this.player.x - sprite.x, this.player.y - anchorY);
+        if (distance > radius || (best && distance >= best.distance)) continue;
+        best = { sprite, actions, distance };
+      }
+      return best;
+    }
+
+    _requestFurnitureAction() {
+      if (this.activity || this._activityPending) return;
+      const nearby = this._nearbyFurnitureAction();
+      if (!nearby) return;
+      const action = this.keyShift?.isDown && nearby.actions[1] ? nearby.actions[1] : nearby.actions[0];
+      const instanceId = nearby.sprite.getData('instanceId');
+      if (!instanceId || !action) return;
+      this._activityPending = true;
+      socket.emit('furnitureInteract', { phase: 'start', instanceId, action });
+    }
+
+    _leaveFurnitureActivity(reason = 'exit') {
+      if (!this.activity && !this._activityPending) return;
+      this._activityPending = false;
+      const activity = this.activity;
+      const stand = activity?.stand;
+      this.activity = null;
+      this.sitting = false;
+      this.player.body.enable = true;
+      if (stand && Number.isFinite(stand.x) && Number.isFinite(stand.y)) {
+        this.player.setPosition(stand.x, stand.y);
+        this.player.body?.reset(stand.x, stand.y);
+        this.playerDir = stand.dir || this.playerDir;
+      }
+      this._applyActivityPose(this, null, this.playerDir || 'down');
+      socket.emit('furnitureInteract', { phase: 'exit', reason });
     }
 
     _installPlacementInput(atHome) {
@@ -1476,7 +1621,18 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const floorBaseY = (item.gridY + footprint.height) * 48;
         const sprite = this.add.image(floorCenterX, floorBaseY, this._furnitureTextureKey(def.id))
           .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(uprightRotation).setDepth(floorBaseY);
-        sprite.setData('isSeat', def.id === 'oak_chair'); // server currently validates chairs only
+        // The supplied bath/TV files are native tileset sheets. Display one
+        // authored tile at the furniture's footprint rather than the whole
+        // sheet as an accidental oversized decoration.
+        if (def.id === 'bathtub') sprite.setCrop(0, 0, 16, 64);
+        if (def.id === 'television') sprite.setCrop(0, 0, 16, 16);
+        sprite.setData('instanceId', String(item.id));
+        sprite.setData('furnitureId', def.id);
+        sprite.setData('actions', Array.isArray(def.actions) ? def.actions : []);
+        sprite.setData('actionRadius', def.interaction?.radius || 86);
+        sprite.setData('anchor', def.interaction?.anchor || 'center');
+        sprite.setData('height', footprint.height);
+        sprite.setData('isSeat', Array.isArray(def.actions) && def.actions.includes('sit'));
         sprite.setData('seatDir', 'down');
         this._animateFurnitureObject(sprite, def.id, item.gridX * 90 + item.gridY * 130);
         this.furniture.push(sprite);
@@ -1489,6 +1645,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _removeRemote(id) {
       const remote = this.remotes[id];
       if (!remote) return;
+      this._clearActivityEffect(remote);
       for (const object of [remote.sprite, remote.nameTag, remote.cosmetic, remote.wings, remote.chatBubble]) {
         if (object) { this.tweens.killTweensOf(object); object.destroy(); }
       }
@@ -1516,6 +1673,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.player.setPosition(serverPlayer.x, serverPlayer.y);
       this.player.body?.reset(serverPlayer.x, serverPlayer.y);
       this.playerDir = serverPlayer.dir || this.playerDir;
+      if (serverPlayer.activity) this._setLocalActivity(serverPlayer.activity, serverPlayer);
+      else if (this.activity) this._setLocalActivity(null, serverPlayer);
     }
 
     addRemote(id, player) {
@@ -1535,7 +1694,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           appear: { character, hairIdx, skinIdx, shirtIdx, pantsIdx },
           wear: { equipped: player.equipped || '', wings: player.wings || '', slots: { ...(player.slots || {}) } },
           petId: player.pet || '', petAcc: player.petAcc || '', petStage: player.petStage || 0,
-          lastDir: player.dir || 'down', seated: false,
+          lastDir: player.dir || 'down', seated: false, activity: null, _activityFx: null,
         };
         this._makeRemotePresentation(remote, player, id);
       } else if (remote.texture !== texture) {
@@ -1567,10 +1726,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const dir = player.dir || remote.lastDir || 'down';
       remote.lastDir = dir;
       remote.seated = player.anim === 'sit';
+      remote.activity = player.activity || (player.anim === 'sit' ? { action: 'sit' } : null);
       remote.sprite.setPosition(player.x, player.y).setTexture(remote.texture);
       remote.sprite.setDepth(player.y);
       remote.nameTag?.setPosition(player.x, player.y - 40).setDepth(player.y + 2);
-      if (player.anim === 'walk') {
+      if (remote.activity) {
+        remote.playerTexKey = remote.texture;
+        this._applyActivityPose(remote, remote.activity, dir);
+      } else if (player.anim === 'walk') {
         const key = 'walk_' + remote.texture + '_' + dir;
         if (this.anims.exists(key) && remote.sprite.anims.currentAnim?.key !== key) remote.sprite.play(key);
       } else {
@@ -1667,10 +1830,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const up = !typing && (this.keys.up.isDown || this.wasd.up.isDown || touchMove.up);
       const down = !typing && (this.keys.down.isDown || this.wasd.down.isDown || touchMove.down);
       const body = this.player.body;
+      if (this.activity && !this.transitionRequested && (left || right || up || down)) {
+        this._leaveFurnitureActivity('movement');
+      }
       let dir = this.playerDir || 'down';
-      let anim = this.sitting ? 'sit' : 'idle';
+      let anim = this.activity ? (this.activity.action === 'sit' ? 'sit' : this.activity.action) : 'idle';
       body.setVelocity(0, 0);
-      if (!this.sitting && !this.transitionRequested) {
+      if (!this.activity && !this._activityPending && !this.transitionRequested) {
         // Independent axes, matching HQ; diagonals retain the same total speed.
         if (up) { body.setVelocityY(-SPEED); dir = 'up'; anim = 'walk'; }
         else if (down) { body.setVelocityY(SPEED); dir = 'down'; anim = 'walk'; }
@@ -1681,12 +1847,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ui.classList.toggle('neighborhood-walking', anim === 'walk');
       this.playerDir = dir;
       // Match validLocationMove's 16px radius at the map edge before emitting.
-      if (!this.sitting) {
+      if (!this.activity) {
         this.player.x = Phaser.Math.Clamp(this.player.x, 16, this.mapWidth - 16);
         this.player.y = Phaser.Math.Clamp(this.player.y, 16, this.mapHeight - 16);
       }
-      if (this.sitting) {
-        this.player.setPosition(this.sitX, this.sitY);
+      if (this.activity) {
+        this.player.setPosition(this.activity.x, this.activity.y);
         body.setVelocity(0, 0);
       } else if (anim === 'walk') {
         const key = 'walk_' + this.playerTexKey + '_' + dir;
@@ -1699,11 +1865,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.player.setDepth(this.player.y);
       this.localNameTag?.setDepth(this.player.y + 2);
       this._positionPresentation({ cosmetic: this.localCosmetic, cosmeticDef: this.localCosmeticDef, wings: this.localWings, wingsDef: this.localWingsDef, slotObjs: this.localSlotObjs }, this.player.x, this.player.y, dir);
+      if (this._activityFx) this._activityFx.setPosition(this.player.x, this.player.y - 54);
       if (this.localPet) {
-        this._stepPet(this.localPet, this.player.x, this.player.y, delta, this.sitting);
+        this._stepPet(this.localPet, this.player.x, this.player.y, delta, !!this.activity);
         this.localPet.setDepth?.(this.localPet.y - 1);
       }
       for (const remote of Object.values(this.remotes)) {
+        if (remote._activityFx) remote._activityFx.setPosition(remote.sprite.x, remote.sprite.y - 54);
         if (remote.pet) {
           this._stepPet(remote.pet, remote.sprite.x, remote.sprite.y, delta, remote.seated);
           remote.pet.setDepth?.(remote.pet.y - 1);
@@ -1712,13 +1880,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       if (this.localBubble) this.localBubble.setPosition(this.player.x, this.player.y - 78);
 
-      let seat = null;
-      if (!this.sitting && this.location.startsWith('home:')) {
-        seat = this.furniture.find((item) => item.getData('isSeat') &&
-          Phaser.Math.Distance.Between(this.player.x, this.player.y, item.x, item.y) <= 52);
-      } else if (!this.sitting) {
-        seat = this.seats.find((item) => Phaser.Math.Distance.Between(this.player.x, this.player.y, item.x, item.y) <= 52);
-      }
+      const nearbyAction = !this.activity && !this._activityPending && this.location.startsWith('home:')
+        ? this._nearbyFurnitureAction() : null;
       if (!this.portalRelease && !this._insidePortal(this.player.x, this.player.y)) this.portalRelease = true;
       // Use an inner doorway that is derived from the authoritative foot
       // radius. The former fixed 12px inset included facade-overlap strips in
@@ -1737,8 +1900,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       else if (unfinishedLot) this.interactHint.setText(unfinishedLot.ownerEmail === globals()._playerEmail
         ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
         .setPosition(this.player.x, this.player.y - 65).setVisible(true);
-      else if (this.sitting) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
-      else if (seat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (this.activity) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (nearbyAction) {
+        const actions = nearbyAction.actions;
+        const primary = ({ sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower', bathe: 'Bathe', watch: 'Watch TV' })[actions[0]] || 'Use';
+        const secondaryAction = actions[1];
+        const secondary = secondaryAction
+          ? ' · [Shift+E] ' + (({ lie: 'Lie down', bathe: 'Bathe', shower: 'Shower', sleep: 'Sleep', watch: 'Watch TV', sit: 'Sit' })[secondaryAction] || 'Use')
+          : '';
+        this.interactHint.setText('[E] ' + primary + secondary).setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      }
       else this.interactHint.setVisible(false);
       if (door && this.portalRelease && !this.transitionRequested) {
         // Each door carries the visible lot's canonical account address. No
@@ -1774,19 +1945,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         }
       }
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
-        if (this.sitting) {
-          this.sitting = false;
-          body.enable = true;
-          this.player.setPosition(this.preSitX, this.preSitY);
-          body.reset(this.preSitX, this.preSitY);
-        } else if (seat) {
-          this.sitting = true;
-          this.preSitX = this.player.x; this.preSitY = this.player.y;
-          this.sitX = seat.x; this.sitY = seat.getData ? seat.y + 10 : seat.y;
-          this.playerDir = seat.getData ? (seat.getData('seatDir') || 'down') : (seat.dir || 'down');
-          body.enable = false; // server excludes the oak chair for the sit snap
-          this.player.setPosition(this.sitX, this.sitY);
-        }
+        if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
+        else this._requestFurnitureAction();
       }
       this.lastSend += delta;
       if (this.lastSend >= 50) {
@@ -1819,7 +1979,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._streetScenerySegments?.forEach((objects) => objects.forEach((object) => object?.destroy?.()));
       this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
-      this.keys = this.wasd = this.keyE = null;
+      this.keys = this.wasd = this.keyE = this.keyShift = null;
       if (window._neighborhoodScene === this) window._neighborhoodScene = null;
     }
   }

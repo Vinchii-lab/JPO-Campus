@@ -45,3 +45,15 @@ House size means usable floor area, not enlarging the same small room with camer
 **Why:** The user rejected the compact divided interior as too small even after rooms were added, and requested whole-room scale comparable to the ZIP examples.
 
 **How to apply:** Enlarge authored geometry and traversal space while retaining native furniture scale. Keep saved furniture coordinates where possible; conflicting placements can return to inventory without deleting ownership.
+
+Homes must start completely unfurnished; players choose, buy, and place all furniture. Reuse HQ's controls across locations instead of introducing separate neighborhood control panels.
+
+**Why:** The user explicitly rejected the built-in bed/kitchen/bath fittings and the added plus/minus zoom frame. They want the same HQ experience on another map, with M showing their current location.
+
+**How to apply:** Keep only architecture in the base home. Never add free furnishings or their invisible blockers. Put furniture actions on placed shop items and make shared controls location-aware.
+
+Show nearby blocks for a long residential street map, not a uniformly shrunk image of its entire world.
+
+**Why:** Permanent sparse lot indices can make the street hundreds of thousands of pixels tall. Bounding canvas memory alone produces an unreadable thin strip; the map must remain useful at the player's location.
+
+**How to apply:** Use a player-local street region with consistent origin translation for geometry and markers. Keep whole-map views for the bounded plaza, shops, and homes.
