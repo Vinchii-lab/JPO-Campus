@@ -39,7 +39,10 @@ import {
   validYardPlacement,
   streetDefinition,
   streetLotForOwner,
+  streetReturnSpawnForOwner,
   streetPortalForTransition,
+  staticSeatForPoint,
+  staticSeatStandCandidates,
 } from "./neighborhood.mjs";
 import {
   furnitureActionDefinition,
@@ -64,7 +67,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-interiors.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3353,7 +3356,7 @@ function locationOf(p) {
   // into an unreachable room; normalize it before any room or collision work.
   if (p && (p.locationId === "maple-row" || p.locationId === "juniper-square")) {
     const ownLot = streetLotForOwner(streetHomes, p.email);
-    const spawn = ownLot?.returnSpawn || { x: 576, y: 912, dir: "up" };
+    const spawn = ownLot?.returnSpawn || { x: 144, y: 504, dir: "right" };
     p.locationId = "neighborhood";
     p.x = spawn.x;
     p.y = spawn.y;
@@ -9470,14 +9473,26 @@ io.on("connection", (socket) => {
       return false;
     }
     if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
+    const previousHome = parseLocation(oldLocation);
+    // A home exit is an address operation, not a generic street respawn. If
+    // the durable lot projection is temporarily unavailable, keep the player
+    // in the home and retry rather than strand them at the shared entrance.
+    const homeReturnSpawn = target.id === "neighborhood" && previousHome?.kind === "home"
+      ? streetReturnSpawnForOwner(streetHomes, previousHome.ownerEmail)
+      : null;
+    if (target.id === "neighborhood" && previousHome?.kind === "home" && !homeReturnSpawn) {
+      socket.emit("locationTransitionResult", {
+        ok: false, code: "unavailable",
+        message: "Your Willow Walk address is being prepared. Please try again shortly.",
+      });
+      return false;
+    }
     if (oldLocation !== target.id) {
       emitToLocation(oldLocation, "playerLeft", socket.id);
       socket.leave(locationRoom(oldLocation));
       let spawn = locationSpawn(target, oldLocation);
-      const previousHome = parseLocation(oldLocation);
       if (target.id === "neighborhood" && previousHome?.kind === "home") {
-        const lot = streetLotForOwner(streetHomes, previousHome.ownerEmail);
-        if (lot) spawn = { ...lot.returnSpawn };
+        spawn = { ...homeReturnSpawn };
       }
       // Layout rules reserve this route for new placements. Older saved homes
       // may predate that rule, so recover to a nearby clear tile rather than
@@ -10130,7 +10145,7 @@ io.on("connection", (socket) => {
 
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
-    const x = Number(data.x), y = Number(data.y);
+    let x = Number(data.x), y = Number(data.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return rejectMove();
 
     // Every map has an authoritative boundary.  The HQ map additionally has
@@ -10151,8 +10166,32 @@ io.on("connection", (socket) => {
       blockers.find((b) => b.instanceId === String(me.activity.instanceId));
     const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
       Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);
-    const staticSeat = location?.kind !== "home" && !isOfficePlayer(socket.id) &&
-      LOCATION_GEOMETRY[location?.id]?.seats?.find((seat) => Math.hypot(x - seat.x, y - seat.y) <= 20);
+    const staticSeat = location?.kind !== "home" && !isOfficePlayer(socket.id) && !me.activity &&
+      data.anim === "sit" ? staticSeatForPoint(location, x, y) : null;
+    // A public seat is an authoritative anchor. Leaving one must use its
+    // authored/derived walkable stand point, rather than a client-selected
+    // teleport that merely changes anim back to idle.
+    const previousStaticSeat = location?.kind !== "home" && !isOfficePlayer(socket.id) && !me.activity &&
+      me.anim === "sit" ? staticSeatForPoint(location, me.x, me.y, 24) : null;
+    let staticStand = null;
+    if (previousStaticSeat && data.anim !== "sit") {
+      // The browser receives the same authored candidate list, but the server
+      // remains the authority: choose the nearest candidate that is still
+      // walkable under the current map geometry instead of trusting a client
+      // supplied teleport point. This also survives an older browser carrying
+      // a stale candidate order.
+      staticStand = staticSeatStandCandidates(location, previousStaticSeat)
+        .filter((candidate) => validLocationMove(location, candidate.x, candidate.y))
+        .sort((a, b) =>
+          Math.hypot(x - a.x, y - a.y) - Math.hypot(x - b.x, y - b.y))
+        .find((candidate) => Math.hypot(x - candidate.x, y - candidate.y) <= 20) || null;
+      if (!staticStand) return rejectMove();
+      x = staticStand.x; y = staticStand.y;
+    }
+    if (staticSeat) {
+      // Normalize a valid sit packet to the seat's canonical foot centre.
+      x = Number(staticSeat.x); y = Number(staticSeat.y);
+    }
     if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat && !me.activity) return rejectMove();
     const actionAnim = ["lie", "sleep", "shower", "bathe", "watch"].includes(data.anim);
     if (actionAnim && (!me.activity || data.anim !== me.anim)) return rejectMove();
@@ -10168,6 +10207,7 @@ io.on("connection", (socket) => {
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be
     // replayed every frame to fake fast movement.
+    const wasStaticSitting = !!previousStaticSeat;
     const sitting = data.anim === "sit";
     let snapBonus = 0;
     if (sitting !== wasSitting && now - lastSnapAt >= SEAT_SNAP_COOLDOWN_MS) {
@@ -10215,7 +10255,9 @@ io.on("connection", (socket) => {
 
     const rlglPrevX = me.x, rlglPrevY = me.y;
     me.x = x; me.y = y;
-    if (typeof data.dir === "string") me.dir = data.dir;
+    if (staticSeat) me.dir = staticSeat.dir || "down";
+    else if (staticStand) me.dir = staticStand.dir || "down";
+    else if (typeof data.dir === "string") me.dir = data.dir;
     me.anim = typeof data.anim === "string" ? data.anim : "idle";
     wasSitting = sitting;
     lastMoveAt = now;
@@ -10223,6 +10265,16 @@ io.on("connection", (socket) => {
     // Red Light Green Light rides the validated pipeline: the move was already
     // accepted as legit, so red-light detection can't false-positive off junk.
     rlglOnMove(socket.id, rlglPrevX, rlglPrevY, x, y, now);
+    if (!me.activity && (staticSeat || previousStaticSeat) && sitting !== wasStaticSitting) {
+      const seat = sitting ? staticSeat : previousStaticSeat;
+      // On exit, report the candidate actually selected by the authoritative
+      // nearest-valid check above, not merely the first metadata entry.
+      const stand = sitting ? null : staticStand;
+      socket.emit("parkSeatState", {
+        seated: sitting, seatId: seat?.id || null, x: me.x, y: me.y,
+        dir: me.dir || "down", stand,
+      });
+    }
     // Prop Hunt secrecy: the hider's live position is never broadcast while a
     // round runs — the server tracks it (me.x/me.y above), everyone else only
     // ever learns the prop's frozen spot from phHunt.

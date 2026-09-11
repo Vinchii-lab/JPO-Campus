@@ -1440,6 +1440,12 @@
     #minimapCanvas {
       border: 2px solid #3a4668; border-radius: 10px;
       background: #10131f; box-shadow: 0 12px 48px rgba(0,0,0,.6);
+      /* The renderer writes an explicit display size after choosing bounded
+         backing pixels.  Keep these limits as a CSS-side safety net for a
+         frame that arrives before the first map draw (and for a resized
+         mobile viewport), but never let the browser pick an independent
+         width/height for a replaced canvas. */
+      display: block; box-sizing: border-box; width: auto; height: auto;
       max-width: 92vw; max-height: 80vh;
     }
     #minimap .mm-hint { color: #8fa0c8; font-size: 13px; letter-spacing: .04em; }
@@ -7253,6 +7259,7 @@
     let _mmOpen = false, _mmBg = null, _mmTimer = null, _mmScale = 1;
     let _mmWorldScale = 1, _mmBackgroundToken = '';
     let _mmCanvasWidth = 1, _mmCanvasHeight = 1;
+    let _mmCssWidth = 1, _mmCssHeight = 1, _mmCssScale = 1;
     // Canvas dimensions are intentionally bounded independently of CSS. A
     // street map grows with its canonical lot coordinates, so a one-world-pixel
     // canvas would turn an extreme (but valid) lot number into a multi-gigabyte
@@ -7260,10 +7267,17 @@
     const MM_MAX_CANVAS_WIDTH = 2048;
     const MM_MAX_CANVAS_HEIGHT = 2048;
     const MM_MAX_CANVAS_PIXELS = 4 * 1024 * 1024;
+    const MM_STREET_CHUNK_HEIGHT = 1920;
+    const MM_LAYOUT_VERSION = 'nearby-chunk-v2';
     const _mmEl = document.getElementById('minimap');
     const _mmCv = document.getElementById('minimapCanvas');
     const _mmTitle = document.getElementById('minimapTitle');
     const _mmSubtitle = document.getElementById('minimapSubtitle');
+    // Keep a small, inspectable renderer marker on the actual canvas. This is
+    // useful when an already-open tab has survived a deploy: the pixel and CSS
+    // dimensions below prove which renderer produced the visible frame instead
+    // of relying on a screenshot or on a stale title string.
+    if (_mmCv) _mmCv.dataset.minimapRenderer = MM_LAYOUT_VERSION;
     // Pretty background: a pre-rendered shot of the ACTUAL office art
     // (assets/minimap.png, regenerate with the capture script after map edits).
     // The blocky tile raster below stays as the fallback if it fails to load.
@@ -7361,11 +7375,17 @@
 
     function _mmMapSize(scene) {
       if (!_mmIsNeighborhoodScene(scene)) {
-        return { width: scene._tileMap.width, height: scene._tileMap.height };
+        const tileMap = scene?._tileMap || {};
+        return {
+          width: Number.isFinite(Number(tileMap.width)) && Number(tileMap.width) > 0 ? Number(tileMap.width) : 1,
+          height: Number.isFinite(Number(tileMap.height)) && Number(tileMap.height) > 0 ? Number(tileMap.height) : 1,
+        };
       }
       const bounds = scene.info?.bounds || {};
-      const width = Number(scene.mapWidth || bounds.width);
-      const height = Number(scene.mapHeight || bounds.height);
+      const sceneWidth = Number(scene.mapWidth), boundWidth = Number(bounds.width);
+      const sceneHeight = Number(scene.mapHeight), boundHeight = Number(bounds.height);
+      const width = Number.isFinite(sceneWidth) && sceneWidth > 0 ? sceneWidth : boundWidth;
+      const height = Number.isFinite(sceneHeight) && sceneHeight > 0 ? sceneHeight : boundHeight;
       return {
         width: Number.isFinite(width) && width > 0 ? width : 1,
         height: Number.isFinite(height) && height > 0 ? height : 1,
@@ -7378,7 +7398,7 @@
       // Willow Walk is an intentionally sparse, vertically extensible street:
       // never rasterise its entire canonical extent. Keep a stable two-segment
       // row chunk (or the whole map when it is smaller) around the local player.
-      const height = Math.min(1920, mapHeight);
+      const height = Math.min(MM_STREET_CHUNK_HEIGHT, mapHeight);
       const maxOrigin = Math.max(0, mapHeight - height);
       const playerY = Number(scene.player?.y);
       const row = Number.isFinite(playerY) ? Math.floor(playerY / height) : 0;
@@ -7412,9 +7432,54 @@
       return { scale, width: canvasWidth, height: canvasHeight };
     }
 
+    function _mmApplyCanvasLayout(pixelWidth, pixelHeight) {
+      const safeWidth = Math.max(1, Math.floor(Number(pixelWidth) || 1));
+      const safeHeight = Math.max(1, Math.floor(Number(pixelHeight) || 1));
+      const viewportWidth = Math.max(1, Number(window.innerWidth) || 1);
+      const viewportHeight = Math.max(1, Number(window.innerHeight) || 1);
+      // Match the CSS limits above, but calculate both axes from one scale.
+      // Independent width/height assignment is what turns a large sparse
+      // street into a one-pixel vertical strip in some browsers.
+      const maxWidth = Math.max(1, Math.floor(viewportWidth * 0.92));
+      const maxHeight = Math.max(1, Math.floor(viewportHeight * 0.80));
+      const cssScale = Math.min(1, maxWidth / safeWidth, maxHeight / safeHeight);
+      _mmCssScale = Number.isFinite(cssScale) && cssScale > 0 ? cssScale : 1;
+      _mmCssWidth = Math.max(1, Math.floor(safeWidth * _mmCssScale));
+      _mmCssHeight = Math.max(1, Math.floor(safeHeight * _mmCssScale));
+      // `width`/`height` are the backing-store pixels; style dimensions are
+      // the on-screen pixels. Set both deliberately and preserve one aspect
+      // ratio so CSS can never collapse a 1440×1920 local chunk to 1×1920.
+      if (_mmCv) {
+        _mmCv.style.width = _mmCssWidth + 'px';
+        _mmCv.style.height = _mmCssHeight + 'px';
+        _mmCv.dataset.minimapRenderer = MM_LAYOUT_VERSION;
+        _mmCv.dataset.pixelSize = safeWidth + 'x' + safeHeight;
+        _mmCv.dataset.displaySize = _mmCssWidth + 'x' + _mmCssHeight;
+        _mmCv.dataset.displayScale = String(_mmCssScale);
+      }
+      return { width: _mmCssWidth, height: _mmCssHeight, scale: _mmCssScale };
+    }
+
+    function _mmReadablePx(cssPixels, worldScale = 1) {
+      // Text and markers are authored in canvas pixels, then pass through the
+      // world and CSS scales. Compensate once so a phone does not turn every
+      // lot/portal label into an unreadable 2px smear.
+      const scale = Math.max(Number.MIN_VALUE, _mmCssScale * (Number(worldScale) || 1));
+      return Math.max(1, cssPixels / scale);
+    }
+
     function _mmFitScale(scene, width, height) {
       if (_mmIsNeighborhoodScene(scene)) {
-        const bounded = _mmBoundedWorldSize(width, height);
+        // Keep the crop guarantee here as well as in the caller. This is the
+        // final guard against a future draw path accidentally passing the
+        // complete 647136px street height to the rasteriser.
+        const mapHeight = _mmMapSize(scene).height;
+        const requestedHeight = Number.isFinite(Number(height)) && Number(height) > 0
+          ? Number(height) : mapHeight;
+        const renderHeight = _mmIsStreetScene(scene)
+          ? Math.min(MM_STREET_CHUNK_HEIGHT, mapHeight, requestedHeight)
+          : requestedHeight;
+        const bounded = _mmBoundedWorldSize(width, renderHeight);
         _mmWorldScale = bounded.scale;
         _mmCanvasWidth = bounded.width;
         _mmCanvasHeight = bounded.height;
@@ -7478,7 +7543,8 @@
 
     function _mmNeighborhoodBase(g, scene, viewport) {
       const location = scene.location;
-      const width = scene.mapWidth, height = scene.mapHeight;
+      const map = _mmMapSize(scene);
+      const width = map.width, height = map.height;
       g.fillStyle = location === 'neighborhood' ? '#77a45f'
         : location === 'city' ? '#83aa68' : location?.endsWith('-shop') ? '#b78b68' : '#c59a72';
       g.fillRect(0, 0, width, height);
@@ -7578,7 +7644,8 @@
           _mmRect(g, { x: lot.x - 112, y: lot.bottom - 234, width: 224, height: 145 },
             stage === 'complete' ? 'rgba(71,106,119,.28)' : 'rgba(116,84,64,.22)',
             'rgba(73,54,45,.75)', 1);
-          g.font = '10px monospace'; g.textAlign = 'center'; g.fillStyle = '#fff5c7';
+          g.font = Math.ceil(_mmReadablePx(10, _mmWorldScale)) + 'px monospace';
+          g.textAlign = 'center'; g.fillStyle = '#fff5c7';
           g.fillText('LOT ' + String(lot.lot || lot.lotIndex || '?'), lot.x, lot.bottom - 246);
         });
       }
@@ -7588,7 +7655,8 @@
              door.y > viewport.originY + viewport.height)) return;
         _mmRect(g, door, 'rgba(246,223,117,.58)', '#fff1a8', 2);
         if (door.label) {
-          g.font = '10px monospace'; g.textAlign = 'center'; g.fillStyle = '#fff7c7';
+          g.font = Math.ceil(_mmReadablePx(10, _mmWorldScale)) + 'px monospace';
+          g.textAlign = 'center'; g.fillStyle = '#fff7c7';
           g.fillText(String(door.label).toUpperCase(), door.x + door.width / 2, Math.max(11, door.y - 4));
         }
       });
@@ -7600,6 +7668,7 @@
       const width = mapWidth;
       const height = _mmIsStreetScene(scene) ? viewport.height : mapHeight;
       _mmFitScale(scene, width, height);
+      _mmApplyCanvasLayout(_mmCanvasWidth, _mmCanvasHeight);
       const bg = document.createElement('canvas');
       bg.width = _mmCanvasWidth;
       bg.height = _mmCanvasHeight;
@@ -7619,6 +7688,7 @@
     }
 
     function _mmNeighborhoodToken(scene, viewport) {
+      const map = _mmMapSize(scene);
       const lots = (scene.info?.streetLots || []).map((lot) => [
         lot.lot, lot.lotIndex, lot.x, lot.bottom, lot.northSide,
         lot.construction?.stage, lot.exteriorColor,
@@ -7627,9 +7697,9 @@
       const furniture = (scene.furniture || []).map((item) => [
         item.texture?.key, Math.round(item.x), Math.round(item.y), Math.round(item.rotation || 0),
       ].join(':')).join('|');
-      return [scene.location, scene.mapWidth, scene.mapHeight, lots,
+      return [scene.location, map.width, map.height, lots,
         (scene.doors || []).map((door) => [door.destination, door.x, door.y, door.width, door.height].join(':')).join('|'),
-        furniture, viewport?.originY || 0, viewport?.height || scene.mapHeight].join('||');
+        furniture, viewport?.originY || 0, viewport?.height || map.height].join('||');
     }
 
     function _mmDraw() {
@@ -7642,7 +7712,7 @@
       const viewport = neighborhood ? _mmNeighborhoodViewport(sc) : { originY: 0, height: map.height };
       const title = street ? 'Nearby blocks' : (sc.info?.label || (neighborhood ? sc.location : 'JPO HQ'));
       const subtitle = street
-        ? `${sc.info?.label || 'Willow Walk'} · row ${Math.floor(viewport.originY / 1920) + 1}`
+        ? `${sc.info?.label || 'Willow Walk'} · row ${Math.floor(viewport.originY / MM_STREET_CHUNK_HEIGHT) + 1}`
         : '';
       if (_mmTitle && _mmTitle.textContent !== title) _mmTitle.textContent = title;
       if (_mmSubtitle && _mmSubtitle.textContent !== subtitle) _mmSubtitle.textContent = subtitle;
@@ -7652,6 +7722,7 @@
         _mmBackgroundToken = token;
       }
       _mmCv.width = _mmBg.width; _mmCv.height = _mmBg.height;
+      _mmApplyCanvasLayout(_mmBg.width, _mmBg.height);
       const g = _mmCv.getContext('2d');
       g.drawImage(_mmBg, 0, 0);
       const k = neighborhood ? _mmWorldScale : _mmScale / (sceneTileSize(sc) * 3);
@@ -7659,7 +7730,8 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         const localY = y - viewport.originY;
         if (neighborhood && (localY < 0 || localY > viewport.height)) return;
-        g.beginPath(); g.arc(x * k, localY * k, ring ? 7 : 5, 0, Math.PI * 2);
+        g.beginPath(); g.arc(x * k, localY * k,
+          _mmReadablePx(ring ? 7 : 5), 0, Math.PI * 2);
         g.fillStyle = color; g.fill();
         if (ring) { g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke(); }
       };
@@ -7667,11 +7739,15 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         const localY = y - viewport.originY;
         if (neighborhood && (localY < 0 || localY > viewport.height)) return;
-        g.font = '10px sans-serif'; g.textAlign = 'center';
+        g.font = Math.ceil(_mmReadablePx(10)) + 'px sans-serif'; g.textAlign = 'center';
         const w = g.measureText(text).width;
+        const labelOffset = _mmReadablePx(10);
+        const labelPad = _mmReadablePx(3);
+        const labelHeight = _mmReadablePx(12);
         g.fillStyle = 'rgba(0,0,0,.62)';
-        g.fillRect(x * k - w / 2 - 3, localY * k - 19, w + 6, 12);
-        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, localY * k - 10);
+        g.fillRect(x * k - w / 2 - labelPad, localY * k - labelOffset * 1.9,
+          w + labelPad * 2, labelHeight);
+        g.fillStyle = '#dfe6ff'; g.fillText(text, x * k, localY * k - labelOffset);
       };
       const remotes = neighborhood ? sc.remotes : sc.otherPlayers;
       for (const id in (remotes || {})) {

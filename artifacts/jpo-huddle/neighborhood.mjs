@@ -124,8 +124,12 @@ export function isHuddleTestIdentity(value) {
 export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["neighborhood"]);
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
-  neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 576, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
-  city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
+  neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" }, bounds: { width: 1440, height: 1056 } },
+  city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 1600 } },
+  cafe: { id: "cafe", label: "Cafe", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  diner: { id: "diner", label: "Diner", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  bakery: { id: "bakery", label: "Bakery", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  sushi: { id: "sushi", label: "Sushi", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "garden-shop": { id: "garden-shop", label: "Willow & Green", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "decor-shop": { id: "decor-shop", label: "Plaza Decor", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
@@ -200,7 +204,11 @@ export function streetDefinition(entries = []) {
     };
     return {
       ...home, construction: home.construction || homeConstruction(home), lot: slot, x, bottom, northSide, door,
-      returnSpawn: { x, y: northSide ? bottom + 32 : bottom - 122, dir: northSide ? "down" : "up" },
+      // North facades end at `bottom`; south facades begin at
+      // `bottom - 234`. Keep the return point on the street-facing side of
+      // either facade, with a 32px foot-centre margin, never inside the
+      // residence blocker itself.
+      returnSpawn: { x, y: northSide ? bottom + 32 : bottom - 266, dir: northSide ? "down" : "up" },
       yard: Array.isArray(home.yard) ? home.yard : [],
     };
   });
@@ -231,7 +239,13 @@ export function streetDefinition(entries = []) {
 export function streetLotForOwner(entries, ownerEmail) {
   const email = String(ownerEmail || "").trim().toLowerCase();
   if (isHuddleTestIdentity(email)) return null;
-  return streetDefinition(entries).lots.find((lot) => lot.ownerEmail === email) || null;
+  return streetDefinition(entries).lots.find((lot) =>
+    String(lot.ownerEmail || "").trim().toLowerCase() === email) || null;
+}
+
+export function streetReturnSpawnForOwner(entries, ownerEmail) {
+  const lot = streetLotForOwner(entries, ownerEmail);
+  return lot?.returnSpawn ? { ...lot.returnSpawn } : null;
 }
 
 export function streetPortalForTransition(destination, x, y, entries) {
@@ -260,6 +274,14 @@ export const LOCATION_GEOMETRY = Object.freeze({
       // supplied shop facade, so their visible doors and server portals agree.
       { x: 178, y: 622, width: 224, height: 122 }, { x: 178, y: 744, width: 76, height: 100 }, { x: 326, y: 744, width: 76, height: 100 },
       { x: 760, y: 622, width: 224, height: 122 }, { x: 760, y: 744, width: 76, height: 100 }, { x: 908, y: 744, width: 76, height: 100 },
+      // Cafe
+      { x: 178, y: 950, width: 224, height: 122 }, { x: 178, y: 1072, width: 76, height: 100 }, { x: 326, y: 1072, width: 76, height: 100 },
+      // Diner
+      { x: 760, y: 950, width: 224, height: 122 }, { x: 760, y: 1072, width: 76, height: 100 }, { x: 908, y: 1072, width: 76, height: 100 },
+      // Bakery
+      { x: 178, y: 1250, width: 224, height: 122 }, { x: 178, y: 1372, width: 76, height: 100 }, { x: 326, y: 1372, width: 76, height: 100 },
+      // Sushi
+      { x: 760, y: 1250, width: 224, height: 122 }, { x: 760, y: 1372, width: 76, height: 100 }, { x: 908, y: 1372, width: 76, height: 100 },
       { x: 95, y: 186, width: 50, height: 50 }, { x: 420, y: 160, width: 50, height: 50 },
       { x: 680, y: 156, width: 50, height: 50 }, { x: 1007, y: 174, width: 50, height: 50 },
       { x: 384, y: 354, width: 28, height: 30 }, { x: 730, y: 354, width: 28, height: 30 },
@@ -270,12 +292,22 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
       { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, label: "Willow & Green" },
       { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, label: "Plaza Decor" },
+      { destination: "cafe", x: 254, y: 1080, width: 72, height: 100, label: "Cafe" },
+      { destination: "diner", x: 836, y: 1080, width: 72, height: 100, label: "Diner" },
+      { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, label: "Bakery" },
+      { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, label: "Sushi" },
     ],
     seats: [
       // Benches sit in grass pockets around the plaza rather than on either
       // the east/west road or its crossing sidewalks.
-      { x: 372, y: 416, dir: "down" }, { x: 780, y: 416, dir: "down" },
-      { x: 88, y: 712, dir: "down" }, { x: 1064, y: 712, dir: "down" },
+      { id: "plaza-bench-northwest", x: 372, y: 416, dir: "down",
+        stands: [{ x: 372, y: 480, dir: "down" }, { x: 340, y: 416, dir: "down" }] },
+      { id: "plaza-bench-northeast", x: 780, y: 416, dir: "down",
+        stands: [{ x: 780, y: 480, dir: "down" }, { x: 716, y: 416, dir: "down" }] },
+      { id: "plaza-bench-southwest", x: 88, y: 712, dir: "down",
+        stands: [{ x: 88, y: 776, dir: "up" }, { x: 152, y: 712, dir: "up" }] },
+      { id: "plaza-bench-southeast", x: 1064, y: 712, dir: "down",
+        stands: [{ x: 1064, y: 776, dir: "up" }, { x: 1032, y: 740, dir: "up" }] },
     ],
   },
   "furniture-shop": {
@@ -301,6 +333,46 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 144, y: 154, width: 672, height: 74 }, { x: 140, y: 378, width: 156, height: 80 }, { x: 662, y: 378, width: 156, height: 80 },
     ],
     doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+  },
+
+  cafe: {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 200, y: 150, width: 560, height: 80 }, { x: 200, y: 350, width: 100, height: 150 }, { x: 660, y: 350, width: 100, height: 150 }
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+    seats: [ { x: 250, y: 250, dir: "up" }, { x: 350, y: 250, dir: "up" }, { x: 450, y: 250, dir: "up" }, { x: 550, y: 250, dir: "up" } ]
+  },
+  diner: {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 100, y: 150, width: 760, height: 60 },
+      { x: 100, y: 350, width: 200, height: 100 }, { x: 660, y: 350, width: 200, height: 100 },
+      { x: 100, y: 500, width: 200, height: 100 }, { x: 660, y: 500, width: 200, height: 100 }
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+    seats: [ { x: 150, y: 460, dir: "left" }, { x: 710, y: 460, dir: "right" } ]
+  },
+  bakery: {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 250, y: 200, width: 460, height: 100 },
+      { x: 250, y: 400, width: 150, height: 60 }, { x: 560, y: 400, width: 150, height: 60 }
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+    seats: []
+  },
+  sushi: {
+    blockers: [
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 200, y: 200, width: 560, height: 120 }, { x: 200, y: 450, width: 120, height: 120 }, { x: 640, y: 450, width: 120, height: 120 }
+    ],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
+    seats: [ { x: 250, y: 350, dir: "up" }, { x: 480, y: 350, dir: "up" }, { x: 710, y: 350, dir: "up" } ]
   },
   home: {
     blockers: [
@@ -330,11 +402,11 @@ export const LOCATION_GEOMETRY = Object.freeze({
 // The only allowed map links. `spawn` is selected by the server based on the
 // source portal, not supplied by a browser.
 export const LOCATION_PORTALS = Object.freeze({
-  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, label: "Willow Walk", spawn: { x: 576, y: 912, dir: "up" } }],
+  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" } }],
   neighborhood: [
-    // This is the central north/south path (x=552..600), not a residence
-    // parcel.  Its 48px width leaves a 16px foot-radius-safe inner trigger.
-    { destination: "office", x: 552, y: 864, width: 48, height: 96, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
+    // HQ Garden is the west end of Willow Walk's main horizontal road. It
+    // mirrors the east city gate and stays west of the first residential lot.
+    { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
     { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
   ],
   city: [
@@ -342,11 +414,19 @@ export const LOCATION_PORTALS = Object.freeze({
     { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
     { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
     { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "cafe", x: 254, y: 1080, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "diner", x: 836, y: 1080, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
   "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 880, dir: "down" } }],
   "decor-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 880, dir: "down" } }],
-  home: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit", spawn: { x: 576, y: 912, dir: "up" } }],
+  cafe: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 1190, dir: "down" } }],
+  diner: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1190, dir: "down" } }],
+  bakery: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 1490, dir: "down" } }],
+  sushi: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1490, dir: "down" } }],
+  home: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit", spawn: { x: 144, y: 504, dir: "right" } }],
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -367,7 +447,7 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (value === "office" || value === "neighborhood" || value === "city" || isShopLocation(value)) return { id: value, kind: value };
+  if (["office", "neighborhood", "city", "cafe", "diner", "bakery", "sushi"].includes(value) || isShopLocation(value)) return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -411,6 +491,42 @@ export function locationBounds(location) {
 export function pointHitsRect(x, y, rect, radius = ACTOR_FOOT_RADIUS) {
   return x + radius > rect.x && x - radius < rect.x + rect.width &&
     y + radius > rect.y && y - radius < rect.y + rect.height;
+}
+
+export function staticSeatForPoint(location, x, y, radius = 24) {
+  const geometry = LOCATION_GEOMETRY[location?.kind === "home" ? "home" : location?.id];
+  const seats = geometry?.seats || [];
+  return seats.find((seat) =>
+    Math.abs(Number(seat.x) - Number(x)) <= radius &&
+    Math.abs(Number(seat.y) - Number(y)) <= radius) || null;
+}
+
+export function staticSeatStandCandidates(location, seat) {
+  if (!seat || !Number.isFinite(Number(seat.x)) || !Number.isFinite(Number(seat.y))) return [];
+  const authored = Array.isArray(seat.stands) ? seat.stands
+    : Array.isArray(seat.stand) ? seat.stand : seat.stand ? [seat.stand] : [];
+  const candidates = authored
+    .filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
+    .map((point) => ({ x: Number(point.x), y: Number(point.y), dir: point.dir || seat.dir || "down" }));
+  if (!candidates.length) {
+    const pivot = location?.id === "city" ? 576 : (Number(locationBounds(location)?.height) || 0) / 2;
+    const northPocket = Number(seat.y) < pivot;
+    candidates.push(
+      { x: Number(seat.x), y: Number(seat.y) + (northPocket ? -64 : 64), dir: northPocket ? "down" : "up" },
+      { x: Number(seat.x), y: Number(seat.y) + (northPocket ? 64 : -64), dir: northPocket ? "up" : "down" },
+      { x: Number(seat.x) - 64, y: Number(seat.y), dir: "right" },
+      { x: Number(seat.x) + 64, y: Number(seat.y), dir: "left" },
+    );
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const point of candidates) {
+    const key = `${point.x}:${point.y}:${point.dir}`;
+    if (!seen.has(key) && validLocationMove(location, point.x, point.y)) {
+      seen.add(key); unique.push(point);
+    }
+  }
+  return unique;
 }
 
 export function validLocationMove(location, x, y, dynamicBlockers = []) {

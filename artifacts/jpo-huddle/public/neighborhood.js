@@ -24,7 +24,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   const panelToggle = ui.querySelector('#neighborhood-panel-toggle');
   function syncPanelControls() {
     ui.classList.toggle('panels-collapsed', panelsCollapsed);
-    panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:') || currentLocation.endsWith('-shop'));
+    panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:') || currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation));
     panelToggle.textContent = panelsCollapsed ? 'Show panel' : 'Hide panel';
     panelToggle.setAttribute('aria-expanded', String(!panelsCollapsed));
   }
@@ -338,7 +338,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   function renderShop() {
     syncPanelControls();
     let panel = document.getElementById('shop-panel');
-    if (typeof currentLocation !== 'string' || !currentLocation.endsWith('-shop')) {
+    if (typeof currentLocation !== 'string' || (!currentLocation.endsWith('-shop') && !['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation))) {
       if (panel) panel.hidden = true;
       return;
     }
@@ -348,18 +348,41 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ui.appendChild(panel);
     }
     panel.hidden = false;
-    const rows = Object.values(furnitureCatalog).map((item) =>
-      '<span class="home-item"><span>' + escapeHtml(item.name) + ' · ' +
-      Number(item.price).toLocaleString() + ' coins</span><button type="button" data-buy="' +
-      escapeHtml(item.id) + '">Buy</button></span>',
-    ).join('') || '<small>The catalog is loading.</small>';
+
+    const isRestaurant = ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation);
     const shopCopy = {
       'furniture-shop': { title: 'Huddle Home', category: 'Furnishings', copy: 'Comfort pieces for your Willow Walk home.' },
       'garden-shop': { title: 'Willow & Green', category: 'Garden goods', copy: 'Leafy accents and a sunny seat for your home or yard.' },
       'decor-shop': { title: 'Plaza Decor', category: 'Living-room accents', copy: 'Statement pieces for a warm, lived-in room.' },
+      'cafe': { title: 'The Daily Grind', category: 'Cafe', copy: 'Fresh coffee and pastries. Have a seat and enjoy the vibe!', isMenu: true },
+      'diner': { title: 'Neon Diner', category: 'American Diner', copy: 'Classic burgers and milkshakes.', isMenu: true },
+      'bakery': { title: 'Sweet Crust', category: 'Bakery', copy: 'Artisan bread and delicious cakes baked daily.', isMenu: true },
+      'sushi': { title: 'Sakura Sushi', category: 'Sushi Restaurant', copy: 'Fresh rolls directly from the conveyor.', isMenu: true },
     }[currentLocation] || { title: 'Huddle shop', category: 'Home goods', copy: 'Furniture for your Willow Walk home.' };
-    panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title) + ' · ' + escapeHtml(shopCopy.category) + '</b><button type="button" data-close>Close</button></div>' +
-        '<div class="home-section"><small>' + escapeHtml(shopCopy.copy) + ' Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.</small>' + rows + '</div>';
+
+    const menuItems = {
+      cafe: ['Espresso', 'Latte', 'Matcha', 'Croissant', 'Muffin'],
+      diner: ['Classic Burger', 'Cheeseburger', 'Fries', 'Vanilla Shake', 'Cherry Pie'],
+      bakery: ['Sourdough', 'Baguette', 'Cupcake', 'Chocolate Cake', 'Macaron'],
+      sushi: ['Salmon Nigiri', 'Tuna Sashimi', 'Dragon Roll', 'Edamame', 'Green Tea']
+    };
+
+    let rows = '';
+    if (isRestaurant) {
+       rows = (menuItems[currentLocation] || []).map(item =>
+         '<span class="home-item"><span>' + escapeHtml(item) + '</span><small class="menu-only-label">Menu Only</small></span>'
+       ).join('');
+    } else {
+       rows = Object.values(furnitureCatalog).map((item) =>
+         '<span class="home-item"><span>' + escapeHtml(item.name) + ' · ' +
+         Number(item.price).toLocaleString() + ' coins</span><button type="button" data-buy="' +
+         escapeHtml(item.id) + '">Buy</button></span>',
+       ).join('') || '<small>The catalog is loading.</small>';
+    }
+
+    const tipCopy = isRestaurant ? 'This is a reference menu. Food purchasing is not yet supported, but please enjoy the ambiance.' : 'Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.';
+panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title) + ' · ' + escapeHtml(shopCopy.category) + '</b><button type="button" data-close>Close</button></div>' +
+        '<div class="home-section"><small>' + escapeHtml(shopCopy.copy) + ' ' + tipCopy + '</small>' + rows + '</div>';
     panel.querySelector('[data-close]').onclick = () => { setPanelsCollapsed(true); };
     panel.querySelectorAll('[data-buy]').forEach((button) => {
       button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
@@ -460,6 +483,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       toast(result.message);
     }
   });
+  socket.on('parkSeatState', (payload) => {
+    const scene = window._neighborhoodScene;
+    if (scene) scene._setParkSeatState(payload);
+  });
   socket.on('furnitureActivity', (payload) => {
     const scene = window._neighborhoodScene;
     if (!scene || !payload?.id) return;
@@ -513,6 +540,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.sitting = false;
       this.activity = null;
       this._activityPending = false;
+      this.staticSeatState = null;
+      this._parkSeatPending = null;
+      this._parkSeatPendingAt = 0;
+      this._parkSeatExitTarget = null;
+      this._parkSeatSitTarget = null;
     }
 
     _removePlacementInput() {
@@ -652,6 +684,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // and separate transparent objects. None uses a baked screenshot/map PNG.
       if (atHome) this._drawHome();
       else if (typeof this.location === 'string' && this.location.endsWith('-shop')) this._drawShop();
+      else if (typeof this.location === 'string' && ['cafe', 'diner', 'bakery', 'sushi'].includes(this.location)) this._drawRestaurant();
       else if (this.location === 'neighborhood') this._drawNeighborhood();
       else this._drawCity();
 
@@ -682,6 +715,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.doors = this.info.portals || [];
       this.updateResidenceDirectory(directory);
       this.seats = this.info.geometry?.seats || [];
+      // A durable reconnect may arrive already seated at a public bench. The
+      // server's anim/coordinates remain authoritative; this only restores the
+      // matching local presentation once the map has been created.
+      if (self.anim === 'sit') {
+        const seat = this.seats
+          .map((candidate) => ({ candidate, distance: Math.hypot(this.player.x - candidate.x, this.player.y - candidate.y) }))
+          .filter(({ distance }) => distance <= 24)
+          .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+        if (seat) this._setParkSeatState({ seated: true, seatId: seat.id || null, x: self.x, y: self.y, dir: self.dir || seat.dir });
+      }
       this._drawPortalCues();
       this.keys = this.input.keyboard.createCursorKeys();
       this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
@@ -1042,16 +1085,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _drawCity() {
       this._tileField(0x83aa68, 0x789d60);
       this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
-      this._path({ x: 456, y: 0, width: 240, height: 912 }, 0x535e66, 0x3e4750);
+      this._path({ x: 456, y: 0, width: 240, height: 1600 }, 0x535e66, 0x3e4750);
       this._path({ x: 0, y: 408, width: 1152, height: 24 });
       this._path({ x: 0, y: 576, width: 1152, height: 24 });
-      this._path({ x: 432, y: 0, width: 24, height: 912 });
-      this._path({ x: 696, y: 0, width: 24, height: 912 });
+      this._path({ x: 432, y: 0, width: 24, height: 1600 });
+      this._path({ x: 696, y: 0, width: 24, height: 1600 });
       // Short garden walks lead to the two south-lane shop thresholds without
       // widening the road or making a new collision shortcut.
       this._path({ x: 836, y: 328, width: 72, height: 104 });
       this._path({ x: 254, y: 852, width: 72, height: 36 });
       this._path({ x: 836, y: 852, width: 72, height: 36 });
+      this._path({ x: 254, y: 1180, width: 72, height: 36 });
+      this._path({ x: 836, y: 1180, width: 72, height: 36 });
+      this._path({ x: 254, y: 1480, width: 72, height: 36 });
+      this._path({ x: 836, y: 1480, width: 72, height: 36 });
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
       // City is commerce and transit. The market remains a closed facade; the
       // three actual shop portals belong to Huddle Home and the two south-lane
@@ -1060,6 +1107,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._exterior('shop', 872, 328);
       this._exterior('shop', 290, 860);
       this._exterior('shop', 872, 860);
+      // New food district venues
+      this._exterior('shop', 290, 1188);
+      this._exterior('shop', 872, 1188);
+      this._exterior('shop', 290, 1488);
+      this._exterior('shop', 872, 1488);
       [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 300], [1048, 300]].forEach(([x, y]) => this._exterior('tree', x, y));
       [[398, 384], [744, 384], [90, 580], [1062, 580]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
       // The seating pockets sit fully outside the crossing roads. Keep the
@@ -1068,6 +1120,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       [[372, 416], [780, 416], [88, 696], [1064, 696]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
       this._storefrontSign(290, 604, 'WILLOW & GREEN');
       this._storefrontSign(872, 604, 'PLAZA DECOR');
+      this._storefrontSign(290, 932, 'THE DAILY GRIND');
+      this._storefrontSign(872, 932, 'NEON DINER');
+      this._storefrontSign(290, 1232, 'SWEET CRUST BAKERY');
+      this._storefrontSign(872, 1232, 'SAKURA SUSHI');
 
       // Decorative cheerful animated details
       [[290, 480], [872, 480], [290, 960], [872, 960]].forEach(([x, y]) => {
@@ -1177,6 +1233,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
     }
 
+
+    _drawRestaurant() {
+      this._interiorTileField('shop_floor', 'shop_wall', { x: 408, width: 144 });
+      if (window.JpoInteriors?.drawRestaurantVignettes) {
+        window.JpoInteriors.drawRestaurantVignettes(this, INTERIOR_ART_SCALE, this.location);
+      }
+    }
+
     _drawShop() {
       this._interiorTileField('shop_floor', 'shop_wall', { x: 408, width: 144 });
       const themes = {
@@ -1266,10 +1330,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           this.portalCues?.push(cue);
           continue;
         }
-        const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
+                const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' :
           portal.destination === 'garden-shop' ? 'WILLOW & GREEN' :
           portal.destination === 'decor-shop' ? 'PLAZA DECOR' :
+          portal.destination === 'cafe' ? 'THE DAILY GRIND' :
+          portal.destination === 'diner' ? 'NEON DINER' :
+          portal.destination === 'bakery' ? 'SWEET CRUST BAKERY' :
+          portal.destination === 'sushi' ? 'SAKURA SUSHI' :
           portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'neighborhood' ? String(portal.label || 'WILLOW WALK').toUpperCase() :
           String(portal.label || 'HQ GARDEN').toUpperCase();
@@ -1504,6 +1572,100 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       socket.emit('furnitureInteract', { phase: 'exit', reason });
     }
 
+    _parkSeatForState(state = this.staticSeatState) {
+      if (!state) return null;
+      return this.seats?.find((seat) => state.seatId && seat.id === state.seatId) ||
+        this.seats?.map((seat) => ({ seat, distance: Math.hypot(Number(state.x) - seat.x, Number(state.y) - seat.y) }))
+          .filter(({ distance }) => distance <= 24)
+          .sort((a, b) => a.distance - b.distance)[0]?.seat || null;
+    }
+
+    _parkSeatStand(seat) {
+      if (!seat) return null;
+      const authored = Array.isArray(seat.stands) ? seat.stands
+        : Array.isArray(seat.stand) ? seat.stand : seat.stand ? [seat.stand] : [];
+      const validAuthored = authored.find((candidate) =>
+        Number.isFinite(Number(candidate?.x)) && Number.isFinite(Number(candidate?.y)));
+      if (validAuthored) return validAuthored;
+      const northPocket = Number(seat.y) < (this.location === 'city' ? 576 : this.mapHeight / 2);
+      return { x: Number(seat.x), y: Number(seat.y) + (northPocket ? -64 : 64), dir: northPocket ? 'down' : 'up' };
+    }
+
+    _setParkSeatState(payload) {
+      if (!this.player || !payload) return;
+      this._parkSeatPending = null;
+      this._parkSeatPendingAt = 0;
+      this._parkSeatExitTarget = null;
+      this._parkSeatSitTarget = null;
+      if (payload.seated) {
+        const seat = this.seats?.find((candidate) => payload.seatId && candidate.id === payload.seatId) ||
+          this.seats?.map((candidate) => ({ candidate, distance: Math.hypot(Number(payload.x) - candidate.x, Number(payload.y) - candidate.y) }))
+            .filter(({ distance }) => distance <= 24)
+            .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+        if (!seat) return;
+        this.staticSeatState = {
+          seated: true, seatId: seat.id || payload.seatId || null,
+          x: Number.isFinite(payload.x) ? payload.x : seat.x,
+          y: Number.isFinite(payload.y) ? payload.y : seat.y,
+          dir: payload.dir || seat.dir || 'down',
+          stand: payload.stand || this._parkSeatStand(seat),
+        };
+        this.player.setPosition(this.staticSeatState.x, this.staticSeatState.y);
+        this.playerDir = this.staticSeatState.dir;
+        this.player.body?.reset(this.player.x, this.player.y);
+        this.player.body.enable = false;
+        this._applyActivityPose(this, { action: 'sit' }, this.playerDir);
+      } else {
+        const target = payload.stand || this._parkSeatExitTarget;
+        this.staticSeatState = null;
+        if (Number.isFinite(payload.x) && Number.isFinite(payload.y)) this.player.setPosition(payload.x, payload.y);
+        if (target?.dir) this.playerDir = target.dir;
+        this.player.body.enable = true;
+        this.player.body?.reset(this.player.x, this.player.y);
+        this._applyActivityPose(this, null, this.playerDir || 'down');
+      }
+    }
+
+    _nearbyParkSeat() {
+      if (!this.player || this.location.startsWith('home:') ||
+          this.location.endsWith('-shop') || this.staticSeatState || this._parkSeatPending) return null;
+      let best = null;
+      for (const seat of this.seats || []) {
+        const distance = Math.hypot(this.player.x - Number(seat.x), this.player.y - Number(seat.y));
+        const radius = Number(seat.interactionRadius) || 86;
+        if (distance > radius || (best && distance >= best.distance)) continue;
+        best = { seat, distance };
+      }
+      return best;
+    }
+
+    _requestParkSeat() {
+      if (this.staticSeatState || this._parkSeatPending) return;
+      const nearby = this._nearbyParkSeat();
+      if (!nearby) return;
+      const seat = nearby.seat;
+      this._parkSeatPending = 'sit';
+      this._parkSeatPendingAt = performance.now();
+      this._parkSeatSitTarget = { x: Number(seat.x), y: Number(seat.y), dir: seat.dir || 'down' };
+      socket.emit('playerMove', {
+        ...this._parkSeatSitTarget, seatId: seat.id || null, anim: 'sit',
+      });
+    }
+
+    _leaveParkSeat(reason = 'exit') {
+      if (!this.staticSeatState || this._parkSeatPending) return;
+      const seat = this._parkSeatForState();
+      const stand = this.staticSeatState.stand || this._parkSeatStand(seat);
+      if (!stand || !Number.isFinite(Number(stand.x)) || !Number.isFinite(Number(stand.y))) return;
+      this._parkSeatPending = 'stand';
+      this._parkSeatPendingAt = performance.now();
+      this._parkSeatExitTarget = { x: Number(stand.x), y: Number(stand.y), dir: stand.dir || 'down' };
+      // Keep the local body frozen until the server accepts this exact authored
+      // stand point. E is therefore a real server movement transition, not a
+      // client-only pose toggle or teleport.
+      socket.emit('playerMove', { ...this._parkSeatExitTarget, seatId: seat?.id || null, anim: 'idle', reason });
+    }
+
     _installPlacementInput(atHome) {
       this._removePlacementInput();
       const atStreet = this.location === 'neighborhood';
@@ -1675,6 +1837,18 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.playerDir = serverPlayer.dir || this.playerDir;
       if (serverPlayer.activity) this._setLocalActivity(serverPlayer.activity, serverPlayer);
       else if (this.activity) this._setLocalActivity(null, serverPlayer);
+      else if (serverPlayer.anim === 'sit' && this.seats?.length) {
+        const seat = this.seats
+          .map((candidate) => ({ candidate, distance: Math.hypot(serverPlayer.x - candidate.x, serverPlayer.y - candidate.y) }))
+          .filter(({ distance }) => distance <= 24)
+          .sort((a, b) => a.distance - b.distance)[0]?.candidate;
+        if (seat) this._setParkSeatState({
+          seated: true, seatId: seat.id || null, x: serverPlayer.x, y: serverPlayer.y,
+          dir: serverPlayer.dir || seat.dir,
+        });
+      } else if (this.staticSeatState) {
+        this._setParkSeatState({ seated: false, x: serverPlayer.x, y: serverPlayer.y, dir: serverPlayer.dir });
+      }
     }
 
     addRemote(id, player) {
@@ -1833,10 +2007,28 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (this.activity && !this.transitionRequested && (left || right || up || down)) {
         this._leaveFurnitureActivity('movement');
       }
+      if (this.staticSeatState && !this._parkSeatPending && !this.transitionRequested && (left || right || up || down)) {
+        this._leaveParkSeat('movement');
+      }
+      // A movement packet can be dropped by the server's cadence guard. Do
+      // not leave the local E interaction permanently pending when no
+      // correction/seat acknowledgement arrives; the authoritative seated
+      // pose remains retryable.
+      if (this._parkSeatPending && this._parkSeatPendingAt &&
+          performance.now() - this._parkSeatPendingAt > 1500) {
+        this._parkSeatPending = null;
+        this._parkSeatPendingAt = 0;
+        this._parkSeatExitTarget = null;
+        this._parkSeatSitTarget = null;
+      }
       let dir = this.playerDir || 'down';
-      let anim = this.activity ? (this.activity.action === 'sit' ? 'sit' : this.activity.action) : 'idle';
+      const parkSeated = !!this.staticSeatState;
+      const parkPendingSit = this._parkSeatPending === 'sit';
+      const parkStanding = this._parkSeatPending === 'stand';
+      let anim = this.activity ? (this.activity.action === 'sit' ? 'sit' : this.activity.action)
+        : ((parkSeated && !parkStanding) || parkPendingSit ? 'sit' : 'idle');
       body.setVelocity(0, 0);
-      if (!this.activity && !this._activityPending && !this.transitionRequested) {
+      if (!this.activity && !parkSeated && !this._parkSeatPending && !this._activityPending && !this.transitionRequested) {
         // Independent axes, matching HQ; diagonals retain the same total speed.
         if (up) { body.setVelocityY(-SPEED); dir = 'up'; anim = 'walk'; }
         else if (down) { body.setVelocityY(SPEED); dir = 'down'; anim = 'walk'; }
@@ -1847,13 +2039,17 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ui.classList.toggle('neighborhood-walking', anim === 'walk');
       this.playerDir = dir;
       // Match validLocationMove's 16px radius at the map edge before emitting.
-      if (!this.activity) {
+      if (!this.activity && !parkSeated && !this._parkSeatPending) {
         this.player.x = Phaser.Math.Clamp(this.player.x, 16, this.mapWidth - 16);
         this.player.y = Phaser.Math.Clamp(this.player.y, 16, this.mapHeight - 16);
       }
       if (this.activity) {
         this.player.setPosition(this.activity.x, this.activity.y);
         body.setVelocity(0, 0);
+      } else if (parkSeated) {
+        this.player.setPosition(this.staticSeatState.x, this.staticSeatState.y);
+        body.setVelocity(0, 0);
+        this._applyActivityPose(this, { action: 'sit' }, this.staticSeatState.dir || dir);
       } else if (anim === 'walk') {
         const key = 'walk_' + this.playerTexKey + '_' + dir;
         if (this.anims.exists(key) && this.player.anims.currentAnim?.key !== key) this.player.play(key);
@@ -1880,7 +2076,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       if (this.localBubble) this.localBubble.setPosition(this.player.x, this.player.y - 78);
 
-      const nearbyAction = !this.activity && !this._activityPending && this.location.startsWith('home:')
+      const nearbyParkSeat = !this.activity && !this._activityPending ? this._nearbyParkSeat() : null;
+      const nearbyAction = !this.activity && !this._activityPending && !nearbyParkSeat && this.location.startsWith('home:')
         ? this._nearbyFurnitureAction() : null;
       if (!this.portalRelease && !this._insidePortal(this.player.x, this.player.y)) this.portalRelease = true;
       // Use an inner doorway that is derived from the authoritative foot
@@ -1901,6 +2098,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
         .setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this.activity) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (parkSeated || this._parkSeatPending === 'stand') this.interactHint.setText('Standing…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (nearbyParkSeat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyAction) {
         const actions = nearbyAction.actions;
         const primary = ({ sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower', bathe: 'Bathe', watch: 'Watch TV' })[actions[0]] || 'Use';
@@ -1946,12 +2145,19 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
         if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
+        else if (this.staticSeatState) this._leaveParkSeat('exit');
+        else if (nearbyParkSeat) this._requestParkSeat();
         else this._requestFurnitureAction();
       }
       this.lastSend += delta;
       if (this.lastSend >= 50) {
         this.lastSend = 0;
-        socket.emit('playerMove', { x: this.player.x, y: this.player.y, dir: this.playerDir, anim });
+        const parkTarget = this._parkSeatPending === 'stand' ? this._parkSeatExitTarget
+          : this._parkSeatPending === 'sit' ? this._parkSeatSitTarget : null;
+        socket.emit('playerMove', {
+          x: parkTarget?.x ?? this.player.x, y: parkTarget?.y ?? this.player.y,
+          dir: parkTarget?.dir || this.playerDir, anim,
+        });
       }
     }
 

@@ -29,3 +29,9 @@ Test full paths through room doorways, not just isolated waypoint positions.
 **Why:** Individually valid points on opposite sides of a wall incorrectly passed a room-access test; the route between them was blocked.
 
 **How to apply:** Sample the segments between waypoints at smaller than tile resolution, then confirm narrow doorways against the actual Arcade body in-browser.
+
+Validate house returns and static-seat exits against the complete live collision geometry, not just expected coordinate formulas.
+
+**Why:** A south-facing house return was inside its own facade, and an apparently reasonable bench exit intersected a nearby planter. Metadata-only assertions missed both.
+
+**How to apply:** Include every facing and all public seats, sparse lot indices, actor radius, and the full exit path. A valid destination alone does not establish a usable route.
