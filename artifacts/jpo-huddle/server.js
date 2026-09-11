@@ -13,6 +13,20 @@ import {
   grandEventBattleDecision,
   grandEventOpeningPlan,
 } from "./grand-event-rules.mjs";
+import {
+  FURNITURE_CATALOG,
+  LOCATION_GEOMETRY,
+  LOCATIONS,
+  ensureHome,
+  homeDirectory,
+  homeAccess,
+  homeSnapshot,
+  layoutBlockers,
+  locationSpawn,
+  parseLocation,
+  validLocationMove,
+  validPlacement,
+} from "./neighborhood.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -25,9 +39,10 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // same code (boot-time stamps would make an autoscaled deployment hand a
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
-const BUILD_STAMP = crypto.createHash("sha1")
-  .update(readFileSync(path.join(__dirname, "public", "index.html")))
-  .digest("hex").slice(0, 12);
+const buildHasher = crypto.createHash("sha1");
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood.css", "neighborhood.mjs"])
+  buildHasher.update(readFileSync(path.join(__dirname, file)));
+const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
 // ── Database ───────────────────────────────────────────────────────────────
 // The DB is the source of truth for everything durable (profiles, coins,
@@ -236,9 +251,10 @@ app.post("/admin/purge", express.json(), async (req, res) => {
       // dropLiveByEmail (delete first is fine).
       roundHandleLeave(id);
       rlglHandleLeave(id);
+      const locationId = locationOf(p);
       delete players[id];
       io.to(id).emit("kicked");
-      io.emit("playerLeft", id);
+      emitToLocation(locationId, "playerLeft", id);
     }
     for (const id of Object.keys(pending)) {
       delete pending[id];
@@ -1980,11 +1996,11 @@ async function feedPetTreat(io, socket, p) {
     next: PET_MYTHIC.has(pet)
       ? (xp >= PET_EVOLVE_XP[0] ? null : PET_EVOLVE_XP[0])
       : (PET_EVOLVE_XP.find((t) => t > xp) ?? null) });
-  io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
+  emitToLocation(locationOf(p), "objectEffect", { id: socket.id, kind: "snack", emoji: "🦴" });
   if (stage > prevStage) {
-    io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
-    io.emit("petEvolved", { id: socket.id, name: p.name, pet, stage,
-                            petName: ((p.petNames || {})[pet]) || "" });
+    emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc, petStage: stage });
+    emitToLocation(locationOf(p), "petEvolved", { id: socket.id, name: p.name, pet, stage,
+                                                    petName: ((p.petNames || {})[pet]) || "" });
     console.log(`${p.name}'s ${pet} evolved to stage ${stage} (${xp} treats)`);
   }
   console.log(`${p.name} fed ${pet} a treat (xp ${xp})`);
@@ -2603,6 +2619,7 @@ function nearbyIds(socketId, radius) {
   const r2 = radius * radius;
   for (const [id, q] of Object.entries(players)) {
     if (id === socketId) { out.push(id); continue; }
+    if ((q.locationId || "office") !== (p.locationId || "office")) continue;
     const dx = (q.x ?? 0) - (p.x ?? 0), dy = (q.y ?? 0) - (p.y ?? 0);
     if (dx * dx + dy * dy <= r2) out.push(id);
   }
@@ -3237,8 +3254,17 @@ function coachCoffeeMoment(socketId) {
 // Map a jpo_players row (snake_case columns) to the in-memory / client-facing
 // player state shape (camelCase).
 function rowToPlayerState(row) {
+  const officeSpawn = LOCATIONS.office.spawn;
   return {
-    x: row.x, y: row.y, dir: row.dir, anim: row.anim === "sit" ? "sit" : "idle",
+    // Location membership is deliberately live-session state. A reconnect
+    // safely returns to HQ, whose durable x/y columns already existed before
+    // homes shipped; home layouts themselves are fully durable in their own
+    // development-schema tables.
+    locationId: "office",
+    // Never resurrect a persisted coordinate into a different map: reconnects
+    // intentionally use the authored, painted HQ spawn (rather than stale
+    // coordinates from an older map/home session).
+    x: officeSpawn.x, y: officeSpawn.y, dir: officeSpawn.dir, anim: "idle",
     // `name` is the in-game DISPLAY name (nickname first) — every consumer
     // (nametags, chat, announcements, grace snapshot) reads this field.
     // `fullName` keeps the real name for the admin panel.
@@ -3283,6 +3309,69 @@ function rowToPlayerState(row) {
     // Epoch ms of account creation, for the profile card's "joined" line.
     createdAt:   row.created_at ? new Date(row.created_at).getTime() : null,
   };
+}
+
+// ── Shared City and Homes: location room helpers ───────────────────────────
+// Socket.IO rooms are the fan-out boundary.  Do not use io.emit for positional
+// state: a room is a shared map instance while each home has its own room.
+function locationOf(p) { return p?.locationId || "office"; }
+function locationRoom(id) { return `location:${id}`; }
+function sameLocation(aId, bId) {
+  return !!players[aId] && !!players[bId] && locationOf(players[aId]) === locationOf(players[bId]);
+}
+function emitToLocation(locationId, event, payload, exceptId = null) {
+  const room = io.to(locationRoom(locationId));
+  if (exceptId) room.except(exceptId).emit(event, payload);
+  else room.emit(event, payload);
+}
+function locationPlayers(forId) {
+  const p = players[forId];
+  if (!p) return {};
+  const here = locationOf(p), out = {};
+  for (const [id, candidate] of Object.entries(players)) {
+    if (locationOf(candidate) === here) out[id] = candidate;
+  }
+  return out;
+}
+function isOfficePlayer(id) { return locationOf(players[id]) === "office"; }
+function locationInfo(locationId) {
+  const parsed = parseLocation(locationId);
+  if (!parsed) return null;
+  const base = parsed.kind === "home" ? {
+    id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432,
+  } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
+  return { ...base, geometry: LOCATION_GEOMETRY[parsed.kind === "home" ? "home" : parsed.id] };
+}
+const homeLayoutCollisionCache = new Map();
+function homeBlockersFor(location) {
+  return location?.kind === "home" ? (homeLayoutCollisionCache.get(location.ownerEmail) || []) : [];
+}
+// All permission-changing operations on a home share one FIFO.  PostgreSQL
+// transactions still protect durable rows, while this closes the asynchronous
+// access-check → room-join window in this process.
+const homeOperationChains = new Map();
+function withHomeOperation(ownerEmail, operation) {
+  const previous = homeOperationChains.get(ownerEmail) || Promise.resolve();
+  const next = previous.catch(() => {}).then(operation);
+  homeOperationChains.set(ownerEmail, next);
+  return next.finally(() => {
+    if (homeOperationChains.get(ownerEmail) === next) homeOperationChains.delete(ownerEmail);
+  });
+}
+function filterPlayersForLocation(snapshot, locationId) {
+  const out = {};
+  for (const [id, player] of Object.entries(snapshot || {}))
+    if (locationOf(player) === locationId) out[id] = player;
+  return out;
+}
+async function emitHomeSnapshotToOccupants(ownerEmail) {
+  const locationId = `home:${ownerEmail}`;
+  const ownerSnapshot = await homeSnapshot(pool, ownerEmail, ownerEmail);
+  homeLayoutCollisionCache.set(ownerEmail, layoutBlockers(ownerSnapshot.layout));
+  for (const [id, viewer] of Object.entries(players)) {
+    if (locationOf(viewer) !== locationId) continue;
+    io.to(id).emit("homeSnapshot", await homeSnapshot(pool, ownerEmail, viewer.email));
+  }
 }
 
 // Valid win-counter keys: the duel game ids + 'dark' for Office After
@@ -3402,7 +3491,11 @@ function dropLiveByEmail(email, exceptId) {
     // roundLeaveGoneByEmail themselves (password reset, pending-queue exits).
     if (!roundDeferLeave(id)) roundHandleLeave(id);
     rlglHandleLeave(id);
-    if (players[id]) { delete players[id]; io.emit("playerLeft", id); }
+    if (players[id]) {
+      const locationId = locationOf(players[id]);
+      delete players[id];
+      emitToLocation(locationId, "playerLeft", id);
+    }
     if (pending[id]) delete pending[id];
     const stale = io.sockets.sockets.get(id);
     if (stale) stale.disconnect(true);
@@ -3417,7 +3510,7 @@ function cancelGrace(email) {
   const g = graceByEmail[email];
   if (!g) return null;
   clearTimeout(g.timer);
-  io.emit("playerLeft", g.oldId);
+  emitToLocation(g.locationId || "office", "playerLeft", g.oldId);
   delete graceByEmail[email];
   return g;
 }
@@ -3449,6 +3542,7 @@ async function restorePlayer(socket, row) {
   }
 
   players[socket.id] = state;
+  socket.join(locationRoom(state.locationId));
 
   socket.emit("approved", {
     name:      state.name,
@@ -3478,7 +3572,8 @@ async function restorePlayer(socket, row) {
     dir:       state.dir,
     anim:      state.anim === "sit" ? "sit" : "idle",
   });
-  socket.emit("currentPlayers", phMaskedPlayers(socket.id));
+  // Prop Hunt masks the hider before the new location filter is applied.
+  socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), state.locationId));
   // Prop Hunt for late joiners: vanish the hider's (masked) entry, share the
   // prop if the hunt is on, and re-offer the invite so a refreshed seeker
   // (new socket id — the old seeker spot is gone) can jump back in.
@@ -3567,9 +3662,7 @@ async function restorePlayer(socket, row) {
   // This direct push covers reconnects even before the client sends uiSync.
   grandEventSyncToSocket(socket.id);
 
-  for (const pid in players) {
-    if (pid !== socket.id) io.to(pid).emit("playerJoined", { id: socket.id, ...state });
-  }
+  emitToLocation(state.locationId, "playerJoined", { id: socket.id, ...state }, socket.id);
 
   // After Dark grace rebind: if this email holds a spot in the ACTIVE round
   // (marked `gone` by roundDeferLeave, or still keyed under an older socket id
@@ -4463,7 +4556,7 @@ function petBattleEmitXpAndEvolve(p, sid, pet, prevXp, xp, delta) {
   });
   const stage = petStageOfPet(pet, xp), prevStage = petStageOfPet(pet, prevXp);
   if (stage > prevStage && p) {
-    io.emit("playerPetUpdate", { id: sid, pet: p.pet, petAcc: p.petAcc, petStage: petStageFor(p) });
+    emitToLocation(locationOf(p), "playerPetUpdate", { id: sid, pet: p.pet, petAcc: p.petAcc, petStage: petStageFor(p) });
     io.emit("petEvolved", { id: sid, name: p.name, pet, stage,
                             petName: ((p.petNames || {})[pet]) || "" });
     console.log(`${p.name}'s ${pet} evolved to stage ${stage} (battle XP, now ${xp})`);
@@ -6305,7 +6398,7 @@ function phBeginHunt() {
   propHunt.state = "hunting";
   propHunt.endsAt = Date.now() + propHunt.huntMs;
   propHunt.huntTimer = setTimeout(() => phFinish(false, null, "time"), propHunt.huntMs);
-  io.emit("phHunt", {
+  emitToLocation("office", "phHunt", {
     prop: { x: Math.round(hp.x), y: Math.round(hp.y), disguise: propHunt.disguise },
     endsAt: propHunt.endsAt,
   });
@@ -6328,7 +6421,7 @@ function phFinish(found, winnerName, reason) {
   clearTimeout(propHunt.huntTimer);
   const hid = propHunt.hiderId;
   const hp  = players[hid];
-  io.emit("phEnd", {
+  emitToLocation("office", "phEnd", {
     found: !!found,
     winnerName: winnerName || null,
     hiderName: propHunt.hiderName,
@@ -6427,7 +6520,7 @@ function rlglCancel(reason) {
   const g = rlgl;
   rlgl = null;
   clearTimeout(g.joinTimer); clearTimeout(g.lightTimer); clearTimeout(g.attemptTimer); clearTimeout(g.replayTimer); clearTimeout(g.fakeTimer);
-  io.emit("rlglCancelled", { reason });
+  emitToLocation("office", "rlglCancelled", { reason });
   console.log(`RLGL: cancelled (${reason})`);
 }
 
@@ -6444,7 +6537,7 @@ function rlglPlaceAtStart(id, idx) {
   p.y = RLGL_START_Y;
   p.anim = "idle"; p.dir = "down";
   io.to(id).emit("rlglTeleport", { x: p.x, y: p.y });
-  io.emit("playerMoved", { id, ...p });
+  emitToLocation("office", "playerMoved", { id, ...p });
 }
 
 // Sudden-death theater: mid-green the doll TWITCHES like she's turning
@@ -6456,7 +6549,7 @@ function rlglScheduleFake() {
   clearTimeout(rlgl.fakeTimer);
   rlgl.fakeTimer = setTimeout(() => {
     if (!rlgl || rlgl.state !== "running" || rlgl.light !== "green") return;
-    io.emit("rlglFake", {});
+    emitToLocation("office", "rlglFake", {});
   }, 500 + Math.floor(Math.random() * 1_200));
 }
 
@@ -6474,7 +6567,7 @@ function rlglScheduleLight() {
     if (!rlgl || rlgl.state !== "running") return;
     rlgl.light = rlgl.light === "green" ? "red" : "green";
     if (rlgl.light === "red") rlgl.redAt = Date.now();
-    io.emit("rlglLight", { light: rlgl.light, graceMs: ph.grace });
+    emitToLocation("office", "rlglLight", { light: rlgl.light, graceMs: ph.grace });
     if (rlgl.light === "green") rlglScheduleFake();
     else clearTimeout(rlgl.fakeTimer);
     rlglScheduleLight();
@@ -6523,7 +6616,7 @@ function rlglStartAttempt() {
   }
   clearTimeout(rlgl.attemptTimer); clearTimeout(rlgl.lightTimer); clearTimeout(rlgl.fakeTimer);
   rlgl.attemptTimer = setTimeout(rlglTimeUp, 8_000 + RLGL_ATTEMPT_MS);
-  io.emit("rlglBegin", {
+  emitToLocation("office", "rlglBegin", {
     attempt: rlgl.attempt, prize: rlgl.prize, endsAt: rlgl.endsAt,
     phase: { n: Math.min(rlgl.attempt, RLGL_PHASES.length), name: ph.name },
     arena: RLGL_ARENA, bounds, startY: RLGL_START_Y, finishY: RLGL_FINISH_Y, doll: RLGL_DOLL,
@@ -6531,7 +6624,7 @@ function rlglStartAttempt() {
     coins: rlgl.coins.map((c, i) => ({ idx: i, x: c.x, y: c.y })), coinValue: RLGL_COIN_VALUE,
     pushRangePx: RLGL_PUSH_RANGE_PX, pushCooldownMs: RLGL_PUSH_COOLDOWN_MS, pushArmMs: RLGL_PUSH_ARM_MS,
   });
-  if (rlgl.slippery) io.emit("rlglSlippery", { on: true });
+  if (rlgl.slippery) emitToLocation("office", "rlglSlippery", { on: true });
   rlglScheduleFake();
   rlglScheduleLight();
   console.log(`RLGL: attempt ${rlgl.attempt} (${ph.name}) started with ${rlgl.members.size} runners`);
@@ -6542,7 +6635,7 @@ function rlglMaybeSlippery() {
   const left = rlglRunnersLeft();
   if (left > 0 && left <= RLGL_SLIPPERY_AT && rlgl.members.size > RLGL_SLIPPERY_AT) {
     rlgl.slippery = true;
-    io.emit("rlglSlippery", { on: true });
+    emitToLocation("office", "rlglSlippery", { on: true });
     console.log("RLGL: floor is now SLIPPERY");
   }
 }
@@ -6552,7 +6645,7 @@ function rlglEliminate(id, cause, byName) {
   if (!m || !m.alive || m.finished) return;
   m.alive = false;
   const p = players[id];
-  io.emit("rlglOut", {
+  emitToLocation("office", "rlglOut", {
     id, name: m.name, cause, byName: byName || null,
     x: p ? Math.round(p.x) : 0, y: p ? Math.round(p.y) : 0,
   });
@@ -6587,7 +6680,7 @@ function rlglCheckAttemptEnd() {
     for (const [id, m] of [...rlgl.members]) if (!(m.alive && m.finished)) rlgl.members.delete(id);
     rlgl.attempt++;
     rlgl.state = "joining";   // limbo: red-light checks stop during the reset
-    io.emit("rlglRound", {
+    emitToLocation("office", "rlglRound", {
       attempt: rlgl.attempt,
       remaining: finishers.map(([, m]) => ({ name: m.name, safe: m.safe || 0 })),
       safeNeeded: 2,
@@ -6603,7 +6696,7 @@ function rlglCheckAttemptEnd() {
   if (rlgl.attempt >= RLGL_MAX_ATTEMPTS) { rlglCancel("Twenty rounds and NOBODY survived. The doll wins. No payout."); return; }
   rlgl.attempt++;
   rlgl.state = "joining";   // brief limbo so red-light checks stop during the reset
-  io.emit("rlglReplay", { attempt: rlgl.attempt });
+  emitToLocation("office", "rlglReplay", { attempt: rlgl.attempt });
   rlgl.replayTimer = setTimeout(rlglStartAttempt, 4_000);
   console.log(`RLGL: nobody survived — replaying (attempt ${rlgl.attempt})`);
 }
@@ -6635,7 +6728,7 @@ async function rlglFinish(finisherPairs) {
       }
     } catch (err) { console.error("RLGL payout failed:", err); }
   }
-  io.emit("rlglEnd", { winners: winners.map((w) => w.name), each, prize: g.prize, attempt: g.attempt });
+  emitToLocation("office", "rlglEnd", { winners: winners.map((w) => w.name), each, prize: g.prize, attempt: g.attempt });
   if (rlgl === g) rlgl = null;
   console.log(`RLGL: over after attempt ${g.attempt} — ${winners.length} survivor(s) × ${each} coins`);
 }
@@ -6667,11 +6760,11 @@ function rlglHandleLeave(id) {
       }
       return;
     }
-    io.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
+    emitToLocation("office", "rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
     if (rlgl.members.size === 0) rlglCancel("Everyone left before the game began.");
     return;
   }
-  io.emit("rlglOut", { id, name: m.name, cause: "left", byName: null, x: 0, y: 0 });
+  emitToLocation("office", "rlglOut", { id, name: m.name, cause: "left", byName: null, x: 0, y: 0 });
   rlglMaybeSlippery();
   rlglCheckAttemptEnd();
 }
@@ -6988,7 +7081,7 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
     if (p) {
       p.x = x; p.y = RLGL_START_Y;
       io.to(id).emit("rlglPushed", { id, x: p.x, y: p.y, byName: "The doll — wait for GO!" });
-      io.emit("playerMoved", { id, ...p });
+      emitToLocation("office", "playerMoved", { id, ...p });
     }
     return;
   }
@@ -7012,7 +7105,7 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
       const cdx = x - c.x, cdy = y - c.y;
       if (cdx * cdx + cdy * cdy > RLGL_COIN_GRAB_PX * RLGL_COIN_GRAB_PX) continue;
       c.taken = true;
-      io.emit("rlglCoin", { idx: i, byId: id, byName: m.name, value: RLGL_COIN_VALUE });
+      emitToLocation("office", "rlglCoin", { idx: i, byId: id, byName: m.name, value: RLGL_COIN_VALUE });
       const p = players[id];
       if (p) {
         if (p.email) {
@@ -7033,7 +7126,7 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
   }
   if (y >= RLGL_FINISH_Y) {
     m.finished = true;
-    io.emit("rlglFinished", { id, name: m.name });
+    emitToLocation("office", "rlglFinished", { id, name: m.name });
     console.log(`RLGL: ${m.name} crossed the finish line`);
     rlglMaybeSlippery();
     rlglCheckAttemptEnd();
@@ -7205,7 +7298,7 @@ function roundHandleLeave(id) {
     if (round.members.size === 0) cancelRound("Everyone left before the round began.");
     // Broadcast to EVERYONE (count only, leaks nothing) so the invite card's
     // "N in so far" stays fresh for people who haven't joined yet.
-    else io.emit("roundLobby", { count: round.members.size });
+    else emitToLocation("office", "roundLobby", { count: round.members.size });
     return;
   }
   if (round.state !== "active") return;   // 'ending' → settlement stands
@@ -7290,6 +7383,7 @@ const VOICE_ICE_MAX  = 4_000;   // bytes — a single ICE candidate runs well un
 function voicePairOk(aId, bId) {
   const a = players[aId], b = players[bId];
   if (!a || !b) return false;
+  if (locationOf(a) !== locationOf(b)) return false;
   // Voice is BIDIRECTIONAL, so unlike chat's one-way rule the pair must sit on
   // the SAME side of the light/dark split — a lit observer paired with an
   // alive member would be a live position-callout channel into the dark.
@@ -7673,7 +7767,7 @@ io.on("connection", (socket) => {
   socket.on("phStart", (payload) => {
     if (!admins.has(socket.id)) return;
     const p = players[socket.id];
-    if (!p) return;
+    if (!p || !isOfficePlayer(socket.id)) return;
     if (!takeToken(roundBucket)) return;
     if (grandEventIsBlockingOfficeEvents()) { socket.emit("phResult", { ok: false, message: "Pet Wars Grand Event is open — finish or cancel it first." }); return; }
     if (propHunt) { socket.emit("phResult", { ok: false, message: "A Hide & Seek round is already running." }); return; }
@@ -7692,8 +7786,8 @@ io.on("connection", (socket) => {
       hideTimer: setTimeout(phBeginHunt, hideSecs * 1000),
     };
     // Vanish BEFORE the invite so no client ever renders the hider mid-round.
-    socket.broadcast.emit("phVanish", { id: socket.id });
-    io.emit("phInvite", { hiderName: p.name, hideEndsAt: propHunt.hideEndsAt, hiderId: socket.id });
+    emitToLocation("office", "phVanish", { id: socket.id }, socket.id);
+    emitToLocation("office", "phInvite", { hiderName: p.name, hideEndsAt: propHunt.hideEndsAt, hiderId: socket.id });
     socket.emit("phResult", { ok: true, message: `Hide & Seek is on — go hide! ${hideSecs}s until the hunt.` });
     logAdmin(socket, "Hide & Seek started", `${p.name} is hiding (${hideSecs}s hide, ${huntSecs}s hunt)`);
   });
@@ -7703,7 +7797,7 @@ io.on("connection", (socket) => {
     // socket id) gets back into the round, and latecomers get to play.
     if (!propHunt) return;
     const p = players[socket.id];
-    if (!p || socket.id === propHunt.hiderId || propHunt.seekers.has(socket.id)) return;
+    if (!p || !isOfficePlayer(socket.id) || socket.id === propHunt.hiderId || propHunt.seekers.has(socket.id)) return;
     if (!takeToken(roundBucket)) return;
     propHunt.seekers.add(socket.id);
     // Teleport to the gathering base with a little scatter so joiners don't
@@ -7713,7 +7807,7 @@ io.on("connection", (socket) => {
     p.y = propHunt.gatherY + Math.round(Math.random() * 120 - 60);
     p.anim = "idle";
     socket.emit("phJoined", { x: p.x, y: p.y, hideEndsAt: propHunt.hideEndsAt, phase: propHunt.state, endsAt: propHunt.endsAt });
-    socket.broadcast.emit("playerMoved", { id: socket.id, ...p });
+    emitToLocation(locationOf(p), "playerMoved", { id: socket.id, ...p }, socket.id);
   });
 
   // ── HQ-Buddy quiz ─────────────────────────────────────────────────────────
@@ -7790,13 +7884,13 @@ io.on("connection", (socket) => {
   // Hider changes their mind mid-hide (the prop everyone hunts is whatever
   // this holds when the hide timer fires). Locked once the hunt starts.
   socket.on("phSetDisguise", (payload) => {
-    if (!propHunt || propHunt.state !== "hiding" || socket.id !== propHunt.hiderId) return;
+    if (!propHunt || !isOfficePlayer(socket.id) || propHunt.state !== "hiding" || socket.id !== propHunt.hiderId) return;
     const d = payload && payload.disguise;
     if (typeof d === "string" && PH_DISGUISES.has(d)) propHunt.disguise = d;
   });
 
   socket.on("phGuess", () => {
-    if (!propHunt || propHunt.state !== "hunting") return;
+    if (!propHunt || !isOfficePlayer(socket.id) || propHunt.state !== "hunting") return;
     if (!propHunt.seekers.has(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     const p = players[socket.id], hp = players[propHunt.hiderId];
@@ -7808,7 +7902,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("phCancel", () => {
-    if (!admins.has(socket.id) || !propHunt) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id) || !propHunt) return;
     phFinish(false, null, "cancelled");
   });
 
@@ -8003,7 +8097,7 @@ io.on("connection", (socket) => {
 
   // ── Pet Wars Grand Event ──────────────────────────────────────────────
   socket.on("grandEventCreate", (payload) => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     grandEventQueue(async () => {
       if (grandEventIsBlockingOfficeEvents()) throw new Error("A Grand Event is already open.");
       if (bingo || race || deal || rlgl || round || propHunt)
@@ -8051,7 +8145,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventStart", () => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     grandEventQueue(async () => {
       await grandEventStartBracket();
       logAdmin(socket, "Grand Event bracket started", `${grandEvent.entrants.size} players`);
@@ -8060,7 +8154,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventCancel", () => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     grandEventQueue(async () => {
       if (!grandEvent || grandEvent.state !== "registration")
         throw new Error("Only an open registration lobby can be cancelled.");
@@ -8071,6 +8165,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventJoin", () => {
+    if (!isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     grandEventQueue(() => grandEventJoin(socket.id))
       .then(() => socket.emit("grandEventActionResult", { ok: true, message: "You're in the Grand Event!" }))
@@ -8078,6 +8173,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventWithdraw", () => {
+    if (!isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     grandEventQueue(() => grandEventWithdraw(socket.id))
       .then(() => socket.emit("grandEventActionResult", { ok: true, message: "You withdrew. Your entry fee was refunded." }))
@@ -8085,12 +8181,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventReady", () => {
+    if (!isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     grandEventQueue(() => grandEventReady(socket.id))
       .catch((err) => socket.emit("grandEventActionResult", { ok: false, message: err.message || "Couldn't ready up." }));
   });
 
   socket.on("grandEventViewMode", (payload) => {
+    if (!isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     const mode = String(payload?.mode || "");
     grandEventQueue(() => grandEventSetViewMode(socket.id, mode))
@@ -8107,6 +8205,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("grandEventWatch", (payload) => {
+    if (!isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     const watch = payload?.watch === true;
     grandEventQueue(() => grandEventSetWatching(socket.id, watch))
@@ -8126,7 +8225,7 @@ io.on("connection", (socket) => {
 
   // ── Admin: Red Light, Green Light ─────────────────────────────────────
   socket.on("adminRlglStart", (payload) => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     if (rlgl)     { socket.emit("adminRlglResult", { ok: false, message: "A doll game is already running." }); return; }
     if (grandEventIsBlockingOfficeEvents()) { socket.emit("adminRlglResult", { ok: false, message: "The Pet Wars Grand Event is running." }); return; }
     if (bingo)    { socket.emit("adminRlglResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
@@ -8152,13 +8251,13 @@ io.on("connection", (socket) => {
       }, RLGL_JOIN_MS),
       lightTimer: null, attemptTimer: null, replayTimer: null, endsAt: 0,
     };
-    io.emit("rlglLobby", { prize, count: 0, msLeft: RLGL_JOIN_MS });
+    emitToLocation("office", "rlglLobby", { prize, count: 0, msLeft: RLGL_JOIN_MS });
     socket.emit("adminRlglResult", { ok: true, message: `Doll game announced — ${prize.toLocaleString()} coin pot, ${RLGL_JOIN_MS / 1000}s to join. Survivors split it.` });
     logAdmin(socket, "Red Light Green Light started", `Pot ${prize.toLocaleString()} coins`);
     console.log(`ADMIN RLGL start: pot ${prize}`);
   });
   socket.on("adminRlglCancel", () => {
-    if (!admins.has(socket.id) || !rlgl) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id) || !rlgl) return;
     if (rlgl.state === "ending") return;
     rlglCancel("The office called the game off.");
     logAdmin(socket, "Red Light Green Light cancelled", "");
@@ -8168,7 +8267,7 @@ io.on("connection", (socket) => {
 
   // ─── PET RACE ──────────────────────────────────────────────────────────────
   socket.on('ownerStartRace', ({ prize }) => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     if (race) { socket.emit('ownerMsg', 'A pet race is already running.'); return; }
     if (grandEventIsBlockingOfficeEvents()) { socket.emit('ownerMsg', 'The Pet Wars Grand Event is running.'); return; }
     const p = players[socket.id];
@@ -8207,7 +8306,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on('ownerRaceCancel', () => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     raceCancel('Cancelled by admin.');
     logAdmin(socket, 'Pet Race cancelled', '');
   });
@@ -8217,7 +8316,7 @@ io.on("connection", (socket) => {
     // Duel races are private — only the two challenged players may join.
     if (race.duelIds && !race.duelIds.includes(socket.id)) return;
     const p = players[socket.id];
-    if (!p?.pet) { socket.emit('raceJoinErr', 'You need a pet equipped to race! \uD83D\uDC3E'); return; }
+    if (!p?.pet || !isOfficePlayer(socket.id)) { socket.emit('raceJoinErr', 'Come to JPO HQ with a pet equipped to race! \uD83D\uDC3E'); return; }
     if (race.entrants.has(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     const stage = petStageFor(p);
@@ -8232,7 +8331,7 @@ io.on("connection", (socket) => {
     // Duel races are private — only the two players can bet.
     if (race.duelIds && !race.duelIds.includes(socket.id)) return;
     const p = players[socket.id];
-    if (!p?.email) return;
+    if (!p?.email || !isOfficePlayer(socket.id)) return;
     if (!takeToken(interactBucket)) return;
     if (!race.entrants.has(onId)) { socket.emit('raceBetErr', 'That pet is not in the race.'); return; }
     amount = Math.max(50, Math.min(p.coins, Math.round(amount || 0)));
@@ -8252,14 +8351,14 @@ io.on("connection", (socket) => {
 
   socket.on("rlglJoin", () => {
     const p = players[socket.id];
-    if (!p || !rlgl || rlgl.state !== "joining" || rlgl.replayTimer) return;
+    if (!p || !isOfficePlayer(socket.id) || !rlgl || rlgl.state !== "joining" || rlgl.replayTimer) return;
     if (!takeToken(interactBucket)) return;
     if (rlgl.members.has(socket.id)) return;
     // One live socket per email in the game (mirror of bingo's email keying).
     if (p.email) for (const m of rlgl.members.values()) if (m.email === p.email) return;
     rlgl.members.set(socket.id, { name: p.name, email: p.email || null, alive: true, finished: false, lastPushAt: 0 });
     rlglPlaceAtStart(socket.id, rlgl.members.size - 1);
-    io.emit("rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
+    emitToLocation("office", "rlglLobby", { prize: rlgl.prize, count: rlgl.members.size, msLeft: Math.max(0, rlgl.joinEndsAt - Date.now()) });
     socket.emit("rlglYouIn", {});
     console.log(`RLGL join: ${p.name} (${rlgl.members.size} in)`);
   });
@@ -8272,7 +8371,7 @@ io.on("connection", (socket) => {
     if (!rlgl || rlgl.state !== "running") return;
     const me = rlgl.members.get(socket.id);
     const p = players[socket.id];
-    if (!me || !p || !me.alive || me.finished) return;
+    if (!me || !p || !isOfficePlayer(socket.id) || !me.alive || me.finished) return;
     const now = Date.now();
     if (rlgl.beganAt && now - rlgl.beganAt < RLGL_PUSH_ARM_MS) return;   // shoving not armed yet this round
     if (now - me.lastPushAt < RLGL_PUSH_COOLDOWN_MS) return;
@@ -8280,7 +8379,7 @@ io.on("connection", (socket) => {
     if (typeof targetId !== "string" || targetId === socket.id) return;
     const tm = rlgl.members.get(targetId);
     const tp = players[targetId];
-    if (!tm || !tp || !tm.alive || tm.finished) return;
+    if (!tm || !tp || !sameLocation(socket.id, targetId) || !tm.alive || tm.finished) return;
     const dx = tp.x - p.x, dy = tp.y - p.y;
     if (dx * dx + dy * dy > RLGL_PUSH_RANGE_PX * RLGL_PUSH_RANGE_PX) return;
     me.lastPushAt = now;
@@ -8292,8 +8391,8 @@ io.on("connection", (socket) => {
     tp.x = Math.min(b.x1 - 15, Math.max(b.x0 + 15, tp.x + (dx / d) * RLGL_PUSH_DIST_PX));
     tp.y = Math.min(RLGL_ARENA.y1 - 20, Math.max(RLGL_ARENA.y0 + 20, tp.y + (dy / d) * RLGL_PUSH_DIST_PX));
     tp.x = Math.round(tp.x); tp.y = Math.round(tp.y);
-    io.emit("playerMoved", { id: targetId, ...tp });
-    io.emit("rlglPushed", { id: targetId, name: tm.name, byId: socket.id, byName: me.name, x: tp.x, y: tp.y });
+    emitToLocation("office", "playerMoved", { id: targetId, ...tp });
+    emitToLocation("office", "rlglPushed", { id: targetId, name: tm.name, byId: socket.id, byName: me.name, x: tp.x, y: tp.y });
     console.log(`RLGL: ${me.name} pushed ${tm.name}`);
     // Pushed while the doll is watching → the VICTIM moved. Squid Game rules.
     if (rlgl.light === "red" && now > rlgl.redAt + rlglPhase().grace) {
@@ -8303,7 +8402,7 @@ io.on("connection", (socket) => {
     // Pushed across the finish line during green → congratulations, I guess.
     if (tp.y >= RLGL_FINISH_Y) {
       tm.finished = true;
-      io.emit("rlglFinished", { id: targetId, name: tm.name });
+      emitToLocation("office", "rlglFinished", { id: targetId, name: tm.name });
       rlglMaybeSlippery();
       rlglCheckAttemptEnd();
     }
@@ -8311,7 +8410,7 @@ io.on("connection", (socket) => {
 
   // ── Admin: Office Bingo ───────────────────────────────────────────────
   socket.on("adminBingoStart", (payload) => {
-    if (!admins.has(socket.id)) return;
+    if (!admins.has(socket.id) || !isOfficePlayer(socket.id)) return;
     const hostEmail = players[socket.id]?.email;
     if (!hostEmail) { socket.emit("adminBingoResult", { ok: false, message: "Finish entering the office before starting Bingo." }); return; }
     if (bingo) { socket.emit("adminBingoResult", { ok: false, message: "A bingo game is already running." }); return; }
@@ -8381,7 +8480,7 @@ io.on("connection", (socket) => {
     console.log(`ADMIN bingo start: prize ${prize}, ${mode}, ${rule}, ${callMs}ms`);
   });
   socket.on("adminBingoCancel", () => {
-    if (!bingo) return;
+    if (!bingo || !isOfficePlayer(socket.id)) return;
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can cancel it." }); return; }
     const gameId = bingo.id;
     bingoStop();
@@ -8392,7 +8491,7 @@ io.on("connection", (socket) => {
   });
   // Host mode: the admin deals the next ball by hand.
   socket.on("adminBingoCall", () => {
-    if (!bingo || bingo.state !== "active") { socket.emit("adminBingoResult", { ok: false, message: "No active game to call for." }); return; }
+    if (!bingo || !isOfficePlayer(socket.id) || bingo.state !== "active") { socket.emit("adminBingoResult", { ok: false, message: "No active game to call for." }); return; }
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can call numbers." }); return; }
     if (bingo.mode !== "manual") { socket.emit("adminBingoResult", { ok: false, message: "Auto-calling is on — switch to manual first." }); return; }
     const ownerLine = bingo.announcerOwnerLine;
@@ -8412,7 +8511,7 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("adminBingoAnnouncerLine", (payload) => {
-    if (!bingo || bingo.state !== "active" || bingo.mode !== "manual") {
+    if (!bingo || !isOfficePlayer(socket.id) || bingo.state !== "active" || bingo.mode !== "manual") {
       socket.emit("bingoOwnerLineResult", { ok: false, message: "Owner lines are available during manual calling." });
       return;
     }
@@ -8475,7 +8574,7 @@ io.on("connection", (socket) => {
   });
   // Flip auto ↔ manual mid-game (e.g. host goes AFK → let it run itself).
   socket.on("adminBingoMode", (payload) => {
-    if (!bingo) return;
+    if (!bingo || !isOfficePlayer(socket.id)) return;
     if (!isBingoHost(socket)) { socket.emit("adminBingoResult", { ok: false, message: "Only the person who started this Bingo game can change calling mode." }); return; }
     const mode = payload?.mode === "manual" ? "manual" : "auto";
     bingoSetMode(mode);
@@ -8486,7 +8585,7 @@ io.on("connection", (socket) => {
 
   socket.on("bingoJoin", () => {
     const p = players[socket.id];
-    if (!p?.email || !bingo || bingo.state !== "joining") return;
+    if (!p?.email || !isOfficePlayer(socket.id) || !bingo || bingo.state !== "joining") return;
     if (!takeToken(interactBucket)) return;
     if (bingo.players.has(p.email)) return;
     const card = makeBingoCard();
@@ -8502,7 +8601,7 @@ io.on("connection", (socket) => {
   socket.on("bingoDaub", (payload) => {
     const p = players[socket.id];
     const em = p?.email;
-    if (!em || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
+    if (!em || !isOfficePlayer(socket.id) || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
     const n = Math.round(Number(payload?.n));
     if (!Number.isSafeInteger(n)) return;
     const bp = bingo.players.get(em);
@@ -8514,7 +8613,7 @@ io.on("connection", (socket) => {
   socket.on("bingoClaim", async () => {
     const p = players[socket.id];
     const em = p?.email;
-    if (!em || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
+    if (!em || !isOfficePlayer(socket.id) || !bingo || bingo.state !== "active" || !bingo.players.has(em)) return;
     if (!takeToken(interactBucket)) return;
     const bp = bingo.players.get(em);
     const line = bingo.rule === "blackout" ? bingoHasBlackout(bp.card, bp.daubs) : bingoHasLine(bp.card, bp.daubs);
@@ -8583,7 +8682,7 @@ io.on("connection", (socket) => {
 
   // ── Deal or No Deal (owner-hosted) ────────────────────────────────────
   socket.on("ownerDealStart", (payload) => {
-    if (!owners.has(socket.id)) return;   // OWNER key only — plain admins can't host
+    if (!owners.has(socket.id) || !isOfficePlayer(socket.id)) return;   // OWNER key only — plain admins can't host
     if (deal)     { socket.emit("ownerDealResult", { ok: false, message: "A show is already running." }); return; }
     if (grandEventIsBlockingOfficeEvents()) { socket.emit("ownerDealResult", { ok: false, message: "The Pet Wars Grand Event is running." }); return; }
     if (bingo)    { socket.emit("ownerDealResult", { ok: false, message: "Bingo is running — wait for it to finish." }); return; }
@@ -8617,7 +8716,7 @@ io.on("connection", (socket) => {
   // The Banker speaks — only during the offer break between rounds, like the
   // real show. Puts the offer to an office DEAL / NO DEAL vote.
   socket.on("ownerDealOffer", (payload) => {
-    if (!owners.has(socket.id)) return;
+    if (!owners.has(socket.id) || !isOfficePlayer(socket.id)) return;
     if (!deal || deal.state !== "banker") {
       socket.emit("ownerDealResult", { ok: false, message: deal ? "The phone only rings between rounds — wait for the Banker break." : "No show running." });
       return;
@@ -8640,7 +8739,7 @@ io.on("connection", (socket) => {
   });
   // "No offer this round" — the show rolls straight into the next block.
   socket.on("ownerDealSkip", () => {
-    if (!owners.has(socket.id)) return;
+    if (!owners.has(socket.id) || !isOfficePlayer(socket.id)) return;
     if (!deal || deal.state !== "banker") return;
     clearTimeout(deal.phaseTimer);
     io.emit("dealNoDeal", { gameId: deal.id, yes: 0, no: 0, skipped: true });
@@ -8649,7 +8748,7 @@ io.on("connection", (socket) => {
     dealVotePhase();
   });
   socket.on("ownerDealCancel", () => {
-    if (!owners.has(socket.id) || !deal) return;
+    if (!owners.has(socket.id) || !isOfficePlayer(socket.id) || !deal) return;
     const gameId = deal.id;
     dealStop();
     io.emit("dealOver", { gameId, message: "The Banker walked off the set — show cancelled, nobody gets paid. 📺" });
@@ -8659,7 +8758,7 @@ io.on("connection", (socket) => {
   });
   socket.on("dealJoin", () => {
     const p = players[socket.id];
-    if (!p?.email || !deal || deal.state !== "joining") return;
+    if (!p?.email || !isOfficePlayer(socket.id) || !deal || deal.state !== "joining") return;
     if (!takeToken(interactBucket)) return;
     if (deal.players.has(p.email)) return;
     deal.players.set(p.email, { name: p.name });
@@ -8671,7 +8770,7 @@ io.on("connection", (socket) => {
   socket.on("dealVoteCase", (payload) => {
     const p = players[socket.id];
     const em = p?.email;
-    if (!em || !deal || !deal.players.has(em)) return;
+    if (!em || !isOfficePlayer(socket.id) || !deal || !deal.players.has(em)) return;
     if (deal.state !== "voting" && deal.state !== "pickcase") return;
     if (!takeToken(interactBucket)) return;
     const i = Math.round(Number(payload?.i));
@@ -8686,7 +8785,7 @@ io.on("connection", (socket) => {
   socket.on("dealVoteDeal", (payload) => {
     const p = players[socket.id];
     const em = p?.email;
-    if (!em || !deal || deal.state !== "offer" || !deal.players.has(em)) return;
+    if (!em || !isOfficePlayer(socket.id) || !deal || deal.state !== "offer" || !deal.players.has(em)) return;
     if (!takeToken(interactBucket)) return;
     const yes = !!payload?.yes;
     if (deal.dealVotes.get(em) === yes) return;   // unchanged — drop silently
@@ -8789,12 +8888,12 @@ io.on("connection", (socket) => {
           if (isPet) {
             lp.pet = rows[0].equipped_pet || "";
             io.to(sid).emit("petSuccess", { item: pet, pet: lp.pet, petAcc: lp.petAcc || "" });
-            io.emit("playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "", petStage: petStageFor(lp) });
+            emitToLocation(locationOf(lp), "playerPetUpdate", { id: sid, pet: lp.pet, petAcc: lp.petAcc || "", petStage: petStageFor(lp) });
           } else {
             lp.equipped = rows[0].equipped_cosmetic || "";
             lp.wings = rows[0].equipped_wings || "";
             io.to(sid).emit("shopSuccess", { item: pet, equipped: lp.equipped, wings: lp.wings, slots: lp.slots || emptySlots() });
-            io.emit("playerCosmeticUpdate", { id: sid, cosmetics: lp.cosmetics, equipped: lp.equipped, wings: lp.wings, slots: lp.slots || emptySlots() });
+            emitToLocation(locationOf(lp), "playerCosmeticUpdate", { id: sid, cosmetics: lp.cosmetics, equipped: lp.equipped, wings: lp.wings, slots: lp.slots || emptySlots() });
           }
           io.to(sid).emit("rareGiftToast", { pet });
         }
@@ -8968,9 +9067,10 @@ io.on("connection", (socket) => {
     
     roundHandleLeave(targetId);
     rlglHandleLeave(targetId);
+    const locationId = locationOf(p);
     delete players[targetId];
     io.to(targetId).emit("kicked");
-    io.emit("playerLeft", targetId);
+    emitToLocation(locationId, "playerLeft", targetId);
     if (p.email) {
       try {
         // dismissed = true keeps the revoked person OUT of the DB-backed
@@ -9042,6 +9142,275 @@ io.on("connection", (socket) => {
   });
 
   // ── Game events ──────────────────────────────────────────────────────
+  // ── Shared City and Homes ─────────────────────────────────────────────
+  // Transitions are the only way locationId changes.  Client scene switches
+  // are presentation-only; this handler owns the room, spawn and access gate.
+  let locationTransitionSequence = 0;
+  const transitionTo = async (destination, reason = null) => {
+    const p = players[socket.id];
+    const target = parseLocation(destination);
+    const sequence = ++locationTransitionSequence;
+    if (!p?.email || !target) {
+      socket.emit("locationTransitionResult", { ok: false, code: "invalid", message: "That destination is not available." });
+      return false;
+    }
+    if (inAnyMatch(socket.id) || inRound(socket.id) || rlglActiveRunner(socket.id)) {
+      socket.emit("locationTransitionResult", { ok: false, code: "busy", message: "Finish your office activity before travelling." });
+      return false;
+    }
+    let home = null;
+    try {
+      if (target.kind === "home") {
+        const access = await withHomeOperation(target.ownerEmail, async () => {
+          const checked = await homeAccess(pool, target.ownerEmail, p.email);
+          return checked.ok
+            ? { ...checked, snapshot: await homeSnapshot(pool, target.ownerEmail, p.email) }
+            : checked;
+        });
+        // A later travel request or disconnect always wins over an older
+        // permission lookup; never let a stale await mutate room membership.
+        if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
+        if (!access.ok) {
+          socket.emit("locationTransitionResult", {
+            ok: false, code: access.code || "denied",
+            message: access.code === "not_found" ? "This home no longer exists." : "This home is not open to visitors.",
+          });
+          return false;
+        }
+        home = access.snapshot;
+        homeLayoutCollisionCache.set(target.ownerEmail, layoutBlockers(home.layout));
+      }
+    } catch (err) {
+      console.error("home access failed:", err);
+      socket.emit("locationTransitionResult", { ok: false, code: "unavailable", message: "Homes are being prepared. Please try again shortly." });
+      return false;
+    }
+    if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
+    const oldLocation = locationOf(p);
+    if (oldLocation !== target.id) {
+      emitToLocation(oldLocation, "playerLeft", socket.id);
+      socket.leave(locationRoom(oldLocation));
+      const spawn = locationSpawn(target);
+      p.locationId = target.id;
+      p.x = spawn.x; p.y = spawn.y; p.dir = spawn.dir || "down"; p.anim = "idle";
+      socket.join(locationRoom(target.id));
+      lastMoveAt = 0; wasSitting = false;
+    }
+    const info = locationInfo(target.id);
+    socket.emit("locationTransitionResult", {
+      ok: true, location: target.id, reason, spawn: { x: p.x, y: p.y, dir: p.dir },
+      map: info, self: { ...p }, players: locationPlayers(socket.id), home,
+      catalog: target.kind === "home" || target.kind === "furniture-shop" ? FURNITURE_CATALOG : undefined,
+    });
+    // Existing clients understand this event and remove stale remote sprites.
+    socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), target.id));
+    if (target.kind === "home") socket.emit("homeSnapshot", home);
+    emitToLocation(target.id, "playerJoined", { id: socket.id, ...p }, socket.id);
+    return true;
+  };
+
+  socket.on("locationTransition", (payload) => {
+    const destination = typeof payload?.destination === "string" ? payload.destination : "";
+    void transitionTo(destination);
+  });
+
+  socket.on("homeSnapshotRequest", async () => {
+    const p = players[socket.id], parsed = parseLocation(locationOf(p));
+    if (!p?.email || parsed?.kind !== "home") return;
+    try {
+      const snapshot = await withHomeOperation(parsed.ownerEmail, async () => {
+        const access = await homeAccess(pool, parsed.ownerEmail, p.email);
+        return access.ok ? homeSnapshot(pool, parsed.ownerEmail, p.email) : null;
+      });
+      if (players[socket.id] === p && locationOf(p) === parsed.id && snapshot) socket.emit("homeSnapshot", snapshot);
+    }
+    catch (err) { console.error("home snapshot failed:", err); socket.emit("homeActionResult", { ok: false, message: "Could not load this home." }); }
+  });
+
+  socket.on("homeDirectoryRequest", async () => {
+    const p = players[socket.id];
+    if (!p?.email) return;
+    try {
+      socket.emit("homeDirectory", { homes: await homeDirectory(pool, p.email) });
+    } catch (err) {
+      console.error("home directory failed:", err);
+      socket.emit("homeDirectory", { homes: [], error: "Could not load the home directory." });
+    }
+  });
+
+  socket.on("homePurchase", async (payload) => {
+    const p = players[socket.id];
+    const furnitureId = typeof payload?.furnitureId === "string" ? payload.furnitureId : "";
+    const item = FURNITURE_CATALOG[furnitureId];
+    if (!p?.email || locationOf(p) !== "furniture-shop" || !item || !takeToken(buyBucket)) return;
+    if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
+      socket.emit("homePurchaseResult", { ok: false, message: "Finish your current activity before shopping." }); return;
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await ensureHome(client, p.email);
+      // The conditional debit is the authority: simultaneous clicks/sockets
+      // cannot create furniture unless each one actually paid.
+      const debit = await client.query(
+        `UPDATE jpo_players SET coins=coins-$2, updated_at=now()
+          WHERE email=$1 AND coins >= $2 RETURNING coins`,
+        [p.email, item.price],
+      );
+      if (!debit.rows[0]) { await client.query("ROLLBACK"); socket.emit("homePurchaseResult", { ok: false, message: "Not enough coins." }); return; }
+      const bought = await client.query(
+        `INSERT INTO jpo_home_furniture (owner_email, furniture_id) VALUES ($1,$2) RETURNING id`,
+        [p.email, furnitureId],
+      );
+      await client.query("COMMIT");
+      p.coins = debit.rows[0].coins;
+      const home = await homeSnapshot(pool, p.email, p.email);
+      socket.emit("coinUpdate", { coins: p.coins });
+      socket.emit("homePurchaseResult", { ok: true, item: { id: bought.rows[0].id, furnitureId }, coins: p.coins, home });
+      socket.emit("homeSnapshot", home);
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("home purchase failed:", err);
+      socket.emit("homePurchaseResult", { ok: false, message: "Purchase could not be completed." });
+    } finally { client.release(); }
+  });
+
+  socket.on("homeLayoutSet", async (payload) => {
+    const p = players[socket.id], parsed = parseLocation(locationOf(p));
+    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
+    const gridX = Number(payload?.gridX), gridY = Number(payload?.gridY), rotation = Number(payload?.rotation);
+    if (!p?.email || parsed?.kind !== "home" || parsed.ownerEmail !== p.email || !instanceId ||
+        !Number.isInteger(gridX) || !Number.isInteger(gridY) || !Number.isInteger(rotation)) return;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await ensureHome(client, p.email);
+      // Serialise per-home edits with the home row lock, then calculate overlap
+      // from authoritative rows inside the same transaction.
+      await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [p.email]);
+      const owned = await client.query(`SELECT furniture_id FROM jpo_home_furniture WHERE id=$1 AND owner_email=$2`, [instanceId, p.email]);
+      const item = FURNITURE_CATALOG[owned.rows[0]?.furniture_id];
+      if (!item) throw new Error("Furniture is not in your inventory.");
+      const existing = await client.query(
+        `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, f.furniture_id
+           FROM jpo_home_layout_items l JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
+          WHERE l.home_owner_email=$1 AND l.furniture_instance_id <> $2`,
+        [p.email, instanceId],
+      );
+      const others = existing.rows.map((r) => ({ gridX: r.grid_x, gridY: r.grid_y, rotation: r.rotation, item: FURNITURE_CATALOG[r.furniture_id] })).filter((r) => r.item);
+      if (!validPlacement(item, gridX, gridY, rotation, others)) throw new Error("That furniture does not fit there.");
+      await client.query(
+        `INSERT INTO jpo_home_layout_items (furniture_instance_id, home_owner_email, grid_x, grid_y, rotation)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (furniture_instance_id) DO UPDATE SET grid_x=$3, grid_y=$4, rotation=$5, updated_at=now()`,
+        [instanceId, p.email, gridX, gridY, rotation],
+      );
+      await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [p.email]);
+      await client.query("COMMIT");
+      await emitHomeSnapshotToOccupants(p.email);
+      socket.emit("homeActionResult", { ok: true, message: "Placed." });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      socket.emit("homeActionResult", { ok: false, message: err.message || "Could not place that item." });
+    } finally { client.release(); }
+  });
+
+  socket.on("homeLayoutReturn", async (payload) => {
+    const p = players[socket.id], parsed = parseLocation(locationOf(p));
+    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
+    if (!p?.email || parsed?.kind !== "home" || parsed.ownerEmail !== p.email || !instanceId) return;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await ensureHome(client, p.email);
+      // Match placement's per-home row lock.  Without it a return racing a
+      // placement can publish revisions/snapshots in the wrong order.
+      await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [p.email]);
+      const changed = await client.query(
+        `DELETE FROM jpo_home_layout_items l USING jpo_home_furniture f
+          WHERE l.furniture_instance_id=$1 AND f.id=l.furniture_instance_id AND f.owner_email=$2
+          RETURNING l.furniture_instance_id`,
+        [instanceId, p.email],
+      );
+      if (!changed.rows[0]) throw new Error("That item is not placed in your home.");
+      await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [p.email]);
+      await client.query("COMMIT");
+      await emitHomeSnapshotToOccupants(p.email);
+      socket.emit("homeActionResult", { ok: true, message: "Returned to inventory." });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      socket.emit("homeActionResult", { ok: false, message: err.message || "Could not return that item." });
+    } finally { client.release(); }
+  });
+
+  socket.on("homeAccessSet", async (payload) => {
+    const p = players[socket.id], mode = payload?.mode;
+    if (!p?.email || !["public", "invite_only", "private"].includes(mode)) return;
+    try {
+      await withHomeOperation(p.email, async () => {
+        await ensureHome(pool, p.email);
+        await pool.query(`UPDATE jpo_homes SET access_mode=$2, updated_at=now() WHERE owner_email=$1`, [p.email, mode]);
+        socket.emit("homeAccessResult", { ok: true, mode });
+        // Closing a home immediately removes visitors who no longer qualify.
+        for (const [id, visitor] of Object.entries(players)) {
+          // Recheck after awaits: the visitor could have left/re-entered while
+          // this access operation waited in the home FIFO.
+          if (id === socket.id || locationOf(visitor) !== `home:${p.email}`) continue;
+          const access = await homeAccess(pool, p.email, visitor.email);
+          if (access.ok || locationOf(players[id]) !== `home:${p.email}`) continue;
+          emitToLocation(`home:${p.email}`, "playerLeft", id);
+          const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
+          visitor.locationId = "city";
+          const spawn = locationSpawn(parseLocation("city"));
+          visitor.x = spawn.x; visitor.y = spawn.y; visitor.dir = spawn.dir; visitor.anim = "idle";
+          vs?.join(locationRoom("city"));
+          io.to(id).emit("homeEjected", { message: "The owner changed this home's access.", destination: "city" });
+          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: { ...visitor }, players: locationPlayers(id) });
+          io.to(id).emit("currentPlayers", locationPlayers(id));
+          emitToLocation("city", "playerJoined", { id, ...visitor }, id);
+        }
+      });
+    } catch (err) { console.error("home access setting failed:", err); socket.emit("homeAccessResult", { ok: false, message: "Could not save access." }); }
+  });
+
+  socket.on("homeInvite", async (payload) => {
+    const p = players[socket.id], email = String(payload?.email || "").trim().toLowerCase();
+    if (!p?.email || !EMAIL_RE.test(email) || email === p.email) return;
+    try {
+      await withHomeOperation(p.email, async () => {
+        await ensureHome(pool, p.email);
+        await pool.query(`INSERT INTO jpo_home_invitations (owner_email, invitee_email) VALUES ($1,$2)
+                          ON CONFLICT (owner_email, invitee_email) DO UPDATE SET active=true`, [p.email, email]);
+      });
+      socket.emit("homeInviteResult", { ok: true, email });
+    } catch (err) { socket.emit("homeInviteResult", { ok: false, message: "Could not save invitation." }); }
+  });
+  socket.on("homeInviteRevoke", async (payload) => {
+    const p = players[socket.id], email = String(payload?.email || "").trim().toLowerCase();
+    if (!p?.email || !EMAIL_RE.test(email)) return;
+    try {
+      await withHomeOperation(p.email, async () => {
+        await pool.query(`DELETE FROM jpo_home_invitations WHERE owner_email=$1 AND invitee_email=$2`, [p.email, email]);
+        socket.emit("homeInviteResult", { ok: true, email, revoked: true });
+        // A revoked invite ejects an already-present invite-only visitor.
+        const home = await ensureHome(pool, p.email);
+        if (home.access_mode === "invite_only") for (const [id, v] of Object.entries(players)) if (v.email === email && locationOf(v) === `home:${p.email}`) {
+          // The room recheck is essential when transition/access operations
+          // queue behind one another.
+          if (locationOf(players[id]) !== `home:${p.email}`) continue;
+          emitToLocation(`home:${p.email}`, "playerLeft", id);
+          const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
+          v.locationId = "city"; const spawn = locationSpawn(parseLocation("city"));
+          v.x = spawn.x; v.y = spawn.y; v.dir = spawn.dir; v.anim = "idle"; vs?.join(locationRoom("city"));
+          io.to(id).emit("homeEjected", { message: "Your invitation was revoked.", destination: "city" });
+          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: { ...v }, players: locationPlayers(id) });
+          io.to(id).emit("currentPlayers", locationPlayers(id));
+          emitToLocation("city", "playerJoined", { id, ...v }, id);
+        }
+      });
+    } catch (err) { socket.emit("homeInviteResult", { ok: false, message: "Could not revoke invitation." }); }
+  });
+
   socket.on("playerMove", (data) => {
     const me = players[socket.id];
     if (!me || !data) return;
@@ -9065,15 +9434,27 @@ io.on("connection", (socket) => {
     const x = Number(data.x), y = Number(data.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
-    // Reject out-of-bounds positions (a modified client can't leave the office).
+    // Every map has an authoritative boundary.  The HQ map additionally has
+    // painted-tile containment; city/shop/home maps use their authored bounds.
     // Bounds come from the loaded map; a minimal epsilon absorbs the body offset /
     // edge rounding (a seat on the top row snaps to y ≈ -BODY_DY) — NOT a teleport.
-    if (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
-        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON) return;
+    if (isOfficePlayer(socket.id) && (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
+        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON)) return;
     // Void containment: a position whose feet tile has no art on ANY layer is
     // outside the drawn world — silently dropped like every other rejection
     // (the client clamps at the border for UX; this is the anti-cheat half).
-    if (isUnpaintedPosition(x, y)) return;
+    const location = parseLocation(locationOf(me));
+    const blockers = homeBlockersFor(location);
+    // Sitting is a server-checked furniture interaction in homes. A forged
+    // `anim:"sit"` in a plaza, shop, or empty floor is discarded; the chair
+    // itself is temporarily excluded from collision only for that sit snap.
+    const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
+      Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);
+    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair) return;
+    const movementBlockers = chair ? blockers.filter((b) => b !== chair) : blockers;
+    if (isOfficePlayer(socket.id)
+      ? isUnpaintedPosition(x, y)
+      : !location || !validLocationMove(location, x, y, movementBlockers)) return;
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be
@@ -9137,7 +9518,7 @@ io.on("connection", (socket) => {
     // round runs — the server tracks it (me.x/me.y above), everyone else only
     // ever learns the prop's frozen spot from phHunt.
     if (propHunt && propHunt.hiderId === socket.id) return;
-    socket.broadcast.emit("playerMoved", { id: socket.id, ...me });
+    emitToLocation(locationOf(me), "playerMoved", { id: socket.id, ...me }, socket.id);
   });
 
   socket.on("chatMessage", (payload) => {
@@ -9152,9 +9533,9 @@ io.on("connection", (socket) => {
     // delivered to everyone EXCEPT alive participants, so observers can't
     // call out positions to people still in the round.
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatMessage", msg);
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("chatMessage", msg);
     } else {
-      io.emit("chatMessage", msg);
+      emitToLocation(locationOf(players[socket.id]), "chatMessage", msg);
     }
   });
 
@@ -9175,9 +9556,9 @@ io.on("connection", (socket) => {
     // Same Office After Dark routing as text chat: lit players can't leak
     // to the people still in the dark.
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatImage", msg);
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("chatImage", msg);
     } else {
-      io.emit("chatImage", msg);
+      emitToLocation(locationOf(players[socket.id]), "chatImage", msg);
     }
     console.log(`${players[socket.id].name} shared a chat image (${Math.round(img.length / 1024)} KB b64)`);
   });
@@ -9194,9 +9575,9 @@ io.on("connection", (socket) => {
     if (!takeToken(emoteBucket)) return;   // shares the emote throttle
     const out = { mid, emoji, id: socket.id, name: players[socket.id].name };
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("chatReact", out);
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("chatReact", out);
     } else {
-      io.emit("chatReact", out);
+      emitToLocation(locationOf(players[socket.id]), "chatReact", out);
     }
   });
 
@@ -9210,9 +9591,9 @@ io.on("connection", (socket) => {
     // not reach alive participants (a pre-arranged emote code could call out
     // positions just like a chat message would).
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("playerEmote", { id: socket.id, emote });
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("playerEmote", { id: socket.id, emote });
     } else {
-      io.emit("playerEmote", { id: socket.id, emote });
+      emitToLocation(locationOf(players[socket.id]), "playerEmote", { id: socket.id, emote });
     }
   });
 
@@ -9224,9 +9605,9 @@ io.on("connection", (socket) => {
     if (!players[socket.id]) return;
     if (!takeToken(emoteBucket)) return;             // same throttle pool as emotes
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("petTrick", { id: socket.id });
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("petTrick", { id: socket.id });
     } else {
-      io.emit("petTrick", { id: socket.id });
+      emitToLocation(locationOf(players[socket.id]), "petTrick", { id: socket.id });
     }
   });
 
@@ -9266,6 +9647,10 @@ io.on("connection", (socket) => {
       socket.emit("whisperFailed", { message: "They're not in the office right now." });
       return;
     }
+    if (!sameLocation(socket.id, targetId)) {
+      socket.emit("whisperFailed", { message: "They're in another location right now." });
+      return;
+    }
     // Same rule as public chat: nobody outside the dark can whisper someone
     // who's still in the round (position call-outs). Dark→dark is allowed.
     if (inTheDark(targetId) && !inTheDark(socket.id)) {
@@ -9291,6 +9676,7 @@ io.on("connection", (socket) => {
     if (typeof targetId !== "string" || targetId === socket.id) return;
     const target = players[targetId];
     if (!target) { socket.emit("whisperFailed", { message: "They're not in the office right now." }); return; }
+    if (!sameLocation(socket.id, targetId)) { socket.emit("whisperFailed", { message: "They're in another location right now." }); return; }
     if (inTheDark(targetId) && !inTheDark(socket.id)) {
       socket.emit("whisperFailed", { message: "🌙 They're in the dark — wait until the round ends." });
       return;
@@ -9333,9 +9719,9 @@ io.on("connection", (socket) => {
     if (!takeToken(voiceTalkBucket)) return;
     const msg = { id: socket.id, on: !!(payload && payload.on) };
     if (round && round.state === "active" && !inTheDark(socket.id)) {
-      for (const id of Object.keys(players)) if (!inTheDark(id)) io.to(id).emit("voiceTalking", msg);
+      for (const id of Object.keys(players)) if (sameLocation(socket.id, id) && !inTheDark(id)) io.to(id).emit("voiceTalking", msg);
     } else {
-      io.emit("voiceTalking", msg);
+      emitToLocation(locationOf(players[socket.id]), "voiceTalking", msg);
     }
   });
 
@@ -9344,7 +9730,10 @@ io.on("connection", (socket) => {
 
   // Scene-create pull for the NPC snapshot (the restorePlayer push can land
   // before the Phaser scene registers its listeners — pull covers that).
-  socket.on("npcSync", () => { socket.emit("npcState", npcSnapshot()); socket.emit("hrNpcState", HR_NPC); });
+  socket.on("npcSync", () => {
+    if (!isOfficePlayer(socket.id)) return;
+    socket.emit("npcState", npcSnapshot()); socket.emit("hrNpcState", HR_NPC);
+  });
 
   // ── Ms. Poli (HR): daily Code of Discipline quiz ──────────────────────
   socket.on("hrInteract", async () => {
@@ -9657,6 +10046,7 @@ io.on("connection", (socket) => {
     }
     const target = players[targetId];
     if (!target) { socket.emit("rpsChallengeFailed", { message: "They're not in the office right now." }); return; }
+    if (!sameLocation(socket.id, targetId)) { socket.emit("rpsChallengeFailed", { message: "Travel to the same location first." }); return; }
     if (inAnyMatch(socket.id)) { socket.emit("rpsChallengeFailed", { message: "You're already in a challenge." }); return; }
     if (inAnyMatch(targetId)) { socket.emit("rpsChallengeFailed", { message: `${target.name} is busy in another match.` }); return; }
     // ANY round membership blocks duels — joining too, or a duel accepted
@@ -9963,6 +10353,13 @@ io.on("connection", (socket) => {
       });
       return;
     }
+    if (!sameLocation(socket.id, targetId)) {
+      socket.emit("petBattleProfile", {
+        ok: false, ownerId: targetId, requestId, reason,
+        message: "Travel to the same location to inspect that pet.",
+      });
+      return;
+    }
     const pet = target.pet;
     if (!pet || !Object.hasOwn(PETS, pet)) {
       socket.emit("petBattleProfile", {
@@ -10037,6 +10434,7 @@ io.on("connection", (socket) => {
     }
     const target = players[targetId];
     if (!target) { socket.emit("petBattleFail", { message: "They're not in the office right now." }); return; }
+    if (!sameLocation(socket.id, targetId)) { socket.emit("petBattleFail", { message: "Travel to the same location first." }); return; }
     if (!target.email) { socket.emit("petBattleFail", { message: `${target.name} needs a saved account to battle.` }); return; }
     if (battleBySocket.has(targetId)) { socket.emit("petBattleFail", { message: `${target.name} is already battling.` }); return; }
     if (rpsBySocket.has(targetId))    { socket.emit("petBattleFail", { message: `${target.name} is busy in another match.` }); return; }
@@ -10461,7 +10859,7 @@ io.on("connection", (socket) => {
       else p.equipped = item;
       socket.emit("coinUpdate",  { coins: p.coins });
       socket.emit("shopSuccess", { item, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
+      emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
       console.log(`${p.name} bought ${item} (session-only)`);
       return;
     }
@@ -10496,7 +10894,7 @@ io.on("connection", (socket) => {
       p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "", feet: rows[0].equipped_feet || "" };
       socket.emit("coinUpdate",  { coins: p.coins });
       socket.emit("shopSuccess", { item, equipped: p.equipped, wings: p.wings, slots: p.slots });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
+      emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
       console.log(`${p.name} bought ${item}`);
     } catch (err) { console.error("buyCosmetic failed:", err); }
   });
@@ -10559,7 +10957,7 @@ io.on("connection", (socket) => {
     socket.emit("coinUpdate", { coins: p.coins });
     socket.emit("foodBought", { station, item: menuItem.id, name: menuItem.name, icon: menuItem.icon, price: menuItem.price, coins: p.coins });
     // Everyone nearby sees the food bubble — same event the free snacks use.
-    io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: menuItem.icon });
+    emitToLocation(locationOf(p), "objectEffect", { id: socket.id, kind: "snack", emoji: menuItem.icon });
     console.log(`${p.name} bought ${menuItem.name} (${menuItem.price} coins) at ${station}`);
     coachCoffeeMoment(socket.id);
   });
@@ -10590,7 +10988,7 @@ io.on("connection", (socket) => {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       if (isWings) p.wings = item; else if (isOutfit) p.slots[slot] = item; else p.equipped = item;
       socket.emit("equipUpdate", { equipped: p.equipped, wings: p.wings || "", slots: p.slots });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
+      emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
       return;
     }
 
@@ -10609,7 +11007,7 @@ io.on("connection", (socket) => {
       p.wings = rows[0].equipped_wings || "";
       p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "", feet: rows[0].equipped_feet || "" };
       socket.emit("equipUpdate", { equipped: p.equipped, wings: p.wings, slots: p.slots });
-      io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
+      emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
     } catch (err) { console.error("equipCosmetic failed:", err); }
   });
 
@@ -10640,7 +11038,7 @@ io.on("connection", (socket) => {
       p.pet = item;   // buying auto-adopts
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       console.log(`${p.name} adopted ${item} (session-only)`);
       return;
     }
@@ -10666,7 +11064,7 @@ io.on("connection", (socket) => {
       p.pet = rows[0].equipped_pet || "";
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petSuccess", { item, pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       console.log(`${p.name} adopted ${item}`);
     } catch (err) { console.error("buyPet failed:", err); }
   });
@@ -10715,7 +11113,7 @@ io.on("connection", (socket) => {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = item;
       socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
       return;
     }
 
@@ -10730,7 +11128,7 @@ io.on("connection", (socket) => {
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.pet = rows[0].equipped_pet || "";
       socket.emit("petUpdate", { pet: p.pet, petAcc: p.petAcc || "" });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet, petAcc: p.petAcc || "", petStage: petStageFor(p) });
     } catch (err) { console.error("equipPet failed:", err); }
   });
 
@@ -10756,7 +11154,7 @@ io.on("connection", (socket) => {
       p.petAcc = item;   // buying auto-equips
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       console.log(`${p.name} bought ${item} (session-only)`);
       return;
     }
@@ -10782,7 +11180,7 @@ io.on("connection", (socket) => {
       p.petAcc = rows[0].equipped_pet_acc || "";
       socket.emit("coinUpdate", { coins: p.coins });
       socket.emit("petAccSuccess", { item, petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       console.log(`${p.name} bought ${item}`);
     } catch (err) { console.error("buyPetAcc failed:", err); }
   });
@@ -10804,7 +11202,7 @@ io.on("connection", (socket) => {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
       p.petAcc = item;
       socket.emit("petAccUpdate", { petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
       return;
     }
 
@@ -10819,7 +11217,7 @@ io.on("connection", (socket) => {
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
       p.petAcc = rows[0].equipped_pet_acc || "";
       socket.emit("petAccUpdate", { petAcc: p.petAcc });
-      io.emit("playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
+      emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, pet: p.pet || "", petAcc: p.petAcc, petStage: petStageFor(p) });
     } catch (err) { console.error("equipPetAcc failed:", err); }
   });
 
@@ -10999,10 +11397,10 @@ io.on("connection", (socket) => {
       applyGiftRow(pl, row);
       io.to(id).emit("itemGiftState", stateOf(pl));
       if (pl.email === p.email) io.to(id).emit("coinUpdate", { coins: pl.coins });
-      io.emit("playerCosmeticUpdate", {
+      emitToLocation(locationOf(pl), "playerCosmeticUpdate", {
         id, cosmetics: pl.cosmetics, equipped: pl.equipped, wings: pl.wings, slots: pl.slots,
       });
-      io.emit("playerPetUpdate", {
+      emitToLocation(locationOf(pl), "playerPetUpdate", {
         id, pet: pl.pet, petAcc: pl.petAcc, petStage: petStageFor(pl),
       });
     }
@@ -11245,8 +11643,8 @@ io.on("connection", (socket) => {
       pl.cosmetics = row.cosmetics || [];
       pl.pet = row.equipped_pet || "";
       io.to(id).emit("coinUpdate", { coins: pl.coins });
-      io.emit("playerPetUpdate", { id, pet: pl.pet, petAcc: pl.petAcc || "", petStage: petStageFor(pl) });
-      io.emit("playerCosmeticUpdate", { id, cosmetics: pl.cosmetics, equipped: pl.equipped || "", wings: pl.wings || "", slots: pl.slots || emptySlots() });
+      emitToLocation(locationOf(pl), "playerPetUpdate", { id, pet: pl.pet, petAcc: pl.petAcc || "", petStage: petStageFor(pl) });
+      emitToLocation(locationOf(pl), "playerCosmeticUpdate", { id, cosmetics: pl.cosmetics, equipped: pl.equipped || "", wings: pl.wings || "", slots: pl.slots || emptySlots() });
     }
     t.state = "done";
     tradeBySocket.delete(t.fromId);
@@ -11561,8 +11959,8 @@ io.on("connection", (socket) => {
       };
       if (done.winnerPetXp != null) { p.petXp = p.petXp || {}; delete p.petXp[done.item]; }
       socket.emit("coinUpdate", { coins: p.coins });
-      if (hadCos !== p.equipped || hadWings !== p.wings || hadSlots !== JSON.stringify(p.slots)) io.emit("playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
-      if (hadPet !== p.pet || hadAcc !== p.petAcc) io.emit("playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc, petStage: petStageFor(p) });
+      if (hadCos !== p.equipped || hadWings !== p.wings || hadSlots !== JSON.stringify(p.slots)) emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings, slots: p.slots });
+      if (hadPet !== p.pet || hadAcc !== p.petAcc) emitToLocation(locationOf(p), "playerPetUpdate", { id: socket.id, item: p.pet, acc: p.petAcc, petStage: petStageFor(p) });
     }
     socket.emit("storeOk", { message: `Sold! ${label} went for ${done.win.amount.toLocaleString()} coins.` });
     // Winner: live sync or queued note.
@@ -11615,7 +12013,7 @@ io.on("connection", (socket) => {
       p.pantsIdx = pantsIdx;
       socket.emit("coinUpdate",    { coins: p.coins });
       socket.emit("outfitSuccess", { shirtIdx, pantsIdx });
-      io.emit("playerOutfitUpdate", {
+      emitToLocation(locationOf(p), "playerOutfitUpdate", {
         id: socket.id, character: p.character,
         hairIdx: p.hairIdx, skinIdx: p.skinIdx, shirtIdx, pantsIdx,
       });
@@ -11637,7 +12035,7 @@ io.on("connection", (socket) => {
       p.pantsIdx = rows[0].pants_idx;
       socket.emit("coinUpdate",    { coins: p.coins });
       socket.emit("outfitSuccess", { shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx });
-      io.emit("playerOutfitUpdate", {
+      emitToLocation(locationOf(p), "playerOutfitUpdate", {
         id: socket.id, character: p.character,
         hairIdx: p.hairIdx, skinIdx: p.skinIdx,
         shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
@@ -11677,7 +12075,7 @@ io.on("connection", (socket) => {
       p.avatarChanges = (p.avatarChanges ?? 0) + 1;
       socket.emit("coinUpdate",    { coins: p.coins });
       socket.emit("avatarSuccess", { character, hairIdx, avatarChanges: p.avatarChanges });
-      io.emit("playerOutfitUpdate", {
+      emitToLocation(locationOf(p), "playerOutfitUpdate", {
         id: socket.id, character, hairIdx,
         skinIdx: p.skinIdx, shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
       });
@@ -11704,7 +12102,7 @@ io.on("connection", (socket) => {
       p.avatarChanges = rows[0].avatar_changes;
       socket.emit("coinUpdate",    { coins: p.coins });
       socket.emit("avatarSuccess", { character: p.character, hairIdx: p.hairIdx, avatarChanges: p.avatarChanges });
-      io.emit("playerOutfitUpdate", {
+      emitToLocation(locationOf(p), "playerOutfitUpdate", {
         id: socket.id, character: p.character, hairIdx: p.hairIdx,
         skinIdx: p.skinIdx, shirtIdx: p.shirtIdx, pantsIdx: p.pantsIdx,
       });
@@ -11905,6 +12303,10 @@ io.on("connection", (socket) => {
     const { object, game } = payload || {};
     const p = players[socket.id];
     if (!p) return;
+    if (!isOfficePlayer(socket.id)) {
+      socket.emit("interactError", { message: "Office equipment is available at JPO HQ." });
+      return;
+    }
     if (!takeToken(interactBucket)) return;   // silently drop spam
     // Prop Hunt: object effects (brew steam, cooler chatter) render at the
     // object next to the hider — a position tell. Furniture doesn't snack.
@@ -11965,7 +12367,7 @@ io.on("connection", (socket) => {
       waterReadyAt.set(key, now + WATER_COOLDOWN_MS);
       const line = WATER_LINES[waterLineIdx++ % WATER_LINES.length];
       socket.emit("waterCooler", { line });
-      io.emit("objectEffect", { id: socket.id, kind: "water" });
+      emitToLocation(locationOf(p), "objectEffect", { id: socket.id, kind: "water" });
 
     } else if (object.startsWith("punch_bag") || object.startsWith("treadmill")) {
       // Gym equipment: pure flavor (no coins/boost), so no per-person cooldown
@@ -12007,7 +12409,7 @@ io.on("connection", (socket) => {
       if (object === "snack_counter")  { s = GYM_SNACKS[gymSnackIdx++ % GYM_SNACKS.length]; icon = "💪"; }
       else                             { s = MEALS[mealIdx++ % MEALS.length]; icon = "🍽️"; }
       socket.emit("fridgeSnack", { line: s.line, icon });
-      io.emit("objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
+      emitToLocation(locationOf(p), "objectEffect", { id: socket.id, kind: "snack", emoji: s.emoji });
       coachCoffeeMoment(socket.id);
 
     } else if (Object.hasOwn(CHORE_STATIONS, object)) {
@@ -12043,7 +12445,7 @@ io.on("connection", (socket) => {
             io.to(pid).emit("groupEffect", burst);
           }
         } else {
-          io.emit("objectEffect", bubble);
+          emitToLocation(locationOf(p), "objectEffect", bubble);
           io.emit("groupEffect", burst);
         }
         console.log(`${p.name} did chore '${choreId}' at ${object} (+${chore.pay} coins)`);
@@ -12121,7 +12523,7 @@ io.on("connection", (socket) => {
   // aren't mid-duel. The starter auto-joins; everyone gets the invite.
   socket.on("roundStart", () => {
     const p = players[socket.id];
-    if (!p) return;
+    if (!p || !isOfficePlayer(socket.id)) return;
     if (!takeToken(roundBucket)) return;   // silently drop spam
     if (inAnyMatch(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (grandEventIsBlockingOfficeEvents()) { socket.emit("roundError", { message: "The Pet Wars Grand Event is running!" }); return; }
@@ -12145,7 +12547,7 @@ io.on("connection", (socket) => {
       joinEndsAt: Date.now() + ROUND_JOIN_MS,
       joinTimer: setTimeout(beginRound, ROUND_JOIN_MS),
     };
-    io.emit("roundInvite", {
+    emitToLocation("office", "roundInvite", {
       starterId: socket.id, starterName: p.name,
       joinMs: ROUND_JOIN_MS, minPlayers: ROUND_MIN_PLAYERS, count: 1,
     });
@@ -12154,7 +12556,7 @@ io.on("connection", (socket) => {
 
   socket.on("roundJoin", () => {
     const p = players[socket.id];
-    if (!p) return;
+    if (!p || !isOfficePlayer(socket.id)) return;
     if (!takeToken(roundBucket)) return;
     if (inAnyMatch(socket.id)) { socket.emit("roundError", { message: "Finish your match first!" }); return; }
     if (!round || round.state !== "joining") { socket.emit("roundError", { message: "No round is gathering right now." }); return; }
@@ -12170,7 +12572,7 @@ io.on("connection", (socket) => {
     });
     // Broadcast to EVERYONE (count only, leaks nothing) so the invite card's
     // "N in so far" stays fresh for people who haven't joined yet.
-    io.emit("roundLobby", { count: round.members.size });
+    emitToLocation("office", "roundLobby", { count: round.members.size });
   });
 
   // The killer's kill intent. Everything is validated HERE: role, aliveness,
@@ -12180,7 +12582,7 @@ io.on("connection", (socket) => {
   socket.on("roundKill", (payload) => {
     const { targetId } = payload || {};
     const p = players[socket.id];
-    if (!p) return;
+    if (!p || !isOfficePlayer(socket.id)) return;
     if (!takeToken(roundBucket)) return;
     if (!round || round.state !== "active" || !round.killerIds.has(socket.id)) return;
     if (typeof targetId !== "string" || targetId === socket.id) return;
@@ -12188,6 +12590,7 @@ io.on("connection", (socket) => {
     const me = round.members.get(socket.id);
     const tm = round.members.get(targetId);
     let tp = players[targetId];
+    if (tp && !sameLocation(socket.id, targetId)) return;
     // A grace-window ghost (disconnected but holding their round spot) is
     // still a frozen, visible avatar — killable at its parked position, so
     // pulling the plug can't dodge the knife. On resume they come back dead.
@@ -12249,6 +12652,7 @@ io.on("connection", (socket) => {
     }
     const p = players[socket.id];
     if (p) {
+      const locationId = locationOf(p);
       delete players[socket.id];
       if (p.email) {
         // Grace period: don't broadcast "left" yet. Keep the avatar visible for
@@ -12259,12 +12663,12 @@ io.on("connection", (socket) => {
         const email = p.email;
         if (graceByEmail[email]) {
           clearTimeout(graceByEmail[email].timer);
-          io.emit("playerLeft", graceByEmail[email].oldId);
+          emitToLocation(graceByEmail[email].locationId || locationId, "playerLeft", graceByEmail[email].oldId);
         }
         graceByEmail[email] = {
-          oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir, anim: p.anim,
+          oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir, anim: p.anim, locationId,
           timer: setTimeout(() => {
-            io.emit("playerLeft", socket.id);
+            emitToLocation(locationId, "playerLeft", socket.id);
             delete graceByEmail[email];
             // Grace expired without a resume: the sprite is gone, but a round
             // member's SPOT gets the longer ROUND_REJOIN_MS hold (slow reloads
@@ -12283,7 +12687,7 @@ io.on("connection", (socket) => {
       } else {
         // Session-only player: nothing durable to resume — remove immediately.
         console.log(`${p.name} left`);
-        io.emit("playerLeft", socket.id);
+        emitToLocation(locationId, "playerLeft", socket.id);
       }
     }
     // A pending trade can't survive either side leaving — the accept-time SQL

@@ -5,3 +5,4 @@
 export * from "./jpoPlayers";
 export * from "./jpoAnnouncements";
 export * from "./jpoCoach";
+export * from "./jpoNeighborhood";

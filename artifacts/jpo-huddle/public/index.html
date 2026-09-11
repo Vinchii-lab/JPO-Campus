@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="neighborhood.css">
   <script>
     // Self-healing cache buster: the server injects __BUILD__ at page-generation time.
     // On load we ping /stamp; if the server has restarted since this page was cached,
@@ -3960,6 +3961,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="neighborhood.js"></script>
   <script>
     const socket = io();
 
@@ -13373,6 +13375,15 @@
       constructor() { super('OfficeScene'); }
 
       preload() {
+        // Shared City / Homes art supplied with the project.  These are loaded
+        // once with the office bundle so travel never flashes an unloaded map.
+        this.load.image('neighborhood_home_floor', '/assets/neighborhood/Japanese_Home_1_Layer_1_48x48.png');
+        this.load.image('neighborhood_home_decor', '/assets/neighborhood/Japanese_Home_1_Layer_2_48x48.png');
+        this.load.image('neighborhood_home_preview', '/assets/neighborhood/Japanese_Home_1_preview_48x48.png');
+        this.load.image('neighborhood_shop_floor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_1_48x48.png');
+        this.load.image('neighborhood_shop_decor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_2_48x48.png');
+        this.load.image('neighborhood_shop_preview', '/assets/neighborhood/Ice_Cream_Shop_Design_preview_48x48.png');
+        this.load.image('neighborhood_city_home', '/assets/neighborhood/Generic_Home_1_preview_48x48.png');
         // All 13 tilesets embedded in JPO_HQ.tmj (TILESET_SHEETS below mirrors
         // this list with each tileset's firstgid). Every image is ALSO loaded as
         // a 16×16 spritesheet so a single desk/monitor tile can be redrawn as a
@@ -20506,13 +20517,22 @@
        }
     });
 
-    new Phaser.Game({
+    // ── Shared City and Homes presentation ───────────────────────────────
+    if (window.initNeighborhoodUI) {
+      window.initNeighborhoodUI(socket, () => ({
+        showToast, DIR_START,
+        _playerChar, _playerName, _playerEmail, _playerHairIdx, _playerSkinIdx,
+        _playerShirtIdx, _playerPantsIdx, _equippedCosmetic, _equippedWings,
+        _equippedSlots, _equippedPet, _equippedPetAcc, _bakedWearIds, _myPetXp, _petStageFor
+      }));
+    }
+    window._phaserGame = new Phaser.Game({
       type:   Phaser.AUTO,
       width:  window.innerWidth,
       height: window.innerHeight,
       backgroundColor: '#1a1a2e',
       physics: { default: 'arcade', arcade: { debug: false } },
-      scene:  OfficeScene,
+      scene:  [OfficeScene, window.NeighborhoodScene],
       scale:  { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
     });
   </script>
