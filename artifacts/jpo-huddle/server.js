@@ -119,7 +119,7 @@ app.use((req, res, next) => {
 // already-open tabs forward after a deploy/restart that shipped new code.
 app.get('/', (_req, res) => {
   const html = readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
-    .replace('__BUILD_STAMP_TOKEN__', BUILD_STAMP);
+    .replaceAll('__BUILD_STAMP_TOKEN__', BUILD_STAMP);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -321,6 +321,8 @@ app.use(express.static(path.join(__dirname, "public"), {
   setHeaders: (res, filePath) => {
     if (/\.(png|jpe?g|gif|webp|svg|mp3|ogg|wav)$/i.test(filePath)) {
       res.setHeader("Cache-Control", "public, max-age=86400");
+    } else if (/\.(js|css)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     }
   },
 }));

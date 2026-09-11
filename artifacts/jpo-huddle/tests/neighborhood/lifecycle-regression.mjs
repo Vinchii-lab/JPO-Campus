@@ -310,4 +310,24 @@ assert.doesNotThrow(() => scenePrototype.update.call({
   keys: null, wasd: null, keyE: null, keyShift: null, interactHint: null,
 }), "reused scene update waits for keyboard initialization");
 
-console.log("PASS: reproduced pre-fix queued-camera/input exceptions and gated cold/warm/stale scene lifecycles");
+// Phaser destroys the Arcade body before the scene's own SHUTDOWN callback,
+// but retains the sprite object. Optional chaining on the sprite alone cannot
+// protect its setVelocity wrapper, which dereferences this.body internally.
+const destroyedBodySprite = {
+  body: undefined,
+  setVelocity(x, y) { this.body.setVelocity(x, y); },
+};
+assert.throws(() => destroyedBodySprite?.setVelocity(0, 0), TypeError,
+  "reproduce the actual city-to-shop teardown exception");
+for (const method of ["_resetTransientTravel", "_clearMovementTransport"]) {
+  assert.doesNotThrow(() => scenePrototype[method].call({ player: destroyedBodySprite }),
+    `${method} tolerates an already-destroyed Arcade body`);
+  let stopped = false;
+  scenePrototype[method].call({ player: {
+    body: { setVelocity(x, y) { stopped = x === 0 && y === 0; } },
+    setVelocity() { throw new Error("must not call the unsafe sprite wrapper"); },
+  } });
+  assert(stopped, `${method} still stops a live body`);
+}
+
+console.log("PASS: queued scene readiness and destroyed-Arcade-body teardown regressions");

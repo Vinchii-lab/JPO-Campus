@@ -41,3 +41,9 @@ Treat Phaser start/wake as queued operations: apply arrival state only after the
 **Why:** Immediate camera access after a cold start, or input access during a reused scene's teardown, reproduced runtime TypeErrors. A scene reference does not guarantee its camera, player, or keys exist yet.
 
 **How to apply:** Register readiness callbacks before requesting the lifecycle change, cancel callbacks superseded by newer transitions, and keep update handlers inert during teardown/creation.
+
+During shutdown or blur/disconnect cleanup, guard the physics body itself; a surviving sprite does not imply a surviving Arcade body.
+
+**Why:** An actual city→shop browser transition crashed inside sprite.setVelocity after Arcade had already destroyed its body. Optional chaining on the sprite did not help because the method dereferences the missing body internally.
+
+**How to apply:** Stop velocity through an optional body reference in cleanup. Include a retained sprite with a destroyed body in teardown tests. Keep CDN scripts CORS-enabled so library exceptions expose their stack instead of only “Script error.”

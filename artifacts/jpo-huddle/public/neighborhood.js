@@ -608,7 +608,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this.portalRelease = true;
       this.lastSend = 0;
       movement?.clear();
-      this.player?.setVelocity(0, 0);
+      // Arcade shuts down before our scene listener; the sprite can still
+      // exist after its body is destroyed. Do not call its body wrapper.
+      this.player?.body?.setVelocity(0, 0);
       this.sitting = false;
       this.activity = null;
       this._activityPending = false;
@@ -622,7 +624,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _clearMovementTransport() {
       movement?.clear();
       this.lastSend = 0;
-      this.player?.setVelocity(0, 0);
+      this.player?.body?.setVelocity(0, 0);
     }
 
     _removePlacementInput() {

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="neighborhood.css">
+  <link rel="stylesheet" href="neighborhood.css?v=__BUILD_STAMP_TOKEN__">
   <script>
     // Preserve the actual message/location when the preview reports an
     // ErrorEvent without an Error object (for example, a library string throw).
@@ -3988,12 +3988,12 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="house-colors.js"></script>
-  <script src="neighborhood-interiors.js"></script>
-  <script src="focused-movement-helper.js"></script>
-  <script src="neighborhood.js"></script>
+  <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script crossorigin="anonymous" src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="house-colors.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="neighborhood-interiors.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="focused-movement-helper.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script>
     const socket = io();
 
@@ -13845,7 +13845,7 @@
       _clearMovementTransport() {
         window._jpoMovementTransport?.clear();
         this._sendTimer = 0;
-        this.player?.setVelocity(0, 0);
+        this.player?.body?.setVelocity(0, 0);
         this._moving = false;
       }
 
