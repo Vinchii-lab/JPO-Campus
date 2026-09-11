@@ -688,3 +688,17 @@ mtime_ms = 1789125250350
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/92ace331-4313-40ab-be45-94f3ce0f4aba/c6202e7e-db22-4741-915b-1b2a29e1a3d3"
 storage_version_token = "1789125257510717"
 content_type = "image/png"
+
+[[outputs]]
+id = "q6XM1KM04P8ZE0P_qLBsV"
+uri = "file://artifacts/jpo-huddle/public/assets/neighborhood/proof/catalog-furniture-native-3x-contact-sheet.png"
+type = "image"
+title = "Corrected furniture from your 16×16 ZIP"
+description = "The six catalog sprites now come directly from the uploaded pack, shown at crisp 3× scale. Existing ownership, prices, and placement footprints are preserved."
+logical_id = "0117830b-9688-48ea-8001-d5c0ff243c87"
+content_hash = "sha256:4a5deddf6f89f2837a737a9823d8c5e910d8461d92466cae01a3fb9bcba73a6f"
+size = 26857
+mtime_ms = 1789133474336
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/0117830b-9688-48ea-8001-d5c0ff243c87/943a2955-2a5c-4355-be60-3da7400078a6"
+storage_version_token = "1789133559260631"
+content_type = "image/png"

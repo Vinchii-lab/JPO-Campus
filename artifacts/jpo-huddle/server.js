@@ -15,6 +15,7 @@ import {
 } from "./grand-event-rules.mjs";
 import {
   ACTOR_FOOT_RADIUS,
+  HOME_EXTERIOR_COLORS,
   FURNITURE_CATALOG,
   LOCATION_GEOMETRY,
   LOCATIONS,
@@ -22,6 +23,7 @@ import {
   ensureHome,
   homeDirectory,
   homeAccess,
+  homeExteriorColor,
   homeSnapshot,
   layoutBlockers,
   locationSpawn,
@@ -43,7 +45,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood.css", "neighborhood.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -9215,10 +9217,18 @@ io.on("connection", (socket) => {
       socket.join(locationRoom(target.id));
       lastMoveAt = 0; wasSitting = false;
     }
+    // The outdoor city scene draws the authenticated resident's actual home,
+    // so give it the server-owned color even before they enter that home.
+    // ensureHome is the existing free starter-home initialisation, never a
+    // purchase/debit path.
+    const ownHome = await ensureHome(pool, p.email);
+    if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
     const info = locationInfo(target.id);
+    const ownHomeColor = homeExteriorColor(ownHome?.exterior_color);
     socket.emit("locationTransitionResult", {
       ok: true, location: target.id, reason, spawn: { x: p.x, y: p.y, dir: p.dir },
-      map: info, self: { ...p }, players: locationPlayers(socket.id), home,
+      map: info, self: { ...p, homeColor: ownHomeColor }, players: locationPlayers(socket.id), home,
+      homeColor: ownHomeColor,
       catalog: target.kind === "home" || target.kind === "furniture-shop" ? FURNITURE_CATALOG : undefined,
     });
     // Existing clients understand this event and remove stale remote sprites.
@@ -9396,6 +9406,41 @@ io.on("connection", (socket) => {
         }
       });
     } catch (err) { console.error("home access setting failed:", err); socket.emit("homeAccessResult", { ok: false, message: "Could not save access." }); }
+  });
+
+  // A color request never carries an owner id: the authenticated player's
+  // starter home is the only row this handler can update. No coins or purchase
+  // path is involved; every account already owns its home.
+  socket.on("homeColorSet", async (payload) => {
+    const p = players[socket.id];
+    const color = typeof payload?.color === "string" ? payload.color : "";
+    if (!p?.email || !Object.hasOwn(HOME_EXTERIOR_COLORS, color)) {
+      socket.emit("homeColorResult", { ok: false, message: "Choose a listed exterior color." });
+      return;
+    }
+    try {
+      await withHomeOperation(p.email, async () => {
+        await ensureHome(pool, p.email);
+        await pool.query(
+          `UPDATE jpo_homes SET exterior_color=$2, updated_at=now() WHERE owner_email=$1`,
+          [p.email, color],
+        );
+        // Snapshots are generated after the authoritative write and delivered
+        // to every current occupant with their normal owner/visitor projection.
+        await emitHomeSnapshotToOccupants(p.email);
+        const home = await homeSnapshot(pool, p.email, p.email);
+        socket.emit("homeColorResult", { ok: true, color, home });
+        // Outdoor scenes fetch their own permitted directory again. The event
+        // deliberately has no owner/email or color payload, so it cannot leak
+        // a private home's metadata to people who cannot see that directory.
+        for (const locationId of ["city", "maple-row", "juniper-square"]) {
+          io.to(locationRoom(locationId)).emit("homeColorChanged", { refreshDirectory: true });
+        }
+      });
+    } catch (err) {
+      console.error("home exterior color failed:", err);
+      socket.emit("homeColorResult", { ok: false, message: "Could not save exterior color." });
+    }
   });
 
   socket.on("homeInvite", async (payload) => {

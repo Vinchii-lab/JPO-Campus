@@ -11,3 +11,7 @@ Neighborhood travel must happen by walking to the HQ garden boundary and through
 The user approved the original generated exterior sprite style: teal-roof homes, cream/brown townhouses, striped-awning shop, leafy trees, wooden benches, and dark streetlamps.
 
 **Why:** They explicitly chose “Yes—use this style” after reviewing the modular sprite preview. Preserve that visual direction rather than generating unrelated replacements.
+
+Use the user's uploaded 16×16 pack for housing furniture and interior tiles, not the legacy free tiles or guessed sprite-number mappings. Visually verify individual source sprites before labeling them.
+
+**Why:** The user rejected the furniture implementation after mismatched sprite selections and the wrong source scale undermined the purpose of providing the ZIP. Filename suffixes alone did not identify the furniture.

@@ -2,6 +2,23 @@
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
 export const HOME_GRID = { width: 12, height: 9, cell: 48 };
+// Exterior colors are identifiers rather than browser-provided hex values.
+// They are persisted and projected to public home listings, so this small
+// allowlist is the single safe contract for both the server and house art.
+export const HOME_EXTERIOR_COLORS = Object.freeze({
+  teal: { id: "teal", label: "Teal", hex: "#237c86" },
+  terracotta: { id: "terracotta", label: "Terracotta", hex: "#b65b45" },
+  plum: { id: "plum", label: "Plum", hex: "#76506f" },
+  navy: { id: "navy", label: "Navy", hex: "#2f4f78" },
+  sage: { id: "sage", label: "Sage", hex: "#70885f" },
+});
+export const DEFAULT_HOME_EXTERIOR_COLOR = "teal";
+
+export function homeExteriorColor(value) {
+  return typeof value === "string" && HOME_EXTERIOR_COLORS[value]
+    ? value
+    : DEFAULT_HOME_EXTERIOR_COLOR;
+}
 // Player positions are foot-centre coordinates. Both movement validation and
 // the client Arcade collider use this radius, rather than separate magic
 // margins that drift at facades and door thresholds.
@@ -153,15 +170,17 @@ export const LOCATION_PORTALS = Object.freeze({
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
-  // The supplied furniture PNGs are authored facing one direction. Keep their
-  // upright frame rather than pretending a rotated bitmap is a new furniture
-  // variant (which produced upside-down chairs/lamps).
-  oak_chair:   { id: "oak_chair",   name: "Oak chair",       price: 90,  width: 1, height: 1, color: "#a96d43", rotations: [0] },
-  fern:        { id: "fern",        name: "Plaza fern",      price: 130, width: 1, height: 1, color: "#4f9253", rotations: [0] },
-  reading_lamp:{ id: "reading_lamp",name: "Reading lamp",    price: 160, width: 1, height: 1, color: "#e6bd57", rotations: [0] },
-  coffee_table:{ id: "coffee_table",name: "Coffee table",    price: 280, width: 2, height: 1, color: "#805b42", rotations: [0] },
-  blue_sofa:   { id: "blue_sofa",   name: "Blue sofa",       price: 460, width: 2, height: 1, color: "#537ca5", rotations: [0] },
-  bookcase:    { id: "bookcase",    name: "Bookcase",        price: 520, width: 1, height: 2, color: "#79513d", rotations: [0] },
+  // Each image is an unmodified individual 16px-grid PNG from the uploaded
+  // pack. Art is rendered at native 3× and bottom-anchored. Occupancy remains
+  // the original catalog contract: an upper frame (plant leaves, lamp shade)
+  // is presentation, never extra blocked floor or changed saved layouts.
+  // IDs/prices deliberately remain stable for existing inventory instances.
+  oak_chair:   { id: "oak_chair",   name: "Gold armchair",    price: 90,  width: 1, height: 1, color: "#b98743", rotations: [0] },
+  fern:        { id: "fern",        name: "Potted fern",      price: 130, width: 1, height: 1, color: "#4f9253", rotations: [0] },
+  reading_lamp:{ id: "reading_lamp",name: "Coral floor lamp", price: 160, width: 1, height: 1, color: "#d7634b", rotations: [0] },
+  coffee_table:{ id: "coffee_table",name: "Plum low table",   price: 280, width: 2, height: 1, color: "#74637e", rotations: [0] },
+  blue_sofa:   { id: "blue_sofa",   name: "Tan lounge sofa", price: 460, width: 2, height: 1, color: "#b77f45", rotations: [0] },
+  bookcase:    { id: "bookcase",    name: "Gold bookcase",   price: 520, width: 1, height: 2, color: "#a87542", rotations: [0] },
 });
 
 export function parseLocation(value) {
@@ -260,7 +279,10 @@ export async function ensureHome(pool, email) {
     `INSERT INTO jpo_homes (owner_email) VALUES ($1) ON CONFLICT (owner_email) DO NOTHING`,
     [email],
   );
-  const { rows } = await pool.query(`SELECT owner_email, access_mode, layout_revision FROM jpo_homes WHERE owner_email=$1`, [email]);
+  const { rows } = await pool.query(
+    `SELECT owner_email, access_mode, layout_revision, exterior_color FROM jpo_homes WHERE owner_email=$1`,
+    [email],
+  );
   return rows[0] || null;
 }
 
@@ -355,6 +377,9 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
     : undefined;
   return {
     ownerEmail, accessMode: home.access_mode, revision: home.layout_revision,
+    // Old home rows created before this optional column's default is applied
+    // remain visually teal without needing a backfill.
+    exteriorColor: homeExteriorColor(home.exterior_color),
     canEdit: ownerEmail === viewerEmail, inventory, layout, invitations,
   };
 }
@@ -369,7 +394,7 @@ export async function homeDirectory(pool, viewerEmail, requestedPage = 0, pageSi
   const limit = Math.max(1, Math.min(8, Number.isInteger(requestedPage) ? pageSize : 8));
   const page = Math.max(0, Number.isInteger(requestedPage) ? requestedPage : 0);
   const { rows } = await pool.query(
-    `SELECT h.owner_email, h.access_mode, count(*) OVER() AS total,
+    `SELECT h.owner_email, h.access_mode, h.exterior_color, count(*) OVER() AS total,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
        FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
        WHERE p.approved=true AND (h.access_mode='public' OR h.owner_email=$1 OR EXISTS (
@@ -382,7 +407,10 @@ export async function homeDirectory(pool, viewerEmail, requestedPage = 0, pageSi
   );
   const total = Number(rows[0]?.total || 0);
   return {
-    homes: rows.map((row) => ({ ownerEmail: row.owner_email, name: row.name, accessMode: row.access_mode })),
+    homes: rows.map((row) => ({
+      ownerEmail: row.owner_email, name: row.name, accessMode: row.access_mode,
+      exteriorColor: homeExteriorColor(row.exterior_color),
+    })),
     page, pageSize: limit, total, pageCount: Math.max(1, Math.ceil(total / limit)),
   };
 }

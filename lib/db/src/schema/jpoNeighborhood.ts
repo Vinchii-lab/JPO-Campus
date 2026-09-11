@@ -17,6 +17,9 @@ export const jpoHomesTable = pgTable("jpo_homes", {
   ownerEmail: text("owner_email").primaryKey().references(() => jpoPlayersTable.email, { onDelete: "cascade" }),
   accessMode: text("access_mode").notNull().default("public"),
   layoutRevision: integer("layout_revision").notNull().default(0),
+  // Nullable for existing rows during the publish-managed migration; callers
+  // display null as the native teal starter roof.
+  exteriorColor: text("exterior_color").default("teal"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -1,14 +1,17 @@
 #neighborhood-ui {
   position: fixed;
-  z-index: 9500;
-  top: 12px;
-  right: 14px;
+  /* Keep the always-clickable balance/shop/voice HUD above this contextual
+     map UI even during its one-frame measurement/update cycle. */
+  z-index: 299;
+  top: var(--neighborhood-hud-bottom, 60px);
+  right: var(--neighborhood-hud-gutter, 14px);
+  max-width: calc(100vw - var(--neighborhood-hud-gutter, 14px) - var(--neighborhood-hud-gutter, 14px));
   font: 14px 'Press Start 2P', monospace;
   color: #fff;
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
 }
 
@@ -22,12 +25,24 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+  transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
 #neighborhood-title {
   color: #f5ce64;
   text-shadow: 1px 1px 0 #000;
-  margin-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Walking keeps the map unobscured without removing the nav from flex flow:
+   any open home/shop panel remains below the reserved base HUD area. */
+#neighborhood-ui.neighborhood-walking #neighborhood-nav {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
 }
 
 #neighborhood-nav button, #home-panel button, #shop-panel button {
@@ -58,8 +73,9 @@
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8);
-  width: min(370px, calc(100vw - 28px));
-  max-height: calc(100vh - 82px);
+  width: min(370px, calc(100vw - var(--neighborhood-hud-gutter, 14px) - var(--neighborhood-hud-gutter, 14px)));
+  max-width: 100%;
+  max-height: calc(100dvh - var(--neighborhood-hud-bottom, 60px) - 62px);
   overflow-y: auto;
   line-height: 1.45;
   font-family: monospace;
@@ -111,6 +127,15 @@
 .home-invite { display: flex; gap: 5px; margin: 8px 0; }
 .home-invite input { min-width: 0; flex: 1; margin-right: 0 !important; }
 .home-editor-controls > small { margin-top: 10px; }
+.home-section[data-house-colors] { border-color: rgba(245, 206, 100, 0.48); }
+.home-section[data-house-colors] [role="group"] button {
+  min-width: 76px;
+  border-radius: 5px;
+  font-size: 10px;
+}
+.home-section[data-house-colors] [role="group"] button[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px #f5ce64, 0 2px 8px rgba(0, 0, 0, 0.5);
+}
 
 .home-item.selected {
   border-color: #f5ce64;
@@ -148,8 +173,9 @@
 
 #shop-panel {
   pointer-events: auto;
-  width: min(370px, calc(100vw - 28px));
-  max-height: calc(100vh - 82px);
+  width: min(370px, calc(100vw - var(--neighborhood-hud-gutter, 14px) - var(--neighborhood-hud-gutter, 14px)));
+  max-width: 100%;
+  max-height: calc(100dvh - var(--neighborhood-hud-bottom, 60px) - 62px);
   overflow: auto;
   padding: 16px;
   background: #152438f5;
@@ -159,7 +185,15 @@
 }
 body:not(.playing) #neighborhood-ui { display: none; }
 @media (max-width: 600px) {
-  #neighborhood-ui { top: 8px; right: 8px; }
-  #home-panel, #shop-panel { width: min(350px, calc(100vw - 16px)); max-height: calc(100vh - 70px); }
+  #coin-hud { top: 64px !important; right: 8px !important; }
+  #neighborhood-ui {
+    --neighborhood-hud-gutter: 8px;
+    top: var(--neighborhood-hud-bottom, 52px);
+    right: var(--neighborhood-hud-gutter);
+  }
+  #home-panel, #shop-panel {
+    width: min(350px, calc(100vw - var(--neighborhood-hud-gutter) - var(--neighborhood-hud-gutter)));
+    max-height: calc(100dvh - var(--neighborhood-hud-bottom, 52px) - 56px);
+  }
   #neighborhood-nav { padding: 7px 9px; }
 }

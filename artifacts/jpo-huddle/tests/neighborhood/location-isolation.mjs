@@ -46,7 +46,8 @@ async function connect(email, first) {
     chat: inbox(socket, "chatMessage"), voice: inbox(socket, "voiceSignal"), correction: inbox(socket, "playerMoveCorrection"),
     home: inbox(socket, "homeSnapshot"), buy: inbox(socket, "homePurchaseResult"),
     action: inbox(socket, "homeActionResult"), invite: inbox(socket, "homeInviteResult"), access: inbox(socket, "homeAccessResult"),
-    directory: inbox(socket, "homeDirectory"),
+    directory: inbox(socket, "homeDirectory"), color: inbox(socket, "homeColorResult"),
+    colorChanged: inbox(socket, "homeColorChanged"),
   };
   await new Promise((resolve, reject) => { socket.once("connect", resolve); socket.once("connect_error", reject); });
   socket.emit("register", { firstName: first, lastName: "Neighborhood", email, password: "testpass123", character: "adam", department: "IT" });
@@ -235,6 +236,54 @@ try {
   const directory = await a.q.directory.next();
   check(directory.homes?.some((h) => h.ownerEmail === emails[0] && h.name && h.accessMode),
     "home directory exposes only safe owner/name/access metadata", directory);
+
+  // Exterior colors are free starter-home personalization. The requested owner
+  // field is deliberately ignored: B may only update B's own home, never A's.
+  // B is outdoors; C remains in the office, which also checks the safe
+  // colorChanged room signal does not become an office-wide broadcast.
+  a.q.color.clear(); b.q.color.clear(); a.q.home.clear();
+  b.q.colorChanged.clear(); c.q.colorChanged.clear();
+  const aColorBefore = (await db.query(`SELECT exterior_color FROM jpo_homes WHERE owner_email=$1`, [emails[0]])).rows[0]?.exterior_color;
+  a.socket.emit("homeColorSet", { color: "chartreuse" });
+  const rejectedColor = await a.q.color.next();
+  check(!rejectedColor.ok && (await db.query(`SELECT exterior_color FROM jpo_homes WHERE owner_email=$1`, [emails[0]])).rows[0]?.exterior_color === aColorBefore,
+    "unknown exterior color is rejected without persistence", rejectedColor);
+
+  b.socket.emit("homeColorSet", { color: "plum", ownerEmail: emails[0] });
+  const forgedOwnerResult = await b.q.color.next();
+  const forgedOwnerRows = await db.query(
+    `SELECT owner_email, exterior_color FROM jpo_homes WHERE owner_email = ANY($1) ORDER BY owner_email`,
+    [[emails[0], emails[1]]],
+  );
+  check(
+    forgedOwnerResult.ok && forgedOwnerResult.home?.ownerEmail === emails[1] &&
+      forgedOwnerRows.rows.some((row) => row.owner_email === emails[0] && row.exterior_color === aColorBefore) &&
+      forgedOwnerRows.rows.some((row) => row.owner_email === emails[1] && row.exterior_color === "plum"),
+    "forged owner field cannot mutate another resident's home", { result: forgedOwnerResult, rows: forgedOwnerRows.rows },
+  );
+
+  b.q.colorChanged.clear(); c.q.colorChanged.clear();
+  a.socket.emit("homeColorSet", { color: "terracotta" });
+  const savedColor = await a.q.color.next();
+  const colorSnapshot = await a.q.home.next();
+  const persistedColor = (await db.query(`SELECT exterior_color FROM jpo_homes WHERE owner_email=$1`, [emails[0]])).rows[0]?.exterior_color;
+  a.socket.emit("homeDirectoryRequest");
+  const coloredDirectory = await a.q.directory.next();
+  const bOutdoorSignal = await b.q.colorChanged.next().catch(() => null);
+  const cOfficeSignals = await c.q.colorChanged.collect();
+  check(
+    savedColor.ok && savedColor.home?.exteriorColor === "terracotta" &&
+      colorSnapshot.exteriorColor === "terracotta" && persistedColor === "terracotta" &&
+      coloredDirectory.homes?.some((home) => home.ownerEmail === emails[0] && home.exteriorColor === "terracotta"),
+    "owner exterior color persists and snapshots/directory use authoritative safe color",
+    { result: savedColor, snapshot: colorSnapshot, persistedColor, directory: coloredDirectory },
+  );
+  check(
+    bOutdoorSignal?.refreshDirectory === true && cOfficeSignals.length === 0,
+    "color change signal is scoped to outdoor locations with no private metadata",
+    { outdoor: bOutdoorSignal, office: cOfficeSignals },
+  );
+
   await moveTo(c, "neighborhood"); await moveTo(c, "city"); await moveTo(c, `home:${emails[0]}`);
   const ejected = inbox(c.socket, "homeEjected");
   await setAccess(a, "private");

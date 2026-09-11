@@ -1,0 +1,96 @@
+{
+  "archive": "attached_assets/Sprites_1789121693820.zip",
+  "pixelPolicy": "Furniture and interior tiles render at integer 3x scale with nearest filtering. Furniture art is bottom-center anchored; floor occupancy retains the original catalog contract and is independent of decorative art height.",
+  "assets": [
+    {
+      "destination": "furniture/oak_chair.png",
+      "catalogId": "oak_chair",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_117.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "16x32",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "furniture/fern.png",
+      "catalogId": "fern",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_17.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "16x48",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "furniture/reading_lamp.png",
+      "catalogId": "reading_lamp",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_86.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "16x48",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "furniture/coffee_table.png",
+      "catalogId": "coffee_table",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_3.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "32x32",
+      "renderScale": 3,
+      "floorOccupancyCells": "2x1"
+    },
+    {
+      "destination": "furniture/blue_sofa.png",
+      "catalogId": "blue_sofa",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_97.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "16x16",
+      "renderScale": 3,
+      "floorOccupancyCells": "2x1"
+    },
+    {
+      "destination": "furniture/bookcase.png",
+      "catalogId": "bookcase",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_122.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "16x32",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x2"
+    },
+    {
+      "destination": "home-floor-16.png",
+      "zipMember": "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png",
+      "sourcePixels": "crop x=32,y=320,w=16,h=16",
+      "sourceSheetSize": "240x640",
+      "nativeImageSize": "16x16",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "shop-floor-16.png",
+      "zipMember": "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png",
+      "sourcePixels": "crop x=0,y=224,w=16,h=16",
+      "sourceSheetSize": "240x640",
+      "nativeImageSize": "16x16",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "home-wall-16.png",
+      "zipMember": "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Walls_16x16.png",
+      "sourcePixels": "crop x=0,y=128,w=16,h=16",
+      "sourceSheetSize": "512x640",
+      "nativeImageSize": "16x16",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "shop-wall-16.png",
+      "zipMember": "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Walls_16x16.png",
+      "sourcePixels": "crop x=0,y=384,w=16,h=16",
+      "sourceSheetSize": "512x640",
+      "nativeImageSize": "16x16",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    }
+  ]
+}
