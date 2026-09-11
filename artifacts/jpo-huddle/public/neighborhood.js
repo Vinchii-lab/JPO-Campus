@@ -385,6 +385,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       return typeof source?.[method] === 'function' ? source[method].call(this, ...args) : null;
     }
     _makeNameTag(...args) { return this._office('_makeNameTag', ...args); }
+    _bakeWearOnCanvas(...args) { return this._office('_bakeWearOnCanvas', ...args); }
+    _createDirAnims(...args) { return this._office('_createDirAnims', ...args); }
     _placeWearable(...args) { return this._office('_placeWearable', ...args); }
     _makeCosmetic(...args) { return this._office('_makeCosmetic', ...args); }
     _makePet(...args) { return this._office('_makePet', ...args); }

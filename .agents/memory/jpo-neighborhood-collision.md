@@ -17,3 +17,9 @@ Register cleanup on Phaser's SHUTDOWN event; naming a class method `shutdown` do
 **Why:** Street visuals survived as references to destroyed objects on home entry, leaving the shared scene inactive. Timer-generation guards alone did not fix it. ACTIVE-only guards also skipped initial furniture hydration.
 
 **How to apply:** Exercise street → home → street when changing this scene, including a placed item. Reset street-only references before constructing interiors and retain generation guards for delayed fades.
+
+Exercise avatar rendering with a cold texture cache when reusing HQ rendering methods in another scene.
+
+**Why:** HQ's globally cached avatar textures masked missing nested helper bridges until a previously unseen avatar appeared outdoors. Testing only the logged-in avatar missed the crash.
+
+**How to apply:** Include fresh running and sitting sheets with equipped clothing, and check nested method calls use the receiving scene's renderer.
