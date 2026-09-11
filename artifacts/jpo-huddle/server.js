@@ -30,7 +30,12 @@ import {
   parseLocation,
   portalForTransition,
   validLocationMove,
+  validStreetMove,
   validPlacement,
+  validYardPlacement,
+  streetDefinition,
+  streetLotForOwner,
+  streetPortalForTransition,
 } from "./neighborhood.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3319,7 +3324,21 @@ function rowToPlayerState(row) {
 // ── Shared City and Homes: location room helpers ───────────────────────────
 // Socket.IO rooms are the fan-out boundary.  Do not use io.emit for positional
 // state: a room is a shared map instance while each home has its own room.
-function locationOf(p) { return p?.locationId || "office"; }
+function locationOf(p) {
+  // Maple Row and Juniper Square were retired in favor of one continuous
+  // street. A live/grace snapshot from an older server must never be put back
+  // into an unreachable room; normalize it before any room or collision work.
+  if (p && (p.locationId === "maple-row" || p.locationId === "juniper-square")) {
+    const ownLot = streetLotForOwner(streetHomes, p.email);
+    const spawn = ownLot?.returnSpawn || { x: 720, y: 912, dir: "up" };
+    p.locationId = "neighborhood";
+    p.x = spawn.x;
+    p.y = spawn.y;
+    p.dir = spawn.dir;
+    p.anim = "idle";
+  }
+  return p?.locationId || "office";
+}
 function locationRoom(id) { return `location:${id}`; }
 function sameLocation(aId, bId) {
   return !!players[aId] && !!players[bId] && locationOf(players[aId]) === locationOf(players[bId]);
@@ -3339,9 +3358,27 @@ function locationPlayers(forId) {
   return out;
 }
 function isOfficePlayer(id) { return locationOf(players[id]) === "office"; }
+let streetHomes = [];
+let streetWorld = streetDefinition(streetHomes);
+async function refreshStreetHomes(viewerEmail) {
+  const directory = await homeDirectory(pool, viewerEmail);
+  streetHomes = directory.homes;
+  streetWorld = streetDefinition(streetHomes);
+  return directory;
+}
 function locationInfo(locationId) {
   const parsed = parseLocation(locationId);
   if (!parsed) return null;
+  if (parsed.id === "neighborhood") {
+    const fixedPortals = (LOCATION_PORTALS.neighborhood || []).filter((portal) => portal.destination !== "home");
+    return {
+      ...LOCATIONS.neighborhood, kind: "neighborhood", bounds: streetWorld.bounds,
+      actorFootRadius: ACTOR_FOOT_RADIUS,
+      geometry: { blockers: streetWorld.blockers, seats: [] },
+      portals: [...fixedPortals, ...streetWorld.doors],
+      streetLots: streetWorld.lots,
+    };
+  }
   const base = parsed.kind === "home" ? {
     id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432, bounds: { width: 576, height: 432 },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
@@ -9152,7 +9189,7 @@ io.on("connection", (socket) => {
   // Transitions are the only way locationId changes.  Client scene switches
   // are presentation-only; this handler owns the room, spawn and access gate.
   let locationTransitionSequence = 0;
-  const transitionTo = async (destination, reason = null, residencePage = 0) => {
+  const transitionTo = async (destination, reason = null) => {
     const p = players[socket.id];
     const target = parseLocation(destination);
     const sequence = ++locationTransitionSequence;
@@ -9165,9 +9202,21 @@ io.on("connection", (socket) => {
       return false;
     }
     const oldLocation = locationOf(p);
+    // The street has one stable lot per approved account. Refresh before
+    // validating a street doorway, so account joins cannot remap a painted
+    // doorway to a different person.
+    try {
+      if (oldLocation === "neighborhood" || target.id === "neighborhood") await refreshStreetHomes(p.email);
+    } catch (err) {
+      console.error("street snapshot failed:", err);
+      socket.emit("locationTransitionResult", { ok: false, code: "unavailable", message: "Willow Walk is being prepared. Please try again shortly." });
+      return false;
+    }
     // Location changes are physical map portals, not menu travel. Validate this
     // before any home access query so a forged destination cannot probe homes.
-    const portal = portalForTransition(oldLocation, target.id, p.x, p.y, p.email);
+    const portal = oldLocation === "neighborhood" && target.kind === "home"
+      ? streetPortalForTransition(target.id, p.x, p.y, streetHomes)
+      : portalForTransition(oldLocation, target.id, p.x, p.y, p.email);
     if (!portal) {
       socket.emit("locationTransitionResult", { ok: false, code: "portal", message: "Walk through the marked gate or doorway to travel." });
       return false;
@@ -9175,17 +9224,10 @@ io.on("connection", (socket) => {
     let home = null;
     try {
       if (target.kind === "home") {
-        // A residence portal is an exact visible directory slot, not a generic
-        // "open any email while standing here" permission bypass. Re-resolve
-        // the requested page on the server and require the email to match the
-        // portal's numbered lot before checking access. If a page changed in
-        // the brief interval after it was painted, reject rather than taking a
-        // visitor into a differently labelled house.
+        // A residence portal is an exact canonical street lot, not a generic
+        // "open any email while standing here" permission bypass.
         if (portal.residence) {
-          const page = Number.isInteger(residencePage) ? Math.max(0, Math.min(residencePage, 10_000)) : 0;
-          const directory = await homeDirectory(pool, p.email, page);
-          if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
-          const listedHome = directory.homes[(Number(portal.lot) || 1) - 1];
+          const listedHome = streetHomes.find((home) => Number(home.lotIndex) === Number(portal.lot));
           if (!listedHome || listedHome.ownerEmail !== target.ownerEmail) {
             socket.emit("locationTransitionResult", {
               ok: false, code: "residence_changed",
@@ -9223,6 +9265,11 @@ io.on("connection", (socket) => {
       emitToLocation(oldLocation, "playerLeft", socket.id);
       socket.leave(locationRoom(oldLocation));
       let spawn = locationSpawn(target, oldLocation);
+      const previousHome = parseLocation(oldLocation);
+      if (target.id === "neighborhood" && previousHome?.kind === "home") {
+        const lot = streetLotForOwner(streetHomes, previousHome.ownerEmail);
+        if (lot) spawn = { ...lot.returnSpawn };
+      }
       // Layout rules reserve this route for new placements. Older saved homes
       // may predate that rule, so recover to a nearby clear tile rather than
       // spawning a visitor inside a sofa after an upgrade.
@@ -9259,8 +9306,7 @@ io.on("connection", (socket) => {
 
   socket.on("locationTransition", (payload) => {
     const destination = typeof payload?.destination === "string" ? payload.destination : "";
-    const residencePage = Number(payload?.residencePage);
-    void transitionTo(destination, null, Number.isInteger(residencePage) ? residencePage : 0);
+    void transitionTo(destination);
   });
 
   socket.on("homeSnapshotRequest", async () => {
@@ -9279,7 +9325,6 @@ io.on("connection", (socket) => {
   socket.on("homeDirectoryRequest", async (payload) => {
     const p = players[socket.id];
     if (!p?.email) return;
-    const requestedPage = Number(payload?.page);
     const requestId = Number(payload?.requestId);
     const responseRequestId = Number.isInteger(requestId) && requestId >= 0 ? requestId : undefined;
     try {
@@ -9287,8 +9332,7 @@ io.on("connection", (socket) => {
       // requester's row here makes their own residence available even before
       // their first doorway visit; no names or decorative residents are made up.
       await ensureHome(pool, p.email);
-      const directory = await homeDirectory(pool, p.email,
-        Number.isInteger(requestedPage) ? Math.max(0, Math.min(requestedPage, 10_000)) : 0);
+      const directory = await refreshStreetHomes(p.email);
       socket.emit("homeDirectory", responseRequestId === undefined ? directory : { ...directory, requestId: responseRequestId });
     } catch (err) {
       console.error("home directory failed:", err);
@@ -9340,7 +9384,10 @@ io.on("connection", (socket) => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
     const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
     const gridX = Number(payload?.gridX), gridY = Number(payload?.gridY), rotation = Number(payload?.rotation);
-    if (!p?.email || parsed?.kind !== "home" || parsed.ownerEmail !== p.email || !instanceId ||
+    const placementZone = payload?.zone === "yard" ? "yard" : "indoor";
+    const canEditZone = (parsed?.kind === "home" && parsed.ownerEmail === p?.email && placementZone === "indoor") ||
+      (parsed?.id === "neighborhood" && placementZone === "yard");
+    if (!p?.email || !canEditZone || !instanceId ||
         !Number.isInteger(gridX) || !Number.isInteger(gridY) || !Number.isInteger(rotation)) return;
     const client = await pool.connect();
     try {
@@ -9355,20 +9402,27 @@ io.on("connection", (socket) => {
       const existing = await client.query(
         `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, f.furniture_id
            FROM jpo_home_layout_items l JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
-          WHERE l.home_owner_email=$1 AND l.furniture_instance_id <> $2`,
-        [p.email, instanceId],
+           WHERE l.home_owner_email=$1 AND l.furniture_instance_id <> $2 AND l.placement_zone=$3`,
+        [p.email, instanceId, placementZone],
       );
       const others = existing.rows.map((r) => ({ gridX: r.grid_x, gridY: r.grid_y, rotation: r.rotation, item: FURNITURE_CATALOG[r.furniture_id] })).filter((r) => r.item);
-      if (!validPlacement(item, gridX, gridY, rotation, others)) throw new Error("That furniture does not fit there.");
+      if (!(placementZone === "yard"
+        ? validYardPlacement(item, gridX, gridY, rotation, others)
+        : validPlacement(item, gridX, gridY, rotation, others))) throw new Error("That furniture does not fit there.");
       await client.query(
-        `INSERT INTO jpo_home_layout_items (furniture_instance_id, home_owner_email, grid_x, grid_y, rotation)
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (furniture_instance_id) DO UPDATE SET grid_x=$3, grid_y=$4, rotation=$5, updated_at=now()`,
-        [instanceId, p.email, gridX, gridY, rotation],
+        `INSERT INTO jpo_home_layout_items (furniture_instance_id, home_owner_email, grid_x, grid_y, rotation, placement_zone)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (furniture_instance_id) DO UPDATE SET grid_x=$3, grid_y=$4, rotation=$5, placement_zone=$6, updated_at=now()`,
+        [instanceId, p.email, gridX, gridY, rotation, placementZone],
       );
       await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [p.email]);
       await client.query("COMMIT");
       await emitHomeSnapshotToOccupants(p.email);
+      // When editing the outdoor lot the owner is on Willow Walk rather than
+      // in the home room, so they are not an occupant of the snapshot fan-out.
+      socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
+      await refreshStreetHomes(p.email);
+      io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Placed." });
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
@@ -9379,7 +9433,8 @@ io.on("connection", (socket) => {
   socket.on("homeLayoutReturn", async (payload) => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
     const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
-    if (!p?.email || parsed?.kind !== "home" || parsed.ownerEmail !== p.email || !instanceId) return;
+    if (!p?.email || !((parsed?.kind === "home" && parsed.ownerEmail === p.email) ||
+      parsed?.id === "neighborhood") || !instanceId) return;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -9390,13 +9445,18 @@ io.on("connection", (socket) => {
       const changed = await client.query(
         `DELETE FROM jpo_home_layout_items l USING jpo_home_furniture f
           WHERE l.furniture_instance_id=$1 AND f.id=l.furniture_instance_id AND f.owner_email=$2
+            AND ($3 <> 'neighborhood' OR l.placement_zone='yard')
+            AND ($3 <> 'home' OR l.placement_zone='indoor')
           RETURNING l.furniture_instance_id`,
-        [instanceId, p.email],
+        [instanceId, p.email, parsed?.kind || "home"],
       );
       if (!changed.rows[0]) throw new Error("That item is not placed in your home.");
       await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [p.email]);
       await client.query("COMMIT");
       await emitHomeSnapshotToOccupants(p.email);
+      socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
+      await refreshStreetHomes(p.email);
+      io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Returned to inventory." });
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
@@ -9459,7 +9519,8 @@ io.on("connection", (socket) => {
         // Outdoor scenes fetch their own permitted directory again. The event
         // deliberately has no owner/email or color payload, so it cannot leak
         // a private home's metadata to people who cannot see that directory.
-        for (const locationId of ["city", "maple-row", "juniper-square"]) {
+        await refreshStreetHomes(p.email);
+        for (const locationId of ["city", "neighborhood"]) {
           io.to(locationRoom(locationId)).emit("homeColorChanged", { refreshDirectory: true });
         }
       });
@@ -9558,7 +9619,9 @@ io.on("connection", (socket) => {
     const movementBlockers = chair ? blockers.filter((b) => b !== chair) : blockers;
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)
-      : !location || !validLocationMove(location, x, y, movementBlockers)) return rejectMove();
+      : !location || (location.id === "neighborhood"
+        ? !validStreetMove(streetHomes, x, y, movementBlockers)
+        : !validLocationMove(location, x, y, movementBlockers))) return rejectMove();
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be

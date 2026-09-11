@@ -2,6 +2,9 @@
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
 export const HOME_GRID = { width: 12, height: 9, cell: 48 };
+// The yard uses the same native 16px / 3x presentation cell as the room.  It
+// is deliberately a small, fenced part of a residence lot, not a second map.
+export const YARD_GRID = { width: 4, height: 3, cell: 48 };
 // Exterior colors are identifiers rather than browser-provided hex values.
 // They are persisted and projected to public home listings, so this small
 // allowlist is the single safe contract for both the server and house art.
@@ -23,58 +26,92 @@ export function homeExteriorColor(value) {
 // the client Arcade collider use this radius, rather than separate magic
 // margins that drift at facades and door thresholds.
 export const ACTOR_FOOT_RADIUS = 16;
-// These are physical residential streets, not destination-menu aliases.  The
-// plaza is commerce and transit only; Willow Walk is the one personal-home
-// address, while Maple Row and Juniper Square hold the directory residences.
-export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["maple-row", "juniper-square"]);
+// Willow Walk is the one shared residential world.  A lot is derived from its
+// stable approved-account order, never from a paginated directory slot.
+export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["neighborhood"]);
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
   city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
-  "maple-row": { id: "maple-row", label: "Maple Row", spawn: { x: 96, y: 504, dir: "right" }, bounds: { width: 1152, height: 912 } },
-  "juniper-square": { id: "juniper-square", label: "Juniper Square", spawn: { x: 576, y: 96, dir: "down" }, bounds: { width: 1152, height: 912 } },
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
 });
-const RESIDENCE_CENTERS = Object.freeze([
+const STREET_LOT_OFFSETS = Object.freeze([
   [180, 340], [420, 340], [732, 340], [972, 340],
   [180, 812], [420, 812], [732, 812], [972, 812],
 ]);
 // The supplied house sprite's facade is 224px wide with a 72px centered
 // doorway.  Keep this one source for every residential street: the visible
 // footprint, server blocker, and walkable front path agree exactly.
-const residenceBlockers = () => RESIDENCE_CENTERS.flatMap(([centerX, bottomY]) => [
+const residenceBlockers = (lots = STREET_LOT_OFFSETS) => lots.flatMap(([centerX, bottomY]) => [
   { x: centerX - 112, y: bottomY - 234, width: 224, height: 145 },
   { x: centerX - 112, y: bottomY - 89, width: 76, height: 90 },
   { x: centerX + 36, y: bottomY - 89, width: 76, height: 90 },
 ]);
-const residenceDoors = () => RESIDENCE_CENTERS.map(([centerX, bottomY], lot) => ({
-  destination: "home", residence: true, lot: lot + 1,
-  x: centerX - 36, y: bottomY - 90, width: 72, height: 100,
-  label: `Residence ${lot + 1}`,
-}));
+// A segment is a real stretch of the continuous street: four homes face the
+// north pavement and four face the south pavement.  Extending the segment
+// below keeps every account on one physical map while retaining the normal
+// close camera inside a residence.  `ownerEmail` is the canonical address.
+export function streetDefinition(entries = []) {
+  const homes = Array.isArray(entries) ? entries : [];
+  const slotFor = (home, index) => Number.isInteger(home?.lotIndex) && home.lotIndex > 0 ? home.lotIndex : index + 1;
+  const segmentCount = Math.max(1, Math.ceil(Math.max(0, ...homes.map(slotFor)) / STREET_LOT_OFFSETS.length));
+  const lots = homes.map((home, index) => {
+    const slot = slotFor(home, index);
+    const [x, localBottom] = STREET_LOT_OFFSETS[(slot - 1) % STREET_LOT_OFFSETS.length];
+    const segment = Math.floor((slot - 1) / STREET_LOT_OFFSETS.length);
+    const bottom = localBottom + segment * 960;
+    const northSide = localBottom < 500;
+    const door = {
+      destination: "home", residence: true, lot: slot, ownerEmail: home.ownerEmail,
+      x: x - 36, y: bottom - 90, width: 72, height: 100,
+      label: `${home.name || home.ownerEmail}'s home`,
+    };
+    return {
+      ...home, lot: slot, x, bottom, northSide, door,
+      returnSpawn: { x, y: northSide ? bottom + 32 : bottom - 122, dir: northSide ? "down" : "up" },
+      yard: Array.isArray(home.yard) ? home.yard : [],
+    };
+  });
+  const blockers = residenceBlockers(lots.map((lot) => [lot.x, lot.bottom]));
+  const yardBlockers = lots.flatMap((lot) => (lot.yard || []).flatMap((placed) => {
+    const item = FURNITURE_CATALOG[placed.furnitureId];
+    if (!item) return [];
+    const footprint = furnitureFootprint(item, placed.rotation);
+    const originX = lot.x - 96;
+    const originY = lot.northSide ? lot.bottom - 330 : lot.bottom - 66;
+    return [{
+      x: originX + placed.gridX * YARD_GRID.cell,
+      y: originY + placed.gridY * YARD_GRID.cell,
+      width: footprint.width * YARD_GRID.cell,
+      height: footprint.height * YARD_GRID.cell,
+      furnitureId: placed.furnitureId,
+    }];
+  }));
+  const doors = lots.map((lot) => lot.door);
+  const height = segmentCount * 960 + 96;
+  return { bounds: { width: 1440, height }, blockers: [...blockers, ...yardBlockers], doors, lots };
+}
+
+export function streetLotForOwner(entries, ownerEmail) {
+  const email = String(ownerEmail || "").trim().toLowerCase();
+  return streetDefinition(entries).lots.find((lot) => lot.ownerEmail === email) || null;
+}
+
+export function streetPortalForTransition(destination, x, y, entries) {
+  const target = parseLocation(destination);
+  if (target?.kind !== "home") return null;
+  return streetDefinition(entries).doors.find((portal) =>
+    portal.ownerEmail === target.ownerEmail && pointHitsRect(x, y, portal, 0)) || null;
+}
 // This is the shared world contract for the client map and server validator.
 // Every facade below has a matching explicit collider.  The narrow gaps are
 // intentional paved doorways, never visual-only entrances.
 export const LOCATION_GEOMETRY = Object.freeze({
   office: { blockers: [], doors: [] },
   neighborhood: {
-    blockers: [
-      // the townhouse leaves its centered front path open
-      { x: 540, y: 92, width: 192, height: 150 }, { x: 540, y: 242, width: 62, height: 86 }, { x: 670, y: 242, width: 62, height: 86 },
-      // tree colliders are trunk-sized (the canopy remains walk-behind art)
-      { x: 405, y: 210, width: 50, height: 50 }, { x: 455, y: 678, width: 50, height: 50 },
-      { x: 935, y: 698, width: 50, height: 50 }, { x: 91, y: 740, width: 50, height: 50 },
-      { x: 1269, y: 164, width: 50, height: 50 }, { x: 305, y: 720, width: 50, height: 50 },
-      { x: 486, y: 390, width: 28, height: 30 }, { x: 802, y: 390, width: 28, height: 30 },
-      { x: 1146, y: 390, width: 28, height: 30 }, { x: 264, y: 390, width: 28, height: 30 },
-      { x: 372, y: 574, width: 96, height: 30 }, { x: 852, y: 390, width: 96, height: 30 }, { x: 1052, y: 390, width: 96, height: 30 },
-    ],
-    doors: [
-      { destination: "home", x: 602, y: 246, width: 68, height: 94, label: "Your townhouse" },
-    ],
-    seats: [
-      { x: 420, y: 620, dir: "down" }, { x: 900, y: 436, dir: "down" }, { x: 1100, y: 436, dir: "down" },
-    ],
+    // Street houses, colliders, and front doors are generated from the
+    // approved-account snapshot in streetDefinition(), not duplicated here.
+    blockers: [], doors: [], seats: [],
   },
   city: {
     blockers: [
@@ -100,26 +137,6 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 520, y: 410, dir: "down" }, { x: 630, y: 410, dir: "down" },
       { x: 520, y: 616, dir: "down" }, { x: 630, y: 616, dir: "down" },
     ],
-  },
-  "maple-row": {
-    blockers: [
-      ...residenceBlockers(),
-      { x: 62, y: 184, width: 50, height: 50 }, { x: 534, y: 184, width: 50, height: 50 },
-      { x: 1090, y: 202, width: 50, height: 50 }, { x: 74, y: 706, width: 50, height: 50 },
-      { x: 536, y: 730, width: 50, height: 50 }, { x: 1082, y: 706, width: 50, height: 50 },
-    ],
-    doors: residenceDoors(),
-    seats: [{ x: 576, y: 410, dir: "down" }, { x: 576, y: 600, dir: "down" }],
-  },
-  "juniper-square": {
-    blockers: [
-      ...residenceBlockers(),
-      { x: 62, y: 192, width: 50, height: 50 }, { x: 534, y: 200, width: 50, height: 50 },
-      { x: 1090, y: 192, width: 50, height: 50 }, { x: 78, y: 706, width: 50, height: 50 },
-      { x: 536, y: 718, width: 50, height: 50 }, { x: 1082, y: 716, width: 50, height: 50 },
-    ],
-    doors: residenceDoors(),
-    seats: [{ x: 500, y: 500, dir: "down" }, { x: 652, y: 500, dir: "down" }],
   },
   "furniture-shop": {
     blockers: [
@@ -148,21 +165,10 @@ export const LOCATION_PORTALS = Object.freeze({
   neighborhood: [
     { destination: "office", x: 672, y: 912, width: 96, height: 144, spawn: { x: 216, y: 3624, dir: "right" } },
     { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
-    { destination: "home", x: 602, y: 246, width: 68, height: 94, spawn: { x: 288, y: 312, dir: "down" } },
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
     { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "maple-row", x: 1056, y: 432, width: 96, height: 144, spawn: { x: 96, y: 504, dir: "right" } },
-    { destination: "juniper-square", x: 528, y: 816, width: 96, height: 96, spawn: { x: 576, y: 96, dir: "down" } },
-  ],
-  "maple-row": [
-    { destination: "city", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1056, y: 504, dir: "left" } },
-    ...residenceDoors().map((door) => ({ ...door, spawn: { x: 288, y: 312, dir: "down" } })),
-  ],
-  "juniper-square": [
-    { destination: "city", x: 528, y: 0, width: 96, height: 96, spawn: { x: 576, y: 816, dir: "up" } },
-    ...residenceDoors().map((door) => ({ ...door, spawn: { x: 288, y: 312, dir: "down" } })),
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
   home: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, spawn: { x: 636, y: 372, dir: "down" } }],
@@ -183,7 +189,7 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (value === "office" || value === "neighborhood" || value === "city" || value === "maple-row" || value === "juniper-square" || value === "furniture-shop") return { id: value, kind: value };
+  if (value === "office" || value === "neighborhood" || value === "city" || value === "furniture-shop") return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -212,8 +218,7 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   const fromKind = from.kind === "home" ? "home" : from.id;
   const targetKind = target.kind === "home" ? "home" : target.id;
   // Coworker visits are permission-gated by homeAccess in server.js and may
-  // only be entered through a marked directory-residence door. A resident's
-  // own Willow Walk townhouse remains the one direct personal-home door.
+  // only be entered through that account's marked Willow Walk front door.
   if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && !RESIDENTIAL_BLOCK_IDS.includes(fromKind)) return null;
   return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
     portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;
@@ -234,6 +239,14 @@ export function validLocationMove(location, x, y, dynamicBlockers = []) {
   if (b && (x < ACTOR_FOOT_RADIUS || y < ACTOR_FOOT_RADIUS || x > b.width - ACTOR_FOOT_RADIUS || y > b.height - ACTOR_FOOT_RADIUS)) return false;
   const geometry = LOCATION_GEOMETRY[location.kind === "home" ? "home" : location.id];
   return ![...(geometry?.blockers || []), ...dynamicBlockers].some((rect) => pointHitsRect(x, y, rect));
+}
+
+export function validStreetMove(entries, x, y, dynamicBlockers = []) {
+  const street = streetDefinition(entries);
+  const b = street.bounds;
+  if (x < ACTOR_FOOT_RADIUS || y < ACTOR_FOOT_RADIUS ||
+      x > b.width - ACTOR_FOOT_RADIUS || y > b.height - ACTOR_FOOT_RADIUS) return false;
+  return ![...street.blockers, ...dynamicBlockers].some((rect) => pointHitsRect(x, y, rect));
 }
 
 // Persisted layouts predate the upright-art policy. This is the one canonical
@@ -263,6 +276,19 @@ export function validPlacement(item, x, y, rotation, otherItems) {
   });
 }
 
+export function validYardPlacement(item, x, y, rotation, otherItems) {
+  if (!item || !item.rotations.includes(rotation) || !Number.isInteger(x) || !Number.isInteger(y)) return false;
+  const f = furnitureFootprint(item, rotation);
+  // Keep the gate-facing row clear so an owner or visitor cannot be fenced in.
+  if (x < 0 || y < 0 || x + f.width > YARD_GRID.width || y + f.height > YARD_GRID.height ||
+      (x < 2 && x + f.width > 1 && y === YARD_GRID.height - 1)) return false;
+  return !otherItems.some((placed) => {
+    const of = furnitureFootprint(placed.item, placed.rotation);
+    return x < placed.gridX + of.width && x + f.width > placed.gridX &&
+      y < placed.gridY + of.height && y + f.height > placed.gridY;
+  });
+}
+
 export function layoutBlockers(layout) {
   return (layout || []).flatMap((placed) => {
     const item = FURNITURE_CATALOG[placed.furnitureId];
@@ -279,7 +305,7 @@ export async function ensureHome(pool, email) {
     [email],
   );
   const { rows } = await pool.query(
-    `SELECT owner_email, access_mode, layout_revision, exterior_color FROM jpo_homes WHERE owner_email=$1`,
+    `SELECT owner_email, lot_index, access_mode, layout_revision, exterior_color FROM jpo_homes WHERE owner_email=$1`,
     [email],
   );
   return rows[0] || null;
@@ -308,7 +334,7 @@ export async function repairLegacyLayout(pool, ownerEmail) {
     await ensureHome(client, ownerEmail);
     await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [ownerEmail]);
     const { rows } = await client.query(
-      `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, f.furniture_id
+      `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, l.placement_zone, f.furniture_id
          FROM jpo_home_layout_items l
          JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
         WHERE l.home_owner_email=$1
@@ -316,12 +342,14 @@ export async function repairLegacyLayout(pool, ownerEmail) {
         FOR UPDATE OF l`,
       [ownerEmail],
     );
-    const canonical = rows.filter((row) => {
+    const canonical = new Map([["indoor", []], ["yard", []]]);
+    for (const row of rows) {
       const item = FURNITURE_CATALOG[row.furniture_id];
-      return item && effectiveRotation(item, row.rotation) === Number(row.rotation);
-    }).map((row) => ({
-      gridX: row.grid_x, gridY: row.grid_y, rotation: row.rotation, item: FURNITURE_CATALOG[row.furniture_id],
-    }));
+      const zone = row.placement_zone === "yard" ? "yard" : "indoor";
+      if (item && effectiveRotation(item, row.rotation) === Number(row.rotation)) {
+        canonical.get(zone).push({ gridX: row.grid_x, gridY: row.grid_y, rotation: row.rotation, item });
+      }
+    }
     let changed = false;
     for (const row of rows) {
       const item = FURNITURE_CATALOG[row.furniture_id];
@@ -329,9 +357,14 @@ export async function repairLegacyLayout(pool, ownerEmail) {
       // Treat already canonical entries as fixed occupants; legacy entries are
       // considered in stable update order so only the conflicting legacy item
       // is returned to inventory.
-      if (validPlacement(item, row.grid_x, row.grid_y, 0, canonical)) {
+      const zone = row.placement_zone === "yard" ? "yard" : "indoor";
+      const zoneItems = canonical.get(zone);
+      const fits = zone === "yard"
+        ? validYardPlacement(item, row.grid_x, row.grid_y, 0, zoneItems)
+        : validPlacement(item, row.grid_x, row.grid_y, 0, zoneItems);
+      if (fits) {
         await client.query(`UPDATE jpo_home_layout_items SET rotation=0, updated_at=now() WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
-        canonical.push({ gridX: row.grid_x, gridY: row.grid_y, rotation: 0, item });
+        zoneItems.push({ gridX: row.grid_x, gridY: row.grid_y, rotation: 0, item });
       } else {
         await client.query(`DELETE FROM jpo_home_layout_items WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
       }
@@ -352,19 +385,21 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
   await repairLegacyLayout(pool, ownerEmail);
   const home = await ensureHome(pool, ownerEmail);
   const { rows } = await pool.query(
-    `SELECT f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation
+    `SELECT f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation, l.placement_zone
        FROM jpo_home_furniture f
        LEFT JOIN jpo_home_layout_items l ON l.furniture_instance_id=f.id
       WHERE f.owner_email=$1 ORDER BY f.acquired_at, f.id`,
     [ownerEmail],
   );
-  const inventory = [], layout = [];
+  const inventory = [], layout = [], yard = [];
   for (const row of rows) {
     const catalog = FURNITURE_CATALOG[row.furniture_id];
     if (!catalog) continue;
     const view = { id: row.id, furnitureId: row.furniture_id };
     if (row.grid_x == null) inventory.push(view);
-    else layout.push({ ...view, gridX: row.grid_x, gridY: row.grid_y, rotation: effectiveRotation(catalog, row.rotation) });
+    else (row.placement_zone === "yard" ? yard : layout).push({
+      ...view, gridX: row.grid_x, gridY: row.grid_y, rotation: effectiveRotation(catalog, row.rotation),
+    });
   }
   const invitations = ownerEmail === viewerEmail
     ? (await pool.query(
@@ -379,37 +414,54 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
     // Old home rows created before this optional column's default is applied
     // remain visually teal without needing a backfill.
     exteriorColor: homeExteriorColor(home.exterior_color),
-    canEdit: ownerEmail === viewerEmail, inventory, layout, invitations,
+    canEdit: ownerEmail === viewerEmail, inventory, layout, yard, invitations,
   };
 }
 
-// Safe directory projection: homes are discoverable only when public, owned
-// by the requester, or explicitly invited. It deliberately omits layout,
-// inventory, and any account data beyond the displayed name/email.
-export async function homeDirectory(pool, viewerEmail, requestedPage = 0, pageSize = 8) {
-  // Page by a bounded, immutable account order. The selected residence remains
-  // its owner email on the client/server transition, never this transient page
-  // index or a visual lot, so another account joining cannot redirect a visit.
-  const limit = Math.max(1, Math.min(8, Number.isInteger(requestedPage) ? pageSize : 8));
-  const page = Math.max(0, Number.isInteger(requestedPage) ? requestedPage : 0);
+// Safe street projection: all approved accounts have a visible exterior lot,
+// while access is still enforced at the actual front door. It deliberately
+// omits indoor layout, inventory, and account data beyond name/email; the
+// small outdoor yard projection is required to render the shared street.
+export async function homeDirectory(pool, viewerEmail) {
+  // Materialise a row for every approved account while processing an explicit
+  // street request. This is not startup DDL and gives each actual resident a
+  // durable address before their first visit.
+  await pool.query(`INSERT INTO jpo_homes (owner_email)
+                    SELECT email FROM jpo_players WHERE approved=true
+                    ON CONFLICT (owner_email) DO NOTHING`);
   const { rows } = await pool.query(
-    `SELECT h.owner_email, h.access_mode, h.exterior_color, count(*) OVER() AS total,
+    `SELECT h.owner_email, h.lot_index, h.access_mode, h.exterior_color,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
        FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
-       WHERE p.approved=true AND (h.access_mode='public' OR h.owner_email=$1 OR EXISTS (
-        SELECT 1 FROM jpo_home_invitations i
-         WHERE i.owner_email=h.owner_email AND i.invitee_email=$1 AND i.active=true
-       ))
-       ORDER BY p.created_at ASC, h.owner_email ASC
-       LIMIT $2 OFFSET $3`,
-    [viewerEmail, limit, page * limit],
+       WHERE p.approved=true
+       ORDER BY h.lot_index ASC
+    `,
+    [],
   );
-  const total = Number(rows[0]?.total || 0);
+  const owners = rows.map((row) => row.owner_email);
+  const yardRows = owners.length ? (await pool.query(
+    `SELECT f.owner_email, f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation
+       FROM jpo_home_layout_items l JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
+      WHERE l.placement_zone='yard' AND f.owner_email=ANY($1::text[])
+      ORDER BY f.acquired_at, f.id`,
+    [owners],
+  )).rows : [];
+  const yards = new Map();
+  for (const row of yardRows) {
+    const item = FURNITURE_CATALOG[row.furniture_id];
+    if (!item) continue;
+    const list = yards.get(row.owner_email) || [];
+    list.push({ id: row.id, furnitureId: row.furniture_id, gridX: row.grid_x, gridY: row.grid_y,
+      rotation: effectiveRotation(item, row.rotation) });
+    yards.set(row.owner_email, list);
+  }
+  const total = rows.length;
   return {
     homes: rows.map((row) => ({
-      ownerEmail: row.owner_email, name: row.name, accessMode: row.access_mode,
+      ownerEmail: row.owner_email, lotIndex: Number(row.lot_index), name: row.name, accessMode: row.access_mode,
       exteriorColor: homeExteriorColor(row.exterior_color),
+      yard: yards.get(row.owner_email) || [],
     })),
-    page, pageSize: limit, total, pageCount: Math.max(1, Math.ceil(total / limit)),
+    page: 0, pageSize: total, total, pageCount: 1,
   };
 }

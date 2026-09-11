@@ -11,3 +11,9 @@ Refresh Arcade bodies with updateFromGameObject before measuring body center/hal
 Reset all travel flags and cancel delayed callbacks whenever a reusable map scene is created or shut down.
 
 **Why:** Phaser reuses scene instances; a retained transitionRequested flag froze all movement after the second map transition, which looked like a collision error.
+
+Register cleanup on Phaser's SHUTDOWN event; naming a class method `shutdown` does not register it. Clear retained display-object references between maps, and allow initial snapshot hydration during CREATING.
+
+**Why:** Street visuals survived as references to destroyed objects on home entry, leaving the shared scene inactive. Timer-generation guards alone did not fix it. ACTIVE-only guards also skipped initial furniture hydration.
+
+**How to apply:** Exercise street → home → street when changing this scene, including a placed item. Reset street-only references before constructing interiors and retain generation guards for delayed fades.

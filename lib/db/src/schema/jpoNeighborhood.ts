@@ -15,6 +15,12 @@ import { jpoPlayersTable } from "./jpoPlayers";
 // without a data backfill or application-startup DDL.
 export const jpoHomesTable = pgTable("jpo_homes", {
   ownerEmail: text("owner_email").primaryKey().references(() => jpoPlayersTable.email, { onDelete: "cascade" }),
+  // Generated once and never derived from a current directory position. This
+  // is the physical Willow Walk address, so approvals/inserts cannot reshuffle
+  // an established resident's lot.
+  lotIndex: integer("lot_index").notNull().generatedByDefaultAsIdentity({
+    name: "jpo_home_lot_index_seq",
+  }),
   accessMode: text("access_mode").notNull().default("public"),
   layoutRevision: integer("layout_revision").notNull().default(0),
   // Nullable for existing rows during the publish-managed migration; callers
@@ -22,7 +28,7 @@ export const jpoHomesTable = pgTable("jpo_homes", {
   exteriorColor: text("exterior_color").default("teal"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("jpo_homes_lot_index_unique").on(t.lotIndex)]);
 
 // Furniture is instance based rather than a count map.  Consequently two
 // identical chairs can be independently placed, rotated, or returned to the
@@ -47,6 +53,9 @@ export const jpoHomeLayoutItemsTable = pgTable("jpo_home_layout_items", {
   gridX: integer("grid_x").notNull(),
   gridY: integer("grid_y").notNull(),
   rotation: integer("rotation").notNull().default(0),
+  // Existing rows stay indoors through this additive default. A furniture
+  // instance appears in exactly one zone because it has one layout row.
+  placementZone: text("placement_zone").notNull().default("indoor"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

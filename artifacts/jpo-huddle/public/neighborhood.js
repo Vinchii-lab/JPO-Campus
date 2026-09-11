@@ -15,13 +15,17 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let furnitureCatalog = {};
   let selectedInstance = null;
   let selectedRotation = 0;
+  let selectedZone = 'indoor';
   let editorOpen = false;
   let currentLocation = 'office';
   let directory = [];
-  let directoryPage = 0;
-  let directoryMeta = { page: 0, pageCount: 1, total: 0 };
   let directoryRequestId = 0;
   let activeDirectoryRequestId = 0;
+  // A socket result can arrive while the prior map's cosmetic fade is still
+  // pending. Keep one presentation generation and timer: an old completion
+  // must never stop/restart the scene selected by a newer completion.
+  let sceneTransitionGeneration = 0;
+  let sceneTransitionTimer = null;
   // Player sprites, interior tiles, and the verified furniture singles are
   // authored on the same 16px grid. Keep their one shared integer scale here;
   // exterior buildings intentionally use their separate, larger source art.
@@ -89,12 +93,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[char]);
   const isHome = () => currentLocation.startsWith('home:');
-  const isResidentialBlock = () => ['maple-row', 'juniper-square'].includes(currentLocation);
+  const isResidentialBlock = () => currentLocation === 'neighborhood';
   const travel = (destination, options = {}) => socket.emit('locationTransition', { destination, ...options });
-  const requestDirectory = (page = directoryPage) => {
-    directoryPage = Math.max(0, Number(page) || 0);
+  const requestDirectory = () => {
     activeDirectoryRequestId = ++directoryRequestId;
-    socket.emit('homeDirectoryRequest', { page: directoryPage, requestId: activeDirectoryRequestId });
+    socket.emit('homeDirectoryRequest', { requestId: activeDirectoryRequestId });
   };
 
   function renderHome() {
@@ -107,16 +110,27 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       homePanel.hidden = false;
       const homes = directory;
       homePanel.innerHTML =
-        '<div class="home-panel-head"><b>Homes directory</b><button type="button" data-collapse>Hide</button></div>' +
-        '<div class="home-section home-directory"><small>Approved homes · directory block ' + (directoryMeta.page + 1) + ' of ' + directoryMeta.pageCount +
-        '. Each listed resident matches the same numbered house and glowing doorway on this street.</small>' +
-        (homes.length ? homes.map((home, index) => '<span class="home-directory-item"><small>Residence ' + (index + 1) + ' · </small>' +
+        '<div class="home-panel-head"><b>Willow Walk</b><button type="button" data-collapse>Hide</button></div>' +
+        '<div class="home-section home-directory"><small>' + homes.length +
+        ' approved homes · every address is a persistent account lot on this one street.</small>' +
+        (homes.length ? homes.map((home) => '<span class="home-directory-item"><small>Lot ' + home.lotIndex + ' · </small>' +
           escapeHtml(home.name || home.ownerEmail) + ' <small>(' + escapeHtml(home.accessMode) + ')</small></span>').join('') :
           '<small>No homes available yet.</small>') +
-        (directoryMeta.pageCount > 1 ? '<div class="home-pager"><button type="button" data-page="prev" ' +
-          (directoryMeta.page <= 0 ? 'disabled' : '') + '>Previous block</button><button type="button" data-page="next" ' +
-          (directoryMeta.page >= directoryMeta.pageCount - 1 ? 'disabled' : '') + '>Next block</button></div>' : '') +
-        '</div><small class="home-panel-note">Walk through the numbered residence doorway for that resident.</small>';
+        '</div>' +
+        (homeState?.canEdit
+          ? '<div class="home-section"><small>Your fenced yard · choose an owned item, then click a clear square in your yard.</small>' +
+            (Array.isArray(homeState.inventory) && homeState.inventory.length
+              ? homeState.inventory.map((item) => '<span class="home-item ' + (selectedInstance === item.id ? 'selected' : '') + '">' +
+                escapeHtml(furnitureCatalog[item.furnitureId]?.name || item.furnitureId) +
+                '<button type="button" data-yard-select="' + escapeHtml(item.id) + '">Place outside</button></span>').join('')
+              : '<small>No unplaced furniture. Visit Huddle Home for furnishings or store an item from your room.</small>') +
+            (Array.isArray(homeState.yard) && homeState.yard.length
+              ? '<small>Yard items</small>' + homeState.yard.map((item) => '<span class="home-item">' +
+                escapeHtml(furnitureCatalog[item.furnitureId]?.name || item.furnitureId) +
+                '<button type="button" data-yard-move="' + escapeHtml(item.id) + '">Move</button>' +
+                '<button type="button" data-return="' + escapeHtml(item.id) + '">Store</button></span>').join('')
+              : '') + '</div>' : '') +
+        '<small class="home-panel-note">Walk to a lit front door to visit. Visitors can look, but only the owner can decorate.</small>';
       homePanel.querySelector('[data-collapse]').onclick = () => { homePanel.hidden = true; };
       const directoryBody = homePanel.querySelector('.home-directory');
       const directoryNote = homePanel.querySelector('.home-panel-note');
@@ -130,8 +144,26 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         toggleDirectory.textContent = directoryBody.hidden ? 'Open' : 'Close';
         scheduleHudReservation();
       };
-      homePanel.querySelectorAll('[data-page]').forEach((button) => {
-        button.onclick = () => requestDirectory(button.dataset.page === 'next' ? directoryMeta.page + 1 : directoryMeta.page - 1);
+      homePanel.querySelectorAll('[data-yard-select]').forEach((button) => {
+        button.onclick = () => {
+          selectedInstance = button.dataset.yardSelect;
+          selectedRotation = 0;
+          selectedZone = 'yard';
+          toast('Click an open square in your fenced yard.');
+          renderHome();
+        };
+      });
+      homePanel.querySelectorAll('[data-return]').forEach((button) => {
+        button.onclick = () => socket.emit('homeLayoutReturn', { instanceId: button.dataset.return });
+      });
+      homePanel.querySelectorAll('[data-yard-move]').forEach((button) => {
+        button.onclick = () => {
+          selectedInstance = button.dataset.yardMove;
+          selectedRotation = 0;
+          selectedZone = 'yard';
+          toast('Click a new open square in your fenced yard.');
+          renderHome();
+        };
       });
       window.jpoHouseColors?.render(homePanel);
       return;
@@ -148,6 +180,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     ).join('') || '<small>No unplaced furniture yet.</small>';
     const layoutMarkup = layout.map((item) =>
       '<span class="home-item"><span>' + escapeHtml(itemName(item)) + ' (' + item.gridX + ',' + item.gridY + ')</span>' +
+        '<button type="button" data-move="' + escapeHtml(item.id) + '">Move</button>' +
         '<button type="button" data-return="' + escapeHtml(item.id) + '">Store</button></span>',
     ).join('') || '<small>Your room is ready to furnish.</small>';
     const directoryMarkup = directory.length
@@ -175,7 +208,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     homePanel.innerHTML =
       '<div class="home-panel-head"><b>' + (canEdit ? 'Your starter home' : 'Visiting a home') +
       '</b><button type="button" data-collapse>' + (editorOpen ? 'Collapse' : 'Open panel') + '</button></div>' +
-       '<div class="home-section home-directory"><small>Neighbors — select one at a residential street, then use a glowing RESIDENCE doorway.</small>' +
+        '<div class="home-section home-directory"><small>Willow Walk neighbors — each glowing home door belongs to this permanent lot.</small>' +
       directoryMarkup + '</div>' +
       (editorOpen ? editor : (canEdit ? '<small class="home-panel-note">Open panel to place, store, or manage your home.</small>' : ''));
 
@@ -184,12 +217,22 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       button.onclick = () => {
         selectedInstance = button.dataset.select;
         selectedRotation = 0;
+        selectedZone = 'indoor';
         editorOpen = true;
         renderHome();
       };
     });
     homePanel.querySelectorAll('[data-return]').forEach((button) => {
       button.onclick = () => socket.emit('homeLayoutReturn', { instanceId: button.dataset.return });
+    });
+    homePanel.querySelectorAll('[data-move]').forEach((button) => {
+      button.onclick = () => {
+        selectedInstance = button.dataset.move;
+        selectedRotation = 0;
+        selectedZone = 'indoor';
+        editorOpen = true;
+        renderHome();
+      };
     });
     const access = homePanel.querySelector('#home-access');
     if (access) access.value = homeState.accessMode || 'public';
@@ -225,7 +268,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       escapeHtml(item.id) + '">Buy</button></span>',
     ).join('') || '<small>The catalog is loading.</small>';
     panel.innerHTML = '<div class="home-panel-head"><b>Huddle Home · Furnishings</b><button type="button" data-close>Close</button></div>' +
-        '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to Willow Walk, then enter your townhouse to place it.</small>' + rows + '</div>';
+        '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.</small>' + rows + '</div>';
     panel.querySelector('[data-close]').onclick = () => { panel.hidden = true; };
     panel.querySelectorAll('[data-buy]').forEach((button) => {
       button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
@@ -250,17 +293,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   requestDirectory();
   socket.on('homeDirectory', (payload) => {
-    // The exterior slots are the current page. Ignore a delayed previous-page
-    // reply rather than repainting numbered doors with a different page after
-    // the player has already changed directory blocks.
+    // Ignore delayed directory replies. Street lots are canonical account
+    // addresses and never depend on a pagination page.
     if (Number.isInteger(payload?.requestId) && payload.requestId !== activeDirectoryRequestId) return;
     directory = Array.isArray(payload) ? payload : (Array.isArray(payload?.homes) ? payload.homes : []);
-    directoryMeta = {
-      page: Number.isInteger(payload?.page) ? payload.page : directoryPage,
-      pageCount: Math.max(1, Number(payload?.pageCount) || 1),
-      total: Number(payload?.total) || directory.length,
-    };
-    directoryPage = directoryMeta.page;
     if (payload?.error) toast(payload.error);
     window._neighborhoodScene?.updateResidenceDirectory(directory);
     renderHome();
@@ -281,6 +317,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (isHome()) renderHome();
   });
   socket.on('homeActionResult', (result) => {
+    // A mutation always ends its placement gesture. This prevents a stale
+    // preview from being re-used after either a server rejection or a move.
+    selectedInstance = null;
+    selectedRotation = 0;
+    selectedZone = 'indoor';
+    window._neighborhoodScene?.clearPlacementPreview?.();
+    if (isHome() || isResidentialBlock()) renderHome();
     if (result?.message) toast(result.message);
   });
   socket.on('homeAccessResult', (result) => {
@@ -298,6 +341,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   // normal server-filtered directory keeps private homes private while still
   // updating visible street roofs in real time.
   socket.on('homeColorChanged', (payload) => {
+    if (payload?.refreshDirectory && isResidentialBlock()) requestDirectory();
+  });
+  socket.on('homeStreetChanged', (payload) => {
     if (payload?.refreshDirectory && isResidentialBlock()) requestDirectory();
   });
   socket.on('homeEjected', (result) => toast(result?.message || 'You left the home.'));
@@ -361,7 +407,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.load.image('int_' + id, '/assets/neighborhood/' + id.replace('_', '-') + '-16.png');
       });
-      ['house', 'townhouse', 'shop', 'tree', 'bench', 'lamp'].forEach((id) => {
+      ['house', 'shop', 'tree', 'bench', 'lamp'].forEach((id) => {
         this.load.image('ext_' + id, '/assets/neighborhood/exterior/' + id + '.png');
       });
       // The base house remains the normal Phaser asset; this hook documents
@@ -387,8 +433,29 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     create(data) {
+      // ScenePlugin.restart() reuses this JavaScript instance. Phaser clears its
+      // display list, but it does not invoke an arbitrary `shutdown()` method
+      // unless it is subscribed to the scene SHUTDOWN event. Subscribe on every
+      // create (once per lifecycle), then also discard every presentation
+      // reference before drawing this map. Otherwise a home create can run
+      // updateResidenceDirectory against destroyed Willow Walk house/sign
+      // objects from the previous scene and abort the new scene lifecycle.
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
       this._resetTransientTravel();
       this._removePlacementInput();
+      this.remotes = {};
+      this.furniture = [];
+      this.streetLotsVisual = null;
+      this.localBubble = null;
+      this.localCosmetic = this.localWings = this.localPet = null;
+      this.localCosmeticDef = this.localWingsDef = null;
+      this.localSlotObjs = {};
+      this.ghost = null;
+      this.player = null;
+      this.localNameTag = null;
+      this.interactHint = null;
+      this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
+      this.keys = this.wasd = this.keyE = null;
       window._neighborhoodScene = this;
       this.info = data?.map || {};
       this.location = data?.location || currentLocation;
@@ -403,13 +470,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._setNeighborhoodTextureFilters();
       this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
       this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
+      // The shared street deliberately opens out enough to read several real
+      // homes at once; rooms retain the office's normal close scale.
+      this.cameras.main.setZoom(atHome ? 1 : (this.location === 'neighborhood' ? 0.7 : 1));
 
       // All maps are composed here from repeatable tile-sized ground, paths,
       // and separate transparent objects. None uses a baked screenshot/map PNG.
       if (atHome) this._drawHome();
       else if (this.location === 'furniture-shop') this._drawShop();
       else if (this.location === 'neighborhood') this._drawNeighborhood();
-      else if (this.location === 'maple-row' || this.location === 'juniper-square') this._drawResidentialBlock(this.location);
       else this._drawCity();
 
       const self = data?.self || data?.spawn || {};
@@ -429,9 +498,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.cameras.main.startFollow(this.player);
 
       this._geometryBlocks = this.physics.add.staticGroup();
+      this._yardBlocks = this.physics.add.staticGroup();
       this._furnitureBlocks = this.physics.add.staticGroup();
-      (this.info.geometry?.blockers || []).forEach((block) => this._addBlock(this._geometryBlocks, block));
+      (this.info.geometry?.blockers || []).forEach((block) =>
+        this._addBlock(block.furnitureId ? this._yardBlocks : this._geometryBlocks, block));
       this.physics.add.collider(this.player, this._geometryBlocks);
+      this.physics.add.collider(this.player, this._yardBlocks);
       this.physics.add.collider(this.player, this._furnitureBlocks);
       this.doors = this.info.portals || [];
       this.updateResidenceDirectory(directory);
@@ -450,6 +522,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.renderFurniture(homeState);
       this.syncPlayers(data?.players || {});
       this._installPlacementInput(atHome);
+      // This is intentionally in create rather than immediately after
+      // SceneManager.start/restart. Phaser queues lifecycle operations, so
+      // fading the old scene after a queued restart was one source of a frozen,
+      // stopped NeighborhoodScene.
+      if (data?._sceneTransitionGeneration === sceneTransitionGeneration) {
+        this._portalFading = false;
+        this._portalFadeAt = 0;
+        this.cameras.main.fadeIn(220, 16, 22, 34);
+      }
     }
 
     _tileField(base, alternate) {
@@ -531,19 +612,53 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _drawNeighborhood() {
       this._tileField(0x77a45f, 0x6f9b59);
-      this._path({ x: 0, y: 432, width: 1440, height: 192 }, 0x55616a, 0x3f4950);
-      this._path({ x: 0, y: 408, width: 1440, height: 24 }, 0xd8ccb3);
-      this._path({ x: 0, y: 624, width: 1440, height: 24 }, 0xd8ccb3);
-      this._path({ x: 576, y: 0, width: 144, height: 432 });
-      this._path({ x: 576, y: 624, width: 144, height: 432 });
-      this._path({ x: 1200, y: 432, width: 144, height: 192 });
-      this._roadDetails(528, 648, [{ x: 636, y: 420 }, { x: 636, y: 636 }]);
-      this._exterior('townhouse', 636, 330);
-      [[430, 260], [480, 728], [960, 748], [116, 790], [1294, 214], [330, 770]].forEach(([x, y]) => this._exterior('tree', x, y));
-      [[500, 420], [816, 420], [1160, 420], [278, 420]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
-      [[420, 604], [900, 420], [1100, 420]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
-      this._sign(636, 82, 'WILLOW WALK');
-      this._sign(636, 234, 'Your townhouse');
+      const lots = Array.isArray(this.info.streetLots) ? this.info.streetLots : [];
+      const segments = Math.max(1, Math.ceil(lots.length / 8));
+      for (let segment = 0; segment < segments; segment++) {
+        const base = segment * 960;
+        this._path({ x: 0, y: base + 432, width: this.mapWidth, height: 144 }, 0x55616a, 0x3f4950);
+        this._path({ x: 0, y: base + 408, width: this.mapWidth, height: 24 }, 0xd8ccb3);
+        this._path({ x: 0, y: base + 576, width: this.mapWidth, height: 24 }, 0xd8ccb3);
+        this._path({ x: 552, y: base, width: 48, height: 432 });
+        this._path({ x: 552, y: base + 576, width: 48, height: 384 });
+        this._roadDetails(base + 504, 576, [{ x: 540, y: base + 420 }, { x: 612, y: base + 588 }]);
+        [[90, base + 228], [1090, base + 228], [90, base + 760], [1090, base + 760]]
+          .forEach(([x, y]) => this._exterior('tree', x, y));
+        [[270, base + 420], [486, base + 420], [810, base + 420], [1110, base + 420],
+          [270, base + 600], [486, base + 600], [810, base + 600], [1110, base + 600]]
+          .forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      }
+      this.streetLotsVisual = [];
+      lots.forEach((lot) => {
+        this._path({ x: lot.x - 36, y: lot.northSide ? lot.bottom - 90 : lot.bottom - 236,
+          width: 72, height: lot.northSide ? 198 : 246 });
+        const house = this._exterior('house', lot.x, lot.bottom, 2, 4, lot.exteriorColor || 'teal');
+        const sign = this._sign(lot.x, lot.bottom - 102, 'LOT ' + lot.lot + '\n' + String(lot.name || lot.ownerEmail).slice(0, 24));
+        this.streetLotsVisual.push({ lot, house, sign, yard: this._drawStreetYard(lot) });
+      });
+      this._sign(720, 72, 'WILLOW WALK · ONE SHARED STREET');
+    }
+
+    _drawStreetYard(lot) {
+      // Yard objects remain outdoors and are saved in the same owner snapshot
+      // as the room. The fenced patch is intentionally behind the facade, so
+      // its compact 4×3 grid never narrows the public pavement.
+      const originX = lot.x - 96;
+      const originY = lot.northSide ? lot.bottom - 330 : lot.bottom - 66;
+      const objects = [];
+      const art = this.add.graphics().setDepth(Math.max(2, originY - 1));
+      objects.push(art);
+      art.fillStyle(0x6d9855, 0.9).fillRect(originX, originY, 192, 144);
+      art.lineStyle(3, 0xd7c18e, 0.95).strokeRect(originX, originY, 192, 144);
+      for (const item of lot.yard || []) {
+        const def = furnitureCatalog[item.furnitureId];
+        if (!def) continue;
+        const footprint = this._footprint(def, item.rotation);
+        const baseY = originY + (item.gridY + footprint.height) * 48;
+        objects.push(this.add.image(originX + item.gridX * 48 + footprint.width * 24, baseY, this._furnitureTextureKey(def.id))
+          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(baseY));
+      }
+      return objects;
     }
 
     _drawCity() {
@@ -556,9 +671,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._path({ x: 696, y: 0, width: 24, height: 912 });
       this._path({ x: 836, y: 328, width: 72, height: 104 });
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
-      // City is commerce and transit. This closed market facade replaces the
-      // former second, color-mirrored "YOUR HOME" entrance; the owner's only
-      // residential address remains the Willow Walk townhouse.
+      // City is commerce and transit. Its closed market is not a second home;
+      // every residential address exists only on Willow Walk.
       this._exterior('shop', 290, 340);
       this._exterior('shop', 872, 328);
       [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 728], [1048, 736]].forEach(([x, y]) => this._exterior('tree', x, y));
@@ -568,44 +682,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       plaza.fillStyle(0xbfd3cb, 1).fillCircle(576, 500, 92).lineStyle(4, 0xe9dfb9, 0.8).strokeCircle(576, 500, 92);
       plaza.fillStyle(0x66a7c0, 1).fillCircle(576, 500, 34).lineStyle(3, 0xe9f8ff, 0.85).strokeCircle(576, 500, 34);
        this._sign(290, 80, 'PLAZA MARKET · CLOSED');
-      this._sign(872, 88, 'HUDDLE HOME');
-      this._sign(576, 302, 'HUDDLE PLAZA');
-       this._sign(1084, 420, 'MAPLE ROW →');
-       this._sign(576, 800, '↓ JUNIPER SQUARE');
-    }
-
-    _drawResidentialBlock(kind) {
-      const maple = kind === 'maple-row';
-      this._tileField(maple ? 0x78a762 : 0x74a06a, maple ? 0x709b59 : 0x6a965f);
-      this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
-      this._path({ x: 552, y: 0, width: 48, height: 912 }, 0x535e66, 0x3e4750);
-      this._path({ x: 0, y: 408, width: 1152, height: 24 });
-      this._path({ x: 0, y: 576, width: 1152, height: 24 });
-      this._path({ x: 528, y: 0, width: 24, height: 912 });
-      this._path({ x: 600, y: 0, width: 24, height: 912 });
-      const homes = [[180, 340], [420, 340], [732, 340], [972, 340], [180, 812], [420, 812], [732, 812], [972, 812]];
-      this.residenceLots = [];
-      homes.forEach(([x, bottom], index) => {
-        // This is the same 72px clear door path represented in the shared
-        // geometry; every shown home has one of the real residence portals.
-        this._path({ x: x - 36, y: bottom < 500 ? bottom - 90 : 576, width: 72,
-          height: bottom < 500 ? 198 : bottom - 566 });
-        const resident = directory[index];
-        const house = this._exterior('house', x, bottom, 2, 4, resident?.exteriorColor || 'teal');
-        const sign = this._sign(x, bottom - 102, resident
-          ? ('RESIDENCE ' + (index + 1) + '\n' + String(resident.name || resident.ownerEmail).slice(0, 24))
-          : ('RESIDENCE ' + (index + 1)));
-        this.residenceLots.push({ house, sign, index });
-      });
-      const trees = maple
-        ? [[87, 234], [559, 234], [1115, 252], [99, 756], [561, 780], [1107, 756]]
-        : [[87, 242], [559, 250], [1115, 242], [103, 756], [561, 768], [1107, 766]];
-      trees.forEach(([x, y]) => this._exterior('tree', x, y));
-      [[576, 410], [576, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
-      this._roadDetails(504, 576, [{ x: 540, y: 420 }, { x: 612, y: 588 }]);
-       this.residenceStreetSign = this._sign(576, 72,
-         (maple ? 'MAPLE ROW' : 'JUNIPER SQUARE') + ' · DIRECTORY BLOCK ' + (directoryMeta.page + 1));
-      this._sign(576, 128, 'Each numbered residence and doorway matches the directory.');
+       this._sign(872, 88, 'HUDDLE HOME');
+       this._sign(576, 302, 'HUDDLE PLAZA');
+       this._sign(94, 420, '← WILLOW WALK');
     }
 
     setOwnHomeColor(color) {
@@ -613,18 +692,36 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     updateResidenceDirectory(entries) {
-      if (!this.residenceLots) return;
+      if (!this.streetLotsVisual) return;
       const homes = Array.isArray(entries) ? entries : [];
-      this.residenceLots.forEach((lot) => {
-        const resident = homes[lot.index];
-        window.jpoHouseColors?.applyHomeColor(lot.house, resident?.exteriorColor || 'teal');
-        const label = resident
-          ? ('RESIDENCE ' + (lot.index + 1) + '\n' + String(resident.name || resident.ownerEmail).slice(0, 24))
-          : ('RESIDENCE ' + (lot.index + 1));
-        lot.sign?.setText(label);
+      this.streetLotsVisual.forEach((visual) => {
+        const current = homes.find((home) => home.ownerEmail === visual.lot.ownerEmail);
+        if (!current || current.ownerEmail !== visual.lot.ownerEmail) return;
+        window.jpoHouseColors?.applyHomeColor(visual.house, current.exteriorColor || 'teal');
+        visual.sign?.setText('LOT ' + visual.lot.lot + '\n' + String(current.name || current.ownerEmail).slice(0, 24));
+        visual.yard?.forEach((object) => object.destroy());
+        visual.lot = { ...visual.lot, ...current };
+        visual.yard = this._drawStreetYard(visual.lot);
       });
-      this.residenceStreetSign?.setText((this.location === 'maple-row' ? 'MAPLE ROW' : 'JUNIPER SQUARE') +
-        ' · DIRECTORY BLOCK ' + (directoryMeta.page + 1));
+      // Rebuild only from the updated authoritative lot data. This keeps
+      // client Arcade collision aligned with the server's street snapshot
+      // after an owner places or stores an outdoor item.
+      if (this._yardBlocks && this.info.geometry) {
+        const fixed = (this.info.geometry.blockers || []).filter((block) => !block.furnitureId);
+        const yardBlocks = this.streetLotsVisual.flatMap((visual) => (visual.lot.yard || []).flatMap((placed) => {
+          const def = furnitureCatalog[placed.furnitureId];
+          if (!def) return [];
+          const footprint = this._footprint(def, placed.rotation);
+          const originY = visual.lot.northSide ? visual.lot.bottom - 330 : visual.lot.bottom - 66;
+          return [{
+            x: visual.lot.x - 96 + placed.gridX * 48, y: originY + placed.gridY * 48,
+            width: footprint.width * 48, height: footprint.height * 48, furnitureId: placed.furnitureId,
+          }];
+        }));
+        this.info.geometry.blockers = [...fixed, ...yardBlocks];
+        this._yardBlocks.clear(true, true);
+        yardBlocks.forEach((block) => this._addBlock(this._yardBlocks, block));
+      }
     }
 
     _drawShop() {
@@ -664,9 +761,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const cue = this.add.graphics().setDepth(3);
         cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
         cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
-        const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Residence ' + portal.lot) : 'Your townhouse')).toUpperCase() :
+        const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' : portal.destination === 'city' ? 'PLAZA' :
-          portal.destination === 'maple-row' ? 'MAPLE ROW' : portal.destination === 'juniper-square' ? 'JUNIPER SQ' :
           portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
         this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
@@ -760,26 +856,42 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _installPlacementInput(atHome) {
       this._removePlacementInput();
+      const atStreet = this.location === 'neighborhood';
+      const yardLot = atStreet && Array.isArray(this.info.streetLots)
+        ? this.info.streetLots.find((lot) => lot.ownerEmail === globals()._playerEmail) : null;
+      const yardOrigin = yardLot ? {
+        x: yardLot.x - 96, y: yardLot.northSide ? yardLot.bottom - 330 : yardLot.bottom - 66,
+      } : null;
       this._placementMoveHandler = (pointer) => {
-        if (!atHome || !homeState?.canEdit || !selectedInstance) return this._clearGhost();
-        const item = homeState.inventory?.find((candidate) => candidate.id === selectedInstance);
+        const usingYard = atStreet && selectedZone === 'yard';
+        if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || (usingYard && !yardOrigin)) return this._clearGhost();
+        const item = [...(homeState.inventory || []), ...(homeState.layout || []), ...(homeState.yard || [])]
+          .find((candidate) => candidate.id === selectedInstance);
         const def = item && furnitureCatalog[item.furnitureId];
         if (!def) return this._clearGhost();
-        const gridX = Math.floor(pointer.worldX / 48), gridY = Math.floor(pointer.worldY / 48);
+        const gridX = Math.floor((pointer.worldX - (usingYard ? yardOrigin.x : 0)) / 48);
+        const gridY = Math.floor((pointer.worldY - (usingYard ? yardOrigin.y : 0)) / 48);
         const footprint = this._footprint(def, selectedRotation);
-        const blocked = !this._validPlacement(def, gridX, gridY, selectedRotation);
+        const blocked = usingYard
+          ? !this._validYardPlacement(def, gridX, gridY, selectedRotation)
+          : !this._validPlacement(def, gridX, gridY, selectedRotation);
         if (!this.ghost) this.ghost = this.add.image(0, 0, this._furnitureTextureKey(def.id)).setAlpha(0.6).setDepth(25);
         this.ghost.setTexture(this._furnitureTextureKey(def.id)).setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(selectedRotation)
-          .setPosition(gridX * 48 + footprint.width * 24, (gridY + footprint.height) * 48);
+          .setPosition((usingYard ? yardOrigin.x : 0) + gridX * 48 + footprint.width * 24,
+            (usingYard ? yardOrigin.y : 0) + (gridY + footprint.height) * 48);
         if (blocked) this.ghost.setTint(0xff5555); else this.ghost.clearTint();
       };
       this._placementDownHandler = (pointer) => {
-        if (!atHome || !homeState?.canEdit || !selectedInstance || !this.ghost || this.ghost.isTinted) {
-          if (atHome && selectedInstance && this.ghost?.isTinted) toast('That furniture does not fit there.');
+        const usingYard = atStreet && selectedZone === 'yard';
+        if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || !this.ghost || this.ghost.isTinted) {
+          if ((atHome || usingYard) && selectedInstance && this.ghost?.isTinted) toast('That furniture does not fit there.');
           return;
         }
         socket.emit('homeLayoutSet', {
-          instanceId: selectedInstance, gridX: Math.floor(pointer.worldX / 48), gridY: Math.floor(pointer.worldY / 48), rotation: selectedRotation,
+          instanceId: selectedInstance,
+          gridX: Math.floor((pointer.worldX - (usingYard ? yardOrigin.x : 0)) / 48),
+          gridY: Math.floor((pointer.worldY - (usingYard ? yardOrigin.y : 0)) / 48),
+          rotation: selectedRotation, zone: usingYard ? 'yard' : 'indoor',
         });
         selectedInstance = null;
         this._clearGhost();
@@ -794,6 +906,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.ghost = null;
     }
 
+    clearPlacementPreview() {
+      this._clearGhost();
+    }
+
     _footprint(def, rotation) {
       return rotation % 180 === 90 ? { width: def.height || 1, height: def.width || 1 } : { width: def.width || 1, height: def.height || 1 };
     }
@@ -803,6 +919,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (gridX < 0 || gridY < 0 || gridX + footprint.width > 12 || gridY + footprint.height > 9 ||
           (gridX < 7 && gridX + footprint.width > 5 && gridY < 9 && gridY + footprint.height > 6)) return false;
       return !(homeState?.layout || []).some((placed) => {
+        if (placed.id === selectedInstance) return false;
+        const other = furnitureCatalog[placed.furnitureId];
+        if (!other) return false;
+        const otherFootprint = this._footprint(other, placed.rotation);
+        return gridX < placed.gridX + otherFootprint.width && gridX + footprint.width > placed.gridX &&
+          gridY < placed.gridY + otherFootprint.height && gridY + footprint.height > placed.gridY;
+      });
+    }
+
+    _validYardPlacement(def, gridX, gridY, rotation) {
+      const footprint = this._footprint(def, rotation);
+      if (gridX < 0 || gridY < 0 || gridX + footprint.width > 4 || gridY + footprint.height > 3 ||
+          (gridX < 2 && gridX + footprint.width > 1 && gridY === 2)) return false;
+      return !(homeState?.yard || []).some((placed) => {
+        if (placed.id === selectedInstance) return false;
         const other = furnitureCatalog[placed.furnitureId];
         if (!other) return false;
         const otherFootprint = this._footprint(other, placed.rotation);
@@ -812,7 +943,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     renderFurniture(state) {
-      if (!this.scene.isActive() || !this.location?.startsWith('home:')) return;
+      // create() is still in Phaser's CREATING state, not ACTIVE. The incoming
+      // home snapshot can already be complete at that point, and no second
+      // snapshot is guaranteed, so do not suppress the initial furniture build.
+      if (!this.location?.startsWith('home:') || !this._furnitureBlocks) return;
       this.furniture.forEach((object) => object.destroy());
       this.furniture = [];
       this._furnitureBlocks?.clear(true, true);
@@ -848,7 +982,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     syncPlayers(players) {
-      if (!this.scene.isActive()) return;
+      // Like furniture, the authoritative arrival snapshot is applied during
+      // create before the scene status becomes ACTIVE.
+      if (!this.player) return;
       Object.entries(players || {}).forEach(([id, player]) => {
         if (id !== socket.id && player?.email !== globals()._playerEmail) this.addRemote(id, player);
         if (id === socket.id) this.correctLocal(player);
@@ -1065,13 +1201,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       else if (seat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else this.interactHint.setVisible(false);
       if (door && this.portalRelease && !this.transitionRequested) {
-        // Residential doors map to the same page slot displayed on their sign,
-        // never a separately selected name. A stale/empty page cannot form a
-        // home target at all.
-        const resident = door.residence ? directory[(Number(door.lot) || 1) - 1] : null;
+        // Each door carries the visible lot's canonical account address. No
+        // page number or client-selected directory entry can form a target.
+        const resident = door.residence ? directory.find((home) => Number(home.lotIndex) === Number(door.lot)) : null;
         const destination = door.destination === 'home'
           ? ('home:' + (door.residence
-            ? (resident?.ownerEmail || '')
+            ? (door.ownerEmail || resident?.ownerEmail || '')
             : (globals()._playerEmail || '')))
           : door.destination;
         if (destination !== 'home:') {
@@ -1093,7 +1228,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
                this._portalTravelTimer = null;
                if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
                window.jpoBeginMapFade?.();
-                travel(destination, door.residence ? { residencePage: directoryMeta.page } : undefined);
+                 travel(destination);
              }, 38);
            }, 42);
         }
@@ -1126,11 +1261,23 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._clearGhost();
       this._clearLocalPresentation();
       Object.keys(this.remotes).forEach((id) => this._removeRemote(id));
+      this.remotes = {};
+      this.furniture = [];
+      this.streetLotsVisual = null;
+      this.localBubble = null;
+      this.player = null;
+      this.localNameTag = null;
+      this.interactHint = null;
+      this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
+      this.keys = this.wasd = this.keyE = null;
       if (window._neighborhoodScene === this) window._neighborhoodScene = null;
     }
   }
 
   socket.on('locationTransitionResult', (result) => {
+    const generation = ++sceneTransitionGeneration;
+    clearTimeout(sceneTransitionTimer);
+    sceneTransitionTimer = null;
     if (!result?.ok) {
       officePortalTransition = false;
       const active = window._phaserGame?.scene?.getScenes(true)?.find((scene) => scene._portalFading);
@@ -1147,6 +1294,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (!game) return;
     const outgoing = game.scene.getScenes(true).find((scene) => scene.scene.key === 'OfficeScene' || scene.scene.key === 'NeighborhoodScene');
     const finish = () => {
+      // A delayed fade completion belongs to an older server result. In
+      // particular, it must not stop a newly restarted shared scene.
+      if (generation !== sceneTransitionGeneration) return;
       currentLocation = result.location;
       title.textContent = result.map?.label || result.location;
       furnitureCatalog = result.catalog || furnitureCatalog;
@@ -1167,8 +1317,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       renderShop();
       if (result.location === 'office') {
-        game.scene.stop('NeighborhoodScene');
-        game.scene.wake('OfficeScene');
+        // Stopping a scene that is already inactive is harmless; importantly,
+        // this branch is generation-gated so an old home/street result cannot
+        // stop the currently active shared scene.
+        if (game.scene.isActive('NeighborhoodScene')) game.scene.stop('NeighborhoodScene');
+        if (game.scene.isSleeping('OfficeScene')) game.scene.wake('OfficeScene');
+        else if (!game.scene.isActive('OfficeScene')) game.scene.start('OfficeScene');
         const office = game.scene.getScene('OfficeScene');
         if (office.player) {
           office.player.setPosition(result.self.x, result.self.y);
@@ -1182,15 +1336,26 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
          // OfficeScene was already asleep after the first outdoor transition;
          // Phaser warns (and some builds interrupt the next scene lifecycle)
          // when asked to sleep it again.
-         if (game.scene.isActive('OfficeScene')) game.scene.sleep('OfficeScene');
-        game.scene.start('NeighborhoodScene', result);
-        const next = game.scene.getScene('NeighborhoodScene');
-        next._portalFading = false;
-        next.cameras.main.fadeIn(220, 16, 22, 34);
+        if (game.scene.isActive('OfficeScene')) game.scene.sleep('OfficeScene');
+        const sceneData = { ...result, _sceneTransitionGeneration: generation };
+        // NeighborhoodScene is deliberately shared by city, street, shop and
+        // homes. Starting an already-active key queues a stop/start pair; a
+        // second delayed result could then leave its replacement stopped.
+        // Restart has one ordered lifecycle and its create() owns fade-in.
+        if (game.scene.isActive('NeighborhoodScene')) {
+          game.scene.getScene('NeighborhoodScene').scene.restart(sceneData);
+        } else {
+          game.scene.start('NeighborhoodScene', sceneData);
+        }
       }
     };
     const elapsed = outgoing?._portalFading ? performance.now() - (outgoing._portalFadeAt || performance.now()) : 0;
-    if (outgoing?._portalFading && elapsed < 220) setTimeout(finish, 220 - elapsed);
+    if (outgoing?._portalFading && elapsed < 220) {
+      sceneTransitionTimer = setTimeout(() => {
+        sceneTransitionTimer = null;
+        finish();
+      }, 220 - elapsed);
+    }
     else finish();
   });
 
