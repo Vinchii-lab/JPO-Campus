@@ -106,6 +106,8 @@
 .home-directory { max-height: 160px; overflow-y: auto; }
 .home-directory-item { display: block; width: 100%; margin: 3px 0; text-align: left; color: #d7e7d2; }
 .home-directory-item.selected { border-color: #f5ce64; background: #2a475e; }
+.home-pager { display: flex; justify-content: space-between; gap: 6px; margin-top: 8px; }
+.home-pager button:disabled { cursor: default; opacity: 0.45; transform: none; }
 .home-invite { display: flex; gap: 5px; margin: 8px 0; }
 .home-invite input { min-width: 0; flex: 1; margin-right: 0 !important; }
 .home-editor-controls > small { margin-top: 10px; }

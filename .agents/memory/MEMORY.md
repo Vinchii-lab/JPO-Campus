@@ -27,3 +27,4 @@
 - [JPO Huddle Grand Event](jpo-huddle-grand-event.md) — persist outcomes before rewards; spectator/quit is a separate account-keyed viewer preference, never a bracket or escrow mutation.
 - [JPO Huddle Bingo roles & restarts](jpo-huddle-bingo.md) — starter is a host/spectator unless they Join; boot-scoped game IDs prevent old cards surviving a server restart.
 - [Neighborhood direction](jpo-neighborhood-direction.md) — walk through garden exits/doors with fades; authored tile maps, never destination buttons or flattened interior PNG backdrops.
+- [Neighborhood collisions](jpo-neighborhood-collision.md) — refresh Arcade body measurements before offset conversion; reused scenes must reset travel flags and timers.

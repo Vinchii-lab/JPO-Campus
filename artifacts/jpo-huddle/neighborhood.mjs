@@ -2,12 +2,40 @@
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
 export const HOME_GRID = { width: 12, height: 9, cell: 48 };
+// Player positions are foot-centre coordinates. Both movement validation and
+// the client Arcade collider use this radius, rather than separate magic
+// margins that drift at facades and door thresholds.
+export const ACTOR_FOOT_RADIUS = 16;
+// These are physical residential streets, not destination-menu aliases.  A
+// residence still opens only for the directory entry selected by the player;
+// that selection is an email, never a page/slot number, so paging or a newly
+// approved account cannot send somebody to a different home.
+export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["city", "maple-row", "juniper-square"]);
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
   city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
+  "maple-row": { id: "maple-row", label: "Maple Row", spawn: { x: 96, y: 504, dir: "right" }, bounds: { width: 1152, height: 912 } },
+  "juniper-square": { id: "juniper-square", label: "Juniper Square", spawn: { x: 576, y: 96, dir: "down" }, bounds: { width: 1152, height: 912 } },
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
 });
+const RESIDENCE_CENTERS = Object.freeze([
+  [180, 340], [420, 340], [732, 340], [972, 340],
+  [180, 812], [420, 812], [732, 812], [972, 812],
+]);
+// The supplied house sprite's facade is 224px wide with a 72px centered
+// doorway.  Keep this one source for every residential street: the visible
+// footprint, server blocker, and walkable front path agree exactly.
+const residenceBlockers = () => RESIDENCE_CENTERS.flatMap(([centerX, bottomY]) => [
+  { x: centerX - 112, y: bottomY - 234, width: 224, height: 145 },
+  { x: centerX - 112, y: bottomY - 89, width: 76, height: 90 },
+  { x: centerX + 36, y: bottomY - 89, width: 76, height: 90 },
+]);
+const residenceDoors = () => RESIDENCE_CENTERS.map(([centerX, bottomY], lot) => ({
+  destination: "home", residence: true, lot: lot + 1,
+  x: centerX - 36, y: bottomY - 90, width: 72, height: 100,
+  label: `Residence ${lot + 1}`,
+}));
 // This is the shared world contract for the client map and server validator.
 // Every facade below has a matching explicit collider.  The narrow gaps are
 // intentional paved doorways, never visual-only entrances.
@@ -15,12 +43,8 @@ export const LOCATION_GEOMETRY = Object.freeze({
   office: { blockers: [], doors: [] },
   neighborhood: {
     blockers: [
-      // west cottage and its garden trees
-      { x: 120, y: 108, width: 240, height: 160 }, { x: 120, y: 268, width: 86, height: 72 }, { x: 274, y: 268, width: 86, height: 72 },
       // the townhouse leaves its centered front path open
       { x: 540, y: 92, width: 192, height: 150 }, { x: 540, y: 242, width: 62, height: 86 }, { x: 670, y: 242, width: 62, height: 86 },
-      { x: 908, y: 124, width: 224, height: 150 }, { x: 908, y: 274, width: 76, height: 78 }, { x: 1056, y: 274, width: 76, height: 78 },
-      { x: 1060, y: 642, width: 112, height: 136 }, { x: 760, y: 656, width: 112, height: 136 },
       // tree colliders are trunk-sized (the canopy remains walk-behind art)
       { x: 405, y: 210, width: 50, height: 50 }, { x: 455, y: 678, width: 50, height: 50 },
       { x: 935, y: 698, width: 50, height: 50 }, { x: 91, y: 740, width: 50, height: 50 },
@@ -40,7 +64,6 @@ export const LOCATION_GEOMETRY = Object.freeze({
     blockers: [
       { x: 178, y: 106, width: 224, height: 145 }, { x: 178, y: 251, width: 76, height: 90 }, { x: 326, y: 251, width: 76, height: 90 },
       { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
-      { x: 168, y: 590, width: 192, height: 142 }, { x: 704, y: 600, width: 192, height: 142 },
       // Only the fountain core blocks; the surrounding circular plaza and its
       // benches are deliberately walkable/sittable.
       { x: 542, y: 466, width: 68, height: 68 },
@@ -61,6 +84,26 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 520, y: 616, dir: "down" }, { x: 630, y: 616, dir: "down" },
     ],
   },
+  "maple-row": {
+    blockers: [
+      ...residenceBlockers(),
+      { x: 62, y: 184, width: 50, height: 50 }, { x: 534, y: 184, width: 50, height: 50 },
+      { x: 1090, y: 202, width: 50, height: 50 }, { x: 74, y: 706, width: 50, height: 50 },
+      { x: 536, y: 730, width: 50, height: 50 }, { x: 1082, y: 706, width: 50, height: 50 },
+    ],
+    doors: residenceDoors(),
+    seats: [{ x: 576, y: 410, dir: "down" }, { x: 576, y: 600, dir: "down" }],
+  },
+  "juniper-square": {
+    blockers: [
+      ...residenceBlockers(),
+      { x: 62, y: 192, width: 50, height: 50 }, { x: 534, y: 200, width: 50, height: 50 },
+      { x: 1090, y: 192, width: 50, height: 50 }, { x: 78, y: 706, width: 50, height: 50 },
+      { x: 536, y: 718, width: 50, height: 50 }, { x: 1082, y: 716, width: 50, height: 50 },
+    ],
+    doors: residenceDoors(),
+    seats: [{ x: 500, y: 500, dir: "down" }, { x: 652, y: 500, dir: "down" }],
+  },
   "furniture-shop": {
     blockers: [
       { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
@@ -74,7 +117,10 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 0, y: 0, width: 576, height: 48 }, { x: 0, y: 0, width: 48, height: 432 }, { x: 528, y: 0, width: 48, height: 432 },
       { x: 0, y: 384, width: 240, height: 48 }, { x: 336, y: 384, width: 240, height: 48 },
     ],
-    doors: [{ destination: "city", x: 240, y: 372, width: 96, height: 60, label: "Front door" }],
+    // Starts above the threshold, leaving a full floor-mat depth before the
+    // map edge. This makes the automatic walking exit reachable without
+    // pressing into an invisible boundary.
+    doors: [{ destination: "city", x: 240, y: 360, width: 96, height: 72, label: "Front door" }],
   },
 });
 
@@ -85,15 +131,25 @@ export const LOCATION_PORTALS = Object.freeze({
   neighborhood: [
     { destination: "office", x: 672, y: 912, width: 96, height: 144, spawn: { x: 216, y: 3624, dir: "right" } },
     { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
-    { destination: "home", x: 602, y: 246, width: 68, height: 94, spawn: { x: 288, y: 336, dir: "down" } },
+    { destination: "home", x: 602, y: 246, width: 68, height: 94, spawn: { x: 288, y: 312, dir: "down" } },
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
     { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "home", x: 254, y: 250, width: 72, height: 100, spawn: { x: 288, y: 336, dir: "down" } },
+    { destination: "home", x: 254, y: 250, width: 72, height: 100, spawn: { x: 288, y: 312, dir: "down" } },
+    { destination: "maple-row", x: 1056, y: 432, width: 96, height: 144, spawn: { x: 96, y: 504, dir: "right" } },
+    { destination: "juniper-square", x: 528, y: 816, width: 96, height: 96, spawn: { x: 576, y: 96, dir: "down" } },
+  ],
+  "maple-row": [
+    { destination: "city", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1056, y: 504, dir: "left" } },
+    ...residenceDoors().map((door) => ({ ...door, spawn: { x: 288, y: 312, dir: "down" } })),
+  ],
+  "juniper-square": [
+    { destination: "city", x: 528, y: 0, width: 96, height: 96, spawn: { x: 576, y: 816, dir: "up" } },
+    ...residenceDoors().map((door) => ({ ...door, spawn: { x: 288, y: 312, dir: "down" } })),
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
-  home: [{ destination: "city", x: 240, y: 372, width: 96, height: 60, spawn: { x: 290, y: 370, dir: "down" } }],
+  home: [{ destination: "city", x: 240, y: 360, width: 96, height: 72, spawn: { x: 290, y: 370, dir: "down" } }],
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -109,7 +165,7 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (value === "office" || value === "neighborhood" || value === "city" || value === "furniture-shop") return { id: value, kind: value };
+  if (value === "office" || value === "neighborhood" || value === "city" || value === "maple-row" || value === "juniper-square" || value === "furniture-shop") return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -128,7 +184,7 @@ export function locationSpawn(location, fromLocation = null) {
     const link = (LOCATION_PORTALS[fromKind] || []).find((portal) => portal.destination === destination);
     if (link?.spawn) return { ...link.spawn };
   }
-  if (location.kind === "home") return { x: 6 * HOME_GRID.cell, y: 7 * HOME_GRID.cell, dir: "down" };
+  if (location.kind === "home") return { x: 6 * HOME_GRID.cell, y: 312, dir: "down" };
   return { ...LOCATIONS[location.id].spawn };
 }
 
@@ -138,9 +194,9 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   const fromKind = from.kind === "home" ? "home" : from.id;
   const targetKind = target.kind === "home" ? "home" : target.id;
   // Coworker visits are permission-gated by homeAccess in server.js and may
-  // only be entered through the Huddle Plaza residences doorway. A resident's
-  // own Willow Walk townhouse remains a direct personal-home doorway.
-  if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && fromKind !== "city") return null;
+  // only be entered through a marked residence door in the plaza streets. A
+  // resident's own Willow Walk townhouse remains a direct personal-home door.
+  if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && !RESIDENTIAL_BLOCK_IDS.includes(fromKind)) return null;
   return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
     portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;
 }
@@ -150,14 +206,14 @@ export function locationBounds(location) {
   return LOCATIONS[location.id].bounds;
 }
 
-export function pointHitsRect(x, y, rect, radius = 16) {
+export function pointHitsRect(x, y, rect, radius = ACTOR_FOOT_RADIUS) {
   return x + radius > rect.x && x - radius < rect.x + rect.width &&
     y + radius > rect.y && y - radius < rect.y + rect.height;
 }
 
 export function validLocationMove(location, x, y, dynamicBlockers = []) {
   const b = locationBounds(location);
-  if (b && (x < 16 || y < 16 || x > b.width - 16 || y > b.height - 16)) return false;
+  if (b && (x < ACTOR_FOOT_RADIUS || y < ACTOR_FOOT_RADIUS || x > b.width - ACTOR_FOOT_RADIUS || y > b.height - ACTOR_FOOT_RADIUS)) return false;
   const geometry = LOCATION_GEOMETRY[location.kind === "home" ? "home" : location.id];
   return ![...(geometry?.blockers || []), ...dynamicBlockers].some((rect) => pointHitsRect(x, y, rect));
 }
@@ -306,17 +362,27 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
 // Safe directory projection: homes are discoverable only when public, owned
 // by the requester, or explicitly invited. It deliberately omits layout,
 // inventory, and any account data beyond the displayed name/email.
-export async function homeDirectory(pool, viewerEmail) {
+export async function homeDirectory(pool, viewerEmail, requestedPage = 0, pageSize = 8) {
+  // Page by a bounded, immutable account order. The selected residence remains
+  // its owner email on the client/server transition, never this transient page
+  // index or a visual lot, so another account joining cannot redirect a visit.
+  const limit = Math.max(1, Math.min(8, Number.isInteger(requestedPage) ? pageSize : 8));
+  const page = Math.max(0, Number.isInteger(requestedPage) ? requestedPage : 0);
   const { rows } = await pool.query(
-    `SELECT h.owner_email, h.access_mode,
+    `SELECT h.owner_email, h.access_mode, count(*) OVER() AS total,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
        FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
-      WHERE h.access_mode='public' OR h.owner_email=$1 OR EXISTS (
+       WHERE p.approved=true AND (h.access_mode='public' OR h.owner_email=$1 OR EXISTS (
         SELECT 1 FROM jpo_home_invitations i
          WHERE i.owner_email=h.owner_email AND i.invitee_email=$1 AND i.active=true
-      )
-      ORDER BY lower(coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email)), h.owner_email`,
-    [viewerEmail],
+       ))
+       ORDER BY p.created_at ASC, h.owner_email ASC
+       LIMIT $2 OFFSET $3`,
+    [viewerEmail, limit, page * limit],
   );
-  return rows.map((row) => ({ ownerEmail: row.owner_email, name: row.name, accessMode: row.access_mode }));
+  const total = Number(rows[0]?.total || 0);
+  return {
+    homes: rows.map((row) => ({ ownerEmail: row.owner_email, name: row.name, accessMode: row.access_mode })),
+    page, pageSize: limit, total, pageCount: Math.max(1, Math.ceil(total / limit)),
+  };
 }

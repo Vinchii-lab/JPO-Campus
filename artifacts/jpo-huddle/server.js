@@ -14,6 +14,7 @@ import {
   grandEventOpeningPlan,
 } from "./grand-event-rules.mjs";
 import {
+  ACTOR_FOOT_RADIUS,
   FURNITURE_CATALOG,
   LOCATION_GEOMETRY,
   LOCATIONS,
@@ -3343,7 +3344,7 @@ function locationInfo(locationId) {
     id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432, bounds: { width: 576, height: 432 },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
   const key = parsed.kind === "home" ? "home" : parsed.id;
-  return { ...base, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
+  return { ...base, actorFootRadius: ACTOR_FOOT_RADIUS, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
 }
 const homeLayoutCollisionCache = new Map();
 function homeBlockersFor(location) {
@@ -9245,14 +9246,20 @@ io.on("connection", (socket) => {
     catch (err) { console.error("home snapshot failed:", err); socket.emit("homeActionResult", { ok: false, message: "Could not load this home." }); }
   });
 
-  socket.on("homeDirectoryRequest", async () => {
+  socket.on("homeDirectoryRequest", async (payload) => {
     const p = players[socket.id];
     if (!p?.email) return;
+    const requestedPage = Number(payload?.page);
     try {
-      socket.emit("homeDirectory", { homes: await homeDirectory(pool, p.email) });
+      // A starter home belongs to every real approved account. Initialising the
+      // requester's row here makes their own residence available even before
+      // their first doorway visit; no names or decorative residents are made up.
+      await ensureHome(pool, p.email);
+      socket.emit("homeDirectory", await homeDirectory(pool, p.email,
+        Number.isInteger(requestedPage) ? Math.max(0, Math.min(requestedPage, 10_000)) : 0));
     } catch (err) {
       console.error("home directory failed:", err);
-      socket.emit("homeDirectory", { homes: [], error: "Could not load the home directory." });
+      socket.emit("homeDirectory", { homes: [], page: 0, pageCount: 1, total: 0, error: "Could not load the home directory." });
     }
   });
 

@@ -4,7 +4,7 @@
 // rather than re-testing client presentation.
 import { io } from "socket.io-client";
 import pg from "pg";
-import { FURNITURE_CATALOG, effectiveRotation, furnitureFootprint, layoutBlockers, parseLocation, portalForTransition, validLocationMove } from "../../neighborhood.mjs";
+import { FURNITURE_CATALOG, LOCATION_PORTALS, effectiveRotation, furnitureFootprint, layoutBlockers, parseLocation, portalForTransition, validLocationMove } from "../../neighborhood.mjs";
 
 const port = process.env.TEST_PORT;
 if (!port || !process.env.DATABASE_URL) {
@@ -97,6 +97,14 @@ function routeToPortal(location, destination, position) {
     return position[0] > 500
       ? [position, [852, 400], [700, 400], [432, 400], [432, 550], [700, 550], [700, 400], [852, 400], [852, 286], [872, 286]]
       : [position, [432, 550], [700, 550], [700, 400], [852, 400], [852, 286], [872, 286]];
+  if (location === "city" && destination === "maple-row")
+    return [position, [432, 550], [1100, 550], [1100, 504]];
+  if (location === "maple-row" && destination === "city")
+    return [position, [48, 504]];
+  if (location === "city" && destination === "juniper-square")
+    return [position, [1056, 550], [432, 550], [432, 864], [576, 864]];
+  if (location === "juniper-square" && destination === "city")
+    return [position, [576, 48]];
   if (location === "city" && destination.startsWith("home:"))
     return position[0] > 500
       ? [position, [852, 400], [700, 400], [432, 400], [432, 360], [144, 360], [290, 360], [290, 300]]
@@ -134,6 +142,39 @@ try {
   check(!validLocationMove(parseLocation("city"), 200, 200) &&
     validLocationMove(parseLocation("city"), 480, 720),
   "city facade blockers reject clipping but preserve plaza spawn");
+  const cityHomeApproach = [355, 345, 330, 300];
+  check(
+    cityHomeApproach.every((y) => validLocationMove(parseLocation("city"), 290.333, y)) &&
+      !!portalForTransition("city", `home:${emails[0]}`, 290.333, 300, emails[0]),
+    "city home's centered foot trajectory stays clear beside both facade wings",
+    cityHomeApproach,
+  );
+  const testHome = parseLocation("home:test@example.com");
+  const homeExitTrajectory = [360, 372, 384, 402, 416];
+  check(
+    homeExitTrajectory.every((y) => validLocationMove(testHome, 288, y)) &&
+      !!portalForTransition(testHome.id, "city", 288, 384, "test@example.com"),
+    "home floor-mat exit remains walkable from threshold through map edge",
+    homeExitTrajectory,
+  );
+  const shopDoor = { x: 872, y: 286 };
+  const shopExit = { x: 480, y: 684 };
+  check(
+    validLocationMove(parseLocation("city"), shopDoor.x, shopDoor.y) &&
+      !!portalForTransition("city", "furniture-shop", shopDoor.x, shopDoor.y, emails[0]) &&
+      validLocationMove(parseLocation("furniture-shop"), shopExit.x, shopExit.y) &&
+      !!portalForTransition("furniture-shop", "city", shopExit.x, shopExit.y, emails[0]),
+    "shop entry, catalog interior, and plaza exit share walkable portal geometry",
+  );
+  for (const block of ["maple-row", "juniper-square"]) {
+    const residenceDoors = LOCATION_PORTALS[block].filter((portal) => portal.residence);
+    check(
+      residenceDoors.length === 8 && residenceDoors.every((door) =>
+        validLocationMove(parseLocation(block), door.x + door.width / 2, door.y + door.height / 2) &&
+        !!portalForTransition(block, `home:${emails[0]}`, door.x + door.width / 2, door.y + door.height / 2, emails[0])),
+      `${block} has eight matching walkable residence entrances`,
+    );
+  }
   check(
     !!portalForTransition("city", "home:other@justpressone.com", 290, 300, emails[1]) &&
     !portalForTransition("neighborhood", "home:other@justpressone.com", 636, 293, emails[1]),
@@ -270,6 +311,15 @@ try {
     "concurrent place/return serializes both commits with two revision increments",
     { actions: raceActions, rows: placedRows.rows[0]?.n, before: revisionBeforeRace.rows[0]?.layout_revision, after: revisionAfterRace.rows[0]?.layout_revision },
   );
+
+  // Both additional streets are real walking maps, not a travel menu. Their
+  // edge routes and all residence door geometry are exercised above; this
+  // covers the authoritative transitions and safe no-bounce return spawns.
+  await moveTo(a, "city");
+  await moveTo(a, "maple-row");
+  await moveTo(a, "city");
+  await moveTo(a, "juniper-square");
+  await moveTo(a, "city");
 } catch (error) {
   failures.push(error.message || String(error));
   console.error(error);

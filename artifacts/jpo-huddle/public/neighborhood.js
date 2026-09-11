@@ -18,6 +18,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let editorOpen = false;
   let currentLocation = 'office';
   let directory = [];
+  let directoryPage = 0;
+  let directoryMeta = { page: 0, pageCount: 1, total: 0 };
   // This only selects which permitted residence the plaza doorway will open.
   // It never emits a transition; travel still requires walking through that
   // visible map doorway.
@@ -58,30 +60,39 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[char]);
   const isHome = () => currentLocation.startsWith('home:');
+  const isResidentialBlock = () => ['city', 'maple-row', 'juniper-square'].includes(currentLocation);
   const travel = (destination) => socket.emit('locationTransition', { destination });
+  const requestDirectory = (page = directoryPage) => {
+    directoryPage = Math.max(0, Number(page) || 0);
+    socket.emit('homeDirectoryRequest', { page: directoryPage });
+  };
 
   function renderHome() {
     if (!isHome() || !homeState) {
-      if (currentLocation !== 'city') {
+      if (!isResidentialBlock()) {
         homePanel.hidden = true;
         return;
       }
       homePanel.hidden = false;
       const ownEmail = globals()._playerEmail || '';
-      const homes = [
-        ...(ownEmail ? [{ ownerEmail: ownEmail, name: 'Your starter home', accessMode: 'owner' }] : []),
-        ...directory.filter((home) => home.ownerEmail !== ownEmail),
-      ];
+      const homes = directory;
       const selected = selectedVisitEmail || ownEmail;
       homePanel.innerHTML =
         '<div class="home-panel-head"><b>Homes directory</b><button type="button" data-collapse>Hide</button></div>' +
-        '<div class="home-section home-directory"><small>Choose a residence, then walk through the HOMES doorway in the plaza. Choosing a name does not travel you.</small>' +
+        '<div class="home-section home-directory"><small>Approved homes · directory block ' + (directoryMeta.page + 1) + ' of ' + directoryMeta.pageCount +
+        '. Choose a resident, then walk through any glowing RESIDENCE doorway. Choosing a name never travels you.</small>' +
         (homes.length ? homes.map((home) => '<button type="button" class="home-directory-item ' +
           (home.ownerEmail === selected ? 'selected' : '') + '" data-home-target="' + escapeHtml(home.ownerEmail) + '">' +
           escapeHtml(home.name || home.ownerEmail) + ' <small>(' + escapeHtml(home.accessMode) + ')</small></button>').join('') :
           '<small>No homes available yet.</small>') +
-        '</div><small class="home-panel-note">Selected: ' + escapeHtml(selected || 'your starter home') + '</small>';
+        (directoryMeta.pageCount > 1 ? '<div class="home-pager"><button type="button" data-page="prev" ' +
+          (directoryMeta.page <= 0 ? 'disabled' : '') + '>Previous block</button><button type="button" data-page="next" ' +
+          (directoryMeta.page >= directoryMeta.pageCount - 1 ? 'disabled' : '') + '>Next block</button></div>' : '') +
+        '</div><small class="home-panel-note">Selected residence: ' + escapeHtml(selected || 'your home') + '</small>';
       homePanel.querySelector('[data-collapse]').onclick = () => { homePanel.hidden = true; };
+      homePanel.querySelectorAll('[data-page]').forEach((button) => {
+        button.onclick = () => requestDirectory(button.dataset.page === 'next' ? directoryMeta.page + 1 : directoryMeta.page - 1);
+      });
       homePanel.querySelectorAll('[data-home-target]').forEach((button) => {
         button.onclick = () => {
           selectedVisitEmail = button.dataset.homeTarget || '';
@@ -120,7 +131,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
               '<button type="button" data-revoke="' + escapeHtml(invite.email) + '">Revoke</button></span>',
             ).join('')
           : '') +
-        '<small>Furniture uses its supplied upright artwork, so rotation is unavailable until directional art is provided. Choose an item, then click a valid grid position.</small>' + inventoryMarkup +
+        '<small>How furnishing works: buy at Huddle Home, return here, choose “Place” from Inventory, then click a clear floor tile. The front mat and exit path stay clear. Furniture uses supplied upright artwork, so rotation is unavailable.</small>' +
+        '<small>Inventory — bought items waiting to place</small>' + inventoryMarkup +
         '<small>Placed items</small>' + layoutMarkup +
       '</div>'
     ) : '<div class="home-section"><small>The owner controls this room. Furniture updates live.</small></div>';
@@ -128,7 +140,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     homePanel.innerHTML =
       '<div class="home-panel-head"><b>' + (canEdit ? 'Your starter home' : 'Visiting a home') +
       '</b><button type="button" data-collapse>' + (editorOpen ? 'Collapse' : 'Open panel') + '</button></div>' +
-       '<div class="home-section home-directory"><small>Neighbors — visit through their marked home doors.</small>' +
+       '<div class="home-section home-directory"><small>Neighbors — select one at a residential street, then use a glowing RESIDENCE doorway.</small>' +
       directoryMarkup + '</div>' +
       (editorOpen ? editor : (canEdit ? '<small class="home-panel-note">Open panel to place, store, or manage your home.</small>' : ''));
 
@@ -174,17 +186,23 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       Number(item.price).toLocaleString() + ' coins</span><button type="button" data-buy="' +
       escapeHtml(item.id) + '">Buy</button></span>',
     ).join('') || '<small>The catalog is loading.</small>';
-    panel.innerHTML = '<div class="home-panel-head"><b>Huddle Home shop</b><button type="button" data-close>Close</button></div>' +
-      '<div class="home-section"><small>Furniture catalog</small>' + rows + '</div>';
+    panel.innerHTML = '<div class="home-panel-head"><b>Huddle Home · Furnishings</b><button type="button" data-close>Close</button></div>' +
+      '<div class="home-section"><small>You reached the furnishings counter. Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, then enter your home to place it.</small>' + rows + '</div>';
     panel.querySelector('[data-close]').onclick = () => { panel.hidden = true; };
     panel.querySelectorAll('[data-buy]').forEach((button) => {
       button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
     });
   }
 
-  socket.emit('homeDirectoryRequest');
+  requestDirectory();
   socket.on('homeDirectory', (payload) => {
     directory = Array.isArray(payload) ? payload : (Array.isArray(payload?.homes) ? payload.homes : []);
+    directoryMeta = {
+      page: Number.isInteger(payload?.page) ? payload.page : directoryPage,
+      pageCount: Math.max(1, Number(payload?.pageCount) || 1),
+      total: Number(payload?.total) || directory.length,
+    };
+    directoryPage = directoryMeta.page;
     if (payload?.error) toast(payload.error);
     renderHome();
   });
@@ -222,6 +240,28 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.furniture = [];
     }
 
+    _resetTransientTravel() {
+      // Phaser reuses this Scene instance for Willow → Plaza. A transition
+      // request belongs to the map we are leaving, never the next map: leaving
+      // it true makes update() intentionally zero all movement forever.
+      this._portalTravelGeneration = (this._portalTravelGeneration || 0) + 1;
+      clearTimeout(this._portalMoveTimer);
+      clearTimeout(this._portalTravelTimer);
+      this._portalMoveTimer = this._portalTravelTimer = null;
+      this.transitionRequested = false;
+      this._portalFading = false;
+      this._portalFadeAt = 0;
+      this.portalRelease = true;
+      this.lastSend = 0;
+      this.sitting = false;
+    }
+
+    _removePlacementInput() {
+      if (this._placementMoveHandler) this.input.off('pointermove', this._placementMoveHandler);
+      if (this._placementDownHandler) this.input.off('pointerdown', this._placementDownHandler);
+      this._placementMoveHandler = this._placementDownHandler = null;
+    }
+
     // These bridge methods deliberately call the live OfficeScene implementation
     // with this scene as its receiver. The helper methods it calls are bridged too,
     // retaining the established avatar/wearable/pet formats and signatures.
@@ -250,12 +290,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     create(data) {
+      this._resetTransientTravel();
+      this._removePlacementInput();
       window._neighborhoodScene = this;
       this.info = data?.map || {};
       this.location = data?.location || currentLocation;
       const bounds = this.info.bounds || { width: this.info.width || 1152, height: this.info.height || 816 };
       this.mapWidth = bounds.width;
       this.mapHeight = bounds.height;
+      this.actorFootRadius = Number(this.info.actorFootRadius) || 16;
       const atHome = this.location.startsWith('home:');
       this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
       this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
@@ -265,6 +308,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (atHome) this._drawHome();
       else if (this.location === 'furniture-shop') this._drawShop();
       else if (this.location === 'neighborhood') this._drawNeighborhood();
+      else if (this.location === 'maple-row' || this.location === 'juniper-square') this._drawResidentialBlock(this.location);
       else this._drawCity();
 
       const self = data?.self || data?.spawn || {};
@@ -370,16 +414,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._path({ x: 576, y: 624, width: 144, height: 432 });
       this._path({ x: 1200, y: 432, width: 144, height: 192 });
       this._roadDetails(528, 648, [{ x: 636, y: 420 }, { x: 636, y: 636 }]);
-      this._exterior('house', 240, 340);
       this._exterior('townhouse', 636, 330);
-      this._exterior('shop', 1020, 352);
-      this._exterior('house', 1116, 790);
-      this._exterior('house', 816, 804);
       [[430, 260], [480, 728], [960, 748], [116, 790], [1294, 214], [330, 770]].forEach(([x, y]) => this._exterior('tree', x, y));
       [[500, 420], [816, 420], [1160, 420], [278, 420]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
       [[420, 604], [900, 420], [1100, 420]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
       this._sign(636, 82, 'WILLOW WALK');
-      this._sign(1020, 122, 'Cedar Cottage');
       this._sign(636, 234, 'Your townhouse');
     }
 
@@ -396,17 +435,45 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
       this._exterior('house', 290, 340);
       this._exterior('shop', 872, 328);
-      this._exterior('townhouse', 264, 732);
-      this._exterior('townhouse', 800, 744);
       [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 728], [1048, 736]].forEach(([x, y]) => this._exterior('tree', x, y));
       [[398, 384], [744, 384], [402, 630], [746, 630]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
       [[520, 394], [630, 394], [520, 600], [630, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
       const plaza = this.add.graphics().setDepth(2);
       plaza.fillStyle(0xbfd3cb, 1).fillCircle(576, 500, 92).lineStyle(4, 0xe9dfb9, 0.8).strokeCircle(576, 500, 92);
       plaza.fillStyle(0x66a7c0, 1).fillCircle(576, 500, 34).lineStyle(3, 0xe9f8ff, 0.85).strokeCircle(576, 500, 34);
-      this._sign(290, 80, 'HOMES DIRECTORY');
+       this._sign(290, 80, 'YOUR HOME');
       this._sign(872, 88, 'HUDDLE HOME');
       this._sign(576, 302, 'HUDDLE PLAZA');
+       this._sign(1084, 420, 'MAPLE ROW →');
+       this._sign(576, 800, '↓ JUNIPER SQUARE');
+    }
+
+    _drawResidentialBlock(kind) {
+      const maple = kind === 'maple-row';
+      this._tileField(maple ? 0x78a762 : 0x74a06a, maple ? 0x709b59 : 0x6a965f);
+      this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
+      this._path({ x: 552, y: 0, width: 48, height: 912 }, 0x535e66, 0x3e4750);
+      this._path({ x: 0, y: 408, width: 1152, height: 24 });
+      this._path({ x: 0, y: 576, width: 1152, height: 24 });
+      this._path({ x: 528, y: 0, width: 24, height: 912 });
+      this._path({ x: 600, y: 0, width: 24, height: 912 });
+      const homes = [[180, 340], [420, 340], [732, 340], [972, 340], [180, 812], [420, 812], [732, 812], [972, 812]];
+      homes.forEach(([x, bottom], index) => {
+        // This is the same 72px clear door path represented in the shared
+        // geometry; every shown home has one of the real residence portals.
+        this._path({ x: x - 36, y: bottom < 500 ? bottom - 90 : 576, width: 72,
+          height: bottom < 500 ? 198 : bottom - 566 });
+        this._exterior('house', x, bottom);
+        this._sign(x, bottom - 102, 'RESIDENCE ' + (index + 1));
+      });
+      const trees = maple
+        ? [[87, 234], [559, 234], [1115, 252], [99, 756], [561, 780], [1107, 756]]
+        : [[87, 242], [559, 250], [1115, 242], [103, 756], [561, 768], [1107, 766]];
+      trees.forEach(([x, y]) => this._exterior('tree', x, y));
+      [[576, 410], [576, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
+      this._roadDetails(504, 576, [{ x: 540, y: 420 }, { x: 612, y: 588 }]);
+      this._sign(576, 72, maple ? 'MAPLE ROW · 8 RESIDENCES' : 'JUNIPER SQUARE · 8 RESIDENCES');
+      this._sign(576, 128, 'Select an approved home in the directory, then walk through a glowing residence door.');
     }
 
     _drawShop() {
@@ -420,8 +487,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       art.fillStyle(0xb85f5c, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
       [[112, 108], [848, 108], [100, 560], [860, 560]].forEach(([x, y]) =>
         this.add.image(x, y, 'furn_fern').setDisplaySize(48, 48).setDepth(4));
-      this._sign(480, 112, 'HUDDLE HOME · FURNISH WELL');
-      this.add.text(480, 190, 'Talk to the catalog at the counter — purchases go to your home inventory.', {
+       this._sign(480, 112, 'HUDDLE HOME · FURNISHINGS');
+       this.add.text(480, 190, 'FURNITURE PRICES IN COINS · crossing this door opens the catalog · purchases go to your home inventory.', {
         fontFamily: 'monospace', fontSize: '12px', color: '#fff7db', backgroundColor: '#493c36cc', padding: { x: 6, y: 4 }, align: 'center',
       }).setOrigin(0.5).setDepth(18);
     }
@@ -435,7 +502,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       art.fillStyle(0xb96657, 0.8).fillRoundedRect(142, 145, 292, 128, 16);
       art.lineStyle(3, 0xf2dfba, 0.75).strokeRoundedRect(142, 145, 292, 128, 16);
       art.fillStyle(0x6e4d3b, 1).fillRect(48, 384, 192, 44).fillRect(336, 384, 192, 44);
+       // The center is intentionally open from the arrival tile to the
+       // threshold: a visible floor mat rather than an edge-only exit.
+       art.fillStyle(0x9e7355, 1).fillRoundedRect(240, 360, 96, 66, 6);
+       art.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(240, 360, 96, 66, 6);
       this.add.text(288, 91, 'A QUIET PLACE TO LAND', { fontFamily: 'monospace', fontSize: '13px', color: '#5c4636' }).setOrigin(0.5).setDepth(10);
+       this.add.text(288, 390, 'PLAZA EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
     }
 
     _drawPortalCues() {
@@ -443,7 +515,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const cue = this.add.graphics().setDepth(3);
         cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
         cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
-        const label = portal.destination === 'home' ? (this.location === 'city' ? 'HOMES' : 'HOME') : portal.destination === 'furniture-shop' ? 'SHOP' : portal.destination === 'city' ? 'PLAZA' : portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
+        const label = portal.destination === 'home' ? (portal.residence ? 'RESIDENCE' : 'YOUR HOME') :
+          portal.destination === 'furniture-shop' ? 'FURNISHINGS' : portal.destination === 'city' ? 'PLAZA' :
+          portal.destination === 'maple-row' ? 'MAPLE ROW' : portal.destination === 'juniper-square' ? 'JUNIPER SQ' :
+          portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
         this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
         }).setOrigin(0.5, 1).setDepth(2000);
@@ -456,11 +531,27 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _addBlock(group, rect) {
-      // Server pointHitsRect uses a 16px radius. With the Office foot body
-      // (12×10), inflating by 10/11px makes client collision stop at the same
-      // center position rather than allowing a packet the server will reject.
-      const r = this.add.rectangle(rect.x + rect.width / 2, rect.y + rect.height / 2,
-        rect.width + 20, rect.height + 22, 0, 0);
+      // `player.x/y` are the exact foot-centre coordinates sent to the
+      // server. Arcade's body is deliberately lower in the 16×32 sprite
+      // (offset 2,20), so its centre is currently x+0, y+27 after 3× scale.
+      // Shift the static zone by that *measured* body-centre offset and size
+      // it from the measured half-extents. Collision then occurs precisely
+      // when server pointHitsRect(player.x, player.y, rect, 16) would occur;
+      // do not use the former hard-coded +20/+22 expansion.
+      const body = this.player?.body;
+      // create() runs before Arcade's first preUpdate. Refresh scale/origin
+      // now, otherwise center/halfWidth still describe the unscaled sprite.
+      body?.updateFromGameObject();
+      const bodyCenterX = body?.center?.x ?? this.player.x;
+      const bodyCenterY = body?.center?.y ?? this.player.y;
+      const offsetX = bodyCenterX - this.player.x;
+      const offsetY = bodyCenterY - this.player.y;
+      const halfWidth = body?.halfWidth ?? 6;
+      const halfHeight = body?.halfHeight ?? 5;
+      const width = Math.max(1, rect.width + 2 * (this.actorFootRadius - halfWidth));
+      const height = Math.max(1, rect.height + 2 * (this.actorFootRadius - halfHeight));
+      const r = this.add.rectangle(rect.x + rect.width / 2 + offsetX, rect.y + rect.height / 2 + offsetY,
+        width, height, 0, 0);
       this.physics.add.existing(r, true);
       group.add(r);
       return r;
@@ -504,7 +595,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _installPlacementInput(atHome) {
-      this.input.on('pointermove', (pointer) => {
+      this._removePlacementInput();
+      this._placementMoveHandler = (pointer) => {
         if (!atHome || !homeState?.canEdit || !selectedInstance) return this._clearGhost();
         const item = homeState.inventory?.find((candidate) => candidate.id === selectedInstance);
         const def = item && furnitureCatalog[item.furnitureId];
@@ -516,8 +608,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this.ghost.setTexture('furn_' + def.id).setDisplaySize(def.width * 48, def.height * 48).setAngle(selectedRotation)
           .setPosition(gridX * 48 + footprint.width * 24, gridY * 48 + footprint.height * 24);
         if (blocked) this.ghost.setTint(0xff5555); else this.ghost.clearTint();
-      });
-      this.input.on('pointerdown', (pointer) => {
+      };
+      this._placementDownHandler = (pointer) => {
         if (!atHome || !homeState?.canEdit || !selectedInstance || !this.ghost || this.ghost.isTinted) {
           if (atHome && selectedInstance && this.ghost?.isTinted) toast('That furniture does not fit there.');
           return;
@@ -528,7 +620,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         selectedInstance = null;
         this._clearGhost();
         renderHome();
-      });
+      };
+      this.input.on('pointermove', this._placementMoveHandler);
+      this.input.on('pointerdown', this._placementDownHandler);
     }
 
     _clearGhost() {
@@ -740,7 +834,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       let dir = this.playerDir || 'down';
       let anim = this.sitting ? 'sit' : 'idle';
       body.setVelocity(0, 0);
-      if (!this.sitting) {
+      if (!this.sitting && !this.transitionRequested) {
         if (left) { body.setVelocityX(-170); dir = 'left'; anim = 'walk'; }
         else if (right) { body.setVelocityX(170); dir = 'right'; anim = 'walk'; }
         else if (up) { body.setVelocityY(-170); dir = 'up'; anim = 'walk'; }
@@ -797,17 +891,32 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       else this.interactHint.setVisible(false);
       if (door && this.portalRelease && !this.transitionRequested) {
         const destination = door.destination === 'home'
-          ? ('home:' + (this.location === 'city'
+          ? ('home:' + (door.residence
             ? (selectedVisitEmail || globals()._playerEmail || '')
             : (globals()._playerEmail || '')))
           : door.destination;
         if (destination !== 'home:') {
           this.transitionRequested = true;
-          // Socket packet ordering ensures the authoritative position is in
-          // the door before the server evaluates the portal transition.
-          socket.emit('playerMove', { x: this.player.x, y: this.player.y, dir: this.playerDir, anim: 'idle' });
-          window.jpoBeginMapFade?.();
-          travel(destination);
+           // The movement stream is rate-limited on the server. Previously a
+           // fresh portal packet could arrive inside that short throttle window
+           // and be dropped, so transition validation saw the last point just
+           // outside the door (most noticeable at the home exit). Hold still,
+           // then send a guaranteed newer authoritative foot position before
+           // asking for the map change.
+           body.setVelocity(0, 0);
+           const portalPoint = { x: this.player.x, y: this.player.y, dir: this.playerDir };
+           const generation = this._portalTravelGeneration;
+           this._portalMoveTimer = setTimeout(() => {
+             this._portalMoveTimer = null;
+             if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
+             socket.emit('playerMove', { ...portalPoint, anim: 'idle' });
+             this._portalTravelTimer = setTimeout(() => {
+               this._portalTravelTimer = null;
+               if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
+               window.jpoBeginMapFade?.();
+               travel(destination);
+             }, 38);
+           }, 42);
         }
       }
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
@@ -833,6 +942,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     shutdown() {
+      this._resetTransientTravel();
+      this._removePlacementInput();
       this._clearGhost();
       this._clearLocalPresentation();
       Object.keys(this.remotes).forEach((id) => this._removeRemote(id));
@@ -863,12 +974,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (isHome()) {
         homeState = result.home || homeState;
         editorOpen = false;
-        socket.emit('homeDirectoryRequest');
+        requestDirectory();
         renderHome();
       } else {
         selectedInstance = null;
-        if (result.location === 'city') {
-          socket.emit('homeDirectoryRequest');
+        if (isResidentialBlock()) {
+          requestDirectory();
           renderHome();
         } else homePanel.hidden = true;
       }
@@ -886,7 +997,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         officePortalRelease = false;
         officePortalTransition = false;
       } else {
-        game.scene.sleep('OfficeScene');
+         // OfficeScene was already asleep after the first outdoor transition;
+         // Phaser warns (and some builds interrupt the next scene lifecycle)
+         // when asked to sleep it again.
+         if (game.scene.isActive('OfficeScene')) game.scene.sleep('OfficeScene');
         game.scene.start('NeighborhoodScene', result);
         const next = game.scene.getScene('NeighborhoodScene');
         next._portalFading = false;
