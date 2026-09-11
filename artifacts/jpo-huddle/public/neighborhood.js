@@ -43,11 +43,17 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   // pending. Keep one presentation generation and timer: an old completion
   // must never stop/restart the scene selected by a newer completion.
   let sceneTransitionGeneration = 0;
+  let lastServerTransitionSequence = 0;
+  socket.on('disconnect', () => { lastServerTransitionSequence = 0; });
   let sceneTransitionTimer = null;
   // Player sprites, interior tiles, and the verified furniture singles are
   // authored on the same 16px grid. Keep their one shared integer scale here;
   // exterior buildings intentionally use their separate, larger source art.
   const INTERIOR_ART_SCALE = 3;
+  // Arcade resolves static-body contact after floating-point integration. A
+  // half-pixel client-only margin prevents exact server contact from visually
+  // penetrating for one frame; the server's ACTOR_FOOT_RADIUS is unchanged.
+  const COLLISION_SAFETY_MARGIN = 0.5;
   // Keep browser placement and the home threshold in lockstep with
   // neighborhood.mjs (24x18 cells at 48px). Room art itself is supplied by
   // the interior design layer; these constants only govern interaction.
@@ -112,7 +118,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     const inside = player.x >= 112 && player.x <= 176 && player.y >= 3564 && player.y <= 3684;
     if (!inside || !officePortalRelease || officePortalTransition) return false;
     officePortalTransition = true;
-    socket.emit('playerMove', { x: player.x, y: player.y, dir: dir || 'left', anim: 'idle' });
+    movement?.sendReliable('office', { x: player.x, y: player.y, dir: dir || 'left', anim: 'idle' });
     window.jpoBeginMapFade?.();
     travel('neighborhood');
     return true;
@@ -123,7 +129,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   const isHome = () => currentLocation.startsWith('home:');
   const isResidentialBlock = () => currentLocation === 'neighborhood';
   const ownHome = () => homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail ? homeState : null;
-  const travel = (destination, options = {}) => socket.emit('locationTransition', { destination, ...options });
+  const travel = (destination, options = {}) =>
+    movement?.sendReliableEvent('locationTransition', currentLocation, { destination, ...options });
+  const movement = window.JpoFocusedMovement?.create(socket, {
+    onPause: () => {
+      window._neighborhoodScene?._clearMovementTransport();
+      window._gameScene?._clearMovementTransport();
+    },
+  });
+  window._jpoMovementTransport = movement;
   const requestDirectory = () => {
     activeDirectoryRequestId = ++directoryRequestId;
     socket.emit('homeDirectoryRequest', { requestId: activeDirectoryRequestId });
@@ -473,7 +487,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   socket.on('homeEjected', (result) => toast(result?.message || 'You left the home.'));
   socket.on('furnitureInteractionResult', (result) => {
     const scene = window._neighborhoodScene;
-    if (!scene) return;
+    if (!scene?.scene?.isActive?.()) return;
     scene._activityPending = false;
     if (result?.ok && result.phase === 'start' && result.activity) {
       scene._setLocalActivity(result.activity, result);
@@ -485,7 +499,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   });
   socket.on('parkSeatState', (payload) => {
     const scene = window._neighborhoodScene;
-    if (scene) scene._setParkSeatState(payload);
+    if (scene?.scene?.isActive?.()) scene._setParkSeatState(payload);
   });
   socket.on('furnitureActivity', (payload) => {
     const scene = window._neighborhoodScene;
@@ -522,6 +536,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       super('NeighborhoodScene');
       this.remotes = {};
       this.furniture = [];
+      this._lastCorrectionSeq = -1;
     }
 
     _resetTransientTravel() {
@@ -537,6 +552,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._portalFadeAt = 0;
       this.portalRelease = true;
       this.lastSend = 0;
+      movement?.clear();
+      this.player?.setVelocity(0, 0);
       this.sitting = false;
       this.activity = null;
       this._activityPending = false;
@@ -545,6 +562,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._parkSeatPendingAt = 0;
       this._parkSeatExitTarget = null;
       this._parkSeatSitTarget = null;
+    }
+
+    _clearMovementTransport() {
+      movement?.clear();
+      this.lastSend = 0;
+      this.player?.setVelocity(0, 0);
     }
 
     _removePlacementInput() {
@@ -932,6 +955,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       const width = camera.width || this.scale.width;
       const height = camera.height || this.scale.height;
       const outdoors = this.location === 'neighborhood' || this.location === 'city';
+      const fitKey = `${width}:${height}:${this.mapWidth}:${this.mapHeight}:${outdoors}:${this._outdoorZoomFactor || 1.15}`;
+      if (this._cameraFitKey === fitKey) return;
+      this._cameraFitKey = fitKey;
       // Never show beyond the authored road/world edges. Keep the desired
       // outdoor scale on smaller screens, but fill wide displays rather than
       // exposing a large unplayable grass area to the right of the street.
@@ -1386,8 +1412,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       const offsetY = bodyCenterY - this.player.y;
       const halfWidth = body?.halfWidth ?? 6;
       const halfHeight = body?.halfHeight ?? 5;
-      const width = Math.max(1, rect.width + 2 * (this.actorFootRadius - halfWidth));
-      const height = Math.max(1, rect.height + 2 * (this.actorFootRadius - halfHeight));
+       const width = Math.max(1, rect.width + 2 * (this.actorFootRadius - halfWidth) + 2 * COLLISION_SAFETY_MARGIN);
+       const height = Math.max(1, rect.height + 2 * (this.actorFootRadius - halfHeight) + 2 * COLLISION_SAFETY_MARGIN);
       const r = this.add.rectangle(rect.x + rect.width / 2 + offsetX, rect.y + rect.height / 2 + offsetY,
         width, height, 0, 0);
       this.physics.add.existing(r, true);
@@ -1552,7 +1578,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       const instanceId = nearby.sprite.getData('instanceId');
       if (!instanceId || !action) return;
       this._activityPending = true;
-      socket.emit('furnitureInteract', { phase: 'start', instanceId, action });
+      movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'start', instanceId, action });
     }
 
     _leaveFurnitureActivity(reason = 'exit') {
@@ -1569,7 +1595,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         this.playerDir = stand.dir || this.playerDir;
       }
       this._applyActivityPose(this, null, this.playerDir || 'down');
-      socket.emit('furnitureInteract', { phase: 'exit', reason });
+      movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'exit', reason });
     }
 
     _parkSeatForState(state = this.staticSeatState) {
@@ -1647,7 +1673,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._parkSeatPending = 'sit';
       this._parkSeatPendingAt = performance.now();
       this._parkSeatSitTarget = { x: Number(seat.x), y: Number(seat.y), dir: seat.dir || 'down' };
-      socket.emit('playerMove', {
+      movement?.sendReliable(this.location, {
         ...this._parkSeatSitTarget, seatId: seat.id || null, anim: 'sit',
       });
     }
@@ -1663,7 +1689,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // Keep the local body frozen until the server accepts this exact authored
       // stand point. E is therefore a real server movement transition, not a
       // client-only pose toggle or teleport.
-      socket.emit('playerMove', { ...this._parkSeatExitTarget, seatId: seat?.id || null, anim: 'idle', reason });
+      movement?.sendReliable(this.location, { ...this._parkSeatExitTarget, seatId: seat?.id || null, anim: 'idle', reason });
     }
 
     _installPlacementInput(atHome) {
@@ -1818,11 +1844,18 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       delete this.remotes[id];
     }
 
+    _isCurrentLocation(payload) {
+      const location = typeof payload?.location === 'string' ? payload.location
+        : typeof payload?.locationId === 'string' ? payload.locationId : null;
+      return !location || location === this.location;
+    }
+
     syncPlayers(players) {
       // Like furniture, the authoritative arrival snapshot is applied during
       // create before the scene status becomes ACTIVE.
       if (!this.player) return;
       Object.entries(players || {}).forEach(([id, player]) => {
+        if (!this._isCurrentLocation(player)) return;
         if (id !== socket.id && player?.email !== globals()._playerEmail) this.addRemote(id, player);
         if (id === socket.id) this.correctLocal(player);
       });
@@ -1831,6 +1864,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     correctLocal(serverPlayer) {
       if (!serverPlayer || !this.player || !Number.isFinite(serverPlayer.x) || !Number.isFinite(serverPlayer.y)) return;
+      if (!this._isCurrentLocation(serverPlayer) ||
+          !window.JpoFocusedMovement?.shouldApplyCorrection(serverPlayer, this.location, this._lastCorrectionSeq)) return;
+      if (Number.isSafeInteger(serverPlayer.seq)) this._lastCorrectionSeq = serverPlayer.seq;
       // currentPlayers is an authoritative snapshot (transition/ejection/reconnect).
       this.player.setPosition(serverPlayer.x, serverPlayer.y);
       this.player.body?.reset(serverPlayer.x, serverPlayer.y);
@@ -1852,8 +1888,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     addRemote(id, player) {
-      if (!id || !player || id === socket.id || player.email === globals()._playerEmail) return;
+      if (!id || !player || id === socket.id || player.email === globals()._playerEmail ||
+          !this._isCurrentLocation(player)) return;
       let remote = this.remotes[id];
+      if (remote && Number.isSafeInteger(player.seq) &&
+          player.seq < (remote._movementSeq ?? -1)) return;
       const character = player.character || 'adam';
       const hairIdx = player.hairIdx || 0, skinIdx = player.skinIdx || 0;
       const shirtIdx = player.shirtIdx ?? player.clothesIdx ?? 0, pantsIdx = player.pantsIdx ?? player.clothesIdx ?? 0;
@@ -1869,6 +1908,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           wear: { equipped: player.equipped || '', wings: player.wings || '', slots: { ...(player.slots || {}) } },
           petId: player.pet || '', petAcc: player.petAcc || '', petStage: player.petStage || 0,
           lastDir: player.dir || 'down', seated: false, activity: null, _activityFx: null,
+           _movementSeq: Number.isSafeInteger(player.seq) ? player.seq : -1,
         };
         this._makeRemotePresentation(remote, player, id);
       } else if (remote.texture !== texture) {
@@ -1937,7 +1977,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         if (player?.id === socket.id) this.correctLocal(player);
         return;
       }
+      if (!this._isCurrentLocation(player)) return;
       const remote = this.remotes[player.id];
+      if (remote && !window.JpoFocusedMovement?.shouldApplyRemote(player, this.location, remote._movementSeq ?? -1)) return;
+      if (remote && Number.isSafeInteger(player.seq)) remote._movementSeq = player.seq;
       if (remote) this._applyRemote(remote, player);
       else this.addRemote(player.id, player);
     }
@@ -2133,7 +2176,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
            this._portalMoveTimer = setTimeout(() => {
              this._portalMoveTimer = null;
              if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
-             socket.emit('playerMove', { ...portalPoint, anim: 'idle' });
+              movement?.sendReliable(this.location, { ...portalPoint, anim: 'idle' });
              this._portalTravelTimer = setTimeout(() => {
                this._portalTravelTimer = null;
                if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
@@ -2149,16 +2192,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         else if (nearbyParkSeat) this._requestParkSeat();
         else this._requestFurnitureAction();
       }
-      this.lastSend += delta;
-      if (this.lastSend >= 50) {
-        this.lastSend = 0;
-        const parkTarget = this._parkSeatPending === 'stand' ? this._parkSeatExitTarget
-          : this._parkSeatPending === 'sit' ? this._parkSeatSitTarget : null;
-        socket.emit('playerMove', {
-          x: parkTarget?.x ?? this.player.x, y: parkTarget?.y ?? this.player.y,
-          dir: parkTarget?.dir || this.playerDir, anim,
-        });
-      }
+      const parkTarget = this._parkSeatPending === 'stand' ? this._parkSeatExitTarget
+        : this._parkSeatPending === 'sit' ? this._parkSeatSitTarget : null;
+      movement?.tick(delta, this.location, {
+        x: parkTarget?.x ?? this.player.x, y: parkTarget?.y ?? this.player.y,
+        dir: parkTarget?.dir || this.playerDir, anim,
+      });
     }
 
     shutdown() {
@@ -2191,6 +2230,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   }
 
   socket.on('locationTransitionResult', (result) => {
+    if (Number.isSafeInteger(result?.transitionSequence)) {
+      if (result.transitionSequence < lastServerTransitionSequence) return;
+      lastServerTransitionSequence = result.transitionSequence;
+    }
     const generation = ++sceneTransitionGeneration;
     clearTimeout(sceneTransitionTimer);
     sceneTransitionTimer = null;
@@ -2250,6 +2293,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           office.player.setPosition(result.self.x, result.self.y);
           office.player.body?.reset(result.self.x, result.self.y);
         }
+        office._syncOfficePlayers?.(result.players || {});
         office._portalFading = false;
         office.cameras.main.fadeIn(220, 16, 22, 34);
         officePortalRelease = false;
@@ -2281,18 +2325,25 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     else finish();
   });
 
-  socket.on('currentPlayers', (players) => window._neighborhoodScene?.syncPlayers(players || {}));
-  socket.on('playerJoined', (player) => window._neighborhoodScene?.addRemote(player?.id, player));
-  socket.on('playerMoved', (player) => window._neighborhoodScene?.moveRemote(player));
+  const activeNeighborhood = () => {
+    const scene = window._neighborhoodScene;
+    return scene?.scene?.isActive?.() ? scene : null;
+  };
+  socket.on('currentPlayers', (players) => activeNeighborhood()?.syncPlayers(players || {}));
+  socket.on('playerJoined', (player) => activeNeighborhood()?.addRemote(player?.id, player));
+  socket.on('playerMoved', (player) => activeNeighborhood()?.moveRemote(player));
   socket.on('playerMoveCorrection', (player) => {
-    if (window._neighborhoodScene) return window._neighborhoodScene.correctLocal(player);
+    const neighborhood = activeNeighborhood();
+    if (neighborhood) return neighborhood.correctLocal(player);
     const office = window._phaserGame?.scene?.getScene('OfficeScene');
-    if (office?.player && Number.isFinite(player?.x) && Number.isFinite(player?.y)) {
+    if (office?.player && (!player?.location || player.location === 'office') &&
+        window.JpoFocusedMovement?.shouldApplyCorrection(player, 'office', office._lastCorrectionSeq ?? -1)) {
+      if (Number.isSafeInteger(player.seq)) office._lastCorrectionSeq = player.seq;
       office.player.setPosition(player.x, player.y);
       office.player.body?.reset(player.x, player.y);
     }
   });
-  socket.on('playerLeft', (id) => window._neighborhoodScene?._removeRemote(id));
+  socket.on('playerLeft', (id) => activeNeighborhood()?._removeRemote(id));
   socket.on('chatMessage', (payload) => {
     if (typeof payload?.message === 'string') window._neighborhoodScene?.showChat(payload.id, payload.message);
   });

@@ -54,6 +54,7 @@ import {
   furnitureActionPathClear,
   furnitureActivityConflictsWithBlock,
 } from "./furniture-actions.mjs";
+import { inspectMovementEnvelope } from "./movement-protocol.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -67,7 +68,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-interiors.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3297,6 +3298,7 @@ function rowToPlayerState(row) {
     // homes shipped; home layouts themselves are fully durable in their own
     // development-schema tables.
     locationId: "office",
+    movementRevision: 0,
     // Never resurrect a persisted coordinate into a different map: reconnects
     // intentionally use the authored, painted HQ spawn (rather than stale
     // coordinates from an older map/home session).
@@ -3366,6 +3368,29 @@ function locationOf(p) {
   return p?.locationId || "office";
 }
 function locationRoom(id) { return `location:${id}`; }
+function movementRevisionOf(player) {
+  return Number.isSafeInteger(player?.movementRevision) && player.movementRevision >= 0
+    ? player.movementRevision : 0;
+}
+function bumpMovementRevision(player) {
+  if (!player) return 0;
+  player.movementRevision = movementRevisionOf(player) + 1;
+  return player.movementRevision;
+}
+// All positional broadcasts carry the authoritative room and movement
+// sequence. Rooms already isolate normal traffic, but these tags also protect
+// clients during a scene transition from a delayed packet from the old map.
+function movementPayload(id, player, overrides = {}) {
+  const locationId = locationOf(player);
+  const { movementRevision: _movementRevision, ...publicPlayer } = player || {};
+  return {
+    id,
+    ...publicPlayer,
+    ...overrides,
+    location: locationId,
+    seq: movementRevisionOf(player),
+  };
+}
 function sameLocation(aId, bId) {
   return !!players[aId] && !!players[bId] && locationOf(players[aId]) === locationOf(players[bId]);
 }
@@ -3387,7 +3412,7 @@ function locationPlayers(forId) {
   if (!p) return {};
   const here = locationOf(p), out = {};
   for (const [id, candidate] of Object.entries(players)) {
-    if (locationOf(candidate) === here) out[id] = candidate;
+    if (locationOf(candidate) === here) out[id] = movementPayload(id, candidate);
   }
   return out;
 }
@@ -3481,7 +3506,7 @@ function withHomeOperation(ownerEmail, operation) {
 function filterPlayersForLocation(snapshot, locationId) {
   const out = {};
   for (const [id, player] of Object.entries(snapshot || {}))
-    if (locationOf(player) === locationId) out[id] = player;
+    if (locationOf(player) === locationId) out[id] = movementPayload(id, player);
   return out;
 }
 async function emitHomeSnapshotToOccupants(ownerEmail) {
@@ -3608,7 +3633,8 @@ function stopFurnitureActivity(socketId, reason = "exit", moveToStand = true) {
   player.activity = null;
   player.anim = "idle";
   emitToLocation(locationId, "furnitureActivity", furnitureActivityPayload(socketId, "stop", activity, player));
-  emitToLocation(locationId, "playerMoved", { id: socketId, ...player }, socketId);
+  bumpMovementRevision(player);
+  emitToLocation(locationId, "playerMoved", movementPayload(socketId, player), socketId);
   return true;
 }
 
@@ -3804,11 +3830,22 @@ async function restorePlayer(socket, row) {
     avatarChanges: state.avatarChanges ?? 0,
     x:         state.x,
     y:         state.y,
+    location:  state.locationId,
+    locationId: state.locationId,
     // Restored pose: the client re-enters the seated pose from these instead of
     // spawning fresh — without them every refresh/build-stamp reload stood the
     // player up at spawn (and un-seated them for everyone watching).
     dir:       state.dir,
     anim:      state.anim === "sit" ? "sit" : "idle",
+  });
+  // A resume can arrive on a socket whose Phaser scene survived the network
+  // seam. Tell that client which live scene the server restored BEFORE the
+  // room snapshot, so an old neighborhood scene cannot keep emitting as HQ.
+  socket.emit("locationTransitionResult", {
+    ok: true, reason: "resume", location: state.locationId,
+    spawn: { x: state.x, y: state.y, dir: state.dir },
+    map: locationInfo(state.locationId), self: movementPayload(socket.id, state),
+    players: locationPlayers(socket.id),
   });
   // Prop Hunt masks the hider before the new location filter is applied.
   socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), state.locationId));
@@ -3900,7 +3937,7 @@ async function restorePlayer(socket, row) {
   // This direct push covers reconnects even before the client sends uiSync.
   grandEventSyncToSocket(socket.id);
 
-  emitToLocation(state.locationId, "playerJoined", { id: socket.id, ...state }, socket.id);
+  emitToLocation(state.locationId, "playerJoined", movementPayload(socket.id, state), socket.id);
 
   // After Dark grace rebind: if this email holds a spot in the ACTIVE round
   // (marked `gone` by roundDeferLeave, or still keyed under an older socket id
@@ -6647,10 +6684,13 @@ function phBeginHunt() {
 // client keeps the payload). The mask is the PUBLIC gathering spot — zero
 // information. The hider themself gets the real map.
 function phMaskedPlayers(forId) {
-  if (!propHunt || forId === propHunt.hiderId) return players;
-  const hp = players[propHunt.hiderId];
-  if (!hp) return players;
-  return { ...players, [propHunt.hiderId]: { ...hp, x: propHunt.gatherX, y: propHunt.gatherY, anim: "idle" } };
+  const out = {};
+  for (const [id, player] of Object.entries(players)) {
+    const masked = propHunt && forId !== propHunt.hiderId && id === propHunt.hiderId
+      ? { x: propHunt.gatherX, y: propHunt.gatherY, anim: "idle" } : {};
+    out[id] = movementPayload(id, player, masked);
+  }
+  return out;
 }
 
 function phFinish(found, winnerName, reason) {
@@ -6774,8 +6814,9 @@ function rlglPlaceAtStart(id, idx) {
   p.x = Math.round(b.x0 + 20 + laneW * (idx + 0.5));
   p.y = RLGL_START_Y;
   p.anim = "idle"; p.dir = "down";
+  bumpMovementRevision(p);
   io.to(id).emit("rlglTeleport", { x: p.x, y: p.y });
-  emitToLocation("office", "playerMoved", { id, ...p });
+  emitToLocation("office", "playerMoved", movementPayload(id, p));
 }
 
 // Sudden-death theater: mid-green the doll TWITCHES like she's turning
@@ -7318,8 +7359,9 @@ function rlglOnMove(id, prevX, prevY, x, y, now) {
     const p = players[id];
     if (p) {
       p.x = x; p.y = RLGL_START_Y;
+      bumpMovementRevision(p);
       io.to(id).emit("rlglPushed", { id, x: p.x, y: p.y, byName: "The doll — wait for GO!" });
-      emitToLocation("office", "playerMoved", { id, ...p });
+      emitToLocation("office", "playerMoved", movementPayload(id, p));
     }
     return;
   }
@@ -7676,6 +7718,7 @@ io.on("connection", (socket) => {
   const voiceSigBucket  = makeBucket(80, 150); // WebRTC handshakes burst (~15 msgs × several peers entering a crowd), then go quiet
   const voiceTalkBucket = makeBucket(8, 600);  // 🎙 badge flips + the 4s keepalive while the key is held
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
+  let lastMoveSequence = 0;                 // newest accepted client envelope sequence
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
 
@@ -8044,8 +8087,9 @@ io.on("connection", (socket) => {
     p.x = propHunt.gatherX + Math.round(Math.random() * 120 - 60);
     p.y = propHunt.gatherY + Math.round(Math.random() * 120 - 60);
     p.anim = "idle";
+    bumpMovementRevision(p);
     socket.emit("phJoined", { x: p.x, y: p.y, hideEndsAt: propHunt.hideEndsAt, phase: propHunt.state, endsAt: propHunt.endsAt });
-    emitToLocation(locationOf(p), "playerMoved", { id: socket.id, ...p }, socket.id);
+    emitToLocation(locationOf(p), "playerMoved", movementPayload(socket.id, p), socket.id);
   });
 
   // ── HQ-Buddy quiz ─────────────────────────────────────────────────────────
@@ -8629,7 +8673,8 @@ io.on("connection", (socket) => {
     tp.x = Math.min(b.x1 - 15, Math.max(b.x0 + 15, tp.x + (dx / d) * RLGL_PUSH_DIST_PX));
     tp.y = Math.min(RLGL_ARENA.y1 - 20, Math.max(RLGL_ARENA.y0 + 20, tp.y + (dy / d) * RLGL_PUSH_DIST_PX));
     tp.x = Math.round(tp.x); tp.y = Math.round(tp.y);
-    emitToLocation("office", "playerMoved", { id: targetId, ...tp });
+    bumpMovementRevision(tp);
+    emitToLocation("office", "playerMoved", movementPayload(targetId, tp));
     emitToLocation("office", "rlglPushed", { id: targetId, name: tm.name, byId: socket.id, byName: me.name, x: tp.x, y: tp.y });
     console.log(`RLGL: ${me.name} pushed ${tm.name}`);
     // Pushed while the doll is watching → the VICTIM moved. Squid Game rules.
@@ -9209,6 +9254,7 @@ io.on("connection", (socket) => {
       if (reg && !reg.email) {
         const state = {
           x: GRASS_SPAWN.x, y: GRASS_SPAWN.y, dir: "down", anim: "idle",
+          locationId: "office", movementRevision: 0,
           name: reg.nickname || reg.firstName || reg.name, fullName: reg.name,
           email: "", character: reg.character,
           hairIdx: reg.hairIdx, skinIdx: reg.skinIdx, shirtIdx: reg.shirtIdx, pantsIdx: reg.pantsIdx,
@@ -9225,7 +9271,7 @@ io.on("connection", (socket) => {
         io.to(targetId).emit("announcerStatus", { canPost: false });
         io.to(targetId).emit("announcements", await fetchAnnouncements());
         for (const pid in players) {
-          if (pid !== targetId) io.to(pid).emit("playerJoined", { id: targetId, ...state });
+          if (pid !== targetId) io.to(pid).emit("playerJoined", movementPayload(targetId, state));
         }
         _notifyAdmins();
         logAdmin(socket, "Registration approved", `${reg.name} (session-only)`);
@@ -9504,6 +9550,7 @@ io.on("connection", (socket) => {
       }
       p.locationId = target.id;
       p.x = spawn.x; p.y = spawn.y; p.dir = spawn.dir || "down"; p.anim = "idle";
+      bumpMovementRevision(p);
       socket.join(locationRoom(target.id));
       lastMoveAt = 0; wasSitting = false;
     }
@@ -9516,8 +9563,9 @@ io.on("connection", (socket) => {
     const info = locationInfo(target.id);
     const ownHomeColor = homeExteriorColor(ownHome?.exterior_color);
     socket.emit("locationTransitionResult", {
-      ok: true, location: target.id, reason, spawn: { x: p.x, y: p.y, dir: p.dir },
-      map: info, self: { ...p, homeColor: ownHomeColor }, players: locationPlayers(socket.id), home,
+      ok: true, location: target.id, reason, transitionSequence: sequence,
+      spawn: { x: p.x, y: p.y, dir: p.dir },
+      map: info, self: movementPayload(socket.id, p, { homeColor: ownHomeColor }), players: locationPlayers(socket.id), home,
       homeColor: ownHomeColor,
       catalog: target.kind === "home" ? FURNITURE_CATALOG :
         isShopLocation(target.id) ? homeShopCatalog(target.id) : undefined,
@@ -9525,17 +9573,26 @@ io.on("connection", (socket) => {
     // Existing clients understand this event and remove stale remote sprites.
     socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), target.id));
     if (target.kind === "home") socket.emit("homeSnapshot", home);
-    emitToLocation(target.id, "playerJoined", { id: socket.id, ...p }, socket.id);
+    emitToLocation(target.id, "playerJoined", movementPayload(socket.id, p), socket.id);
     return true;
   };
 
   socket.on("locationTransition", (payload) => {
+    const envelope = inspectMovementEnvelope(payload, locationOf(players[socket.id]), lastMoveSequence);
+    if (envelope.ignore) return;
     const destination = typeof payload?.destination === "string" ? payload.destination : "";
-    void transitionTo(destination);
+    void transitionTo(destination).then((ok) => {
+      if (ok && envelope.hasSequence) lastMoveSequence = Math.max(lastMoveSequence, envelope.sequence);
+    });
   });
 
   socket.on("furnitureInteract", async (payload) => {
     const p = players[socket.id];
+    const envelope = inspectMovementEnvelope(payload, locationOf(p), lastMoveSequence);
+    if (envelope.ignore) return;
+    const commitSequence = () => {
+      if (envelope.hasSequence) lastMoveSequence = Math.max(lastMoveSequence, envelope.sequence);
+    };
     const parsed = parseLocation(locationOf(p));
     const phase = payload?.phase === "exit" ? "exit" : "start";
     if (!p || parsed?.kind !== "home" || !p.email || isHuddleTestIdentity(p.email)) {
@@ -9548,6 +9605,7 @@ io.on("connection", (socket) => {
     if (phase === "exit") {
       if (!p.activity) {
         socket.emit("furnitureInteractionResult", { ok: true, phase: "stop" });
+        commitSequence();
         return;
       }
       const activity = p.activity;
@@ -9556,6 +9614,7 @@ io.on("connection", (socket) => {
         ok: true, phase: "stop", instanceId: activity.instanceId, action: activity.action,
         x: p.x, y: p.y, dir: p.dir,
       });
+      commitSequence();
       return;
     }
     if (p.activity) {
@@ -9652,10 +9711,12 @@ io.on("connection", (socket) => {
       emitToLocation(parsed.id, "furnitureActivity", furnitureActivityPayload(
         socket.id, "start", activity, p,
       ));
-      emitToLocation(parsed.id, "playerMoved", { id: socket.id, ...p }, socket.id);
+      bumpMovementRevision(p);
+      emitToLocation(parsed.id, "playerMoved", movementPayload(socket.id, p), socket.id);
       socket.emit("furnitureInteractionResult", {
         ok: true, phase: "start", activity, x: p.x, y: p.y, dir: p.dir,
       });
+      commitSequence();
     } catch (err) {
       console.error("furniture interaction failed:", err);
       socket.emit("furnitureInteractionResult", {
@@ -10008,11 +10069,12 @@ io.on("connection", (socket) => {
           visitor.locationId = "city";
           const spawn = locationSpawn(parseLocation("city"));
           visitor.x = spawn.x; visitor.y = spawn.y; visitor.dir = spawn.dir; visitor.anim = "idle";
+          bumpMovementRevision(visitor);
           vs?.join(locationRoom("city"));
           io.to(id).emit("homeEjected", { message: "The owner changed this home's access.", destination: "city" });
-          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: { ...visitor }, players: locationPlayers(id) });
+          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: movementPayload(id, visitor), players: locationPlayers(id) });
           io.to(id).emit("currentPlayers", locationPlayers(id));
-          emitToLocation("city", "playerJoined", { id, ...visitor }, id);
+          emitToLocation("city", "playerJoined", movementPayload(id, visitor), id);
         }
       });
       // Directory metadata is cacheable, but access itself is never cached:
@@ -10102,9 +10164,9 @@ io.on("connection", (socket) => {
           v.locationId = "city"; const spawn = locationSpawn(parseLocation("city"));
           v.x = spawn.x; v.y = spawn.y; v.dir = spawn.dir; v.anim = "idle"; vs?.join(locationRoom("city"));
           io.to(id).emit("homeEjected", { message: "Your invitation was revoked.", destination: "city" });
-          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: { ...v }, players: locationPlayers(id) });
+          io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: movementPayload(id, v), players: locationPlayers(id) });
           io.to(id).emit("currentPlayers", locationPlayers(id));
-          emitToLocation("city", "playerJoined", { id, ...v }, id);
+          emitToLocation("city", "playerJoined", movementPayload(id, v), id);
         }
       });
     } catch (err) { socket.emit("homeInviteResult", { ok: false, message: "Could not revoke invitation." }); }
@@ -10113,11 +10175,18 @@ io.on("connection", (socket) => {
   socket.on("playerMove", (data) => {
     const me = players[socket.id];
     if (!me || !data) return;
+    // These transport guards intentionally run before throttling, activity
+    // cleanup, collision checks, or correction. Reliable Socket.IO packets can
+    // survive a disconnect, so an old-map/old-sequence packet must be inert.
+    const envelope = inspectMovementEnvelope(data, locationOf(me), lastMoveSequence);
+    if (envelope.ignore) return;
+    const packetSequence = envelope.hasSequence ? envelope.sequence : null;
     // A rejected packet must put the local physics body back on the last
     // authoritative point. Otherwise a client can remain visibly inside a
     // facade until another accepted packet happens to correct it.
-    const rejectMove = () => socket.emit("playerMoveCorrection", {
+    const rejectMove = (reason = "validation") => socket.emit("playerMoveCorrection", {
       x: me.x, y: me.y, dir: me.dir || "down", anim: me.anim || "idle",
+      location: locationOf(me), seq: movementRevisionOf(me), clientSeq: packetSequence, reason,
     });
 
     // Throttle: cap how often we accept + rebroadcast movement. The client sends
@@ -10146,14 +10215,14 @@ io.on("connection", (socket) => {
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
     let x = Number(data.x), y = Number(data.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return rejectMove();
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return rejectMove("coordinates");
 
     // Every map has an authoritative boundary.  The HQ map additionally has
     // painted-tile containment; city/shop/home maps use their authored bounds.
     // Bounds come from the loaded map; a minimal epsilon absorbs the body offset /
     // edge rounding (a seat on the top row snaps to y ≈ -BODY_DY) — NOT a teleport.
     if (isOfficePlayer(socket.id) && (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
-        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON)) return rejectMove();
+        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON)) return rejectMove("bounds");
     // Void containment: a position whose feet tile has no art on ANY layer is
     // outside the drawn world — silently dropped like every other rejection
     // (the client clamps at the border for UX; this is the anti-cheat half).
@@ -10185,24 +10254,24 @@ io.on("connection", (socket) => {
         .sort((a, b) =>
           Math.hypot(x - a.x, y - a.y) - Math.hypot(x - b.x, y - b.y))
         .find((candidate) => Math.hypot(x - candidate.x, y - candidate.y) <= 20) || null;
-      if (!staticStand) return rejectMove();
+      if (!staticStand) return rejectMove("seat");
       x = staticStand.x; y = staticStand.y;
     }
     if (staticSeat) {
       // Normalize a valid sit packet to the seat's canonical foot centre.
       x = Number(staticSeat.x); y = Number(staticSeat.y);
     }
-    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat && !me.activity) return rejectMove();
+    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat && !me.activity) return rejectMove("seat");
     const actionAnim = ["lie", "sleep", "shower", "bathe", "watch"].includes(data.anim);
-    if (actionAnim && (!me.activity || data.anim !== me.anim)) return rejectMove();
+    if (actionAnim && (!me.activity || data.anim !== me.anim)) return rejectMove("activity");
     const movementBlockers = activeBlock
       ? blockers.filter((b) => b !== activeBlock)
       : (chair ? blockers.filter((b) => b !== chair) : blockers);
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)
-      : !location || (location.id === "neighborhood"
+        : !location || (location.id === "neighborhood"
         ? !validStreetWorldMove(streetWorld, x, y, movementBlockers)
-        : !validLocationMove(location, x, y, movementBlockers))) return rejectMove();
+          : !validLocationMove(location, x, y, movementBlockers))) return rejectMove("collision");
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be
@@ -10250,7 +10319,7 @@ io.on("connection", (socket) => {
       const speed = MOVE_SPEED * mult;
       const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
-      if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return rejectMove(); }   // teleport / speed hack
+       if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return rejectMove("speed"); }   // teleport / speed hack
     }
 
     const rlglPrevX = me.x, rlglPrevY = me.y;
@@ -10259,6 +10328,8 @@ io.on("connection", (socket) => {
     else if (staticStand) me.dir = staticStand.dir || "down";
     else if (typeof data.dir === "string") me.dir = data.dir;
     me.anim = typeof data.anim === "string" ? data.anim : "idle";
+    if (packetSequence !== null) lastMoveSequence = Math.max(lastMoveSequence, packetSequence);
+    bumpMovementRevision(me);
     wasSitting = sitting;
     lastMoveAt = now;
     if (LT_METRICS) ltState.mvOk++;
@@ -10279,7 +10350,7 @@ io.on("connection", (socket) => {
     // round runs — the server tracks it (me.x/me.y above), everyone else only
     // ever learns the prop's frozen spot from phHunt.
     if (propHunt && propHunt.hiderId === socket.id) return;
-    emitToLocation(locationOf(me), "playerMoved", { id: socket.id, ...me }, socket.id);
+    emitToLocation(locationOf(me), "playerMoved", movementPayload(socket.id, me), socket.id);
   });
 
   socket.on("chatMessage", (payload) => {

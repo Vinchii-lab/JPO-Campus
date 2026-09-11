@@ -3983,6 +3983,7 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="house-colors.js"></script>
   <script src="neighborhood-interiors.js"></script>
+  <script src="focused-movement-helper.js"></script>
   <script src="neighborhood.js"></script>
   <script>
     const socket = io();
@@ -13827,7 +13828,25 @@
 
     // ── Phaser scene ──────────────────────────────────────────────────
     class OfficeScene extends Phaser.Scene {
-      constructor() { super('OfficeScene'); }
+      constructor() {
+        super('OfficeScene');
+        this._lastCorrectionSeq = -1;
+      }
+
+      _clearMovementTransport() {
+        window._jpoMovementTransport?.clear();
+        this._sendTimer = 0;
+        this.player?.setVelocity(0, 0);
+        this._moving = false;
+      }
+
+      _sendReliableMovement(payload) {
+        return window._jpoMovementTransport?.sendReliable('office', payload) || false;
+      }
+
+      _sendPeriodicMovement(delta, payload) {
+        return window._jpoMovementTransport?.tick(delta, 'office', payload) || false;
+      }
 
       preload() {
         // All 13 tilesets embedded in JPO_HQ.tmj (TILESET_SHEETS below mirrors
@@ -14406,21 +14425,24 @@
         });
 
         socket.on('currentPlayers', (allPlayers) => {
-          if (!this.player) { this._pendingPlayers = allPlayers; return; }
-          // Reconcile against the authoritative list: add/refresh everyone present,
-          // and drop any local sprite no longer there (e.g. someone left while we
-          // were briefly away during a reconnect).
-          Object.entries(allPlayers).forEach(([id,data]) => { if (id!==socket.id) this._addOtherPlayer(id,data); });
-          Object.keys(this.otherPlayers).forEach((id) => { if (!allPlayers[id]) this._removeOtherPlayer(id); });
+          if (!this.scene.isActive()) return;
+          this._syncOfficePlayers(allPlayers);
         });
 
         socket.on('playerJoined', (data) => {
+          if (!this.scene.isActive() || (data?.location && data.location !== 'office') ||
+              (data?.locationId && data.locationId !== 'office')) return;
           if (data.id !== socket.id) this._addOtherPlayer(data.id, data);
         });
 
         socket.on('playerMoved', (data) => {
+          if (!this.scene.isActive() || (data?.location && data.location !== 'office') ||
+              (data?.locationId && data.locationId !== 'office')) return;
           const entry = this.otherPlayers[data.id];
           if (!entry) return;
+          if (window.JpoFocusedMovement?.shouldApplyRemote &&
+              !window.JpoFocusedMovement.shouldApplyRemote(data, 'office', entry._movementSeq ?? -1)) return;
+          if (Number.isSafeInteger(data.seq)) entry._movementSeq = data.seq;
           entry.seated = data.anim === 'sit';   // drives the pet's wider stand-off ring
           entry.sprite.setPosition(data.x, data.y);
           const rdir = DIR_START[data.dir] !== undefined ? data.dir : 'down';
@@ -18295,8 +18317,21 @@
         delete this.otherPlayers[id];
       }
 
+      _syncOfficePlayers(allPlayers) {
+        if (!this.player) { this._pendingPlayers = allPlayers || {}; return; }
+        // Reconcile against the authoritative room snapshot, including
+        // removals. This is also used when HQ wakes after a resume; a sleeping
+        // scene does not receive the ordinary currentPlayers listener.
+        Object.entries(allPlayers || {}).forEach(([id, data]) => {
+          if (id !== socket.id && (!data?.location || data.location === 'office') &&
+              (!data?.locationId || data.locationId === 'office')) this._addOtherPlayer(id, data);
+        });
+        Object.keys(this.otherPlayers).forEach((id) => { if (!allPlayers?.[id]) this._removeOtherPlayer(id); });
+      }
+
       _addOtherPlayer(id, data) {
-        if (id === socket.id) return;           // never draw ourselves as a remote player
+        if (id === socket.id || (data?.location && data.location !== 'office') ||
+            (data?.locationId && data.locationId !== 'office')) return; // never draw another map's player
         // Also skip a STALE copy of ourselves: a fast refresh/reconnect can leave our
         // previous socket's player on the server for a moment, so currentPlayers /
         // playerJoined arrives with a second entry carrying OUR email but a different
@@ -18309,6 +18344,8 @@
         // duplicate-character bug: a second currentPlayers/playerJoined for an
         // already-known id (e.g. after a socket reconnect) double-added the sprite,
         // and it froze in whatever pose it held (often mid-sit).
+        const prior = this.otherPlayers[id];
+        if (prior && Number.isSafeInteger(data?.seq) && data.seq < (prior._movementSeq ?? -1)) return;
         this._removeOtherPlayer(id);
         const char        = data.character  || 'adam';
         const hairIdx     = data.hairIdx    || 0;
@@ -18373,6 +18410,7 @@
         const pet = this._makePet(data.pet, data.x, data.y, data.petAcc, petStage, id);
 
         this.otherPlayers[id] = { sprite, nameTag, cosmetic, cosmeticDef, wings, wingsDef, slotObjs, pet, petStage, lastDir: data.dir || 'down', chatBubble:null, character:char, texKey, occluders, seated: data.anim === 'sit',
+          _movementSeq: Number.isSafeInteger(data.seq) ? data.seq : -1,
           appear: { hairIdx, skinIdx, shirtIdx, pantsIdx },
           wear: { equipped: data.equipped || '', wings: data.wings || '', slots: Object.assign({}, data.slots || {}) } };
         // Eliminated round players stay hidden even across a sprite re-add
@@ -18468,11 +18506,7 @@
           this._setObjHighlight(null);
           touchAction.queued = false;
           this._updateTouchActionBtn(null, true);
-          this._sendTimer += delta;
-          if (this._sendTimer >= 50) {
-            this._sendTimer = 0;
-            socket.emit('playerMove', {x:player.x, y:player.y, dir:this.lastDir, anim:this.sitting?'sit':'idle'});
-          }
+          this._sendPeriodicMovement(delta, { x: player.x, y: player.y, dir: this.lastDir, anim: this.sitting ? 'sit' : 'idle' });
           return;
         }
 
@@ -18644,6 +18678,7 @@
           }
         }
         const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
+        let specialMovement = null;
         touchAction.queued = false;
         if (doAction) {
           if (this.sitting) {
@@ -18658,6 +18693,7 @@
             // stood on before sitting, so re-enabling collision there is safe.
             if (this._preSitPos) { player.body.reset(this._preSitPos.x, this._preSitPos.y); this._preSitPos = null; }
             player.body.enable = true;
+            specialMovement = { x: player.x, y: player.y, dir: this.lastDir, anim: 'idle' };
           } else if (interact?.type === 'board') {
             this.lastDir = interact.dir;
             openBoardPanel(this.boardIdByTile?.[interact.bcol + ',' + interact.brow] || 'office');
@@ -18714,6 +18750,7 @@
             // derived cell IS the seat cell; for SEAT_DY seats (tall HR-desk chairs) it's the
             // desk-top cell the feet landed on, which carries the occluder branch.
             this._seatOccluders = this._seatOccludersFor(player.x, player.y, s.facing);
+            specialMovement = { x: player.x, y: player.y, dir: this.lastDir, anim: 'sit' };
           }
         }
 
@@ -18825,11 +18862,10 @@
           this._moving = moving;
         }
 
-        this._sendTimer += delta;
-        if (this._sendTimer >= 50) {
-          this._sendTimer = 0;
+        if (specialMovement) this._sendReliableMovement(specialMovement);
+        if (!specialMovement) {
           const animState = this.sitting ? 'sit' : (this._moving ? 'walk' : 'idle');
-          socket.emit('playerMove', {x:player.x, y:player.y, dir:this.lastDir, anim:animState});
+          this._sendPeriodicMovement(delta, { x: player.x, y: player.y, dir: this.lastDir, anim: animState });
         }
       }
     }

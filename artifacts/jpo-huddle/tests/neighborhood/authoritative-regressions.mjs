@@ -115,5 +115,13 @@ assert.match(clientSource, /if \(portal\.residence\) \{\s*this\.portalCues\?\.pu
   "residence doors keep a cue but do not add a duplicate owner label");
 assert.doesNotMatch(clientSource, /setDepth\(Math\.max\(2, originY - 1\)\)/,
   "yard ground must not be y-sorted over actors");
+assert.match(clientSource, /const COLLISION_SAFETY_MARGIN = 0\.5/,
+  "Arcade exact-contact protection must remain a tiny client-only margin");
+assert.match(clientSource, /actorFootRadius - halfWidth\) \+ 2 \* COLLISION_SAFETY_MARGIN/,
+  "client blocker expansion must derive from measured Arcade body extents");
+const measuredBodyHalfWidth = 18; // setSize(12, 10) at the authored 3x scale
+const measuredZoneExpansion = (ACTOR_FOOT_RADIUS - measuredBodyHalfWidth) + 0.5;
+assert.equal(measuredZoneExpansion + measuredBodyHalfWidth, 16.5,
+  "the measured 36px scaled body and 16px server foot radius preserve a half-pixel client margin");
 
 console.log("PASS: west-end HQ portal, hidden Huddle A/B homes, and outdoor layering contracts");
