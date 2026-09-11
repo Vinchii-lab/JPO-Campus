@@ -4,33 +4,87 @@
 export const HOME_GRID = { width: 12, height: 9, cell: 48 };
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
-  city: { id: "city", label: "Huddle Plaza", spawn: { x: 480, y: 720, dir: "down" }, bounds: { width: 1152, height: 912 } },
-  "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 528, y: 672, dir: "down" }, bounds: { width: 1056, height: 816 } },
+  neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
+  city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
+  "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
 });
 // This is the shared world contract for the client map and server validator.
-// Coordinates are world pixels and blockers are intentionally generous around
-// building art so an avatar cannot clip through a facade/checkout counter.
+// Every facade below has a matching explicit collider.  The narrow gaps are
+// intentional paved doorways, never visual-only entrances.
 export const LOCATION_GEOMETRY = Object.freeze({
-  city: {
+  office: { blockers: [], doors: [] },
+  neighborhood: {
     blockers: [
-      { x: 48, y: 48, width: 300, height: 250 }, { x: 804, y: 48, width: 300, height: 250 },
-      { x: 48, y: 610, width: 300, height: 250 }, { x: 804, y: 610, width: 300, height: 250 },
-      { x: 422, y: 320, width: 308, height: 190 },
+      // west cottage and its garden trees
+      { x: 120, y: 108, width: 240, height: 160 }, { x: 120, y: 268, width: 86, height: 72 }, { x: 274, y: 268, width: 86, height: 72 },
+      // the townhouse leaves its centered front path open
+      { x: 540, y: 92, width: 192, height: 150 }, { x: 540, y: 242, width: 62, height: 86 }, { x: 670, y: 242, width: 62, height: 86 },
+      { x: 908, y: 124, width: 224, height: 150 }, { x: 908, y: 274, width: 76, height: 78 }, { x: 1056, y: 274, width: 76, height: 78 },
+      { x: 1060, y: 642, width: 112, height: 136 }, { x: 760, y: 656, width: 112, height: 136 },
+      // tree colliders are trunk-sized (the canopy remains walk-behind art)
+      { x: 405, y: 210, width: 50, height: 50 }, { x: 455, y: 678, width: 50, height: 50 },
+      { x: 935, y: 698, width: 50, height: 50 }, { x: 91, y: 740, width: 50, height: 50 },
+      { x: 1269, y: 164, width: 50, height: 50 }, { x: 305, y: 720, width: 50, height: 50 },
+      { x: 486, y: 390, width: 28, height: 30 }, { x: 802, y: 390, width: 28, height: 30 },
+      { x: 1146, y: 618, width: 28, height: 30 }, { x: 264, y: 618, width: 28, height: 30 },
+      { x: 372, y: 574, width: 96, height: 30 }, { x: 766, y: 578, width: 96, height: 30 }, { x: 1052, y: 390, width: 96, height: 30 },
     ],
     doors: [
-      { destination: "office", x: 486, y: 96, width: 180, height: 54 },
-      { destination: "furniture-shop", x: 852, y: 560, width: 150, height: 54 },
+      { destination: "home", x: 602, y: 246, width: 68, height: 94, label: "Your townhouse" },
+    ],
+  },
+  city: {
+    blockers: [
+      { x: 178, y: 106, width: 224, height: 145 }, { x: 178, y: 251, width: 76, height: 90 }, { x: 326, y: 251, width: 76, height: 90 },
+      { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
+      { x: 168, y: 590, width: 192, height: 142 }, { x: 704, y: 600, width: 192, height: 142 },
+      { x: 480, y: 358, width: 190, height: 108 },
+      { x: 95, y: 186, width: 50, height: 50 }, { x: 420, y: 160, width: 50, height: 50 },
+      { x: 680, y: 156, width: 50, height: 50 }, { x: 1007, y: 174, width: 50, height: 50 },
+      { x: 67, y: 678, width: 50, height: 50 }, { x: 1023, y: 686, width: 50, height: 50 },
+      { x: 384, y: 354, width: 28, height: 30 }, { x: 730, y: 354, width: 28, height: 30 },
+      { x: 388, y: 600, width: 28, height: 30 }, { x: 732, y: 600, width: 28, height: 30 },
+      { x: 472, y: 364, width: 96, height: 30 }, { x: 582, y: 364, width: 96, height: 30 },
+      { x: 472, y: 570, width: 96, height: 30 }, { x: 582, y: 570, width: 96, height: 30 },
+    ],
+    doors: [
+      { destination: "home", x: 254, y: 250, width: 72, height: 100, label: "Your home" },
+      { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
     ],
   },
   "furniture-shop": {
     blockers: [
-      { x: 0, y: 0, width: 1056, height: 92 }, { x: 0, y: 740, width: 1056, height: 76 },
-      { x: 0, y: 0, width: 72, height: 816 }, { x: 984, y: 0, width: 72, height: 816 },
-      { x: 180, y: 190, width: 670, height: 105 },
+      { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
+      { x: 0, y: 672, width: 408, height: 48 }, { x: 552, y: 672, width: 408, height: 48 },
+      { x: 144, y: 154, width: 672, height: 74 }, { x: 140, y: 378, width: 156, height: 80 }, { x: 662, y: 378, width: 156, height: 80 },
     ],
-    doors: [{ destination: "city", x: 468, y: 735, width: 120, height: 81 }],
+    doors: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit" }],
   },
-  home: { blockers: [], doors: [{ destination: "city", x: 240, y: 384, width: 96, height: 48 }] },
+  home: {
+    blockers: [
+      { x: 0, y: 0, width: 576, height: 48 }, { x: 0, y: 0, width: 48, height: 432 }, { x: 528, y: 0, width: 48, height: 432 },
+      { x: 0, y: 384, width: 240, height: 48 }, { x: 336, y: 384, width: 240, height: 48 },
+    ],
+    doors: [{ destination: "city", x: 240, y: 372, width: 96, height: 60, label: "Front door" }],
+  },
+});
+
+// The only allowed map links. `spawn` is selected by the server based on the
+// source portal, not supplied by a browser.
+export const LOCATION_PORTALS = Object.freeze({
+  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, spawn: { x: 720, y: 912, dir: "up" } }],
+  neighborhood: [
+    { destination: "office", x: 672, y: 912, width: 96, height: 144, spawn: { x: 216, y: 3624, dir: "right" } },
+    { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
+    { destination: "home", x: 602, y: 246, width: 68, height: 94, spawn: { x: 288, y: 336, dir: "down" } },
+  ],
+  city: [
+    { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
+    { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "home", x: 254, y: 250, width: 72, height: 100, spawn: { x: 288, y: 336, dir: "down" } },
+  ],
+  "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
+  home: [{ destination: "city", x: 240, y: 372, width: 96, height: 60, spawn: { x: 290, y: 370, dir: "down" } }],
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -43,7 +97,7 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (value === "office" || value === "city" || value === "furniture-shop") return { id: value, kind: value };
+  if (value === "office" || value === "neighborhood" || value === "city" || value === "furniture-shop") return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -54,9 +108,28 @@ export function parseLocation(value) {
   return null;
 }
 
-export function locationSpawn(location) {
-  if (location.kind === "home") return { x: 6 * HOME_GRID.cell + 24, y: 7 * HOME_GRID.cell + 24, dir: "up" };
+export function locationSpawn(location, fromLocation = null) {
+  if (fromLocation) {
+    const from = parseLocation(fromLocation);
+    const fromKind = from?.kind === "home" ? "home" : from?.id;
+    const destination = location.kind === "home" ? "home" : location.id;
+    const link = (LOCATION_PORTALS[fromKind] || []).find((portal) => portal.destination === destination);
+    if (link?.spawn) return { ...link.spawn };
+  }
+  if (location.kind === "home") return { x: 6 * HOME_GRID.cell, y: 7 * HOME_GRID.cell, dir: "down" };
   return { ...LOCATIONS[location.id].spawn };
+}
+
+export function portalForTransition(fromLocation, destination, x, y, actorEmail = "") {
+  const from = parseLocation(fromLocation), target = parseLocation(destination);
+  if (!from || !target || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const fromKind = from.kind === "home" ? "home" : from.id;
+  const targetKind = target.kind === "home" ? "home" : target.id;
+  // A house door takes its owner home. Coworker visits remain permission-gated
+  // but cannot be used as arbitrary teleport links.
+  if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase()) return null;
+  return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
+    portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;
 }
 
 export function locationBounds(location) {
@@ -84,10 +157,11 @@ export function furnitureFootprint(item, rotation) {
 export function validPlacement(item, x, y, rotation, otherItems) {
   if (!item || !item.rotations.includes(rotation) || !Number.isInteger(x) || !Number.isInteger(y)) return false;
   const f = furnitureFootprint(item, rotation);
-  // The bottom-centre entry strip is permanently clear, so furniture can never
-  // block the door and strand visitors.
+  // The spawn-to-door entry strip is permanently clear, so furniture can never
+  // trap a visitor at arrival or block the front door.
   if (x < 0 || y < 0 || x + f.width > HOME_GRID.width || y + f.height > HOME_GRID.height ||
-      (y + f.height > HOME_GRID.height - 1 && x <= 6 && x + f.width > 5)) return false;
+      // Preserve the spawn and a two-tile route from it to the front door.
+      (x < 7 && x + f.width > 5 && y < 9 && y + f.height > 6)) return false;
   return !otherItems.some((placed) => {
     const of = furnitureFootprint(placed.item, placed.rotation);
     return x < placed.gridX + of.width && x + f.width > placed.gridX &&

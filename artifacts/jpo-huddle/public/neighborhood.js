@@ -5,7 +5,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   const ui = document.createElement('div');
   ui.id = 'neighborhood-ui';
-  // Travel belongs to authored map doors, not a screen-covering button bar.
+  // This is a location plaque, deliberately not a travel menu.
   ui.innerHTML = '<div id="neighborhood-nav"><span id="neighborhood-title">JPO HQ</span></div><div id="home-panel" hidden></div>';
   document.body.appendChild(ui);
 
@@ -21,12 +21,36 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   const globals = () => getGlobals() || {};
   const toast = (message) => globals().showToast?.(message);
+  let officePortalRelease = true;
+  let officePortalTransition = false;
+  window.jpoBeginMapFade = function() {
+    const game = window._phaserGame;
+    const scene = game?.scene?.getScenes(true)?.find((candidate) =>
+      candidate.scene.key === 'OfficeScene' || candidate.scene.key === 'NeighborhoodScene');
+    if (!scene || scene._portalFading) return;
+    scene._portalFading = true;
+    scene._portalFadeAt = performance.now();
+    scene.cameras.main.fadeOut(220, 16, 22, 34);
+  };
+  // The gate lies on an existing, walkable western garden tile in JPO_HQ.tmj
+  // (columns 2–3, rows 74–76). It is deliberately proximity-only: no action
+  // key and no travel button can bypass the walk through the garden.
+  window.jpoTryOfficePortal = function(player, dir) {
+    if (currentLocation !== 'office' || !player) return false;
+    const inside = player.x >= 96 && player.x <= 192 && player.y >= 3552 && player.y <= 3696;
+    if (!inside) { officePortalRelease = true; return false; }
+    if (!officePortalRelease || officePortalTransition) return false;
+    officePortalTransition = true;
+    socket.emit('playerMove', { x: player.x, y: player.y, dir: dir || 'left', anim: 'idle' });
+    window.jpoBeginMapFade?.();
+    travel('neighborhood');
+    return true;
+  };
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[char]);
   const isHome = () => currentLocation.startsWith('home:');
   const travel = (destination) => socket.emit('locationTransition', { destination });
-  window.jpoTravel = travel;
 
   function renderHome() {
     if (!isHome() || !homeState) {
@@ -48,9 +72,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         '<button type="button" data-return="' + escapeHtml(item.id) + '">Store</button></span>',
     ).join('') || '<small>Your room is ready to furnish.</small>';
     const directoryMarkup = directory.length
-      ? directory.map((home) => '<button type="button" class="home-directory-item" data-visit="' +
-          escapeHtml(home.ownerEmail) + '">' + escapeHtml(home.name || home.ownerEmail) +
-          ' <small>(' + escapeHtml(home.accessMode) + ')</small></button>').join('')
+      ? directory.map((home) => '<span class="home-directory-item">' + escapeHtml(home.name || home.ownerEmail) +
+          ' <small>(' + escapeHtml(home.accessMode) + ')</small></span>').join('')
       : '<small>No homes available to visit.</small>';
 
     const editor = canEdit ? (
@@ -73,15 +96,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     homePanel.innerHTML =
       '<div class="home-panel-head"><b>' + (canEdit ? 'Your starter home' : 'Visiting a home') +
       '</b><button type="button" data-collapse>' + (editorOpen ? 'Collapse' : 'Open panel') + '</button></div>' +
-      '<div class="home-section home-directory"><small>Visit coworkers <button type="button" data-refresh-dir>Refresh</button></small>' +
+       '<div class="home-section home-directory"><small>Neighbors — visit through their marked home doors.</small>' +
       directoryMarkup + '</div>' +
       (editorOpen ? editor : (canEdit ? '<small class="home-panel-note">Open panel to place, store, or manage your home.</small>' : ''));
 
     homePanel.querySelector('[data-collapse]').onclick = () => { editorOpen = !editorOpen; renderHome(); };
-    homePanel.querySelector('[data-refresh-dir]').onclick = () => socket.emit('homeDirectoryRequest');
-    homePanel.querySelectorAll('[data-visit]').forEach((button) => {
-      button.onclick = () => travel('home:' + button.dataset.visit);
-    });
     homePanel.querySelectorAll('[data-select]').forEach((button) => {
       button.onclick = () => {
         selectedInstance = button.dataset.select;
@@ -197,8 +216,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase'].forEach((id) => {
         this.load.image('furn_' + id, '/assets/neighborhood/furniture/' + id + '.png');
       });
-      this.load.image('neighborhood_shop_floor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_1_48x48.png');
-      this.load.image('neighborhood_shop_decor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_2_48x48.png');
+      ['house', 'townhouse', 'shop', 'tree', 'bench', 'lamp'].forEach((id) => {
+        this.load.image('ext_' + id, '/assets/neighborhood/exterior/' + id + '.png');
+      });
     }
 
     create(data) {
@@ -212,18 +232,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
       this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
 
-      const art = this.add.graphics();
-      if (atHome) {
-        art.fillStyle(0xdfd3b8, 1).fillRect(0, 0, this.mapWidth, this.mapHeight);
-        art.lineStyle(8, 0x8a7258, 1).strokeRect(4, 4, this.mapWidth - 8, this.mapHeight - 8);
-        for (let x = 0; x <= this.mapWidth; x += 48) art.lineStyle(1, 0x000000, 0.15).lineBetween(x, 0, x, this.mapHeight);
-        for (let y = 0; y <= this.mapHeight; y += 48) art.lineStyle(1, 0x000000, 0.15).lineBetween(0, y, this.mapWidth, y);
-      } else if (this.location === 'furniture-shop') {
-        this.add.image(this.mapWidth / 2, this.mapHeight / 2, 'neighborhood_shop_floor').setDisplaySize(this.mapWidth, this.mapHeight);
-        this.add.image(this.mapWidth / 2, this.mapHeight / 2, 'neighborhood_shop_decor').setDisplaySize(this.mapWidth, this.mapHeight).setDepth(5);
-      } else {
-        art.fillStyle(0x8a9e88, 1).fillRect(0, 0, this.mapWidth, this.mapHeight);
-      }
+      // All maps are composed here from repeatable tile-sized ground, paths,
+      // and separate transparent objects. None uses a baked screenshot/map PNG.
+      if (atHome) this._drawHome();
+      else if (this.location === 'furniture-shop') this._drawShop();
+      else if (this.location === 'neighborhood') this._drawNeighborhood();
+      else this._drawCity();
 
       const self = data?.self || data?.spawn || {};
       const g = globals();
@@ -233,7 +247,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || ('run_' + char);
       this.playerDir = self.dir || 'down';
       this.player = this.physics.add.sprite(self.x || 24, self.y || 24, this.playerTexKey, g.DIR_START?.[this.playerDir] || 0)
-        .setScale(3).setOrigin(0.5, 0.5);
+        .setScale(3).setOrigin(0.5, 0.5).setDepth(20);
       this.player.body.setSize(12, 10).setOffset(2, 20);
       this.player.body.setCollideWorldBounds(true);
       this.localNameTag = this._makeNameTag(this.player.x, this.player.y, g._playerName || self.name || 'You') ||
@@ -246,17 +260,144 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       (this.info.geometry?.blockers || []).forEach((block) => this._addBlock(this._geometryBlocks, block));
       this.physics.add.collider(this.player, this._geometryBlocks);
       this.physics.add.collider(this.player, this._furnitureBlocks);
-      this.doors = this.info.geometry?.doors || [];
+      this.doors = this.info.portals || [];
+      this._drawPortalCues();
       this.keys = this.input.keyboard.createCursorKeys();
       this.wasd = this.input.keyboard.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' });
       this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
       this.lastSend = 0;
-      this.interactHint = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '11px', color: '#000', backgroundColor: '#fff', padding: { x: 3, y: 2 } }).setOrigin(0.5).setDepth(30).setVisible(false);
+      // Arrival points intentionally sit just inside an entry threshold. Do
+      // not re-arm it until the player has walked clear, preventing bounce.
+      this.portalRelease = !this._insidePortal(this.player.x, this.player.y);
+      this.interactHint = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '11px', color: '#182331', backgroundColor: '#fff7d6', padding: { x: 5, y: 3 } }).setOrigin(0.5).setDepth(30).setVisible(false);
 
       this._setLocalPresentation();
       this.renderFurniture(homeState);
       this.syncPlayers(data?.players || {});
       this._installPlacementInput(atHome);
+    }
+
+    _tileField(base, alternate) {
+      const art = this.add.graphics().setDepth(0);
+      for (let y = 0; y < this.mapHeight; y += 48) for (let x = 0; x < this.mapWidth; x += 48) {
+        const tone = ((x / 48 * 11 + y / 48 * 7) % 5 === 0) ? alternate : base;
+        art.fillStyle(tone, 1).fillRect(x, y, 48, 48);
+        art.lineStyle(1, 0x24313b, 0.09).strokeRect(x, y, 48, 48);
+      }
+      return art;
+    }
+
+    _path(rect, fill = 0xd8ccb3, border = 0x9b927e) {
+      const art = this.add.graphics().setDepth(1);
+      art.fillStyle(fill, 1).fillRect(rect.x, rect.y, rect.width, rect.height);
+      art.lineStyle(2, border, 0.7).strokeRect(rect.x, rect.y, rect.width, rect.height);
+      for (let x = rect.x + 24; x < rect.x + rect.width; x += 48)
+        art.lineStyle(1, border, 0.26).lineBetween(x, rect.y, x, rect.y + rect.height);
+      for (let y = rect.y + 24; y < rect.y + rect.height; y += 48)
+        art.lineStyle(1, border, 0.26).lineBetween(rect.x, y, rect.x + rect.width, y);
+    }
+
+    _exterior(kind, x, y, scale = 2, depth = 4) {
+      return this.add.image(x, y, 'ext_' + kind).setOrigin(0.5, 1).setScale(scale).setDepth(depth);
+    }
+
+    _sign(x, y, text) {
+      return this.add.text(x, y, text, {
+        fontFamily: 'monospace', fontSize: '12px', color: '#fff4cf',
+        backgroundColor: '#35424acc', padding: { x: 5, y: 3 },
+      }).setOrigin(0.5, 1).setDepth(18);
+    }
+
+    _drawNeighborhood() {
+      this._tileField(0x77a45f, 0x6f9b59);
+      this._path({ x: 0, y: 432, width: 1440, height: 192 }, 0x55616a, 0x3f4950);
+      this._path({ x: 0, y: 408, width: 1440, height: 24 }, 0xd8ccb3);
+      this._path({ x: 0, y: 624, width: 1440, height: 24 }, 0xd8ccb3);
+      this._path({ x: 576, y: 0, width: 144, height: 432 });
+      this._path({ x: 576, y: 624, width: 144, height: 432 });
+      this._path({ x: 1200, y: 432, width: 144, height: 192 });
+      this._exterior('house', 240, 340);
+      this._exterior('townhouse', 636, 330);
+      this._exterior('shop', 1020, 352);
+      this._exterior('house', 1116, 790);
+      this._exterior('house', 816, 804);
+      [[430, 260], [480, 728], [960, 748], [116, 790], [1294, 214], [330, 770]].forEach(([x, y]) => this._exterior('tree', x, y));
+      [[500, 420], [816, 420], [1160, 648], [278, 648]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      [[420, 604], [814, 608], [1100, 420]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
+      this._sign(636, 82, 'WILLOW WALK');
+      this._sign(1020, 122, 'Cedar Café');
+      this._sign(636, 234, 'Your townhouse');
+    }
+
+    _drawCity() {
+      this._tileField(0x83aa68, 0x789d60);
+      this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
+      this._path({ x: 456, y: 0, width: 240, height: 912 }, 0x535e66, 0x3e4750);
+      this._path({ x: 0, y: 408, width: 1152, height: 24 });
+      this._path({ x: 0, y: 576, width: 1152, height: 24 });
+      this._path({ x: 432, y: 0, width: 24, height: 912 });
+      this._path({ x: 696, y: 0, width: 24, height: 912 });
+      this._path({ x: 254, y: 340, width: 72, height: 92 });
+      this._path({ x: 836, y: 328, width: 72, height: 104 });
+      this._exterior('house', 290, 340);
+      this._exterior('shop', 872, 328);
+      this._exterior('townhouse', 264, 732);
+      this._exterior('townhouse', 800, 744);
+      [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 728], [1048, 736]].forEach(([x, y]) => this._exterior('tree', x, y));
+      [[398, 384], [744, 384], [402, 630], [746, 630]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      [[520, 394], [630, 394], [520, 600], [630, 600]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
+      const plaza = this.add.graphics().setDepth(2);
+      plaza.fillStyle(0xbfd3cb, 1).fillCircle(576, 500, 92).lineStyle(4, 0xe9dfb9, 0.8).strokeCircle(576, 500, 92);
+      plaza.fillStyle(0x66a7c0, 1).fillCircle(576, 500, 34).lineStyle(3, 0xe9f8ff, 0.85).strokeCircle(576, 500, 34);
+      this._sign(290, 80, 'YOUR HOME');
+      this._sign(872, 88, 'HUDDLE HOME');
+      this._sign(576, 302, 'HUDDLE PLAZA');
+    }
+
+    _drawShop() {
+      this._tileField(0xe0cda6, 0xd5bd91);
+      const art = this.add.graphics().setDepth(2);
+      art.lineStyle(8, 0x8e6b50, 1).strokeRect(4, 4, this.mapWidth - 8, this.mapHeight - 8);
+      // Counter, display plinths, rugs, and a clear lower exit make this an
+      // authored interior instead of a flattened shop design.
+      art.fillStyle(0x80583f, 1).fillRect(144, 154, 672, 74).lineStyle(3, 0x533826, 1).strokeRect(144, 154, 672, 74);
+      [140, 662].forEach((x) => art.fillStyle(0x9c7357, 1).fillRect(x, 378, 156, 80).lineStyle(2, 0x624431, 1).strokeRect(x, 378, 156, 80));
+      art.fillStyle(0xb85f5c, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
+      [[112, 108], [848, 108], [100, 560], [860, 560]].forEach(([x, y]) =>
+        this.add.image(x, y, 'furn_fern').setDisplaySize(48, 48).setDepth(4));
+      this._sign(480, 112, 'HUDDLE HOME · FURNISH WELL');
+      this.add.text(480, 190, 'Talk to the catalog at the counter — purchases go to your home inventory.', {
+        fontFamily: 'monospace', fontSize: '12px', color: '#fff7db', backgroundColor: '#493c36cc', padding: { x: 6, y: 4 }, align: 'center',
+      }).setOrigin(0.5).setDepth(18);
+    }
+
+    _drawHome() {
+      this._tileField(0xe3d2b1, 0xd9c39e);
+      const art = this.add.graphics().setDepth(2);
+      art.lineStyle(8, 0x8b6d52, 1).strokeRect(4, 4, this.mapWidth - 8, this.mapHeight - 8);
+      art.fillStyle(0x9bb3c4, 1).fillRect(92, 52, 98, 18).fillRect(386, 52, 98, 18);
+      art.lineStyle(3, 0x725542, 1).strokeRect(92, 52, 98, 18).strokeRect(386, 52, 98, 18);
+      art.fillStyle(0xb96657, 0.8).fillRoundedRect(142, 145, 292, 128, 16);
+      art.lineStyle(3, 0xf2dfba, 0.75).strokeRoundedRect(142, 145, 292, 128, 16);
+      art.fillStyle(0x6e4d3b, 1).fillRect(48, 384, 192, 44).fillRect(336, 384, 192, 44);
+      this.add.text(288, 91, 'A QUIET PLACE TO LAND', { fontFamily: 'monospace', fontSize: '13px', color: '#5c4636' }).setOrigin(0.5).setDepth(10);
+    }
+
+    _drawPortalCues() {
+      for (const portal of this.doors) {
+        const cue = this.add.graphics().setDepth(3);
+        cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
+        cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
+        const label = portal.destination === 'home' ? 'HOME' : portal.destination === 'furniture-shop' ? 'SHOP' : portal.destination === 'city' ? 'PLAZA' : portal.destination === 'neighborhood' ? 'WILLOW WALK' : 'HQ GARDEN';
+        this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
+          fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
+        }).setOrigin(0.5, 1).setDepth(19);
+      }
+    }
+
+    _insidePortal(x, y) {
+      return this.doors?.some((portal) => x >= portal.x && x <= portal.x + portal.width &&
+        y >= portal.y && y <= portal.y + portal.height);
     }
 
     _addBlock(group, rect) {
@@ -287,6 +428,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const localPet = g._equippedPet || '';
       this.localPet = this._makePet(localPet, this.player.x, this.player.y, g._equippedPetAcc || '',
         g._petStageFor?.(localPet, (g._myPetXp || {})[localPet] || 0) || 1, socket.id);
+       this.localPet?.setDepth?.(19);
       const baked = g._bakedWearIds?.(char, g._equippedCosmetic, g._equippedWings, g._equippedSlots) || [];
       this.playerTexKey = this._office('_buildPlayerTex', char, g._playerHairIdx || 0, g._playerSkinIdx || 0,
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || this.playerTexKey;
@@ -346,7 +488,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _validPlacement(def, gridX, gridY, rotation) {
       const footprint = this._footprint(def, rotation);
       if (gridX < 0 || gridY < 0 || gridX + footprint.width > 12 || gridY + footprint.height > 9 ||
-          (gridY + footprint.height > 8 && gridX <= 6 && gridX + footprint.width > 5)) return false;
+          (gridX < 7 && gridX + footprint.width > 5 && gridY < 9 && gridY + footprint.height > 6)) return false;
       return !(homeState?.layout || []).some((placed) => {
         const other = furnitureCatalog[placed.furnitureId];
         if (!other) return false;
@@ -415,9 +557,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const baked = globals()._bakedWearIds?.(character, player.equipped, player.wings, player.slots) || [];
       const texture = this._office('_buildPlayerTex', character, hairIdx, skinIdx, shirtIdx, pantsIdx, baked) || ('run_' + character);
       if (!remote) {
-        const sprite = this.add.sprite(player.x, player.y, texture).setScale(3).setOrigin(0.5, 0.5);
+        const sprite = this.add.sprite(player.x, player.y, texture).setScale(3).setOrigin(0.5, 0.5).setDepth(20);
         const nameTag = this._makeNameTag(player.x, player.y, player.name || 'Coworker') ||
-          this.add.text(player.x, player.y - 40, player.name || 'Coworker', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1);
+          this.add.text(player.x, player.y - 40, player.name || 'Coworker', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1).setDepth(22);
         remote = this.remotes[id] = {
           sprite, nameTag, slotObjs: {}, character, texture, name: player.name || 'Coworker',
           appear: { character, hairIdx, skinIdx, shirtIdx, pantsIdx },
@@ -448,6 +590,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       remote.petAcc = player.petAcc || '';
       remote.petStage = stage;
       remote.pet = this._makePet(player.pet || '', remote.sprite.x, remote.sprite.y, player.petAcc || '', stage, id);
+      remote.pet?.setDepth?.(19);
     }
 
     _applyRemote(remote, player) {
@@ -469,11 +612,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _positionPresentation(entry, x, y, dir) {
       for (const [object, def] of [[entry.cosmetic, entry.cosmeticDef], [entry.wings, entry.wingsDef]]) {
         if (!object) continue;
+        object.setDepth?.(21);
         if (def) this._placeWearable(object, def, x, y, dir);
         else object.setPosition(x, y - 68);
       }
       for (const slot of Object.values(entry.slotObjs || {})) {
         if (!slot?.obj) continue;
+        slot.obj.setDepth?.(21);
         if (slot.def) this._placeWearable(slot.obj, slot.def, x, y, dir);
         else slot.obj.setPosition(x, y - 68);
       }
@@ -511,6 +656,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       remote.petAcc = payload.petAcc || '';
       remote.petStage = stage;
       remote.pet = this._makePet(payload.pet || '', remote.sprite.x, remote.sprite.y, payload.petAcc || '', stage, id);
+      remote.pet?.setDepth?.(19);
     }
 
     showChat(playerId, message) {
@@ -573,15 +719,26 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         seat = this.furniture.find((item) => item.getData('isSeat') &&
           Phaser.Math.Distance.Between(this.player.x, this.player.y, item.x, item.y) <= 52);
       }
+      if (!this.portalRelease && !this._insidePortal(this.player.x, this.player.y)) this.portalRelease = true;
       const door = this.doors.find((item) => this.player.x >= item.x && this.player.x <= item.x + item.width &&
         this.player.y >= item.y && this.player.y <= item.y + item.height);
-      if (door) this.interactHint.setText('[E] Exit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      if (door) this.interactHint.setText('Walking through…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this.sitting) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (seat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else this.interactHint.setVisible(false);
+      if (door && this.portalRelease && !this.transitionRequested) {
+        const destination = door.destination === 'home' ? ('home:' + (globals()._playerEmail || '')) : door.destination;
+        if (destination !== 'home:') {
+          this.transitionRequested = true;
+          // Socket packet ordering ensures the authoritative position is in
+          // the door before the server evaluates the portal transition.
+          socket.emit('playerMove', { x: this.player.x, y: this.player.y, dir: this.playerDir, anim: 'idle' });
+          window.jpoBeginMapFade?.();
+          travel(destination);
+        }
+      }
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
-        if (door) travel(door.destination);
-        else if (this.sitting) {
+        if (this.sitting) {
           this.sitting = false;
           body.enable = true;
           this.player.setPosition(this.preSitX, this.preSitY);
@@ -612,41 +769,70 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   socket.on('locationTransitionResult', (result) => {
     if (!result?.ok) {
+      officePortalTransition = false;
+      const active = window._phaserGame?.scene?.getScenes(true)?.find((scene) => scene._portalFading);
+      if (active) {
+        active._portalFading = false;
+        active._portalFadeAt = 0;
+        active.cameras.main.fadeIn(160, 16, 22, 34);
+      }
+      if (window._neighborhoodScene) window._neighborhoodScene.transitionRequested = false;
       if (result?.message) toast(result.message);
       return;
     }
-    currentLocation = result.location;
-    title.textContent = result.map?.label || result.location;
-    furnitureCatalog = result.catalog || furnitureCatalog;
-    if (isHome()) {
-      homeState = result.home || homeState;
-      editorOpen = false;
-      socket.emit('homeDirectoryRequest');
-      renderHome();
-    } else {
-      selectedInstance = null;
-      homePanel.hidden = true;
-    }
-    renderShop();
     const game = window._phaserGame;
     if (!game) return;
-    if (result.location === 'office') {
-      game.scene.stop('NeighborhoodScene');
-      game.scene.wake('OfficeScene');
-      const office = game.scene.getScene('OfficeScene');
-      if (office.player) {
-        office.player.setPosition(result.self.x, result.self.y);
-        office.player.body?.reset(result.self.x, result.self.y);
+    const outgoing = game.scene.getScenes(true).find((scene) => scene.scene.key === 'OfficeScene' || scene.scene.key === 'NeighborhoodScene');
+    const finish = () => {
+      currentLocation = result.location;
+      title.textContent = result.map?.label || result.location;
+      furnitureCatalog = result.catalog || furnitureCatalog;
+      if (isHome()) {
+        homeState = result.home || homeState;
+        editorOpen = false;
+        socket.emit('homeDirectoryRequest');
+        renderHome();
+      } else {
+        selectedInstance = null;
+        homePanel.hidden = true;
       }
-    } else {
-      game.scene.sleep('OfficeScene');
-      game.scene.start('NeighborhoodScene', result);
-    }
+      renderShop();
+      if (result.location === 'office') {
+        game.scene.stop('NeighborhoodScene');
+        game.scene.wake('OfficeScene');
+        const office = game.scene.getScene('OfficeScene');
+        if (office.player) {
+          office.player.setPosition(result.self.x, result.self.y);
+          office.player.body?.reset(result.self.x, result.self.y);
+        }
+        office._portalFading = false;
+        office.cameras.main.fadeIn(220, 16, 22, 34);
+        officePortalRelease = false;
+        officePortalTransition = false;
+      } else {
+        game.scene.sleep('OfficeScene');
+        game.scene.start('NeighborhoodScene', result);
+        const next = game.scene.getScene('NeighborhoodScene');
+        next._portalFading = false;
+        next.cameras.main.fadeIn(220, 16, 22, 34);
+      }
+    };
+    const elapsed = outgoing?._portalFading ? performance.now() - (outgoing._portalFadeAt || performance.now()) : 0;
+    if (outgoing?._portalFading && elapsed < 220) setTimeout(finish, 220 - elapsed);
+    else finish();
   });
 
   socket.on('currentPlayers', (players) => window._neighborhoodScene?.syncPlayers(players || {}));
   socket.on('playerJoined', (player) => window._neighborhoodScene?.addRemote(player?.id, player));
   socket.on('playerMoved', (player) => window._neighborhoodScene?.moveRemote(player));
+  socket.on('playerMoveCorrection', (player) => {
+    if (window._neighborhoodScene) return window._neighborhoodScene.correctLocal(player);
+    const office = window._phaserGame?.scene?.getScene('OfficeScene');
+    if (office?.player && Number.isFinite(player?.x) && Number.isFinite(player?.y)) {
+      office.player.setPosition(player.x, player.y);
+      office.player.body?.reset(player.x, player.y);
+    }
+  });
   socket.on('playerLeft', (id) => window._neighborhoodScene?._removeRemote(id));
   socket.on('chatMessage', (payload) => {
     if (typeof payload?.message === 'string') window._neighborhoodScene?.showChat(payload.id, payload.message);

@@ -41,6 +41,7 @@ id = "2tGIjzMTBBjBk5ewMEGvo"
 uri = "file://artifacts/jpo-huddle/.local/alex_walk_check.png"
 type = "image"
 title = "Alex walk-cycle render with corrected zones (6 frames)"
+logical_id = "f32eafd3-46cb-4b41-b954-6f56b14caf6b"
 
 [[outputs]]
 id = "DSpo-S4iB-2fCUsZbHqOW"
@@ -48,6 +49,7 @@ uri = "file://attached_assets/generated_images/pet_unicorn_concept.png"
 type = "image"
 title = "Unicorn pet — concept"
 description = "Animated unicorn pet idea: walk poses, idle, sparkle effect"
+logical_id = "82ce8ae1-1dc4-4a9e-a6dd-e1db5d6abd7f"
 
 [[outputs]]
 id = "DxSrhwq-MnXqRmdwD2JNf"
@@ -55,6 +57,7 @@ uri = "file://attached_assets/generated_images/pet_phoenix_concept.png"
 type = "image"
 title = "Phoenix pet — concept"
 description = "Animated phoenix pet idea: flying, perched, flame flare"
+logical_id = "73973796-773e-478b-bd36-91d87e4721de"
 
 [[outputs]]
 id = "3zVoTq0M7n6iIpitjRQBT"
@@ -62,6 +65,7 @@ uri = "file://attached_assets/generated_images/wings_concept.png"
 type = "image"
 title = "Wings accessories — concept"
 description = "Angel & bat wings on the character's back, multiple angles"
+logical_id = "33970310-0625-4ee7-ad74-bf85ddbea207"
 
 [[outputs]]
 id = "CgX9UOS87GnrPlHBKaQjR"
@@ -69,6 +73,7 @@ uri = "file://attached_assets/generated_images/pets_existing_animated_concept.pn
 type = "image"
 title = "Your current pets — animated concept"
 description = "Duck, cat, dog, bunny, turtle & dragon with walk / idle / personality moves"
+logical_id = "1ef19da5-b5c0-4812-aaa6-eaec29288d1e"
 
 [[outputs]]
 id = "QuTaq1E_1S9zAFOKA0vd7"
@@ -76,6 +81,7 @@ uri = "file://attached_assets/generated_images/wings_more_designs_concept.png"
 type = "image"
 title = "6 wing designs — concept"
 description = "Fairy, butterfly, phoenix, crystal, steampunk & dragon wings"
+logical_id = "21b5aff7-80e8-4647-bcac-c8781ede5147"
 
 [[outputs]]
 id = "Wb2EmNS_OmoJLhLHeLvKF"
@@ -83,6 +89,7 @@ uri = "file://attached_assets/dragon_anim_preview.png"
 type = "image"
 title = "Baby Dragon — animated frames preview"
 description = "Walk 1-2-3, sit, and fire-breathing frames in the new style"
+logical_id = "6ea9b0e8-2d25-4c21-b0db-08048ffe1e6b"
 
 [[outputs]]
 id = "_puvvneMcuu3NmOngytoK"
@@ -90,6 +97,7 @@ uri = "file://attached_assets/generated_images/squid_doll_concept.png"
 type = "image"
 title = "The Doll — green light / red light"
 description = "Concept: back turned = run; turned around with red eyes = FREEZE."
+logical_id = "7bba6ac4-a5f2-49fc-8c31-49cdd521b75b"
 
 [[outputs]]
 id = "bDY0f4dV8hwq-As1Fhwo3"
@@ -97,6 +105,7 @@ uri = "file://attached_assets/generated_images/push_fall_frames.png"
 type = "image"
 title = "Push & fall animation frames"
 description = "Shove → stumble → face-plant → dizzy stars, frame by frame."
+logical_id = "4cd22bbc-29a7-477a-89d2-71c41b258cb1"
 
 [[outputs]]
 id = "uu57Ysxtdb5ypuRTm6C-I"
@@ -104,6 +113,7 @@ uri = "file://attached_assets/generated_images/dragon_stage1_hatchling.png"
 type = "image"
 title = "Stage 1 — Hatchling 🐣"
 description = "The baby dragon — what you get from the shop."
+logical_id = "116d576a-b378-4455-b31a-76fe40b83b34"
 
 [[outputs]]
 id = "kderJDDfjUTWdlrgFBOO0"
@@ -111,6 +121,7 @@ uri = "file://attached_assets/generated_images/dragon_stage2_drake.png"
 type = "image"
 title = "Stage 2 — Drake ✨ (30 treats)"
 description = "First evolution: real wings, growing horns, smoke puffs."
+logical_id = "3fcb0730-f3a6-4641-b592-bbd60a580517"
 
 [[outputs]]
 id = "3RWbBZ4s64NMnfx5mFyR8"
@@ -118,6 +129,7 @@ uri = "file://attached_assets/generated_images/dragon_stage3_elder.png"
 type = "image"
 title = "Stage 3 — ELDER DRAGON 👑 (70 treats)"
 description = "Final form: gold-tipped horns, flame breath, ember aura."
+logical_id = "d892a619-6a77-4259-973d-2d1c9ff06f75"
 
 [[outputs]]
 id = "r-Kr7O-YFG_AB5KdI1mKf"
@@ -125,6 +137,7 @@ uri = "file://attached_assets/generated_images/dragon_v2_stage2_drake.png"
 type = "image"
 title = "Stage 2 — Drake ✨ (30 treats)"
 description = "Same purple boy, grown up: bigger orange wings, baby horns, smoke puffs."
+logical_id = "13a4e84b-6395-4c38-8352-899df69caf2c"
 
 [[outputs]]
 id = "Zotbkk3oD1UTdR6i_ndaK"
@@ -132,6 +145,7 @@ uri = "file://attached_assets/generated_images/dragon_v2_stage3_elder.png"
 type = "image"
 title = "Stage 3 — ELDER DRAGON 👑 (70 treats)"
 description = "Final form: royal purple, gold-tipped horns, flame wisp, embers."
+logical_id = "45878cdf-6ea6-421e-94f7-bde830dc8bb6"
 
 [[outputs]]
 id = "dqnsr4Z1XJ2T99VrhZ-49"
@@ -139,6 +153,7 @@ uri = "file://attached_assets/generated_images/duck_s2_goose.png"
 type = "image"
 title = "🦆 Duck Stage 2 — Goose ✨ (30 treats)"
 description = "Longer neck, big attitude."
+logical_id = "a74e15fe-7489-45c9-b4e3-10169b165ce8"
 
 [[outputs]]
 id = "GCAkdJ6tvdBbzlGAouZqJ"
@@ -146,6 +161,7 @@ uri = "file://attached_assets/generated_images/duck_s3_swan.png"
 type = "image"
 title = "🦆 Duck Stage 3 — Royal Swan 👑 (70 treats)"
 description = "White-gold feathers, crown crest, sparkles."
+logical_id = "e05663b9-d465-472d-b46d-d854006caba6"
 
 [[outputs]]
 id = "m87ByFYTLQHJGhIGT--JV"
@@ -153,6 +169,7 @@ uri = "file://attached_assets/generated_images/cat_s2_alley.png"
 type = "image"
 title = "🐱 Cat Stage 2 — Alley Cat ✨ (30 treats)"
 description = "Sleeker, taller, tail-up confidence."
+logical_id = "5a92df8f-0f3f-4297-b573-57e8a280a91b"
 
 [[outputs]]
 id = "XFklzy_AjWCFpi07Hvo6D"
@@ -160,6 +177,7 @@ uri = "file://attached_assets/generated_images/cat_s3_tiger.png"
 type = "image"
 title = "🐱 Cat Stage 3 — Tiger 👑 (70 treats)"
 description = "Real stripes, big paws, golden aura."
+logical_id = "1a3c88ff-2eec-4e56-b330-eed56ccf5ec4"
 
 [[outputs]]
 id = "YurlMZwaIkwhdqTJ1IXuG"
@@ -167,6 +185,7 @@ uri = "file://attached_assets/generated_images/dog_s2_goodboy.png"
 type = "image"
 title = "🐶 Dog Stage 2 — Good Boy ✨ (30 treats)"
 description = "Grown shiba with a red bandana."
+logical_id = "2b13cc6a-69e7-4817-8a6d-9dfe0cb58acc"
 
 [[outputs]]
 id = "jv4fl5cK6U7A2woD_-fq6"
@@ -174,6 +193,7 @@ uri = "file://attached_assets/generated_images/dog_s3_direwolf.png"
 type = "image"
 title = "🐶 Dog Stage 3 — Direwolf 👑 (70 treats)"
 description = "Thick mane, notched ear, keeps the bandana."
+logical_id = "abe2b0c7-828d-40c6-9cca-d2f870f399f6"
 
 [[outputs]]
 id = "_HdUAVZyOZoF2ooHcUvbJ"
@@ -181,6 +201,7 @@ uri = "file://attached_assets/generated_images/bunny_s2_jackalope.png"
 type = "image"
 title = "🐰 Bunny Stage 2 — Jackalope ✨ (30 treats)"
 description = "Tiny antlers!!"
+logical_id = "40a7c2b7-74a1-4f82-816a-99ceddf06a49"
 
 [[outputs]]
 id = "QLlxpG_wtRN9xem4OZ2Y3"
@@ -188,6 +209,7 @@ uri = "file://attached_assets/generated_images/bunny_s3_moon.png"
 type = "image"
 title = "🐰 Bunny Stage 3 — Moon Rabbit 👑 (70 treats)"
 description = "Silvery glow, crescent mark, floats with stars."
+logical_id = "69cfa02d-951e-4893-abff-21d541cf4458"
 
 [[outputs]]
 id = "phEqCS52AZTEBog2LHisd"
@@ -195,6 +217,7 @@ uri = "file://attached_assets/generated_images/turtle_s2_battle.png"
 type = "image"
 title = "🐢 Turtle Stage 2 — Battle Turtle ✨ (30 treats)"
 description = "Spiky shell, ready to rumble."
+logical_id = "7f12e2d2-f83b-43aa-a25e-4e848d987002"
 
 [[outputs]]
 id = "nnWbKOHh8W6tXJqoy7_b2"
@@ -202,6 +225,7 @@ uri = "file://attached_assets/generated_images/turtle_s3_ancient.png"
 type = "image"
 title = "🐢 Turtle Stage 3 — Ancient Tortoise 👑 (70 treats)"
 description = "Mossy shell with a tiny bonsai, wise eyebrows."
+logical_id = "54d1b8cc-f98b-40fb-8824-fe3d26d243df"
 
 [[outputs]]
 id = "W0qpcMd1ZsRHjyfJqYP_O"
@@ -209,6 +233,7 @@ uri = "file://attached_assets/generated_images/dog_s3_wolf_v2.png"
 type = "image"
 title = "🐶 Dog Stage 3 — WOLF 👑 (70 treats)"
 description = "A real wolf now: silver-gray fur with shiba orange on the ears, amber eyes, fangs — still wearing his puppy bandana."
+logical_id = "bb7d8822-decc-4297-9b51-8c400a0753b7"
 
 [[outputs]]
 id = "J3yVj883llk2ZNWAftkuG"
@@ -216,6 +241,7 @@ uri = "file://attached_assets/generated_images/husky_s2.png"
 type = "image"
 title = "🐺 Husky Stage 2 — Sled Husky ✨ (30 treats)"
 description = "Grown husky: same gray/white mask, icy blue eyes, red bandana."
+logical_id = "391116f3-d00b-4954-b64b-92462d31104b"
 
 [[outputs]]
 id = "ATCRhrMYJVj2gDFM7db2r"
@@ -223,6 +249,7 @@ uri = "file://attached_assets/generated_images/husky_s3.png"
 type = "image"
 title = "🐺 Husky Stage 3 — ARCTIC WOLF 👑 (70 treats)"
 description = "Real wolf, snow-white and silver, glowing icy eyes, frost sparkles — bandana stays."
+logical_id = "60d56805-33ed-4261-a8e9-01612be58ce9"
 
 [[outputs]]
 id = "X8XZDoZWHPqLPmfiHLvEy"
@@ -230,6 +257,7 @@ uri = "file://attached_assets/generated_images/choco_s2.png"
 type = "image"
 title = "🍫 Choco Stage 2 — Chocolate Lab ✨ (30 treats)"
 description = "Grown choco boy: rich brown coat, cream chest, red bandana."
+logical_id = "8b733e74-b660-4656-aa93-a3e95893c25e"
 
 [[outputs]]
 id = "UmOrZrMbniTcbPP4Q9Gni"
@@ -237,6 +265,7 @@ uri = "file://attached_assets/generated_images/choco_s3.png"
 type = "image"
 title = "🍫 Choco Stage 3 — BEAR-DOG 👑 (70 treats)"
 description = "Big burly bear-sized final form, tiny fangs, still a gentle boy in his bandana."
+logical_id = "55ee1aa3-9f70-446e-8bbc-c09c8b15c832"
 
 [[outputs]]
 id = "39baxfhYwKuLhfwgm383h"
@@ -244,6 +273,7 @@ uri = "file://attached_assets/generated_images/dog_s3_goldenwolf.png"
 type = "image"
 title = "🐶 Shiba Stage 3 — GOLDEN WOLF 👑 (70 treats)"
 description = "Wolf shape, but keeps the shiba's golden-orange fur — bandana stays."
+logical_id = "9f98f0c7-a35b-455c-8da2-d9362412190e"
 
 [[outputs]]
 id = "W3KkvsZndWcD0PE0Awzfk"
@@ -251,6 +281,7 @@ uri = "file://attached_assets/generated_images/choco_s3_bigdog.png"
 type = "image"
 title = "🍫 Choco Stage 3 — GRAND CHOCO 👑 (70 treats)"
 description = "No more bear — a big noble chocolate dog, floppy ears and all."
+logical_id = "74fad9dc-cd9a-4330-8e6d-cde1595639b8"
 
 [[outputs]]
 id = "I2gThmWHgOl3Oq2ZWwxVr"
@@ -258,6 +289,7 @@ uri = "file://attached_assets/wolf_options.png"
 type = "image"
 title = "The wolf choices, round 2 🐺"
 description = "Left to right: BABY (current) · A grown husky · B frost husky · C aurora spirit · D alpha with crown"
+logical_id = "6fcabff5-31c7-4fa8-9d89-d7ad8708f7f3"
 
 [[outputs]]
 id = "7CKcSld9wiaFA-Q1PqjGA"
@@ -265,6 +297,7 @@ uri = "file://attached_assets/generated_images/wolf_mature_aurora.png"
 type = "image"
 title = "Mature Aurora Wolf — sketch 🐺✨"
 description = "Adult wolf proportions like the shiba & choco final forms, aurora mane + glowing markings, red scarf."
+logical_id = "16493d42-63a9-4d58-b836-77bfa930e98a"
 
 [[outputs]]
 id = "s0xi_r8AHYTaTbLPYmXi2"
@@ -272,6 +305,7 @@ uri = "file://attached_assets/wolf_final_preview.png"
 type = "image"
 title = "Aurora Wolf — full pose set + evolution line 🐺✨"
 description = "Top: the 6 in-game frames (stand, 3 walk steps, sit, howl). Bottom: baby → 2nd form → final form at in-game relative sizes."
+logical_id = "48abdc1c-52da-438b-921c-e9c97e578b29"
 
 [[outputs]]
 id = "zlKBPLcu5Bq9BpOhMMtes"
@@ -279,6 +313,7 @@ uri = "file://attached_assets/alpha_husky_preview.png"
 type = "image"
 title = "Alpha Husky — full pose set + evolution line 👑🐺"
 description = "Top: the 6 in-game frames (stand, 3 trot steps, royal sit, howl). Bottom: baby → 2nd form → alpha final form at in-game relative sizes."
+logical_id = "a2ce9d91-2703-4ad9-9acd-f10688f70c81"
 
 [[outputs]]
 id = "Pemn9nf5XcH7MxfEAVJXE"
@@ -286,6 +321,7 @@ uri = "file://attached_assets/pet_evolutions_lineup.png"
 type = "image"
 title = "Pet Evolution Lineup 🦆🐱🐢"
 description = "Ducks, cats, and turtles — baby → grown-up → final form, now live in the game."
+logical_id = "a44dd987-a5c8-4788-ae71-51a8ce3204bf"
 
 [[outputs]]
 id = "VerQGFt4H1mbHVHWlJm2H"
@@ -293,6 +329,7 @@ uri = "file://attached_assets/generated_images/queen_trick_concepts.png"
 type = "image"
 title = "Persian Queen — Royal Trick Concepts"
 description = "Four concept sketches for her new P-button signature move"
+logical_id = "b306e219-6cdd-4143-8b0e-e0a647853fc0"
 
 [[outputs]]
 id = "znOYN-KG2MYNx3KFoRpcA"
@@ -300,6 +337,7 @@ uri = "file://attached_assets/generated_images/bunny_snowball_evo_concept.png"
 type = "image"
 title = "Snowball evolution sketch ❄️"
 description = "Baby → Stage 2 (frost-tipped ears & paws, snowflake hip mark) → FINAL FORM Frost Empress (snow collar ruff, ice-crystal crown, sparkle coat)"
+logical_id = "defc4456-1356-4afe-a18c-caf8a535b643"
 
 [[outputs]]
 id = "9x2tbYFzXGmGJD-UHmU2c"
@@ -307,6 +345,7 @@ uri = "file://attached_assets/generated_images/bunny_cocoa_evo_concept.png"
 type = "image"
 title = "Cocoa evolution sketch 🏎️"
 description = "Baby → Stage 2 (leaner, cream racing stripe starts) → FINAL FORM Espresso Racer (full racing stripe, speed goggles, smug grin)"
+logical_id = "d157771f-bed9-4def-9862-2ee250954a76"
 
 [[outputs]]
 id = "1pyF9NXP1xHlU85CT_tg0"
@@ -314,6 +353,7 @@ uri = "file://attached_assets/turtle_evo_line.png"
 type = "image"
 title = "Turtle evolution line 🐢"
 description = "Baby → Stage 2 → FINAL FORM: the Elder Tortoise — mossy ancient shell, wise old face"
+logical_id = "2e3f342f-a35a-4d7e-abd0-efa8a6e00c44"
 
 [[outputs]]
 id = "n9-2kolqQMSF6aQkSw5mI"
@@ -321,6 +361,7 @@ uri = "file://attached_assets/turtle_s3_frames.png"
 type = "image"
 title = "Elder Tortoise animation frames"
 description = "Walk 1-2-3, sit, and blessing pose — the actual in-game frames"
+logical_id = "83f8be72-c63d-4070-8e22-8dd6de96ce2a"
 
 [[outputs]]
 id = "4xHhuH4IIvajB240ulAMO"
@@ -328,6 +369,7 @@ uri = "file://attached_assets/turtle_sapphire_evo_line.png"
 type = "image"
 title = "Sapphire Turtle evolution line 💎"
 description = "Baby → Stage 2 → FINAL FORM: the Crystal Guardian — gem-faceted sapphire shell"
+logical_id = "5d6cc855-9eba-4fd1-8fe7-6310a7875b27"
 
 [[outputs]]
 id = "lbsyn3cCf85lfSpbRK5xV"
@@ -335,6 +377,7 @@ uri = "file://attached_assets/turtle_sapphire_s3_frames.png"
 type = "image"
 title = "Crystal Guardian animation frames"
 description = "Walk 1-2-3, sit, and spin pose — the actual in-game frames"
+logical_id = "8c95f740-f27f-4fbc-8d35-c0c9fa73f604"
 
 [[outputs]]
 id = "2H8jPjt05uhUGBgtRB0f3"
@@ -342,6 +385,7 @@ uri = "file://attached_assets/generated_images/dragon_violet_evo_concept.png"
 type = "image"
 title = "Violet 🐉 → ARCANE DRAGON"
 description = "Baby → Stage 2 (already flying) → Final: glowing rune wings, magic sparkles"
+logical_id = "6990b9a9-37e6-4c2e-bf7c-68f669f2e59c"
 
 [[outputs]]
 id = "9TGhRpM1LNT3oLTS0fo7k"
@@ -349,6 +393,7 @@ uri = "file://attached_assets/generated_images/dragon_crimson_evo_concept.png"
 type = "image"
 title = "Crimson 🐲 → INFERNO DRAGON"
 description = "Baby → Stage 2 (already flying) → Final: ember wings, flames off nostrils & tail"
+logical_id = "f67a92b7-ef8c-42de-9c43-a3cfb1ab15a0"
 
 [[outputs]]
 id = "mBobZzjqJ_XhzgJHv3Aj_"
@@ -356,6 +401,7 @@ uri = "file://attached_assets/generated_images/dragon_obsidian_evo_concept.png"
 type = "image"
 title = "Obsidian 🖤 → VOID DRAGON"
 description = "Baby → Stage 2 (already flying) → Final: molten lava cracks, drifting embers"
+logical_id = "b7f8ae47-5d3e-4eec-a3cd-2437c8938b1b"
 
 [[outputs]]
 id = "bOt8KdoR5IWPMhLUu2ih9"
@@ -363,6 +409,7 @@ uri = "file://attached_assets/generated_images/dragon_violet_chunky_concept.png"
 type = "image"
 title = "Violet dragon evolution — chunky royal redo"
 description = "Baby → stage 2 → final form, all in the baby's exact colorway. Final form: massive, ornate rune wings, golden crown horns."
+logical_id = "0e48e11b-4829-4db0-ac4f-9a4635b843f7"
 
 [[outputs]]
 id = "I8KmkhDPGnIsXP_giE1Oa"
@@ -370,6 +417,7 @@ uri = "file://attached_assets/dragon_size_chart.png"
 type = "image"
 title = "True in-game size chart"
 description = "Elder turtle (current biggest) vs baby dragon vs stage-2 vs final form — dragons break the size cap: s2 ~1.3x, final ~1.7x. Biggest pet in the game."
+logical_id = "63e92391-dbcf-4aa4-bc25-9c9394472eea"
 
 [[outputs]]
 id = "3k7MHJ_GJ_9nWA8F30WqS"
@@ -377,6 +425,7 @@ uri = "file://attached_assets/generated_images/dragon_moves_storyboard.png"
 type = "image"
 title = "Dragon moves 1 + 3 + 5 + 12 — the sketch"
 description = "Wing-gust dust, swoop landing, wingtip trails (per-dragon colors), charge-up breath."
+logical_id = "ed02b57a-510e-4051-8068-a7fcb2e11aa8"
 
 [[outputs]]
 id = "ZBlM97PDumR_aZP3KwcS4"
@@ -384,6 +433,7 @@ uri = "file://attached_assets/generated_images/unicorn_moves_storyboard.png"
 type = "image"
 title = "Unicorn move ideas"
 description = "4 sketch concepts: Prism Beam, Stardust Gallop, Halo Blessing, Moonbounce"
+logical_id = "95d0e52d-77d3-48d7-a760-9ff821e338b5"
 
 [[outputs]]
 id = "WKccF4-6qdf0VOU2j2Yyn"
@@ -391,6 +441,7 @@ uri = "file://attached_assets/generated_images/phoenix_moves_storyboard.png"
 type = "image"
 title = "Phoenix move ideas"
 description = "4 sketch concepts: Solar Flare, Ember Dive, Rebirth, Firestorm Waltz"
+logical_id = "8b4f73d5-f18d-4ecb-a4e0-3f67a9ca855d"
 
 [[outputs]]
 id = "Vyu7FZEfwohYcGR4xh-29"
@@ -398,6 +449,7 @@ uri = "file://attached_assets/generated_images/unicorn_mature_styles.png"
 type = "image"
 title = "Grown-up unicorn styles — pick one"
 description = "A: Royal Warhorse · B: Celestial · C: Prism Knight · D: Midnight Myth"
+logical_id = "d3d8c3ce-125f-4f27-9294-70dec85f9249"
 
 [[outputs]]
 id = "H40aejXeA9r87kpCG2n78"
@@ -405,6 +457,7 @@ uri = "file://attached_assets/generated_images/unicorn_gold_accessory_options.pn
 type = "image"
 title = "Gold accessory options — pick one"
 description = "A: Heart Charm · B: Star Medallion · C: Royal Saddle · D: Sun Breastplate"
+logical_id = "debd1d66-ac32-405e-835d-2582752c9597"
 
 [[outputs]]
 id = "hyZ6oC6L116sYdlQ7VML9"
@@ -412,6 +465,7 @@ uri = "file://attached_assets/generated_images/phoenix_fx_storyboard.png"
 type = "image"
 title = "Phoenix flight FX options — pick one (or mix)"
 description = "A: Ember Wake · B: Radiant Sun · C: Comet Burn · D: Firestorm Wingbeat — all buildable as-is"
+logical_id = "6492c203-462e-4f3d-93c5-0c9a17e178dc"
 
 [[outputs]]
 id = "RDLJoEeeXFuehD1zGg_Wa"
@@ -419,6 +473,7 @@ uri = "file://attached_assets/pet_evolution_chart.png"
 type = "image"
 title = "JPO Huddle — Pet Evolution Chart (final)"
 description = "Clean version — white halo pixels scrubbed off the Chocolate dog and Obsidian dragon sprites."
+logical_id = "60af1227-e0b4-469c-aa30-e175fa11ac3a"
 
 [[outputs]]
 id = "Od3aV2hRgGAp7iZmxS1D9"
@@ -426,6 +481,7 @@ uri = "file://attached_assets/race_mockup.png"
 type = "image"
 title = "Pet Race — Heat UI Mockup"
 description = "What the race screen would look like during Heat 1. Real pet sprites, lane layout, betting panel, odds, and gate timer."
+logical_id = "5c483e6b-e2c7-40c3-96ec-2f7e805a2339"
 
 [[outputs]]
 id = "wjHbrlVcgaaKaiTBAmULq"
@@ -433,6 +489,7 @@ uri = "file://attached_assets/race_mockup_v2.jpg"
 type = "image"
 title = "Pet Race — Heat UI Mockup"
 description = "What the race screen would look like. Real pet sprites, heat bracket, betting panel, odds, and countdown timer."
+logical_id = "520b7d4f-d56f-4e64-adeb-e4d73f6f3f7a"
 
 [[outputs]]
 id = "QrAhlrhobLE-t9zpiKNrq"
@@ -440,6 +497,7 @@ uri = "file://attached_assets/generated_images/season_rainy_concepts.png"
 type = "image"
 title = "🌧️ Rainy Season (Aug 1–Oct 10)"
 description = "Frog pet: Tadpole → Frog → King Frog · Items: yellow raincoat, red umbrella, rain boots"
+logical_id = "946d16ce-2e71-4f6e-843b-09faec77e755"
 
 [[outputs]]
 id = "3t3mv7l1BQa1V2o8wLJBh"
@@ -447,6 +505,7 @@ uri = "file://attached_assets/generated_images/season_halloween_concepts.png"
 type = "image"
 title = "🎃 Halloween (Oct 10–Nov 4)"
 description = "Black cat pet: Kitten → Cat → Shadow Panther · Items: witch hat, pumpkin head, vampire cape"
+logical_id = "ae92f071-037e-4a42-a0d8-a67671eda32f"
 
 [[outputs]]
 id = "gr--zWhwQ8tIz70_ZyIpe"
@@ -454,6 +513,7 @@ uri = "file://attached_assets/generated_images/season_christmas_concepts.png"
 type = "image"
 title = "🎄 Christmas (Nov 5–Dec 26)"
 description = "Reindeer pet: Fawn → Reindeer → Golden Reindeer · Items: Santa hat, striped scarf, elf outfit"
+logical_id = "c28b41b7-e927-4ce6-b13e-2a5f95598279"
 
 [[outputs]]
 id = "spP_bEqpkAP7n3TsqvIAQ"
@@ -461,6 +521,7 @@ uri = "file://attached_assets/generated_images/season_newyears_concepts.png"
 type = "image"
 title = "🎆 New Years (Dec 27–Jan 15)"
 description = "Dragon pet: Spark → Dragon → Celestial Dragon · Items: party hat, gold suit, confetti popper"
+logical_id = "adea00d3-6406-445e-84f4-2c28273ce1da"
 
 [[outputs]]
 id = "RUrsRGygukA_zwDym4doh"
@@ -468,6 +529,7 @@ uri = "file://attached_assets/generated_images/season_valentines_concepts.png"
 type = "image"
 title = "💘 Valentine's (Jan 16–Feb 16)"
 description = "Lovebird pet: Chick → Lovebird → Cupid Bird · Items: heart glasses, rose, cupid wings"
+logical_id = "2ae7d08c-312f-4efe-a0bf-7b764b2e0d5e"
 
 [[outputs]]
 id = "Ij4TgavGzvkFmQExdVgij"
@@ -475,6 +537,7 @@ uri = "file://attached_assets/generated_images/season_halloween_bat_concepts.png
 type = "image"
 title = "🦇 Halloween (Oct 10–Nov 4) — bat version"
 description = "Bat pet: Baby Bat → Bat → Vampire Bat · Items: witch hat, pumpkin head, vampire cape"
+logical_id = "cd3173f3-60e5-4f7b-98d8-7d49f8eeee4d"
 
 [[outputs]]
 id = "6Yov2qwq7tI7xd2Kp-aYr"
@@ -482,6 +545,7 @@ uri = "file://attached_assets/generated_images/frog_sliced_review.png"
 type = "image"
 title = "🐸 Frog pet — all 3 stages, sliced"
 description = "Tadpole → Frog → King Frog. Each row: stand, 3 walk frames, sit, action. King Frog was flipped to face the right way."
+logical_id = "260f90dc-503d-4436-a043-abefffbe895f"
 
 [[outputs]]
 id = "Os5MOQ8etyvRmiq_JqT9x"
@@ -489,6 +553,7 @@ uri = "file://attached_assets/generated_images/rainy_outfit_ingame.png"
 type = "image"
 title = "🌧️ Rainy outfit in-game"
 description = "Raincoat + rain boots + umbrella worn together (with a cap!) plus the frog tagging along."
+logical_id = "6d2712d8-f5b3-40e8-8fa7-f686839abdba"
 
 [[outputs]]
 id = "8_iSw0mESrjwG1v_GswO_"
@@ -496,6 +561,7 @@ uri = "file://attached_assets/generated_images/rainy_outfit_v2.png"
 type = "image"
 title = "🌧️ Rainy gear v2 — redrawn"
 description = "Raincoat now has a hood rim, zipper and shading; umbrella got a proper domed canopy with highlight, scalloped edge and a J-hook handle."
+logical_id = "c3cede20-1570-4a59-a026-ed7945b1e380"
 
 [[outputs]]
 id = "m1kfmIQMMbiis4vbuHXwl"
@@ -503,6 +569,7 @@ uri = "file://attached_assets/generated_images/rainy_outfit_v3.png"
 type = "image"
 title = "🌧️ Rainy gear v3 — drawn in the character style"
 description = "Front / side / back views. Navy outlines matching the character sprites, zipper + pocket flaps on the coat, hood visible from behind, and the umbrella tilts forward while walking sideways."
+logical_id = "210700a8-7a5f-4b77-baef-3b668fe5bd1d"
 
 [[outputs]]
 id = "YxMPa405yh5VVQDXuVC5L"
@@ -510,6 +577,7 @@ uri = "file://attached_assets/generated_images/layer_split_proof.png"
 type = "image"
 title = "🧩 Proof: characters rebuilt in layers"
 description = "Adam (top) and Amelia (bottom, the tricky one). Each row: original → re-stacked from layers (identical) → the separated Body / Skin / Hair / Shirt / Trousers layers → a recolor done layer-by-layer. The walk strips show the layered recolor staying aligned across every animation frame."
+logical_id = "d72e4c79-0d17-4bb1-8be4-cfe5bc5cd639"
 
 [[outputs]]
 id = "qeGs7_D9FBpxN5Qhe-Jlc"
@@ -517,6 +585,7 @@ uri = "file://attached_assets/generated_images/raincoat_layer_proof.png"
 type = "image"
 title = "🧥 Raincoat v4 — generated from the layers"
 description = "Each row: walking down (6 frames), then back view (3), then side view (3). The coat is auto-derived from each character's own body layers, so it hugs every pose perfectly — no more clipping, boots stay visible, and hair drapes over the hood line. This replaces the old floating-overlay raincoat once you approve."
+logical_id = "67a22f12-c20f-476e-bc7f-5acb1708b79f"
 
 [[outputs]]
 id = "IWljge7CkUJ0lLyiPxRiL"
@@ -524,6 +593,7 @@ uri = "file://attached_assets/generated_images/adam_upgrade_proof.png"
 type = "image"
 title = "🎨 Adam art upgrade — before (top) vs after (bottom)"
 description = "Same size, same poses. Three changes: sun-lit highlights on hair/face tops, colored outlines (dark green around hair, dark purple around the shirt) instead of flat black, and grounded contact shading at the feet. Applied per body layer, so recolors and all baked wearables stay 100% compatible."
+logical_id = "a0b868ee-ee16-4da2-8ca0-86da005b35d9"
 
 [[outputs]]
 id = "feZNk7RTddxM3oBybHJ2k"
@@ -531,6 +601,7 @@ uri = "file://artifacts/jpo-huddle/design/boots-fixed.png"
 type = "image"
 title = "Rain boots on the feet"
 description = "Boots now sit on the feet in all four directions, worn together with the umbrella."
+logical_id = "7188ba2a-6707-4d05-a4b1-39998252a376"
 
 [[outputs]]
 id = "CSIxXvrpEYZsDmoU3xuso"
@@ -538,6 +609,7 @@ uri = "file://artifacts/jpo-huddle/design/umbrella-held.png"
 type = "image"
 title = "Umbrella held in hand"
 description = "The umbrella now has a full shaft with a hook handle that slants down into the character's hand — held, not stuck on the head."
+logical_id = "a87a6f5a-f08d-48d7-b94d-84e0a8815562"
 
 [[outputs]]
 id = "jOXySATiv4w6lbkdkA71b"
@@ -545,6 +617,7 @@ uri = "file://artifacts/jpo-huddle/design/rain-outfit-final.png"
 type = "image"
 title = "Boots on the sprite, umbrella in hand"
 description = "Full rain outfit: boots now cover the shoes completely in all four directions, and the umbrella shaft angles down to the hand in side view."
+logical_id = "ddacf5f6-53e4-4b7f-a46c-beacb405fa3f"
 
 [[outputs]]
 id = "kMRlm45pDFCxB174mvxaE"
@@ -552,6 +625,7 @@ uri = "file://artifacts/jpo-huddle/design/umbrella-hand.png"
 type = "image"
 title = "Umbrella moved to the hand"
 description = "Canopy shifted over the hand side with a short straight shaft down into the hand — no more pole across the head."
+logical_id = "76c29fc2-4844-49a4-884c-1704b7891b4d"
 
 [[outputs]]
 id = "D26lLbZdFmM8098yo2YZR"
@@ -559,6 +633,7 @@ uri = "file://artifacts/jpo-huddle/design/fitcheck.png"
 type = "image"
 title = "Draped hood — like your reference"
 description = "Hood wraps around the face and neck and meets the coat at the shoulders as one piece. Snug crown with the peak, tapered at the neck so the shoulders show, face in the opening. All four directions."
+logical_id = "718bab57-38d8-419d-8c6e-666b5bacdf07"
 
 [[outputs]]
 id = "jJIKVQa97NvIbx0juYjiL"
@@ -566,6 +641,7 @@ uri = "file://artifacts/jpo-huddle/design/frogking_check.png"
 type = "image"
 title = "King Frog 👑 — walking & idle"
 description = "Stage-3 King Frog with the new royal bound gait (left: walking, right: idle). Step glints, glow trail, and crown shimmer play live in-game."
+logical_id = "a76323a6-2534-42c7-af36-9700bac1eadb"
 
 [[outputs]]
 id = "rdDszky14jI6-2gLiXzBC"
@@ -573,6 +649,7 @@ uri = "file://artifacts/jpo-huddle/design/rain_dance_check.png"
 type = "image"
 title = "Rain dance 🌧️🐸"
 description = "Left: stage-2 Frog with his little drizzle cloud. Right: King Frog summoning his storm cloud mid-dance. Rain, splashes, and lightning flickers play live in-game."
+logical_id = "d1c083b3-7ec2-4fec-b143-c24465598982"
 
 [[outputs]]
 id = "6PlcWWNpsW3NfHc9GDrs0"
@@ -580,6 +657,7 @@ uri = "file://artifacts/jpo-huddle/public/audio/bingo-background.mp3"
 type = "audio"
 title = "quiet Bingo background music"
 description = "Generated music: Original seamless looping instrumental background bed for a lively Filipino office Bingo game and radio variety segment. Bright playful percussion, light bass, subtle tropical-pop an…"
+logical_id = "4a2f0b68-8616-4c92-8332-0e7ebe6e02f4"
 
 [[outputs]]
 id = "u5hf6EULslZhTyK5z20NS"
@@ -587,6 +665,7 @@ uri = "file://attached_assets/generated_audio/bingo_videoke_fanfare.mp3"
 type = "audio"
 title = "bingo videoke perfect score fanfare"
 description = "Generated sound effect: Original short Filipino videoke-machine perfect-score celebration sting, bright cheesy digital brass fanfare, sparkling ascending synth notes, tiny drum flourish and triumphan…"
+logical_id = "124df098-e1e2-4264-af52-8ed3bf3550ee"
 
 [[outputs]]
 id = "VmPM4sRR0cO_zS5HPdlVF"
@@ -594,3 +673,18 @@ uri = "file://artifacts/jpo-huddle/public/audio/bingo-videoke-win.mp3"
 type = "audio"
 title = "Bingo Videoke Winner Sting"
 description = "2.5-second instrumental videoke-style perfect-score fanfare used when a paid Bingo winner is confirmed."
+logical_id = "3bcf55ab-cb70-47ca-aa57-5222294ae293"
+
+[[outputs]]
+id = "Qm5PthVVUnZqO1GWSrjsp"
+uri = "file://attached_assets/generated_images/neighborhood-sprite-preview.png"
+type = "image"
+title = "Generated neighborhood sprites"
+description = "Original modular pixel-art assets: a home, townhouse, furniture shop, tree, bench, and streetlamp. These are separate objects for assembling walkable maps—not a flattened map background."
+logical_id = "92ace331-4313-40ab-be45-94f3ce0f4aba"
+content_hash = "sha256:39318867b7fbd3bca23b3b7b6052730328c60171e075e372fad0d5f29851b9f3"
+size = 135758
+mtime_ms = 1789125250350
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/92ace331-4313-40ab-be45-94f3ce0f4aba/c6202e7e-db22-4741-915b-1b2a29e1a3d3"
+storage_version_token = "1789125257510717"
+content_type = "image/png"

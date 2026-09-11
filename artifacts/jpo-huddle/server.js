@@ -17,6 +17,7 @@ import {
   FURNITURE_CATALOG,
   LOCATION_GEOMETRY,
   LOCATIONS,
+  LOCATION_PORTALS,
   ensureHome,
   homeDirectory,
   homeAccess,
@@ -24,6 +25,7 @@ import {
   layoutBlockers,
   locationSpawn,
   parseLocation,
+  portalForTransition,
   validLocationMove,
   validPlacement,
 } from "./neighborhood.mjs";
@@ -3338,9 +3340,10 @@ function locationInfo(locationId) {
   const parsed = parseLocation(locationId);
   if (!parsed) return null;
   const base = parsed.kind === "home" ? {
-    id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432,
+    id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432, bounds: { width: 576, height: 432 },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
-  return { ...base, geometry: LOCATION_GEOMETRY[parsed.kind === "home" ? "home" : parsed.id] };
+  const key = parsed.kind === "home" ? "home" : parsed.id;
+  return { ...base, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
 }
 const homeLayoutCollisionCache = new Map();
 function homeBlockersFor(location) {
@@ -9158,6 +9161,14 @@ io.on("connection", (socket) => {
       socket.emit("locationTransitionResult", { ok: false, code: "busy", message: "Finish your office activity before travelling." });
       return false;
     }
+    const oldLocation = locationOf(p);
+    // Location changes are physical map portals, not menu travel. Validate this
+    // before any home access query so a forged destination cannot probe homes.
+    const portal = portalForTransition(oldLocation, target.id, p.x, p.y, p.email);
+    if (!portal) {
+      socket.emit("locationTransitionResult", { ok: false, code: "portal", message: "Walk through the marked gate or doorway to travel." });
+      return false;
+    }
     let home = null;
     try {
       if (target.kind === "home") {
@@ -9186,11 +9197,18 @@ io.on("connection", (socket) => {
       return false;
     }
     if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
-    const oldLocation = locationOf(p);
     if (oldLocation !== target.id) {
       emitToLocation(oldLocation, "playerLeft", socket.id);
       socket.leave(locationRoom(oldLocation));
-      const spawn = locationSpawn(target);
+      let spawn = locationSpawn(target, oldLocation);
+      // Layout rules reserve this route for new placements. Older saved homes
+      // may predate that rule, so recover to a nearby clear tile rather than
+      // spawning a visitor inside a sofa after an upgrade.
+      if (target.kind === "home" && !validLocationMove(target, spawn.x, spawn.y, homeLayoutCollisionCache.get(target.ownerEmail) || [])) {
+        const recovered = [{ x: 288, y: 288 }, { x: 240, y: 336 }, { x: 336, y: 336 }, { x: 288, y: 240 }]
+          .find((point) => validLocationMove(target, point.x, point.y, homeLayoutCollisionCache.get(target.ownerEmail) || []));
+        if (recovered) spawn = { ...recovered, dir: "down" };
+      }
       p.locationId = target.id;
       p.x = spawn.x; p.y = spawn.y; p.dir = spawn.dir || "down"; p.anim = "idle";
       socket.join(locationRoom(target.id));
@@ -9414,6 +9432,12 @@ io.on("connection", (socket) => {
   socket.on("playerMove", (data) => {
     const me = players[socket.id];
     if (!me || !data) return;
+    // A rejected packet must put the local physics body back on the last
+    // authoritative point. Otherwise a client can remain visibly inside a
+    // facade until another accepted packet happens to correct it.
+    const rejectMove = () => socket.emit("playerMoveCorrection", {
+      x: me.x, y: me.y, dir: me.dir || "down", anim: me.anim || "idle",
+    });
 
     // Throttle: cap how often we accept + rebroadcast movement. The client sends
     // ~20/s (every 50ms); anything faster than MOVE_MIN_INTERVAL_MS is a flood.
@@ -9432,14 +9456,14 @@ io.on("connection", (socket) => {
     // Coords must be finite — they're written to integer columns on the coin tick
     // / disconnect, so a NaN/Infinity would throw there every time.
     const x = Number(data.x), y = Number(data.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return rejectMove();
 
     // Every map has an authoritative boundary.  The HQ map additionally has
     // painted-tile containment; city/shop/home maps use their authored bounds.
     // Bounds come from the loaded map; a minimal epsilon absorbs the body offset /
     // edge rounding (a seat on the top row snaps to y ≈ -BODY_DY) — NOT a teleport.
     if (isOfficePlayer(socket.id) && (x < -MOVE_BOUNDS_EPSILON || x > WORLD_W + MOVE_BOUNDS_EPSILON ||
-        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON)) return;
+        y < -MOVE_BOUNDS_EPSILON || y > WORLD_H + MOVE_BOUNDS_EPSILON)) return rejectMove();
     // Void containment: a position whose feet tile has no art on ANY layer is
     // outside the drawn world — silently dropped like every other rejection
     // (the client clamps at the border for UX; this is the anti-cheat half).
@@ -9450,11 +9474,11 @@ io.on("connection", (socket) => {
     // itself is temporarily excluded from collision only for that sit snap.
     const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
       Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);
-    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair) return;
+    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair) return rejectMove();
     const movementBlockers = chair ? blockers.filter((b) => b !== chair) : blockers;
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)
-      : !location || !validLocationMove(location, x, y, movementBlockers)) return;
+      : !location || !validLocationMove(location, x, y, movementBlockers)) return rejectMove();
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';
     // grant the extra distance only on that transition, cooldown-gated so it can't be
@@ -9501,7 +9525,7 @@ io.on("connection", (socket) => {
       const speed = MOVE_SPEED * mult;
       const maxDist = speed * elapsed * MOVE_SPEED_TOLERANCE + MOVE_JITTER_PX + snapBonus;
       const dx = x - me.x, dy = y - me.y;
-      if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return; }   // teleport / speed hack (silently dropped)
+      if (dx * dx + dy * dy > maxDist * maxDist) { if (LT_METRICS) ltState.mvRej++; return rejectMove(); }   // teleport / speed hack
     }
 
     const rlglPrevX = me.x, rlglPrevY = me.y;

@@ -13375,15 +13375,6 @@
       constructor() { super('OfficeScene'); }
 
       preload() {
-        // Shared City / Homes art supplied with the project.  These are loaded
-        // once with the office bundle so travel never flashes an unloaded map.
-        this.load.image('neighborhood_home_floor', '/assets/neighborhood/Japanese_Home_1_Layer_1_48x48.png');
-        this.load.image('neighborhood_home_decor', '/assets/neighborhood/Japanese_Home_1_Layer_2_48x48.png');
-        this.load.image('neighborhood_home_preview', '/assets/neighborhood/Japanese_Home_1_preview_48x48.png');
-        this.load.image('neighborhood_shop_floor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_1_48x48.png');
-        this.load.image('neighborhood_shop_decor', '/assets/neighborhood/Ice_Cream_Shop_Design_layer_2_48x48.png');
-        this.load.image('neighborhood_shop_preview', '/assets/neighborhood/Ice_Cream_Shop_Design_preview_48x48.png');
-        this.load.image('neighborhood_city_home', '/assets/neighborhood/Generic_Home_1_preview_48x48.png');
         // All 13 tilesets embedded in JPO_HQ.tmj (TILESET_SHEETS below mirrors
         // this list with each tileset's firstgid). Every image is ALSO loaded as
         // a 16×16 spritesheet so a single desk/monitor tile can be redrawn as a
@@ -13729,6 +13720,18 @@
         })();
 
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
+        // Existing JPO_HQ.tmj garden edge: columns 2–3 / rows 74–76 are
+        // painted outdoor ground with no furniture or wall collision. This is
+        // a cue layered over the unchanged HQ map, not a replacement map.
+        this._gardenExit = { x: 96, y: 3552, width: 96, height: 144 };
+        const gardenGate = this.add.graphics().setDepth(350);
+        gardenGate.fillStyle(0xd9c681, 0.55).fillRect(96, 3552, 96, 144);
+        gardenGate.lineStyle(3, 0xfff1a8, 0.95).strokeRect(98, 3554, 92, 140);
+        gardenGate.lineStyle(5, 0x6d4b32, 1).lineBetween(105, 3566, 105, 3682).lineBetween(181, 3566, 181, 3682);
+        this.add.text(144, 3546, 'WILLOW WALK  ←', {
+          fontSize: '11px', fontFamily: 'monospace', color: '#fff6c6',
+          backgroundColor: '#263b31dd', padding: { x: 5, y: 3 },
+        }).setOrigin(0.5, 1).setDepth(351);
 
         // Cafeteria food spots: one per table, found by the table's top-left
         // marker gid (2183) on the Furniture layer, scanned row-major. The
@@ -18022,6 +18025,14 @@
         const down  = cursors.down.isDown  || wasd.down.isDown  || touchMove.down;
         const left  = cursors.left.isDown  || wasd.left.isDown  || touchMove.left;
         const right = cursors.right.isDown || wasd.right.isDown || touchMove.right;
+        // Walking into the western garden gate begins a map fade and asks the
+        // server for the adjacent Willow Walk map. There is intentionally no
+        // E-key or destination UI path for this transition.
+        if (window.jpoTryOfficePortal?.(player, this.lastDir)) {
+          player.setVelocity(0, 0);
+          this.eHint.setVisible(false);
+          return;
+        }
 
         // Tile we're standing on, measured from the arcade body (feet), not the
         // sprite origin (chest) — otherwise the E-scan probes one row too high.
