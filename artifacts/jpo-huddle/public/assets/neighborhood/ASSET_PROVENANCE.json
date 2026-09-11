@@ -91,6 +91,63 @@
       "nativeImageSize": "16x16",
       "renderScale": 3,
       "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/kitchen_counter.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/12_Kitchen_Black_Shadow_Singles_16x16/Kitchen_Shadow_Singles_101.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/kitchen_sink.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/12_Kitchen_Black_Shadow_Singles_16x16/Kitchen_Shadow_Singles_102.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/kitchen_stove.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/12_Kitchen_Black_Shadow_Singles_16x16/Kitchen_Shadow_Singles_105.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/kitchen_fridge.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/12_Kitchen_Black_Shadow_Singles_16x16/Kitchen_Shadow_Singles_15.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/bathroom_toilet.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/3_Bathroom_Black_Shadow_Singles_16x16/Bathroom_Black_Shadow_Singles_22.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/bathroom_sink.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/3_Bathroom_Black_Shadow_Singles_16x16/Bathroom_Black_Shadow_Singles_44.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "interiors/bedroom_bed.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/4_Bedroom_Black_Shadow_SIngles_16x16/Bedroom_Black_Shadow_Singles_15.png",
+      "renderScale": 3,
+      "floorOccupancyCells": "1x1"
+    },
+    {
+      "destination": "city/bunting.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/10_Birthday_Party_Black_Shadow_Singles_16x16/Birthday_Party_Shadow_Singles_10.png",
+      "renderScale": 3
+    },
+    {
+      "destination": "city/balloons.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/10_Birthday_Party_Black_Shadow_Singles_16x16/Birthday_Party_Shadow_Singles_1.png",
+      "renderScale": 3
+    },
+    {
+      "destination": "city/flowers.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/10_Birthday_Party_Black_Shadow_Singles_16x16/Birthday_Party_Shadow_Singles_30.png",
+      "renderScale": 3
     }
   ]
 }

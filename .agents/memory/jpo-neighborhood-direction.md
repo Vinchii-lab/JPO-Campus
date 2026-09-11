@@ -39,3 +39,9 @@ Outdoor framing must fill the viewport within the authored road edges, rather th
 **Why:** The user rejected the wide empty area caused by fixed outdoor zoom and the fountain/benches obstructing the plaza crossing.
 
 **How to apply:** Treat outdoor zoom as responsive with the map bounds as a minimum coverage constraint. Keep indoor scale unchanged and check wide viewports.
+
+House size means usable floor area, not enlarging the same small room with camera zoom. Treat the uploaded pack's house examples as the scale reference.
+
+**Why:** The user rejected the compact divided interior as too small even after rooms were added, and requested whole-room scale comparable to the ZIP examples.
+
+**How to apply:** Enlarge authored geometry and traversal space while retaining native furniture scale. Keep saved furniture coordinates where possible; conflicting placements can return to inventory without deleting ownership.

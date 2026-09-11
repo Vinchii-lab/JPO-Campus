@@ -29,7 +29,7 @@ ${method('_drawNeighborhood', '_residenceSignText')}
     _streetYardKey() { return ''; }
   }
   return new Neighborhood();
-})()`, {});
+})()`, { syncZoomControls() {} });
 
 const canvasSizes = [];
 const graphics = {
@@ -98,6 +98,15 @@ scene.mapWidth = 1152;
 scene.mapHeight = 912;
 scene._fitNeighborhoodCamera();
 assert(scene.cameras.main.height / scene.cameras.main.zoom <= scene.mapHeight);
+const fittedZoom = scene.cameras.main.zoom;
+scene._setOutdoorZoom(2);
+assert(scene.cameras.main.zoom > fittedZoom, 'outdoor zoom can increase');
+scene._fitNeighborhoodCamera();
+assert.equal(scene._outdoorZoomFactor, 2, 'update preserves manual zoom');
+scene._setOutdoorZoom(0.1);
+assert.equal(scene._outdoorZoomFactor, 1, 'zoom out stops at map edges');
+scene._setOutdoorZoom(10);
+assert.equal(scene._outdoorZoomFactor, 2.8, 'zoom in is bounded');
 scene.location = 'home:owner';
 scene._fitNeighborhoodCamera();
 assert.equal(scene.cameras.main.zoom, 1, 'interiors keep normal scale');

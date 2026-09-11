@@ -1,33 +1,38 @@
 // Authoritative neighborhood definitions.  These maps are intentionally
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
-export const HOME_GRID = { width: 12, height: 9, cell: 48 };
-// The starter house is intentionally compact, but it is not one undivided
-// room.  Keep room boundaries on whole 16px-art cells (3x presentation scale)
-// so the same coordinates can drive the server collider, the client collider,
-// and placement validation without introducing sub-tile thresholds.
+// A home cell is one supplied 16px art tile at the shared 3x presentation
+// scale. Keep the authoritative room at least as large as the uploaded room
+// builder samples: 24x18 cells = 1152x864px. Existing 12x9 furniture
+// coordinates remain valid coordinates inside this larger floor.
+export const HOME_GRID = { width: 24, height: 18, cell: 48 };
+// The starter house is a real multi-room floor rather than one compact room.
+// Room boundaries stay on whole 16px-art cells so the same geometry drives the
+// server collider, browser collider, labels, and placement validation.
 export const HOME_ROOM_GEOMETRY = Object.freeze({
   rooms: Object.freeze([
-    Object.freeze({ id: "living-kitchen", label: "Living & kitchen", x: 5, y: 1, width: 6, height: 7 }),
-    Object.freeze({ id: "bedroom", label: "Bedroom", x: 1, y: 1, width: 3, height: 3 }),
-    Object.freeze({ id: "bath", label: "Bath", x: 1, y: 5, width: 3, height: 3 }),
+    Object.freeze({ id: "living-kitchen", label: "Living & kitchen", x: 11, y: 1, width: 12, height: 16 }),
+    Object.freeze({ id: "bedroom", label: "Bedroom", x: 1, y: 1, width: 9, height: 8 }),
+    Object.freeze({ id: "bath", label: "Bath", x: 1, y: 10, width: 9, height: 7 }),
   ]),
   // Doorways are the intentionally omitted cells in the solid interior
-  // dividers.  The one-cell (48px) gaps leave 16px of clearance at each side
-  // for the authoritative actor foot radius.
+  // dividers. Two-cell openings are 96px on their travel axis, leaving ample
+  // clearance for the authoritative 16px actor foot radius.
   doorways: Object.freeze([
-    Object.freeze({ id: "living-bedroom-door", x: 4, y: 2, width: 1, height: 1 }),
-    Object.freeze({ id: "living-bath-door", x: 4, y: 6, width: 1, height: 1 }),
-    Object.freeze({ id: "bedroom-bath-hall", x: 2, y: 4, width: 1, height: 1 }),
+    Object.freeze({ id: "living-bedroom-door", x: 10, y: 4, width: 1, height: 2 }),
+    Object.freeze({ id: "living-bath-door", x: 10, y: 12, width: 1, height: 2 }),
+    Object.freeze({ id: "bedroom-bath-hall", x: 4, y: 9, width: 2, height: 1 }),
   ]),
   walls: Object.freeze([
-    // A vertical divider separates the private rooms from living/kitchen.
-    Object.freeze({ id: "living-private-divider", x: 4, y: 1, width: 1, height: 1 }),
-    Object.freeze({ id: "living-private-divider", x: 4, y: 3, width: 1, height: 3 }),
-    Object.freeze({ id: "living-private-divider", x: 4, y: 7, width: 1, height: 1 }),
-    // A horizontal divider gives the bedroom and bath their own rooms.
-    Object.freeze({ id: "bedroom-bath-divider", x: 1, y: 4, width: 1, height: 1 }),
-    Object.freeze({ id: "bedroom-bath-divider", x: 3, y: 4, width: 1, height: 1 }),
+    // A vertical divider separates the large private wing from
+    // living/kitchen, with generous bedroom and bath door openings.
+    Object.freeze({ id: "living-private-divider", x: 10, y: 1, width: 1, height: 3 }),
+    Object.freeze({ id: "living-private-divider", x: 10, y: 6, width: 1, height: 6 }),
+    Object.freeze({ id: "living-private-divider", x: 10, y: 14, width: 1, height: 3 }),
+    // A horizontal divider separates the bedroom and bath. The two-cell hall
+    // is centered in the private wing and remains continuously traversable.
+    Object.freeze({ id: "bedroom-bath-divider", x: 1, y: 9, width: 3, height: 1 }),
+    Object.freeze({ id: "bedroom-bath-divider", x: 6, y: 9, width: 4, height: 1 }),
   ]),
 });
 
@@ -41,6 +46,29 @@ export const HOME_INTERIOR_WALL_BLOCKERS = Object.freeze(
     width: wall.width * HOME_GRID.cell,
     height: wall.height * HOME_GRID.cell,
     roomWall: true,
+  })),
+);
+// Supplied interior art that belongs to the starter floor is part of the
+// authoritative room, not decorative client-only scenery.  These footprints
+// are intentionally independent of owned furniture: legacy possessions can
+// remain at their saved coordinates unless they overlap one of these fixtures,
+// in which case validPlacement/repairLegacyLayout returns only that placement
+// to the owner's inventory.
+export const HOME_BUILTIN_FIXTURES = Object.freeze([
+  Object.freeze({ id: "kitchen-fridge", texture: "int_kitchen_fridge", gridX: 11, gridY: 1, width: 1, height: 1 }),
+  Object.freeze({ id: "kitchen-counter-1", texture: "int_kitchen_counter", gridX: 12, gridY: 1, width: 1, height: 1 }),
+  Object.freeze({ id: "kitchen-sink", texture: "int_kitchen_sink", gridX: 13, gridY: 1, width: 1, height: 1 }),
+  Object.freeze({ id: "kitchen-counter-2", texture: "int_kitchen_counter", gridX: 14, gridY: 1, width: 1, height: 1 }),
+  Object.freeze({ id: "kitchen-stove", texture: "int_kitchen_stove", gridX: 15, gridY: 1, width: 1, height: 1 }),
+  Object.freeze({ id: "bedroom-bed", texture: "int_bedroom_bed", gridX: 2, gridY: 1, width: 1, height: 3 }),
+  Object.freeze({ id: "bathroom-toilet", texture: "int_bathroom_toilet", gridX: 1, gridY: 10, width: 1, height: 3 }),
+  Object.freeze({ id: "bathroom-sink", texture: "int_bathroom_sink", gridX: 2, gridY: 10, width: 1, height: 3 }),
+]);
+export const HOME_BUILTIN_FIXTURE_BLOCKERS = Object.freeze(
+  HOME_BUILTIN_FIXTURES.map((fixture) => ({
+    x: fixture.gridX * HOME_GRID.cell, y: fixture.gridY * HOME_GRID.cell,
+    width: fixture.width * HOME_GRID.cell, height: fixture.height * HOME_GRID.cell,
+    fixtureId: fixture.id, builtInFixture: true,
   })),
 );
 // The yard uses the same native 16px / 3x presentation cell as the room.  It
@@ -94,12 +122,22 @@ export function homeConstruction(home = {}) {
 // the client Arcade collider use this radius, rather than separate magic
 // margins that drift at facades and door thresholds.
 export const ACTOR_FOOT_RADIUS = 16;
+// Browser/e2e Huddle A/B accounts are deliberately session-only for the
+// neighborhood world.  Keep this narrow: real coworkers whose names happen
+// to contain "Huddle" remain normal residents.  The generated suffix is part
+// of the test-account naming convention (for example huddle-a-qwc0xff@...).
+export const HUDDLE_TEST_EMAIL_PATTERN = /^huddle-[ab](?:-[a-z0-9]+)?@justpressone\.com$/;
+
+export function isHuddleTestIdentity(value) {
+  return HUDDLE_TEST_EMAIL_PATTERN.test(String(value || "").trim().toLowerCase());
+}
+
 // Willow Walk is the one shared residential world.  A lot is derived from its
 // stable approved-account order, never from a paginated directory slot.
 export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["neighborhood"]);
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
-  neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 720, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
+  neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 576, y: 912, dir: "up" }, bounds: { width: 1440, height: 1056 } },
   city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 912 } },
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "garden-shop": { id: "garden-shop", label: "Willow & Green", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
@@ -153,7 +191,13 @@ const residenceBlockers = (lots = STREET_LOT_OFFSETS) => lots.flatMap(([centerX,
 // below keeps every account on one physical map while retaining the normal
 // close camera inside a residence.  `ownerEmail` is the canonical address.
 export function streetDefinition(entries = []) {
-  const homes = Array.isArray(entries) ? entries : [];
+  // Retained Huddle A/B rows (including their possessions) are intentionally
+  // not neighborhood residents.  Filtering here is the final presentation
+  // guard in addition to homeDirectory's SQL filter, so stale snapshots can
+  // never paint or address their old lots.
+  const homes = Array.isArray(entries)
+    ? entries.filter((home) => !isHuddleTestIdentity(home?.ownerEmail))
+    : [];
   const slotFor = (home, index) => Number.isInteger(home?.lotIndex) && home.lotIndex > 0 ? home.lotIndex : index + 1;
   const segmentCount = Math.max(1, Math.ceil(Math.max(0, ...homes.map(slotFor)) / STREET_LOT_OFFSETS.length));
   const lots = homes.map((home, index) => {
@@ -199,6 +243,7 @@ export function streetDefinition(entries = []) {
 
 export function streetLotForOwner(entries, ownerEmail) {
   const email = String(ownerEmail || "").trim().toLowerCase();
+  if (isHuddleTestIdentity(email)) return null;
   return streetDefinition(entries).lots.find((lot) => lot.ownerEmail === email) || null;
 }
 
@@ -272,28 +317,37 @@ export const LOCATION_GEOMETRY = Object.freeze({
   },
   home: {
     blockers: [
-      { x: 0, y: 0, width: 576, height: 48 }, { x: 0, y: 0, width: 48, height: 432 }, { x: 528, y: 0, width: 48, height: 432 },
-      { x: 0, y: 384, width: 240, height: 48 }, { x: 336, y: 384, width: 240, height: 48 },
+      // 24x18 floor perimeter. The centered 96px exit is the only opening in
+      // the bottom wall; all other edges remain solid.
+      { x: 0, y: 0, width: 1152, height: 48 },
+      { x: 0, y: 0, width: 48, height: 864 },
+      { x: 1104, y: 0, width: 48, height: 864 },
+      { x: 0, y: 816, width: 528, height: 48 },
+      { x: 624, y: 816, width: 528, height: 48 },
       ...HOME_INTERIOR_WALL_BLOCKERS,
+      ...HOME_BUILTIN_FIXTURE_BLOCKERS,
     ],
     // The room map is sent with the transition payload so the browser draws
     // and collides with the exact same supplied wall-tile cells as the server.
     roomDividers: HOME_INTERIOR_WALL_BLOCKERS,
     rooms: HOME_ROOM_GEOMETRY.rooms,
     doorways: HOME_ROOM_GEOMETRY.doorways,
+    builtInFixtures: HOME_BUILTIN_FIXTURES,
     // Starts above the threshold, leaving a full floor-mat depth before the
     // map edge. This makes the automatic walking exit reachable without
     // pressing into an invisible boundary.
-    doors: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, label: "Willow Walk exit" }],
+    doors: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit" }],
   },
 });
 
 // The only allowed map links. `spawn` is selected by the server based on the
 // source portal, not supplied by a browser.
 export const LOCATION_PORTALS = Object.freeze({
-  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, spawn: { x: 720, y: 912, dir: "up" } }],
+  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, label: "Willow Walk", spawn: { x: 576, y: 912, dir: "up" } }],
   neighborhood: [
-    { destination: "office", x: 672, y: 912, width: 96, height: 144, spawn: { x: 216, y: 3624, dir: "right" } },
+    // This is the central north/south path (x=552..600), not a residence
+    // parcel.  Its 48px width leaves a 16px foot-radius-safe inner trigger.
+    { destination: "office", x: 552, y: 864, width: 48, height: 96, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
     { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
   ],
   city: [
@@ -305,7 +359,7 @@ export const LOCATION_PORTALS = Object.freeze({
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
   "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 880, dir: "down" } }],
   "decor-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 880, dir: "down" } }],
-  home: [{ destination: "neighborhood", x: 240, y: 360, width: 96, height: 72, spawn: { x: 636, y: 372, dir: "down" } }],
+  home: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit", spawn: { x: 576, y: 912, dir: "up" } }],
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -342,7 +396,7 @@ export function locationSpawn(location, fromLocation = null) {
     const link = (LOCATION_PORTALS[fromKind] || []).find((portal) => portal.destination === destination);
     if (link?.spawn) return { ...link.spawn };
   }
-  if (location.kind === "home") return { x: 6 * HOME_GRID.cell, y: 312, dir: "down" };
+  if (location.kind === "home") return { x: 12 * HOME_GRID.cell, y: 720, dir: "down" };
   return { ...LOCATIONS[location.id].spawn };
 }
 
@@ -351,6 +405,7 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   if (!from || !target || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   const fromKind = from.kind === "home" ? "home" : from.id;
   const targetKind = target.kind === "home" ? "home" : target.id;
+  if (targetKind === "home" && isHuddleTestIdentity(target.ownerEmail)) return null;
   // Coworker visits are permission-gated by homeAccess in server.js and may
   // only be entered through that account's marked Willow Walk front door.
   if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && !RESIDENTIAL_BLOCK_IDS.includes(fromKind)) return null;
@@ -409,15 +464,21 @@ export function validPlacement(item, x, y, rotation, otherItems = []) {
   const f = furnitureFootprint(item, rotation);
   // The spawn-to-door entry strip is permanently clear, so furniture can never
   // trap a visitor at arrival or block the front door.
-  if (x < 0 || y < 0 || x + f.width > HOME_GRID.width || y + f.height > HOME_GRID.height ||
-      // Preserve the spawn and a two-tile route from it to the front door.
-      (x < 7 && x + f.width > 5 && y < 9 && y + f.height > 6) ||
+  if (x < 1 || y < 1 || x + f.width > HOME_GRID.width - 1 || y + f.height > HOME_GRID.height - 1 ||
+      // Preserve the central spawn and its two-cell route to the front door.
+      // Existing 12x9 placements remain untouched unless they intersect a
+      // newly authoritative wall/divider, in which case repairLegacyLayout
+      // returns only that placement to the owner's inventory.
+      (x < 13 && x + f.width > 11 && y < HOME_GRID.height && y + f.height > 14) ||
       // Room-divider cells are real walls, not decorative overlays. Rejecting
       // them here keeps a saved item from occupying a cell the movement
       // validator and client Arcade collider consider solid.
       HOME_ROOM_GEOMETRY.walls.some((wall) =>
         x < wall.x + wall.width && x + f.width > wall.x &&
         y < wall.y + wall.height && y + f.height > wall.y)) return false;
+  if (HOME_BUILTIN_FIXTURES.some((fixture) =>
+    x < fixture.gridX + fixture.width && x + f.width > fixture.gridX &&
+    y < fixture.gridY + fixture.height && y + f.height > fixture.gridY)) return false;
   // A clear cell is still a doorway: furniture there can block the only
   // route between rooms even though it does not overlap a wall tile.
   if (HOME_ROOM_GEOMETRY.doorways.some((doorway) =>
@@ -454,6 +515,7 @@ export function layoutBlockers(layout) {
 }
 
 export async function ensureHome(pool, email) {
+  if (isHuddleTestIdentity(email)) return null;
   await pool.query(
     // `ON CONFLICT DO NOTHING` alone still evaluates the lot identity before
     // discovering an existing owner, burning a durable street slot on every
@@ -475,6 +537,9 @@ export async function ensureHome(pool, email) {
 }
 
 export async function homeAccess(pool, ownerEmail, visitorEmail) {
+  if (isHuddleTestIdentity(ownerEmail)) {
+    return { ok: false, code: "not_found" };
+  }
   const home = await ensureHome(pool, ownerEmail);
   if (!home) return { ok: false, code: "not_found" };
   if (!homeConstruction(home).complete) return { ok: false, code: "unfinished", home };
@@ -544,6 +609,7 @@ export async function repairLegacyLayout(pool, ownerEmail) {
 }
 
 export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
+  if (isHuddleTestIdentity(ownerEmail)) return null;
   await repairLegacyLayout(pool, ownerEmail);
   const home = await ensureHome(pool, ownerEmail);
   const { rows } = await pool.query(
@@ -587,10 +653,12 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
   };
 }
 
-// Safe street projection: all approved accounts have a visible exterior lot,
-// while access is still enforced at the actual front door. It deliberately
-// omits indoor layout, inventory, and account data beyond name/email; the
-// small outdoor yard projection is required to render the shared street.
+// Safe street projection: all approved resident accounts have a visible
+// exterior lot, while access is still enforced at the actual front door.
+// Session-only Huddle A/B identities are intentionally omitted even when a
+// retained database row exists. The projection deliberately omits indoor
+// layout, inventory, and account data beyond name/email; the small outdoor
+// yard projection is required to render the shared street.
 export async function homeDirectory(pool, viewerEmail) {
   // Materialise a row for every approved account while processing an explicit
   // street request. This is not startup DDL and gives each actual resident a
@@ -599,6 +667,7 @@ export async function homeDirectory(pool, viewerEmail) {
                     SELECT p.email
                       FROM jpo_players p
                      WHERE p.approved=true
+                        AND lower(p.email) !~ '^huddle-[ab](-[a-z0-9]+)?@justpressone[.]com$'
                        AND NOT EXISTS (
                          SELECT 1 FROM jpo_homes h WHERE h.owner_email=p.email
                        )
@@ -608,7 +677,8 @@ export async function homeDirectory(pool, viewerEmail) {
             h.floor_built, h.walls_built, h.roof_built,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
        FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
-       WHERE p.approved=true
+        WHERE p.approved=true
+          AND lower(p.email) !~ '^huddle-[ab](-[a-z0-9]+)?@justpressone[.]com$'
        ORDER BY h.lot_index ASC
     `,
     [],

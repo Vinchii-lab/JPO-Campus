@@ -15,6 +15,7 @@ import {
 } from "./grand-event-rules.mjs";
 import {
   ACTOR_FOOT_RADIUS,
+  HOME_GRID,
   HOME_CONSTRUCTION_COMPONENTS,
   HOME_EXTERIOR_COLORS,
   FURNITURE_CATALOG,
@@ -29,6 +30,7 @@ import {
   homeExteriorColor,
   homeSnapshot,
   layoutBlockers,
+  isHuddleTestIdentity,
   locationSpawn,
   parseLocation,
   portalForTransition,
@@ -3333,7 +3335,7 @@ function locationOf(p) {
   // into an unreachable room; normalize it before any room or collision work.
   if (p && (p.locationId === "maple-row" || p.locationId === "juniper-square")) {
     const ownLot = streetLotForOwner(streetHomes, p.email);
-    const spawn = ownLot?.returnSpawn || { x: 720, y: 912, dir: "up" };
+    const spawn = ownLot?.returnSpawn || { x: 576, y: 912, dir: "up" };
     p.locationId = "neighborhood";
     p.x = spawn.x;
     p.y = spawn.y;
@@ -3406,7 +3408,9 @@ function locationInfo(locationId) {
     };
   }
   const base = parsed.kind === "home" ? {
-    id: parsed.id, kind: "home", label: "Starter Home", width: 576, height: 432, bounds: { width: 576, height: 432 },
+    id: parsed.id, kind: "home", label: "Starter Home",
+    width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell,
+    bounds: { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
   const key = parsed.kind === "home" ? "home" : parsed.id;
   return { ...base, actorFootRadius: ACTOR_FOOT_RADIUS, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
@@ -9231,6 +9235,12 @@ io.on("connection", (socket) => {
       socket.emit("locationTransitionResult", { ok: false, code: "invalid", message: "That destination is not available." });
       return false;
     }
+    if (target.kind === "home" && isHuddleTestIdentity(target.ownerEmail)) {
+      socket.emit("locationTransitionResult", {
+        ok: false, code: "not_found", message: "Huddle test accounts do not have neighborhood homes.",
+      });
+      return false;
+    }
     if (inAnyMatch(socket.id) || inRound(socket.id) || rlglActiveRunner(socket.id)) {
       socket.emit("locationTransitionResult", { ok: false, code: "busy", message: "Finish your office activity before travelling." });
       return false;
@@ -9310,7 +9320,7 @@ io.on("connection", (socket) => {
       // may predate that rule, so recover to a nearby clear tile rather than
       // spawning a visitor inside a sofa after an upgrade.
       if (target.kind === "home" && !validLocationMove(target, spawn.x, spawn.y, homeLayoutCollisionCache.get(target.ownerEmail) || [])) {
-        const recovered = [{ x: 288, y: 288 }, { x: 240, y: 336 }, { x: 336, y: 336 }, { x: 288, y: 240 }]
+        const recovered = [{ x: 576, y: 720 }, { x: 624, y: 720 }, { x: 576, y: 672 }, { x: 672, y: 720 }]
           .find((point) => validLocationMove(target, point.x, point.y, homeLayoutCollisionCache.get(target.ownerEmail) || []));
         if (recovered) spawn = { ...recovered, dir: "down" };
       }
@@ -9349,6 +9359,11 @@ io.on("connection", (socket) => {
   socket.on("homeSnapshotRequest", async () => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
     if (!p?.email || (!parsed || (parsed.kind !== "home" && parsed.id !== "neighborhood"))) return;
+    if ((parsed.id === "neighborhood" && isHuddleTestIdentity(p.email)) ||
+        (parsed.kind === "home" && isHuddleTestIdentity(parsed.ownerEmail))) {
+      socket.emit("homeActionResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     try {
       // The owner's outdoor panel needs its construction/archive state too.
       // No other home's snapshot is ever disclosed while on the shared street.
@@ -9387,6 +9402,12 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     const componentId = typeof payload?.componentId === "string" ? payload.componentId : "";
     const component = HOME_CONSTRUCTION_COMPONENTS[componentId];
+    if (p?.email && isHuddleTestIdentity(p.email)) {
+      socket.emit("homeConstructionResult", {
+        ok: false, code: "test_account", message: "Huddle test accounts do not have neighborhood homes.",
+      });
+      return;
+    }
     if (!p?.email || locationOf(p) !== "neighborhood" || !component || !takeToken(buyBucket)) return;
     if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
       socket.emit("homeConstructionResult", { ok: false, code: "busy", message: "Finish your current activity before building." });
@@ -9484,6 +9505,12 @@ io.on("connection", (socket) => {
     const furnitureId = typeof payload?.furnitureId === "string" ? payload.furnitureId : "";
     const shopId = locationOf(p);
     const item = isShopLocation(shopId) ? shopCatalog(shopId)[furnitureId] : null;
+    if (p?.email && isHuddleTestIdentity(p.email)) {
+      socket.emit("homePurchaseResult", {
+        ok: false, code: "test_account", message: "Huddle test accounts do not have neighborhood homes.",
+      });
+      return;
+    }
     if (!p?.email || !isShopLocation(shopId) || !item || !takeToken(buyBucket)) return;
     if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
       socket.emit("homePurchaseResult", { ok: false, message: "Finish your current activity before shopping." }); return;
@@ -9524,6 +9551,10 @@ io.on("connection", (socket) => {
     const placementZone = payload?.zone === "yard" ? "yard" : "indoor";
     const canEditZone = (parsed?.kind === "home" && parsed.ownerEmail === p?.email && placementZone === "indoor") ||
       (parsed?.id === "neighborhood" && placementZone === "yard");
+    if (p?.email && isHuddleTestIdentity(p.email)) {
+      socket.emit("homeActionResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     if (!p?.email || !canEditZone || !instanceId ||
         !Number.isInteger(gridX) || !Number.isInteger(gridY) || !Number.isInteger(rotation)) return;
     const client = await pool.connect();
@@ -9571,6 +9602,10 @@ io.on("connection", (socket) => {
   socket.on("homeLayoutReturn", async (payload) => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
     const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
+    if (p?.email && isHuddleTestIdentity(p.email)) {
+      socket.emit("homeActionResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     if (!p?.email || !((parsed?.kind === "home" && parsed.ownerEmail === p.email) ||
       parsed?.id === "neighborhood") || !instanceId) return;
     const client = await pool.connect();
@@ -9606,6 +9641,10 @@ io.on("connection", (socket) => {
   socket.on("homeAccessSet", async (payload) => {
     const p = players[socket.id], mode = payload?.mode;
     if (!p?.email || !["public", "invite_only", "private"].includes(mode)) return;
+    if (isHuddleTestIdentity(p.email)) {
+      socket.emit("homeAccessResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     try {
       await withHomeOperation(p.email, async () => {
         await ensureHome(pool, p.email);
@@ -9643,6 +9682,10 @@ io.on("connection", (socket) => {
   socket.on("homeColorSet", async (payload) => {
     const p = players[socket.id];
     const color = typeof payload?.color === "string" ? payload.color : "";
+    if (p?.email && isHuddleTestIdentity(p.email)) {
+      socket.emit("homeColorResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     if (!p?.email || !Object.hasOwn(HOME_EXTERIOR_COLORS, color)) {
       socket.emit("homeColorResult", { ok: false, message: "Choose a listed exterior color." });
       return;
@@ -9677,6 +9720,10 @@ io.on("connection", (socket) => {
   socket.on("homeInvite", async (payload) => {
     const p = players[socket.id], email = String(payload?.email || "").trim().toLowerCase();
     if (!p?.email || !EMAIL_RE.test(email) || email === p.email) return;
+    if (isHuddleTestIdentity(p.email) || isHuddleTestIdentity(email)) {
+      socket.emit("homeInviteResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     try {
       await withHomeOperation(p.email, async () => {
         await ensureHome(pool, p.email);
@@ -9689,6 +9736,10 @@ io.on("connection", (socket) => {
   socket.on("homeInviteRevoke", async (payload) => {
     const p = players[socket.id], email = String(payload?.email || "").trim().toLowerCase();
     if (!p?.email || !EMAIL_RE.test(email)) return;
+    if (isHuddleTestIdentity(p.email)) {
+      socket.emit("homeInviteResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      return;
+    }
     try {
       await withHomeOperation(p.email, async () => {
         await pool.query(`DELETE FROM jpo_home_invitations WHERE owner_email=$1 AND invitee_email=$2`, [p.email, email]);
