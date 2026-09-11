@@ -242,11 +242,20 @@ export function validLocationMove(location, x, y, dynamicBlockers = []) {
 }
 
 export function validStreetMove(entries, x, y, dynamicBlockers = []) {
-  const street = streetDefinition(entries);
+  return validStreetWorldMove(streetDefinition(entries), x, y, dynamicBlockers);
+}
+
+// The server retains one immutable streetDefinition snapshot between actual
+// residence changes. Accepting that snapshot here avoids re-creating every
+// facade and yard blocker for each 20 Hz movement packet while preserving the
+// exact same bounds and collision test as validStreetMove().
+export function validStreetWorldMove(street, x, y, dynamicBlockers = []) {
+  if (!street?.bounds || !Number.isFinite(x) || !Number.isFinite(y)) return false;
   const b = street.bounds;
   if (x < ACTOR_FOOT_RADIUS || y < ACTOR_FOOT_RADIUS ||
       x > b.width - ACTOR_FOOT_RADIUS || y > b.height - ACTOR_FOOT_RADIUS) return false;
-  return ![...street.blockers, ...dynamicBlockers].some((rect) => pointHitsRect(x, y, rect));
+  return !(street.blockers || []).some((rect) => pointHitsRect(x, y, rect)) &&
+    !(dynamicBlockers || []).some((rect) => pointHitsRect(x, y, rect));
 }
 
 // Persisted layouts predate the upright-art policy. This is the one canonical

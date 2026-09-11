@@ -30,7 +30,7 @@ import {
   parseLocation,
   portalForTransition,
   validLocationMove,
-  validStreetMove,
+  validStreetWorldMove,
   validPlacement,
   validYardPlacement,
   streetDefinition,
@@ -3360,11 +3360,34 @@ function locationPlayers(forId) {
 function isOfficePlayer(id) { return locationOf(players[id]) === "office"; }
 let streetHomes = [];
 let streetWorld = streetDefinition(streetHomes);
-async function refreshStreetHomes(viewerEmail) {
-  const directory = await homeDirectory(pool, viewerEmail);
-  streetHomes = directory.homes;
-  streetWorld = streetDefinition(streetHomes);
-  return directory;
+let streetDirectory = null;
+let streetDirectoryLoad = null;
+let streetDirectoryGeneration = 0;
+function invalidateStreetHomes() {
+  // Access is never decided from this cache (homeAccess always reads under the
+  // home's operation lock). This snapshot is only the immutable street
+  // geometry/directory projection used by movement and map delivery.
+  streetDirectoryGeneration++;
+  streetDirectory = null;
+}
+async function refreshStreetHomes() {
+  if (streetDirectory) return streetDirectory;
+  const generation = streetDirectoryGeneration;
+  if (streetDirectoryLoad?.generation === generation) return streetDirectoryLoad.promise;
+  const load = { generation, promise: null };
+  load.promise = homeDirectory(pool).then((directory) => {
+    // A mutation may commit while the directory query is in flight. Never
+    // publish that pre-mutation result; load the newer generation instead.
+    if (generation !== streetDirectoryGeneration) return refreshStreetHomes();
+    streetHomes = directory.homes;
+    streetWorld = streetDefinition(streetHomes);
+    streetDirectory = directory;
+    return directory;
+  }).finally(() => {
+    if (streetDirectoryLoad === load) streetDirectoryLoad = null;
+  });
+  streetDirectoryLoad = load;
+  return load.promise;
 }
 function locationInfo(locationId) {
   const parsed = parseLocation(locationId);
@@ -9045,6 +9068,9 @@ io.on("connection", (socket) => {
       );
       const row = rows[0];
       if (!row) return;
+      invalidateStreetHomes();
+      await refreshStreetHomes();
+      io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
 
       // Prefer the clicked socket; fall back to ANY live pending socket for
       // this email (the person may have reconnected under a new socket id
@@ -9118,10 +9144,15 @@ io.on("connection", (socket) => {
       try {
         // dismissed = true keeps the revoked person OUT of the DB-backed
         // pending queue until they actively come back (which re-queues them).
-        await pool.query(
+        const revoked = await pool.query(
           `UPDATE jpo_players SET approved = false, dismissed = true, updated_at = now() WHERE email = $1`,
           [p.email],
         );
+        if (revoked.rowCount) {
+          invalidateStreetHomes();
+          await refreshStreetHomes();
+          io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
+        }
       } catch (err) { console.error("kick revoke failed:", err); }
     }
     _notifyAdmins();
@@ -9206,7 +9237,7 @@ io.on("connection", (socket) => {
     // validating a street doorway, so account joins cannot remap a painted
     // doorway to a different person.
     try {
-      if (oldLocation === "neighborhood" || target.id === "neighborhood") await refreshStreetHomes(p.email);
+      if (oldLocation === "neighborhood" || target.id === "neighborhood") await refreshStreetHomes();
     } catch (err) {
       console.error("street snapshot failed:", err);
       socket.emit("locationTransitionResult", { ok: false, code: "unavailable", message: "Willow Walk is being prepared. Please try again shortly." });
@@ -9328,11 +9359,10 @@ io.on("connection", (socket) => {
     const requestId = Number(payload?.requestId);
     const responseRequestId = Number.isInteger(requestId) && requestId >= 0 ? requestId : undefined;
     try {
-      // A starter home belongs to every real approved account. Initialising the
-      // requester's row here makes their own residence available even before
-      // their first doorway visit; no names or decorative residents are made up.
-      await ensureHome(pool, p.email);
-      const directory = await refreshStreetHomes(p.email);
+      // homeDirectory materialises all approved accounts (including this
+      // requester) in its one cold-cache query. Avoid an extra two-query
+      // ensureHome round trip for every client directory response.
+      const directory = await refreshStreetHomes();
       socket.emit("homeDirectory", responseRequestId === undefined ? directory : { ...directory, requestId: responseRequestId });
     } catch (err) {
       console.error("home directory failed:", err);
@@ -9421,7 +9451,8 @@ io.on("connection", (socket) => {
       // When editing the outdoor lot the owner is on Willow Walk rather than
       // in the home room, so they are not an occupant of the snapshot fan-out.
       socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
-      await refreshStreetHomes(p.email);
+      invalidateStreetHomes();
+      await refreshStreetHomes();
       io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Placed." });
     } catch (err) {
@@ -9455,7 +9486,8 @@ io.on("connection", (socket) => {
       await client.query("COMMIT");
       await emitHomeSnapshotToOccupants(p.email);
       socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
-      await refreshStreetHomes(p.email);
+      invalidateStreetHomes();
+      await refreshStreetHomes();
       io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
       socket.emit("homeActionResult", { ok: true, message: "Returned to inventory." });
     } catch (err) {
@@ -9491,6 +9523,10 @@ io.on("connection", (socket) => {
           emitToLocation("city", "playerJoined", { id, ...visitor }, id);
         }
       });
+      // Directory metadata is cacheable, but access itself is never cached:
+      // homeAccess rechecks the database during every home transition.
+      invalidateStreetHomes();
+      io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
     } catch (err) { console.error("home access setting failed:", err); socket.emit("homeAccessResult", { ok: false, message: "Could not save access." }); }
   });
 
@@ -9519,7 +9555,8 @@ io.on("connection", (socket) => {
         // Outdoor scenes fetch their own permitted directory again. The event
         // deliberately has no owner/email or color payload, so it cannot leak
         // a private home's metadata to people who cannot see that directory.
-        await refreshStreetHomes(p.email);
+        invalidateStreetHomes();
+        await refreshStreetHomes();
         for (const locationId of ["city", "neighborhood"]) {
           io.to(locationRoom(locationId)).emit("homeColorChanged", { refreshDirectory: true });
         }
@@ -9620,7 +9657,7 @@ io.on("connection", (socket) => {
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)
       : !location || (location.id === "neighborhood"
-        ? !validStreetMove(streetHomes, x, y, movementBlockers)
+        ? !validStreetWorldMove(streetWorld, x, y, movementBlockers)
         : !validLocationMove(location, x, y, movementBlockers))) return rejectMove();
 
     // A sit<->stand "snap" teleports the avatar ~1 tile and flips anim to/from 'sit';

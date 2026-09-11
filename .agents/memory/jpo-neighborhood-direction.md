@@ -21,3 +21,9 @@ Version asset URLs and Phaser texture keys when replacing artwork with different
 **Why:** Replacing furniture files in place while changing to native-scale rendering left browsers using cached, oversized old images. A page/code reload does not necessarily invalidate the image cache.
 
 **How to apply:** Verify decoded texture dimensions, not just files on disk; test already-placed furniture when changing asset scale.
+
+The residential goal is player-built homes, not repeated finished house facades with furniture decoration alone.
+
+**Why:** After seeing the shared street, the user explicitly rejected its prebuilt houses. The earlier approval of exterior art was not approval to give every player an identical completed building.
+
+**How to apply:** Establish the intended construction controls before replacing the current homes, and preserve existing ownership and purchased items during any conversion.

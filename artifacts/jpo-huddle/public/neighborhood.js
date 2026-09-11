@@ -536,21 +536,39 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _tileField(base, alternate) {
-      const art = this.add.graphics().setDepth(0);
-      for (let y = 0; y < this.mapHeight; y += 48) for (let x = 0; x < this.mapWidth; x += 48) {
-        const tone = ((x / 48 * 11 + y / 48 * 7) % 5 === 0) ? alternate : base;
-        art.fillStyle(tone, 1).fillRect(x, y, 48, 48);
-        art.lineStyle(1, 0x24313b, 0.09).strokeRect(x, y, 48, 48);
-        // Break up the repeatable field without turning the authored maps into
-        // a single baked ground image. Indoor palettes remain clean wood/tile.
-        if (base === 0x77a45f || base === 0x83aa68) {
-          const dx = 7 + ((x / 48 * 17 + y / 48 * 9) % 26);
-          const dy = 9 + ((x / 48 * 7 + y / 48 * 13) % 25);
-          art.fillStyle(0x436f42, 0.14).fillCircle(x + dx, y + dy, 1.2);
-          art.fillStyle(0xd3df9c, 0.10).fillRect(x + 38 - dx / 5, y + 36 - dy / 7, 2, 1);
+      // A street with many accounts can be several map segments tall. The old
+      // implementation retained thousands of Graphics commands for its ground
+      // (fill, outline, and grass details per 48px cell). Bake only the
+      // repeatable five-cell palette cycle, then let one TileSprite repeat it;
+      // this is a tiny source texture, not a world-sized render texture.
+      const key = 'neighborhood-ground:' + base.toString(16) + ':' + alternate.toString(16);
+      if (!this.textures.exists(key)) {
+        const art = this.make.graphics({ x: 0, y: 0, add: false });
+        const period = 48 * 5;
+        for (let y = 0; y < period; y += 48) for (let x = 0; x < period; x += 48) {
+          const cellX = x / 48, cellY = y / 48;
+          const tone = ((cellX * 11 + cellY * 7) % 5 === 0) ? alternate : base;
+          art.fillStyle(tone, 1).fillRect(x, y, 48, 48);
+          art.lineStyle(1, 0x24313b, 0.09).strokeRect(x, y, 48, 48);
+          // Break up the repeatable field without turning the authored maps into
+          // a single baked ground image. Indoor palettes remain clean wood/tile.
+          if (base === 0x77a45f || base === 0x83aa68) {
+            const dx = 7 + ((cellX * 17 + cellY * 9) % 26);
+            const dy = 9 + ((cellX * 7 + cellY * 13) % 25);
+            art.fillStyle(0x436f42, 0.14).fillCircle(x + dx, y + dy, 1.2);
+            art.fillStyle(0xd3df9c, 0.10).fillRect(x + 38 - dx / 5, y + 36 - dy / 7, 2, 1);
+          }
         }
+        art.generateTexture(key, period, period);
+        art.destroy();
       }
-      return art;
+      return this.add.tileSprite(this.mapWidth / 2, this.mapHeight / 2, this.mapWidth, this.mapHeight, key).setDepth(0);
+    }
+
+    _streetYardKey(yard) {
+      return (yard || []).map((item) => [
+        item.id, item.furnitureId, item.gridX, item.gridY, item.rotation,
+      ].join(':')).join('|');
     }
 
     _interiorTileField(floorKey, wallKey, exit) {
@@ -636,7 +654,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           width: 72, height: lot.northSide ? 198 : 246 });
         const house = this._exterior('house', lot.x, lot.bottom, 2, 4, lot.exteriorColor || 'teal');
         const sign = this._sign(lot.x, lot.bottom - 102, 'LOT ' + lot.lot + '\n' + String(lot.name || lot.ownerEmail).slice(0, 24));
-        this.streetLotsVisual.push({ lot, house, sign, yard: this._drawStreetYard(lot) });
+        this.streetLotsVisual.push({
+          lot, house, sign, color: lot.exteriorColor || 'teal',
+          yardKey: this._streetYardKey(lot.yard), yard: this._drawStreetYard(lot),
+        });
       });
       this._sign(720, 72, 'WILLOW WALK · ONE SHARED STREET');
     }
@@ -696,19 +717,31 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     updateResidenceDirectory(entries) {
       if (!this.streetLotsVisual) return;
       const homes = Array.isArray(entries) ? entries : [];
+      const homesByOwner = new Map(homes.map((home) => [home.ownerEmail, home]));
+      let yardChanged = false;
       this.streetLotsVisual.forEach((visual) => {
-        const current = homes.find((home) => home.ownerEmail === visual.lot.ownerEmail);
+        const current = homesByOwner.get(visual.lot.ownerEmail);
         if (!current || current.ownerEmail !== visual.lot.ownerEmail) return;
-        window.jpoHouseColors?.applyHomeColor(visual.house, current.exteriorColor || 'teal');
-        visual.sign?.setText('LOT ' + visual.lot.lot + '\n' + String(current.name || current.ownerEmail).slice(0, 24));
-        visual.yard?.forEach((object) => object.destroy());
+        const color = current.exteriorColor || 'teal';
+        if (visual.color !== color) {
+          window.jpoHouseColors?.applyHomeColor(visual.house, color);
+          visual.color = color;
+        }
+        const signText = 'LOT ' + visual.lot.lot + '\n' + String(current.name || current.ownerEmail).slice(0, 24);
+        if (visual.sign?.text !== signText) visual.sign?.setText(signText);
+        const yardKey = this._streetYardKey(current.yard);
+        if (visual.yardKey !== yardKey) {
+          visual.yard?.forEach((object) => object.destroy());
+          visual.yard = this._drawStreetYard({ ...visual.lot, ...current });
+          visual.yardKey = yardKey;
+          yardChanged = true;
+        }
         visual.lot = { ...visual.lot, ...current };
-        visual.yard = this._drawStreetYard(visual.lot);
       });
       // Rebuild only from the updated authoritative lot data. This keeps
       // client Arcade collision aligned with the server's street snapshot
       // after an owner places or stores an outdoor item.
-      if (this._yardBlocks && this.info.geometry) {
+      if (yardChanged && this._yardBlocks && this.info.geometry) {
         const fixed = (this.info.geometry.blockers || []).filter((block) => !block.furnitureId);
         const yardBlocks = this.streetLotsVisual.flatMap((visual) => (visual.lot.yard || []).flatMap((placed) => {
           const def = furnitureCatalog[placed.furnitureId];
