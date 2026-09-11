@@ -83,7 +83,7 @@ assert.match(serverSource, /socket\.emit\("locationTransitionResult", \{\s*ok: t
   "resume emits authoritative scene sync");
 assert.match(serverSource, /location:\s+state\.locationId,\s+locationId:\s+state\.locationId/,
   "resume approval carries the authoritative restored location");
-assert.match(neighborhoodSource, /office\._syncOfficePlayers\?\.\(result\.players \|\| \{\}\)/,
+assert.match(neighborhoodSource, /target\._syncOfficePlayers\?\.\(result\.players \|\| \{\}\)/,
   "HQ wake reconciles the resume roster snapshot");
 assert.match(neighborhoodSource, /currentPlayers.*activeNeighborhood\(\)\?\.syncPlayers/s,
   "neighborhood snapshots remain scene-gated during resume");

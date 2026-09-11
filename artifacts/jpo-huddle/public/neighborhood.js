@@ -46,6 +46,59 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let lastServerTransitionSequence = 0;
   socket.on('disconnect', () => { lastServerTransitionSequence = 0; });
   let sceneTransitionTimer = null;
+  let sceneReadinessWait = null;
+  const sceneCreateEvent = Phaser.Scenes?.Events?.CREATE || 'create';
+  const sceneWakeEvent = Phaser.Scenes?.Events?.WAKE || 'wake';
+  const cancelSceneReadinessWait = () => {
+    sceneReadinessWait?.cancel?.();
+    sceneReadinessWait = null;
+  };
+  const sceneRuntimeReady = (scene, location) => {
+    if (!scene?.cameras?.main || !scene.player) return false;
+    if (location === 'office') {
+      return !!scene.cursors && !!scene.wasd;
+    }
+    return !!scene.keys && !!scene.wasd && !!scene.keyE && !!scene.keyShift && !!scene.interactHint;
+  };
+  const waitForSceneReady = (scene, location, generation, eventName, waitForEvent, apply) => {
+    if (!scene) throw new Error('Cannot transition without a target scene');
+    const events = scene.events;
+    if (waitForEvent && !events?.on) throw new Error('Target scene has no lifecycle event emitter');
+    let eventSeen = !waitForEvent;
+    let cancelled = false;
+    const onLifecycle = () => {
+      eventSeen = true;
+      attempt();
+    };
+    const cleanup = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (waitForEvent) events.off?.(eventName, onLifecycle);
+      if (sceneReadinessWait?.cancel === cancel) sceneReadinessWait = null;
+    };
+    const cancel = () => cleanup();
+    const attempt = () => {
+      if (cancelled) return;
+      if (generation !== sceneTransitionGeneration) {
+        cleanup();
+        return;
+      }
+      if (!eventSeen || !sceneRuntimeReady(scene, location)) return;
+      cleanup();
+      apply(scene);
+    };
+    // Keep one listener until the target has all runtime objects. A stale
+    // queued restart can emit CREATE while its create() intentionally returns
+    // unready; the next queued CREATE must still be observable. cleanup()
+    // removes this single listener on apply or supersession.
+    if (waitForEvent) events.on(eventName, onLifecycle);
+    sceneReadinessWait = { cancel, tryApply: attempt };
+    // An already-active target needs no queued lifecycle operation. Calling
+    // this after installing the listener also closes the small race where a
+    // mock/alternate SceneManager emits synchronously from start/restart.
+    attempt();
+    return sceneReadinessWait;
+  };
   // Player sprites, interior tiles, and the verified furniture singles are
   // authored on the same 16px grid. Keep their one shared integer scale here;
   // exterior buildings intentionally use their separate, larger source art.
@@ -100,10 +153,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     const game = window._phaserGame;
     const scene = game?.scene?.getScenes(true)?.find((candidate) =>
       candidate.scene.key === 'OfficeScene' || candidate.scene.key === 'NeighborhoodScene');
-    if (!scene || scene._portalFading) return;
+    const camera = scene?.cameras?.main;
+    if (!scene || !camera || scene._portalFading) return;
     scene._portalFading = true;
     scene._portalFadeAt = performance.now();
-    scene.cameras.main.fadeOut(220, 16, 22, 34);
+    camera.fadeOut(220, 16, 22, 34);
   };
   // The gate lies on an existing, walkable western garden tile in JPO_HQ.tmj
   // (columns 2–3, rows 74–76). It is deliberately proximity-only: no action
@@ -487,7 +541,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   socket.on('homeEjected', (result) => toast(result?.message || 'You left the home.'));
   socket.on('furnitureInteractionResult', (result) => {
     const scene = window._neighborhoodScene;
-    if (!scene?.scene?.isActive?.()) return;
+    if (!scene?.scene?.isActive?.() || !scene._neighborhoodReady) return;
     scene._activityPending = false;
     if (result?.ok && result.phase === 'start' && result.activity) {
       scene._setLocalActivity(result.activity, result);
@@ -499,11 +553,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   });
   socket.on('parkSeatState', (payload) => {
     const scene = window._neighborhoodScene;
-    if (scene?.scene?.isActive?.()) scene._setParkSeatState(payload);
+    if (scene?.scene?.isActive?.() && scene._neighborhoodReady) scene._setParkSeatState(payload);
   });
   socket.on('furnitureActivity', (payload) => {
     const scene = window._neighborhoodScene;
-    if (!scene || !payload?.id) return;
+    if (!scene || !scene._neighborhoodReady || !payload?.id) return;
     if (payload.id === socket.id) {
       if (payload.phase === 'start' && payload.action) {
         scene._setLocalActivity({
@@ -537,6 +591,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this.remotes = {};
       this.furniture = [];
       this._lastCorrectionSeq = -1;
+      this._neighborhoodReady = false;
     }
 
     _resetTransientTravel() {
@@ -665,6 +720,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // updateResidenceDirectory against destroyed Willow Walk house/sign
       // objects from the previous scene and abort the new scene lifecycle.
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+      this._neighborhoodReady = false;
       this._resetTransientTravel();
       this._removePlacementInput();
       this.remotes = {};
@@ -688,6 +744,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._activityFx = null;
       this._activityEffectTween = null;
       window._neighborhoodScene = this;
+      // A restart is queued, not immediate. If another server result won
+      // before this create callback ran, do not apply the older result's spawn,
+      // roster, or fade to the reused scene. Let the newer queued restart own
+      // the next create lifecycle; update() remains inert in the meantime.
+      if (Number.isSafeInteger(data?._sceneTransitionGeneration) &&
+          data._sceneTransitionGeneration !== sceneTransitionGeneration) return;
       this.info = data?.map || {};
       this.location = data?.location || currentLocation;
       const bounds = this.info.bounds || { width: this.info.width || 1152, height: this.info.height || 816 };
@@ -770,15 +832,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           (event.deltaY < 0 ? 1.1 : 1 / 1.1));
       };
       this.game.canvas.addEventListener('wheel', this._outdoorWheelHandler, { passive: false });
-      // This is intentionally in create rather than immediately after
-      // SceneManager.start/restart. Phaser queues lifecycle operations, so
-      // fading the old scene after a queued restart was one source of a frozen,
-      // stopped NeighborhoodScene.
-      if (data?._sceneTransitionGeneration === sceneTransitionGeneration) {
-        this._portalFading = false;
-        this._portalFadeAt = 0;
-        this.cameras.main.fadeIn(220, 16, 22, 34);
-      }
+      this._neighborhoodReady = true;
     }
 
     _tileField(base, alternate) {
@@ -2024,8 +2078,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     update(_time, delta) {
+      // SceneManager can leave a reused instance briefly active while its
+      // restart/create queue is draining. Do not let a destroyed player or a
+      // partially-created input/camera stack enter this frame.
+      if (!this._neighborhoodReady || !this.cameras?.main || !this.player ||
+          !this.keys || !this.wasd || !this.keyE || !this.keyShift || !this.interactHint) return;
       this._fitNeighborhoodCamera();
-      if (!this.player) return;
       this._syncTileField();
       this._syncStreetScenery();
       if (this.location === 'neighborhood') {
@@ -2201,6 +2259,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     shutdown() {
+      this._neighborhoodReady = false;
       if (this._outdoorWheelHandler) this.game.canvas.removeEventListener('wheel', this._outdoorWheelHandler);
       this._outdoorWheelHandler = null;
       this._resetTransientTravel();
@@ -2231,20 +2290,22 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
   socket.on('locationTransitionResult', (result) => {
     if (Number.isSafeInteger(result?.transitionSequence)) {
-      if (result.transitionSequence < lastServerTransitionSequence) return;
+      if (result.transitionSequence <= lastServerTransitionSequence) return;
       lastServerTransitionSequence = result.transitionSequence;
     }
     const generation = ++sceneTransitionGeneration;
+    cancelSceneReadinessWait();
     clearTimeout(sceneTransitionTimer);
     sceneTransitionTimer = null;
     if (!result?.ok) {
       officePortalTransition = false;
       const active = window._phaserGame?.scene?.getScenes(true)?.find((scene) =>
         scene.scene.key === 'NeighborhoodScene' || scene.scene.key === 'OfficeScene');
-      if (active) {
+      const camera = active?.cameras?.main;
+      if (active && camera) {
         active._portalFading = false;
         active._portalFadeAt = 0;
-        active.cameras.main.fadeIn(160, 16, 22, 34);
+        camera.fadeIn(160, 16, 22, 34);
       }
       if (window._neighborhoodScene) {
         window._neighborhoodScene.transitionRequested = false;
@@ -2282,37 +2343,73 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       }
       renderShop();
       if (result.location === 'office') {
+        const office = game.scene.getScene('OfficeScene');
+        const officeSleeping = game.scene.isSleeping('OfficeScene');
+        const officeActive = game.scene.isActive('OfficeScene');
+        const needsOfficeLifecycle = officeSleeping || !officeActive ||
+          !sceneRuntimeReady(office, 'office');
+        // Register before queueing wake/start. Phaser SceneManager operations
+        // are deferred, and a cold OfficeScene has no camera/player/keyboard
+        // objects until CREATE has fully returned.
+        const wait = waitForSceneReady(
+          office, 'office', generation,
+          officeSleeping ? sceneWakeEvent : sceneCreateEvent,
+          needsOfficeLifecycle,
+          (target) => {
+            if (generation !== sceneTransitionGeneration) return;
+            const spawn = result.self || result.spawn;
+            if (Number.isFinite(spawn?.x) && Number.isFinite(spawn?.y)) {
+              target.player.setPosition(spawn.x, spawn.y);
+              target.player.body?.reset(spawn.x, spawn.y);
+            }
+            target._syncOfficePlayers?.(result.players || {});
+            target._portalFading = false;
+            target._portalFadeAt = 0;
+            target.cameras.main.fadeIn(220, 16, 22, 34);
+            officePortalRelease = false;
+            officePortalTransition = false;
+          },
+        );
         // Stopping a scene that is already inactive is harmless; importantly,
         // this branch is generation-gated so an old home/street result cannot
         // stop the currently active shared scene.
         if (game.scene.isActive('NeighborhoodScene')) game.scene.stop('NeighborhoodScene');
-        if (game.scene.isSleeping('OfficeScene')) game.scene.wake('OfficeScene');
-        else if (!game.scene.isActive('OfficeScene')) game.scene.start('OfficeScene');
-        const office = game.scene.getScene('OfficeScene');
-        if (office.player) {
-          office.player.setPosition(result.self.x, result.self.y);
-          office.player.body?.reset(result.self.x, result.self.y);
-        }
-        office._syncOfficePlayers?.(result.players || {});
-        office._portalFading = false;
-        office.cameras.main.fadeIn(220, 16, 22, 34);
-        officePortalRelease = false;
-        officePortalTransition = false;
+        if (officeSleeping) game.scene.wake('OfficeScene');
+        else if (!officeActive) game.scene.start('OfficeScene');
+        wait?.tryApply?.();
       } else {
-         // OfficeScene was already asleep after the first outdoor transition;
-         // Phaser warns (and some builds interrupt the next scene lifecycle)
-         // when asked to sleep it again.
+        // OfficeScene was already asleep after the first outdoor transition;
+        // Phaser warns (and some builds interrupt the next scene lifecycle)
+        // when asked to sleep it again.
         if (game.scene.isActive('OfficeScene')) game.scene.sleep('OfficeScene');
         const sceneData = { ...result, _sceneTransitionGeneration: generation };
+        const neighborhood = game.scene.getScene('NeighborhoodScene');
+        const neighborhoodActive = game.scene.isActive('NeighborhoodScene');
         // NeighborhoodScene is deliberately shared by city, street, shop and
         // homes. Starting an already-active key queues a stop/start pair; a
         // second delayed result could then leave its replacement stopped.
-        // Restart has one ordered lifecycle and its create() owns fade-in.
-        if (game.scene.isActive('NeighborhoodScene')) {
-          game.scene.getScene('NeighborhoodScene').scene.restart(sceneData);
-        } else {
-          game.scene.start('NeighborhoodScene', sceneData);
-        }
+        // Register before restart/start, and let CREATE own all spawn/roster/
+        // fade application after the queued lifecycle has actually completed.
+        const wait = waitForSceneReady(
+          neighborhood, result.location, generation, sceneCreateEvent,
+          true,
+          (target) => {
+            if (generation !== sceneTransitionGeneration) return;
+            const spawn = result.self || result.spawn;
+            if (Number.isFinite(spawn?.x) && Number.isFinite(spawn?.y)) {
+              target.player.setPosition(spawn.x, spawn.y);
+              target.player.body?.reset(spawn.x, spawn.y);
+              target.playerDir = spawn.dir || target.playerDir;
+            }
+            target.syncPlayers(result.players || {});
+            target._portalFading = false;
+            target._portalFadeAt = 0;
+            target.cameras.main.fadeIn(220, 16, 22, 34);
+          },
+        );
+        if (neighborhoodActive) neighborhood.scene.restart(sceneData);
+        else game.scene.start('NeighborhoodScene', sceneData);
+        wait?.tryApply?.();
       }
     };
     const elapsed = outgoing?._portalFading ? performance.now() - (outgoing._portalFadeAt || performance.now()) : 0;
@@ -2325,9 +2422,16 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     else finish();
   });
 
+  // OfficeScene creates the local player from the approved payload. If a
+  // transition result wins the same tick as a cold approval/create lifecycle,
+  // CREATE can be observed before that payload has built the player. Re-check
+  // the single pending waiter on approval; this is event-driven and bounded,
+  // not a retry loop or a growing scene-listener chain.
+  socket.on('approved', () => sceneReadinessWait?.tryApply?.());
+
   const activeNeighborhood = () => {
     const scene = window._neighborhoodScene;
-    return scene?.scene?.isActive?.() ? scene : null;
+    return scene?.scene?.isActive?.() && scene._neighborhoodReady ? scene : null;
   };
   socket.on('currentPlayers', (players) => activeNeighborhood()?.syncPlayers(players || {}));
   socket.on('playerJoined', (player) => activeNeighborhood()?.addRemote(player?.id, player));
@@ -2348,15 +2452,15 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     if (typeof payload?.message === 'string') window._neighborhoodScene?.showChat(payload.id, payload.message);
   });
   socket.on('chatImage', (payload) => window._neighborhoodScene?.showChat(payload?.id, '📷 shared a photo'));
-  socket.on('shopSuccess', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('equipUpdate', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('outfitSuccess', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('avatarSuccess', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('petSuccess', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('petUpdate', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('petAccSuccess', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('petAccUpdate', () => window._neighborhoodScene?._setLocalPresentation());
-  socket.on('petEvolved', (payload) => { if (payload?.id === socket.id) window._neighborhoodScene?._setLocalPresentation(); });
+  socket.on('shopSuccess', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('equipUpdate', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('outfitSuccess', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('avatarSuccess', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('petSuccess', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('petUpdate', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('petAccSuccess', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('petAccUpdate', () => activeNeighborhood()?._setLocalPresentation());
+  socket.on('petEvolved', (payload) => { if (payload?.id === socket.id) activeNeighborhood()?._setLocalPresentation(); });
   socket.on('playerOutfitUpdate', (payload) => {
     if (payload?.id && payload.id !== socket.id) window._neighborhoodScene?._refreshRemoteWear(payload.id, payload);
   });

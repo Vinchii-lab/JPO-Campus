@@ -11,6 +11,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="neighborhood.css">
   <script>
+    // Preserve the actual message/location when the preview reports an
+    // ErrorEvent without an Error object (for example, a library string throw).
+    // Do not preventDefault: errors must remain visible, not silently ignored.
+    window.addEventListener('error', function(event) {
+      if (!event.message) return; // Resource load failures have their own logs.
+      console.error('[JPO runtime]', event.message,
+        event.filename || '', event.lineno || 0, event.colno || 0,
+        event.error?.stack || '');
+    });
     // Self-healing cache buster: the server injects __BUILD__ at page-generation time.
     // On load we ping /stamp; if the server has restarted since this page was cached,
     // stamps won't match and we force a hard reload — bypassing every proxy / iframe cache.

@@ -35,3 +35,9 @@ Validate house returns and static-seat exits against the complete live collision
 **Why:** A south-facing house return was inside its own facade, and an apparently reasonable bench exit intersected a nearby planter. Metadata-only assertions missed both.
 
 **How to apply:** Include every facing and all public seats, sparse lot indices, actor radius, and the full exit path. A valid destination alone does not establish a usable route.
+
+Treat Phaser start/wake as queued operations: apply arrival state only after the target scene's CREATE/WAKE and runtime objects are ready.
+
+**Why:** Immediate camera access after a cold start, or input access during a reused scene's teardown, reproduced runtime TypeErrors. A scene reference does not guarantee its camera, player, or keys exist yet.
+
+**How to apply:** Register readiness callbacks before requesting the lifecycle change, cancel callbacks superseded by newer transitions, and keep update handlers inert during teardown/creation.
