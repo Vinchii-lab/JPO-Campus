@@ -4,7 +4,7 @@
 // rather than re-testing client presentation.
 import { io } from "socket.io-client";
 import pg from "pg";
-import { layoutBlockers, parseLocation, validLocationMove } from "../../neighborhood.mjs";
+import { FURNITURE_CATALOG, effectiveRotation, furnitureFootprint, layoutBlockers, parseLocation, portalForTransition, validLocationMove } from "../../neighborhood.mjs";
 
 const port = process.env.TEST_PORT;
 if (!port || !process.env.DATABASE_URL) {
@@ -43,20 +43,87 @@ async function connect(email, first) {
   const q = {
     approved: inbox(socket, "approved"), transition: inbox(socket, "locationTransitionResult"),
     joined: inbox(socket, "playerJoined"), moved: inbox(socket, "playerMoved"),
-    chat: inbox(socket, "chatMessage"), voice: inbox(socket, "voiceSignal"),
+    chat: inbox(socket, "chatMessage"), voice: inbox(socket, "voiceSignal"), correction: inbox(socket, "playerMoveCorrection"),
     home: inbox(socket, "homeSnapshot"), buy: inbox(socket, "homePurchaseResult"),
-    action: inbox(socket, "homeActionResult"),
+    action: inbox(socket, "homeActionResult"), invite: inbox(socket, "homeInviteResult"), access: inbox(socket, "homeAccessResult"),
     directory: inbox(socket, "homeDirectory"),
   };
   await new Promise((resolve, reject) => { socket.once("connect", resolve); socket.once("connect_error", reject); });
   socket.emit("register", { firstName: first, lastName: "Neighborhood", email, password: "testpass123", character: "adam", department: "IT" });
-  await q.approved.next();
-  return { socket, q };
+  const approved = await q.approved.next();
+  return {
+    socket, q, location: "office",
+    position: [Number.isFinite(approved?.x) ? approved.x : 1272, Number.isFinite(approved?.y) ? approved.y : 2253],
+  };
 }
-async function moveTo(client, destination) {
+
+const OFFICE_GARDEN_ROUTE = [
+  [26, 47], [25, 47], [24, 47], [23, 47], [22, 47], [21, 47], [20, 47], [19, 47], [18, 47], [17, 47], [16, 47], [15, 47], [14, 47], [13, 47], [12, 47],
+  [12, 48], [12, 49], [12, 50], [12, 51], [12, 52], [11, 52], [10, 52], [9, 52], [8, 52], [8, 53], [8, 54], [8, 55], [8, 56], [8, 57], [8, 58], [8, 59],
+  [8, 60], [8, 61], [8, 62], [8, 63], [8, 64], [8, 65], [8, 66], [8, 67], [8, 68], [8, 69], [8, 70], [7, 70], [6, 70], [5, 70], [4, 70], [3, 70],
+  [3, 71], [3, 72], [3, 73], [3, 74],
+].map(([col, row]) => [col * 48 + 24, row * 48 + 24 - 27]);
+
+async function walkLine(client, from, to) {
+  const distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const steps = Math.ceil(distance / 42);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    client.socket.emit("playerMove", { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t, dir: "left", anim: "walk" });
+    await sleep(150); // 42px/150ms stays below the authoritative 195px/s budget with tolerance.
+  }
+  return to;
+}
+
+async function walkRoute(client, points) {
+  let at = points[0];
+  // First packet establishes a baseline at the server's known spawn.
+  client.socket.emit("playerMove", { x: at[0], y: at[1], dir: "left", anim: "idle" });
+  await sleep(80);
+  for (const point of points.slice(1)) at = await walkLine(client, at, point);
+  return at;
+}
+
+function routeToPortal(location, destination, position) {
+  if (location === "office" && destination === "neighborhood")
+    return [position, ...OFFICE_GARDEN_ROUTE.slice(1), [168, 3600]];
+  if (location === "neighborhood" && destination === "city")
+    return position[0] > 1000 ? [position, [1392, 504]] : [position, [720, 528], [1392, 528], [1392, 504]];
+  if (location === "neighborhood" && destination.startsWith("home:"))
+    return [position, [720, 528], [636, 528], [636, 350], [636, 293]];
+  if (location === "city" && destination === "neighborhood")
+    return position[0] > 500 ? [position, [852, 400], [700, 400], [432, 400], [432, 550], [48, 550], [48, 504]] : [position, [48, 504]];
+  if (location === "city" && destination === "furniture-shop")
+    return position[0] > 500
+      ? [position, [852, 400], [700, 400], [432, 400], [432, 550], [700, 550], [700, 400], [852, 400], [852, 286], [872, 286]]
+      : [position, [432, 550], [700, 550], [700, 400], [852, 400], [852, 286], [872, 286]];
+  if (location === "city" && destination.startsWith("home:"))
+    return position[0] > 500
+      ? [position, [852, 400], [700, 400], [432, 400], [432, 360], [144, 360], [290, 360], [290, 300]]
+      : [position, [290, 360], [290, 300]];
+  if (location === "furniture-shop" && destination === "city")
+    return [position, [480, 684]];
+  if (location.startsWith("home:") && destination === "city")
+    return [position, [288, 402]];
+  throw new Error(`No authored route from ${location} to ${destination}`);
+}
+
+async function moveTo(client, destination, { expectOk = true } = {}) {
+  const route = routeToPortal(client.location, destination, client.position);
+  await walkRoute(client, route);
   client.socket.emit("locationTransition", { destination });
   const result = await client.q.transition.next();
-  check(result.ok && result.location === destination, `transition accepted: ${destination}`);
+  check(result.ok === expectOk && (!expectOk || result.location === destination), `${expectOk ? "walk portal accepted" : "blocked doorway"}: ${destination}`, result);
+  if (result.ok) {
+    client.location = result.location;
+    client.position = [result.spawn.x, result.spawn.y];
+  } else client.position = route.at(-1);
+  return result;
+}
+async function setAccess(client, mode) {
+  client.socket.emit("homeAccessSet", { mode });
+  const result = await client.q.access.next();
+  check(result.ok && result.mode === mode, `home access saved: ${mode}`, result);
   return result;
 }
 
@@ -64,13 +131,28 @@ try {
   const canonical = parseLocation("home:Case.Owner@JustPressOne.COM");
   check(canonical?.id === "home:case.owner@justpressone.com" && canonical.ownerEmail === "case.owner@justpressone.com",
     "case-variant home targets canonicalize to one room id");
-  check(!validLocationMove(parseLocation("city"), 100, 100) &&
+  check(!validLocationMove(parseLocation("city"), 200, 200) &&
     validLocationMove(parseLocation("city"), 480, 720),
   "city facade blockers reject clipping but preserve plaza spawn");
+  check(
+    !!portalForTransition("city", "home:other@justpressone.com", 290, 300, emails[1]) &&
+    !portalForTransition("neighborhood", "home:other@justpressone.com", 636, 293, emails[1]),
+    "a selected guest home is reachable only through the plaza residences doorway",
+  );
   const chairBlocker = layoutBlockers([{ furnitureId: "oak_chair", gridX: 2, gridY: 2, rotation: 0 }]);
   check(!validLocationMove(parseLocation("home:test@example.com"), 120, 120, chairBlocker) &&
     validLocationMove(parseLocation("home:test@example.com"), 312, 360, chairBlocker),
   "home furniture collision blocks its tile but preserves door spawn");
+  const legacyTable = { furnitureId: "coffee_table", gridX: 1, gridY: 1, rotation: 90 };
+  const canonicalTable = furnitureFootprint(FURNITURE_CATALOG.coffee_table, effectiveRotation(FURNITURE_CATALOG.coffee_table, legacyTable.rotation));
+  const legacyBlocker = layoutBlockers([legacyTable])[0];
+  check(
+    effectiveRotation(FURNITURE_CATALOG.coffee_table, legacyTable.rotation) === 0 &&
+      canonicalTable.width === 2 && canonicalTable.height === 1 &&
+      legacyBlocker.width === canonicalTable.width * 48 && legacyBlocker.height === canonicalTable.height * 48,
+    "legacy 90° nonsquare furniture canonicalizes to the snapshot/client upright footprint",
+    { canonicalTable, legacyBlocker },
+  );
   // Never clean by a test-name prefix: another concurrent/aborted integration
   // run is not ours to delete.  Every cleanup query is restricted to this
   // process's exact generated email list.
@@ -83,35 +165,44 @@ try {
                   SELECT e, 'Test','Neighborhood','Test Neighborhood','adam',true,'IT',1000 FROM unnest($1::text[]) e`, [emails]);
   const [a, b, c] = await Promise.all(emails.map((email, i) => connect(email, "ABC"[i])));
 
-  // A and B share city; C remains in HQ.  No lifecycle, movement, chat or
+  // A and B walk through the office garden and Willow Walk into the city; C
+  // remains in HQ. No lifecycle, movement, chat or
   // voice signal may cross this room boundary.
-  await moveTo(a, "city"); await moveTo(b, "city");
+  await moveTo(a, "neighborhood"); await moveTo(a, "city");
+  await moveTo(b, "neighborhood"); await moveTo(b, "city");
   await c.q.joined.collect(); c.q.moved.clear(); c.q.chat.clear(); c.q.voice.clear();
   a.socket.emit("playerMove", { x: 520, y: 700, dir: "right", anim: "walk" });
-  check((await c.q.moved.collect()).length === 0, "office cannot see city movement");
+  // Socket.IO can still deliver an already-queued office movement frame after
+  // the room switch. Assert specifically that no city-state frame from A leaks
+  // to C, rather than treating historical office traffic as a cross-room leak.
+  const leakedCityMoves = (await c.q.moved.collect()).filter((move) =>
+    move.id === a.socket.id && move.locationId === "city");
+  check(leakedCityMoves.length === 0, "office cannot see city movement", leakedCityMoves);
   a.socket.emit("chatMessage", { text: "city-only" });
   check((await c.q.chat.collect()).length === 0, "office cannot receive city chat");
   a.socket.emit("voiceSignal", { targetId: c.socket.id, data: { k: "offer", sdp: "cross-location" } });
   check((await c.q.voice.collect()).length === 0, "voice relay rejects cross-location peer");
 
-  // A first visit creates the starter home. C is allowed while public, then
-  // gets ejected on invite-only access without an invite.
+  // A first visit creates the starter home. C walks through the same authored
+  // office/neighborhood/plaza route, enters while public, then gets ejected
+  // when the owner makes the home private.
   await moveTo(a, `home:${emails[0]}`);
+  await setAccess(a, "public");
   const aHome = await a.q.home.next();
   check(aHome.canEdit && Array.isArray(aHome.inventory), "owner receives editable starter-home snapshot");
   a.socket.emit("homeDirectoryRequest");
   const directory = await a.q.directory.next();
   check(directory.homes?.some((h) => h.ownerEmail === emails[0] && h.name && h.accessMode),
     "home directory exposes only safe owner/name/access metadata", directory);
-  await moveTo(c, `home:${emails[0]}`);
+  await moveTo(c, "neighborhood"); await moveTo(c, "city"); await moveTo(c, `home:${emails[0]}`);
   const ejected = inbox(c.socket, "homeEjected");
-  a.socket.emit("homeAccessSet", { mode: "private" });
+  await setAccess(a, "private");
   const eject = await ejected.next().catch(() => null);
-  check(!!eject, "access revocation ejects existing visitor");
+  check(!!eject, "private switch ejects existing visitor");
 
   // Purchase only works at the shop, produces an immutable inventory instance,
   // and placement returns a revisioned room snapshot.
-  await moveTo(a, "furniture-shop");
+  await moveTo(a, "city"); await moveTo(a, "furniture-shop");
   const beforePurchase = await db.query(`SELECT coins FROM jpo_players WHERE email=$1`, [emails[0]]);
   a.socket.emit("homePurchase", { furnitureId: "oak_chair" });
   const purchase = await a.q.buy.next();
@@ -122,7 +213,7 @@ try {
     "atomic furniture purchase debits exactly once and returns an instance",
     { before: beforePurchase.rows[0]?.coins, response: purchase, persisted: afterPurchase.rows[0]?.coins },
   );
-  await moveTo(a, `home:${emails[0]}`);
+  await moveTo(a, "city"); await moveTo(a, `home:${emails[0]}`);
   // homePurchase sends a private inventory snapshot while the player is in the
   // shop. It is intentionally stale for this assertion; only inspect snapshots
   // emitted after the layout mutation.
@@ -135,11 +226,24 @@ try {
   }
   check(!!changed, "owner layout placement persists", changed || { queuedSnapshot: "did not contain placed instance", purchase });
 
-  // Regression: access changes queued behind a case-variant transition must
-  // win before the visitor can remain in a stale, alternate-cased room.
-  a.socket.emit("homeAccessSet", { mode: "public" });
-  await sleep(100);
+  // An invite-only home rejects an uninvited doorway attempt. Inviting B
+  // allows the same physical doorway; revoke immediately ejects B.
+  await setAccess(a, "invite_only");
+  await moveTo(b, `home:${emails[0]}`, { expectOk: false });
+  a.socket.emit("homeInvite", { email: emails[1] });
+  check((await a.q.invite.next()).ok, "owner can invite a coworker");
+  await moveTo(b, `home:${emails[0]}`);
+  const revoked = inbox(b.socket, "homeEjected");
+  a.socket.emit("homeInviteRevoke", { email: emails[1] });
+  check(!!(await revoked.next().catch(() => null)), "revoking an invite ejects an invite-only visitor");
+  await b.q.transition.next(); // authoritative ejection map result
+  b.location = "city"; b.position = [144, 480];
+
+  // Regression: access changes queued behind a case-variant physical doorway
+  // request must win before a visitor remains in a stale alternate-cased room.
+  await setAccess(a, "public");
   b.q.transition.clear();
+  await walkRoute(b, routeToPortal(b.location, `home:${emails[0]}`, b.position));
   b.socket.emit("locationTransition", { destination: `home:${emails[0].toUpperCase()}` });
   a.socket.emit("homeAccessSet", { mode: "private" });
   await sleep(900);

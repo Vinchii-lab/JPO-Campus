@@ -9474,7 +9474,9 @@ io.on("connection", (socket) => {
     // itself is temporarily excluded from collision only for that sit snap.
     const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
       Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);
-    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair) return rejectMove();
+    const staticSeat = location?.kind !== "home" && !isOfficePlayer(socket.id) &&
+      LOCATION_GEOMETRY[location?.id]?.seats?.find((seat) => Math.hypot(x - seat.x, y - seat.y) <= 20);
+    if (data.anim === "sit" && !isOfficePlayer(socket.id) && !chair && !staticSeat) return rejectMove();
     const movementBlockers = chair ? blockers.filter((b) => b !== chair) : blockers;
     if (isOfficePlayer(socket.id)
       ? isUnpaintedPosition(x, y)

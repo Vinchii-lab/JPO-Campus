@@ -26,11 +26,14 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 935, y: 698, width: 50, height: 50 }, { x: 91, y: 740, width: 50, height: 50 },
       { x: 1269, y: 164, width: 50, height: 50 }, { x: 305, y: 720, width: 50, height: 50 },
       { x: 486, y: 390, width: 28, height: 30 }, { x: 802, y: 390, width: 28, height: 30 },
-      { x: 1146, y: 618, width: 28, height: 30 }, { x: 264, y: 618, width: 28, height: 30 },
-      { x: 372, y: 574, width: 96, height: 30 }, { x: 766, y: 578, width: 96, height: 30 }, { x: 1052, y: 390, width: 96, height: 30 },
+      { x: 1146, y: 390, width: 28, height: 30 }, { x: 264, y: 390, width: 28, height: 30 },
+      { x: 372, y: 574, width: 96, height: 30 }, { x: 852, y: 390, width: 96, height: 30 }, { x: 1052, y: 390, width: 96, height: 30 },
     ],
     doors: [
       { destination: "home", x: 602, y: 246, width: 68, height: 94, label: "Your townhouse" },
+    ],
+    seats: [
+      { x: 420, y: 620, dir: "down" }, { x: 900, y: 436, dir: "down" }, { x: 1100, y: 436, dir: "down" },
     ],
   },
   city: {
@@ -38,7 +41,9 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 178, y: 106, width: 224, height: 145 }, { x: 178, y: 251, width: 76, height: 90 }, { x: 326, y: 251, width: 76, height: 90 },
       { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
       { x: 168, y: 590, width: 192, height: 142 }, { x: 704, y: 600, width: 192, height: 142 },
-      { x: 480, y: 358, width: 190, height: 108 },
+      // Only the fountain core blocks; the surrounding circular plaza and its
+      // benches are deliberately walkable/sittable.
+      { x: 542, y: 466, width: 68, height: 68 },
       { x: 95, y: 186, width: 50, height: 50 }, { x: 420, y: 160, width: 50, height: 50 },
       { x: 680, y: 156, width: 50, height: 50 }, { x: 1007, y: 174, width: 50, height: 50 },
       { x: 67, y: 678, width: 50, height: 50 }, { x: 1023, y: 686, width: 50, height: 50 },
@@ -50,6 +55,10 @@ export const LOCATION_GEOMETRY = Object.freeze({
     doors: [
       { destination: "home", x: 254, y: 250, width: 72, height: 100, label: "Your home" },
       { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
+    ],
+    seats: [
+      { x: 520, y: 410, dir: "down" }, { x: 630, y: 410, dir: "down" },
+      { x: 520, y: 616, dir: "down" }, { x: 630, y: 616, dir: "down" },
     ],
   },
   "furniture-shop": {
@@ -88,12 +97,15 @@ export const LOCATION_PORTALS = Object.freeze({
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
-  oak_chair:   { id: "oak_chair",   name: "Oak chair",       price: 90,  width: 1, height: 1, color: "#a96d43", rotations: [0, 90, 180, 270] },
+  // The supplied furniture PNGs are authored facing one direction. Keep their
+  // upright frame rather than pretending a rotated bitmap is a new furniture
+  // variant (which produced upside-down chairs/lamps).
+  oak_chair:   { id: "oak_chair",   name: "Oak chair",       price: 90,  width: 1, height: 1, color: "#a96d43", rotations: [0] },
   fern:        { id: "fern",        name: "Plaza fern",      price: 130, width: 1, height: 1, color: "#4f9253", rotations: [0] },
-  reading_lamp:{ id: "reading_lamp",name: "Reading lamp",    price: 160, width: 1, height: 1, color: "#e6bd57", rotations: [0, 90, 180, 270] },
-  coffee_table:{ id: "coffee_table",name: "Coffee table",    price: 280, width: 2, height: 1, color: "#805b42", rotations: [0, 90, 180, 270] },
-  blue_sofa:   { id: "blue_sofa",   name: "Blue sofa",       price: 460, width: 2, height: 1, color: "#537ca5", rotations: [0, 180] },
-  bookcase:    { id: "bookcase",    name: "Bookcase",        price: 520, width: 1, height: 2, color: "#79513d", rotations: [0, 90, 180, 270] },
+  reading_lamp:{ id: "reading_lamp",name: "Reading lamp",    price: 160, width: 1, height: 1, color: "#e6bd57", rotations: [0] },
+  coffee_table:{ id: "coffee_table",name: "Coffee table",    price: 280, width: 2, height: 1, color: "#805b42", rotations: [0] },
+  blue_sofa:   { id: "blue_sofa",   name: "Blue sofa",       price: 460, width: 2, height: 1, color: "#537ca5", rotations: [0] },
+  bookcase:    { id: "bookcase",    name: "Bookcase",        price: 520, width: 1, height: 2, color: "#79513d", rotations: [0] },
 });
 
 export function parseLocation(value) {
@@ -125,9 +137,10 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   if (!from || !target || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   const fromKind = from.kind === "home" ? "home" : from.id;
   const targetKind = target.kind === "home" ? "home" : target.id;
-  // A house door takes its owner home. Coworker visits remain permission-gated
-  // but cannot be used as arbitrary teleport links.
-  if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase()) return null;
+  // Coworker visits are permission-gated by homeAccess in server.js and may
+  // only be entered through the Huddle Plaza residences doorway. A resident's
+  // own Willow Walk townhouse remains a direct personal-home doorway.
+  if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && fromKind !== "city") return null;
   return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
     portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;
 }
@@ -149,8 +162,15 @@ export function validLocationMove(location, x, y, dynamicBlockers = []) {
   return ![...(geometry?.blockers || []), ...dynamicBlockers].some((rect) => pointHitsRect(x, y, rect));
 }
 
+// Persisted layouts predate the upright-art policy. This is the one canonical
+// interpretation used by snapshots, collision, and placement validation.
+export function effectiveRotation(item, rotation) {
+  const value = Number(rotation);
+  return item?.rotations?.includes(value) ? value : 0;
+}
+
 export function furnitureFootprint(item, rotation) {
-  const quarter = Number(rotation) % 180;
+  const quarter = effectiveRotation(item, rotation) % 180;
   return quarter === 90 ? { width: item.height, height: item.width } : { width: item.width, height: item.height };
 }
 
@@ -200,7 +220,59 @@ export async function homeAccess(pool, ownerEmail, visitorEmail) {
   return { ok: !!rows[0], code: rows[0] ? null : "denied", home };
 }
 
+// A legacy 90°/270° record was made when the UI rotated a bitmap even though
+// no matching directional art existed. Normalize it under the home row lock.
+// If its upright footprint now conflicts, remove only the layout row: the
+// furniture row remains in inventory, so no purchased item is lost.
+export async function repairLegacyLayout(pool, ownerEmail) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await ensureHome(client, ownerEmail);
+    await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [ownerEmail]);
+    const { rows } = await client.query(
+      `SELECT l.furniture_instance_id, l.grid_x, l.grid_y, l.rotation, f.furniture_id
+         FROM jpo_home_layout_items l
+         JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
+        WHERE l.home_owner_email=$1
+        ORDER BY l.updated_at, l.furniture_instance_id
+        FOR UPDATE OF l`,
+      [ownerEmail],
+    );
+    const canonical = rows.filter((row) => {
+      const item = FURNITURE_CATALOG[row.furniture_id];
+      return item && effectiveRotation(item, row.rotation) === Number(row.rotation);
+    }).map((row) => ({
+      gridX: row.grid_x, gridY: row.grid_y, rotation: row.rotation, item: FURNITURE_CATALOG[row.furniture_id],
+    }));
+    let changed = false;
+    for (const row of rows) {
+      const item = FURNITURE_CATALOG[row.furniture_id];
+      if (!item || effectiveRotation(item, row.rotation) === Number(row.rotation)) continue;
+      // Treat already canonical entries as fixed occupants; legacy entries are
+      // considered in stable update order so only the conflicting legacy item
+      // is returned to inventory.
+      if (validPlacement(item, row.grid_x, row.grid_y, 0, canonical)) {
+        await client.query(`UPDATE jpo_home_layout_items SET rotation=0, updated_at=now() WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
+        canonical.push({ gridX: row.grid_x, gridY: row.grid_y, rotation: 0, item });
+      } else {
+        await client.query(`DELETE FROM jpo_home_layout_items WHERE furniture_instance_id=$1`, [row.furniture_instance_id]);
+      }
+      changed = true;
+    }
+    if (changed) await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [ownerEmail]);
+    await client.query("COMMIT");
+    return changed;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
+  await repairLegacyLayout(pool, ownerEmail);
   const home = await ensureHome(pool, ownerEmail);
   const { rows } = await pool.query(
     `SELECT f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation
@@ -215,7 +287,7 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
     if (!catalog) continue;
     const view = { id: row.id, furnitureId: row.furniture_id };
     if (row.grid_x == null) inventory.push(view);
-    else layout.push({ ...view, gridX: row.grid_x, gridY: row.grid_y, rotation: row.rotation });
+    else layout.push({ ...view, gridX: row.grid_x, gridY: row.grid_y, rotation: effectiveRotation(catalog, row.rotation) });
   }
   const invitations = ownerEmail === viewerEmail
     ? (await pool.query(
