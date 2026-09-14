@@ -36,11 +36,11 @@ Keep street rendering bounded to the camera viewport, even with sparse permanent
 
 **How to apply:** Filter existing rows before attempting inserts; retain concurrency conflict protection. Bound ground canvases and scenery chunks, account for camera zoom on fixed-scroll ground, and avoid full-world road-mark loops within each chunk.
 
-Outdoor framing must fill the viewport within the authored road edges, rather than expose unplayable grass beyond them. Keep plaza benches and decorative obstacles out of roads.
+HQ-equivalent zoom takes priority over automatic outdoor viewport filling. Keep plaza benches and decorative obstacles out of roads.
 
-**Why:** The user rejected the wide empty area caused by fixed outdoor zoom and the fountain/benches obstructing the plaza crossing.
+**Why:** The user originally disliked excess empty space, but later explicitly rejected the resulting restricted zoom and missing indoor zoom. They want the same zoom in/out behavior as HQ everywhere, not a map-fit minimum that prevents zooming out.
 
-**How to apply:** Treat outdoor zoom as responsive with the map bounds as a minimum coverage constraint. Keep indoor scale unchanged and check wide viewports.
+**How to apply:** Preserve HQ's wheel steps and range across outdoor maps and all interiors. Resizing, per-frame camera fitting, and scene transitions must not silently undo the chosen zoom. Keep source artwork at native 3×; camera zoom is independent of asset scale.
 
 House size means usable floor area, not enlarging the same small room with camera zoom. Treat the uploaded pack's house examples as the scale reference.
 

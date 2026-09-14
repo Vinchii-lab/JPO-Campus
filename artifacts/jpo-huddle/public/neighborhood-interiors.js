@@ -27,12 +27,34 @@ window.JpoInteriors = {
     const room = data.rooms[locationId];
     const floorKey = ['furniture-shop', 'decor-shop', 'cafe', 'bakery', 'sushi'].includes(locationId)
       ? 'commercial-floor-home' : 'commercial-floor-shop';
-    scene.textures.get(floorKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
-    for (let y = 0; y < room.height; y += 48) {
-      for (let x = 0; x < room.width; x += 48) {
-        scene.add.image(x, y, floorKey).setOrigin(0, 0).setScale(3).setDepth(-10);
+    // Batch only the static native floor/wall tiles at their source resolution.
+    // Furniture stays independent for depth, seating and interaction. A room
+    // needs one 320x240 cached surface, not ~370 active tile objects per frame.
+    const surfaceKey = 'commercial-surface:' + locationId + ':' + (window.__BUILD__ || 'current');
+    if (!scene.textures.exists(surfaceKey)) {
+      const surface = scene.textures.createCanvas(surfaceKey, room.width / 3, room.height / 3);
+      const ctx = surface.context;
+      ctx.imageSmoothingEnabled = false;
+      const floor = scene.textures.get(floorKey).getSourceImage();
+      const wall = scene.textures.get('commercial-wall-native').getSourceImage();
+      for (let y = 0; y < room.height / 3; y += 16) {
+        for (let x = 0; x < room.width / 3; x += 16) ctx.drawImage(floor, x, y);
       }
+      for (const rect of scene.info.geometry?.blockers || []) {
+        if (rect.x !== 0 && rect.y !== 0 &&
+            rect.x + rect.width !== room.width && rect.y + rect.height !== room.height) continue;
+        for (let y = rect.y; y < rect.y + rect.height; y += 48) {
+          for (let x = rect.x; x < rect.x + rect.width; x += 48) {
+            const w = Math.min(48, rect.x + rect.width - x) / 3;
+            const h = Math.min(48, rect.y + rect.height - y) / 3;
+            ctx.drawImage(wall, 0, 0, w, h, x / 3, y / 3, w, h);
+          }
+        }
+      }
+      surface.refresh();
+      surface.setFilter(Phaser.Textures.FilterMode.NEAREST);
     }
+    scene.add.image(0, 0, surfaceKey).setOrigin(0, 0).setScale(3).setDepth(-10);
     if (room.objects) {
       room.objects.forEach(obj => {
         // Perimeter walls come from shared collision geometry, including the
@@ -49,21 +71,6 @@ window.JpoInteriors = {
       });
     }
 
-    // Ordinary native tile images avoid TileSprite render-texture allocation
-    // on every room restart and preserve exact authored door openings.
-    const wallKey = 'commercial-wall-native';
-    scene.textures.get(wallKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
-    for (const rect of scene.info.geometry?.blockers || []) {
-      if (rect.x !== 0 && rect.y !== 0 &&
-          rect.x + rect.width !== room.width && rect.y + rect.height !== room.height) continue;
-      for (let y = rect.y; y < rect.y + rect.height; y += 48) {
-        for (let x = rect.x; x < rect.x + rect.width; x += 48) {
-          scene.add.image(x, y, wallKey).setOrigin(0, 0).setScale(3)
-            .setCrop(0, 0, Math.min(48, rect.x + rect.width - x) / 3,
-              Math.min(48, rect.y + rect.height - y) / 3).setDepth(0);
-        }
-      }
-    }
     for (const portal of scene.info.portals || []) {
       if (portal.y !== 0) continue;
       scene.add.image(portal.x + portal.width / 2, portal.y + portal.height, 'pe_shop_door')

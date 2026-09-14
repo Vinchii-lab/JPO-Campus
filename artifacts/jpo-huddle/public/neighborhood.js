@@ -745,6 +745,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this.interactHint = null;
       this._groundTiles = null;
       this._streetScenerySegments = null;
+      this._groundSyncKey = this._streetVisibleKey = this._cameraFitKey = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
       this._ambientTweens = [];
       this.keys = this.wasd = this.keyE = this.keyShift = null;
@@ -835,10 +836,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this.syncPlayers(data?.players || {});
       this._installPlacementInput(atHome);
       this._outdoorWheelHandler = (event) => {
-        if (this.location !== 'neighborhood' && this.location !== 'city') return;
         event.preventDefault();
-        this._setOutdoorZoom((this._outdoorZoomFactor || 1.15) *
-          (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+        this._setOutdoorZoom(this.cameras.main.zoom + (event.deltaY < 0 ? 0.1 : -0.1));
       };
       this.game.canvas.addEventListener('wheel', this._outdoorWheelHandler, { passive: false });
       this._neighborhoodReady = true;
@@ -904,8 +903,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       if (viewport && (viewport.width !== this.scale.width || viewport.height !== this.scale.height)) {
         this._groundTiles.forEach(tile => tile.destroy());
         this._tileField(viewport.base, viewport.alternate);
+        this._groundSyncKey = null;
       }
       const zoom = camera.zoom || 1;
+      const syncKey = `${camera.scrollX}:${camera.scrollY}:${zoom}:${camera.width}:${camera.height}`;
+      if (this._groundSyncKey === syncKey) return;
+      this._groundSyncKey = syncKey;
       const originX = (camera.width || this.scale.width) * (camera.originX ?? 0.5);
       const originY = (camera.height || this.scale.height) * (camera.originY ?? 0.5);
       this._groundTiles.forEach((tile) => {
@@ -1017,23 +1020,17 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       const camera = this.cameras.main;
       const width = camera.width || this.scale.width;
       const height = camera.height || this.scale.height;
-      const outdoors = this.location === 'neighborhood' || this.location === 'city';
-      const fitKey = `${width}:${height}:${this.mapWidth}:${this.mapHeight}:${outdoors}:${this._outdoorZoomFactor || 1.15}`;
+      const zoom = this._cameraZoom ?? 1;
+      const fitKey = `${width}:${height}:${this.mapWidth}:${this.mapHeight}:${zoom}`;
       if (this._cameraFitKey === fitKey) return;
       this._cameraFitKey = fitKey;
-      // Never show beyond the authored road/world edges. Keep the desired
-      // outdoor scale on smaller screens, but fill wide displays rather than
-      // exposing a large unplayable grass area to the right of the street.
-      this._outdoorZoomFactor = this._outdoorZoomFactor || 1.15;
-      const zoom = outdoors
-        ? Math.max(0.7, width / this.mapWidth, height / this.mapHeight) * this._outdoorZoomFactor
-        : 1;
+      // Match HQ's wheel range on every map. Viewport fitting must not
+      // override a user's zoom-out or lock interiors to 1x.
       if (camera.zoom !== zoom) camera.setZoom(zoom);
     }
 
-    _setOutdoorZoom(factor) {
-      if (this.location !== 'neighborhood' && this.location !== 'city') return;
-      this._outdoorZoomFactor = Math.min(2.8, Math.max(1, factor));
+    _setOutdoorZoom(zoom) {
+      this._cameraZoom = Math.min(4, Math.max(0.5, zoom));
       this._fitNeighborhoodCamera();
     }
 
@@ -1089,6 +1086,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // grows from sparse, permanent lot indices.
       const first = Math.max(0, Math.floor(top / 960) - 1);
       const last = Math.min(this.streetSegmentCount - 1, Math.floor(bottom / 960) + 1);
+      const visibleKey = `${first}:${last}`;
+      if (this._streetVisibleKey === visibleKey) return;
+      this._streetVisibleKey = visibleKey;
       const wanted = new Set();
       for (let segment = first; segment <= last; segment++) wanted.add(segment);
       this._streetScenerySegments.forEach((objects, segment) => {
