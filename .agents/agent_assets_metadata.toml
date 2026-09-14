@@ -702,3 +702,10 @@ mtime_ms = 1789133474336
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/0117830b-9688-48ea-8001-d5c0ff243c87/943a2955-2a5c-4355-be60-3da7400078a6"
 storage_version_token = "1789133559260631"
 content_type = "image/png"
+
+[[outputs]]
+id = "S68nLVdEfvhuMBvk6Nddw"
+uri = "file://attached_assets/generated_images/plaza-storefronts-pixel-preview.png"
+type = "image"
+title = "New plaza storefront artwork"
+description = "The eight generated pixel-art storefront sprites now used in the plaza, with dark outlines, textured materials, and detailed awnings and windows."

@@ -456,24 +456,77 @@ function commercialRoomGeometry(id, architecture) {
   };
 }
 
-// City contract for the museum bottom row. The exterior footprint is centered
-// at (576, 1675); its clear door is centered at (576, 1740).
-export const CITY_COMMERCIAL_LAYOUT = Object.freeze({
-  cityBounds: Object.freeze({ width: 1152, height: 1920 }),
-  museum: Object.freeze({
-    id: "museum",
-    label: "Huddle Museum",
-    footprint: Object.freeze({ x: 336, y: 1560, width: 480, height: 230 }),
-    door: Object.freeze({ x: 528, y: 1690, width: 96, height: 100 }),
-    citySpawn: Object.freeze({ x: 576, y: 1830, dir: "up" }),
-    museumSpawn: Object.freeze({ x: 480, y: 576, dir: "up" }),
-    blockers: Object.freeze([
-      Object.freeze({ x: 336, y: 1560, width: 480, height: 130 }),
-      Object.freeze({ x: 336, y: 1690, width: 192, height: 100 }),
-      Object.freeze({ x: 624, y: 1690, width: 192, height: 100 }),
-    ]),
-  }),
+// Huddle Plaza is a fixed 1152x1920 authored world.  The venue footprints
+// deliberately use the full width in two broad rows, leaving a large paved
+// square between them instead of reusing Willow Walk's long road field.
+const CITY_PLAZA_BOUNDS = Object.freeze({ width: 1152, height: 1920 });
+const CITY_GATHERING_SQUARE = Object.freeze({
+  x: 96, y: 432, width: 960, height: 672,
 });
+
+function cityShopLayout({ id, label, x, y }) {
+  const footprint = Object.freeze({ x, y, width: 224, height: 222 });
+  // The supplied facade has a 72px opening in its 224px front.  The visual
+  // door is centered at x+112 and its bottom edge is the facade bottom.
+  const door = Object.freeze({
+    x: x + 76, y: y + 122, width: 72, height: 100,
+  });
+  const topRow = y < CITY_GATHERING_SQUARE.y;
+  return Object.freeze({
+    id, label, footprint, door,
+    citySpawn: Object.freeze({
+      x: x + footprint.width / 2,
+      // Supplied facades open along their south edge. Return below the
+      // facade for both rows; the lower row reaches the square via its
+      // authored side walk rather than spawning inside a roof.
+      y: y + footprint.height + 42,
+      dir: topRow ? "down" : "up",
+    }),
+    blockers: Object.freeze([
+      Object.freeze({ x, y, width: 224, height: 122 }),
+      Object.freeze({ x, y: y + 122, width: 76, height: 100 }),
+      Object.freeze({ x: x + 148, y: y + 122, width: 76, height: 100 }),
+    ]),
+  });
+}
+
+const CITY_PLAZA_SHOPS = Object.freeze([
+  cityShopLayout({ id: "furniture-shop", label: "Huddle Home", x: 48, y: 160 }),
+  cityShopLayout({ id: "garden-shop", label: "Willow & Green", x: 336, y: 160 }),
+  cityShopLayout({ id: "decor-shop", label: "Plaza Decor", x: 624, y: 160 }),
+  cityShopLayout({ id: "cafe", label: "Cafe", x: 912, y: 160 }),
+  cityShopLayout({ id: "diner", label: "Diner", x: 48, y: 1120 }),
+  cityShopLayout({ id: "bakery", label: "Sweet Crust Bakery", x: 464, y: 1120 }),
+  cityShopLayout({ id: "sushi", label: "Sakura Sushi", x: 880, y: 1120 }),
+]);
+const CITY_PLAZA_SHOP_BY_ID = Object.freeze(Object.fromEntries(
+  CITY_PLAZA_SHOPS.map((shop) => [shop.id, shop]),
+));
+
+const CITY_MUSEUM_LAYOUT = Object.freeze({
+  id: "museum",
+  label: "Huddle Museum",
+  footprint: Object.freeze({ x: 456, y: 1440, width: 240, height: 350 }),
+  door: Object.freeze({ x: 528, y: 1690, width: 96, height: 100 }),
+  citySpawn: Object.freeze({ x: 576, y: 1830, dir: "up" }),
+  museumSpawn: Object.freeze({ x: 480, y: 576, dir: "up" }),
+  blockers: Object.freeze([
+    Object.freeze({ x: 456, y: 1440, width: 240, height: 250 }),
+    Object.freeze({ x: 456, y: 1690, width: 72, height: 100 }),
+    Object.freeze({ x: 624, y: 1690, width: 72, height: 100 }),
+  ]),
+});
+
+export const CITY_COMMERCIAL_LAYOUT = Object.freeze({
+  cityBounds: CITY_PLAZA_BOUNDS,
+  gatheringSquare: CITY_GATHERING_SQUARE,
+  shops: CITY_PLAZA_SHOPS,
+  venues: Object.freeze([...CITY_PLAZA_SHOPS, CITY_MUSEUM_LAYOUT]),
+  museum: CITY_MUSEUM_LAYOUT,
+});
+// Keep the plaza name explicit for renderer and geometry consumers while
+// retaining the existing museum-facing export used by older clients.
+export const CITY_PLAZA_LAYOUT = CITY_COMMERCIAL_LAYOUT;
 // Renderer-facing aliases keep the imported design manifest and the city
 // exterior contract discoverable from one shared module.
 export const COMMERCIAL_LAYOUTS = commercialLayouts;
@@ -525,54 +578,36 @@ const BASE_LOCATION_GEOMETRY = Object.freeze({
   },
   city: {
     blockers: [
-      // Closed Plaza Market facade. This used to be a second, color-mirrored
-      // entrance to the authenticated player's Willow Walk home.
-      { x: 178, y: 106, width: 224, height: 235 },
-      { x: 760, y: 106, width: 224, height: 122 }, { x: 760, y: 228, width: 76, height: 100 }, { x: 908, y: 228, width: 76, height: 100 },
-      // Two south-lane storefronts have the same open center threshold as the
-      // supplied shop facade, so their visible doors and server portals agree.
-      { x: 178, y: 622, width: 224, height: 122 }, { x: 178, y: 744, width: 76, height: 100 }, { x: 326, y: 744, width: 76, height: 100 },
-      { x: 760, y: 622, width: 224, height: 122 }, { x: 760, y: 744, width: 76, height: 100 }, { x: 908, y: 744, width: 76, height: 100 },
-      // Cafe
-      { x: 178, y: 950, width: 224, height: 122 }, { x: 178, y: 1072, width: 76, height: 100 }, { x: 326, y: 1072, width: 76, height: 100 },
-      // Diner
-      { x: 760, y: 950, width: 224, height: 122 }, { x: 760, y: 1072, width: 76, height: 100 }, { x: 908, y: 1072, width: 76, height: 100 },
-      // Bakery
-      { x: 178, y: 1250, width: 224, height: 122 }, { x: 178, y: 1372, width: 76, height: 100 }, { x: 326, y: 1372, width: 76, height: 100 },
-      // Sushi
-      { x: 760, y: 1250, width: 224, height: 122 }, { x: 760, y: 1372, width: 76, height: 100 }, { x: 908, y: 1372, width: 76, height: 100 },
-      { x: 95, y: 186, width: 50, height: 50 }, { x: 420, y: 160, width: 50, height: 50 },
-      { x: 680, y: 156, width: 50, height: 50 }, { x: 1007, y: 174, width: 50, height: 50 },
-      { x: 384, y: 354, width: 28, height: 30 }, { x: 730, y: 354, width: 28, height: 30 },
-      { x: 40, y: 660, width: 96, height: 30 }, { x: 1016, y: 660, width: 96, height: 30 },
-      { x: 324, y: 370, width: 96, height: 30 }, { x: 732, y: 370, width: 96, height: 30 },
-      // Huddle Museum: centered bottom-row footprint with a clear 96px door
-      // at x=576 / y=1740. The threshold itself is intentionally not blocked.
-      ...CITY_COMMERCIAL_LAYOUT.museum.blockers,
+      // Every visible facade is generated from the same venue contract used by
+      // the city renderer.  Each 72px opening is left clear for its threshold.
+      ...CITY_PLAZA_LAYOUT.shops.flatMap((shop) => shop.blockers),
+      ...CITY_PLAZA_LAYOUT.museum.blockers,
     ],
     doors: [
-      { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
-      { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, label: "Willow & Green" },
-      { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, label: "Plaza Decor" },
-      { destination: "cafe", x: 254, y: 1080, width: 72, height: 100, label: "Cafe" },
-      { destination: "diner", x: 836, y: 1080, width: 72, height: 100, label: "Diner" },
-      { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, label: "Bakery" },
-      { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, label: "Sushi" },
-      { destination: "museum", ...CITY_COMMERCIAL_LAYOUT.museum.door, label: "Huddle Museum",
+      ...CITY_PLAZA_LAYOUT.shops.map((shop) => ({
+        destination: shop.id, ...shop.door, label: shop.label,
+      })),
+      { destination: "museum", ...CITY_PLAZA_LAYOUT.museum.door, label: "Huddle Museum",
         spawn: CITY_COMMERCIAL_LAYOUT.museum.museumSpawn },
     ],
     seats: [
-      // Benches sit in grass pockets around the plaza rather than on either
-      // the east/west road or its crossing sidewalks.
-      { id: "plaza-bench-northwest", x: 372, y: 416, dir: "down",
-        stands: [{ x: 372, y: 480, dir: "down" }, { x: 340, y: 416, dir: "down" }] },
-      { id: "plaza-bench-northeast", x: 780, y: 416, dir: "down",
-        stands: [{ x: 780, y: 480, dir: "down" }, { x: 716, y: 416, dir: "down" }] },
-      { id: "plaza-bench-southwest", x: 88, y: 712, dir: "down",
-        stands: [{ x: 88, y: 776, dir: "up" }, { x: 152, y: 712, dir: "up" }] },
-      { id: "plaza-bench-southeast", x: 1064, y: 712, dir: "down",
-        stands: [{ x: 1064, y: 776, dir: "up" }, { x: 1032, y: 740, dir: "up" }] },
+      // Benches frame the paved gathering square.  Their authored exits are
+      // deliberately on the same open paving as the player's arrival route.
+      { id: "plaza-bench-northwest", x: 264, y: 520, dir: "down",
+        stands: [{ x: 264, y: 584, dir: "down" }, { x: 200, y: 520, dir: "down" }] },
+      { id: "plaza-bench-northeast", x: 888, y: 520, dir: "down",
+        stands: [{ x: 888, y: 584, dir: "down" }, { x: 824, y: 520, dir: "down" }] },
+      { id: "plaza-bench-southwest", x: 264, y: 1000, dir: "up",
+        stands: [{ x: 264, y: 936, dir: "up" }, { x: 200, y: 1000, dir: "up" }] },
+      { id: "plaza-bench-southeast", x: 888, y: 1000, dir: "up",
+        stands: [{ x: 888, y: 936, dir: "up" }, { x: 824, y: 1000, dir: "up" }] },
     ],
+    // The renderer consumes these same footprints, keeping museum and shop
+    // facades discoverable in the serialized transition payload.
+    commercialExteriors: {
+      gatheringSquare: CITY_PLAZA_LAYOUT.gatheringSquare,
+      venues: CITY_PLAZA_LAYOUT.venues,
+    },
   },
   museum: commercialRoomGeometry("museum", {
     blockers: [...MUSEUM_FOYER_WALLS],
@@ -707,22 +742,19 @@ export const LOCATION_PORTALS = Object.freeze({
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
-    { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "garden-shop", x: 254, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "decor-shop", x: 836, y: 752, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "cafe", x: 254, y: 1080, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "diner", x: 836, y: 1080, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
-    { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    ...CITY_PLAZA_LAYOUT.shops.map((shop) => ({
+      destination: shop.id, ...shop.door,
+      spawn: { x: 480, y: 576, dir: "up" },
+    })),
     { destination: "museum", ...CITY_COMMERCIAL_LAYOUT.museum.door, spawn: CITY_COMMERCIAL_LAYOUT.museum.museumSpawn },
   ],
-  "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
-  "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 880, dir: "down" } }],
-  "decor-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 880, dir: "down" } }],
-  cafe: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 1190, dir: "down" } }],
-  diner: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1190, dir: "down" } }],
-  bakery: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 1490, dir: "down" } }],
-  sushi: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1490, dir: "down" } }],
+  "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID["furniture-shop"].citySpawn }],
+  "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID["garden-shop"].citySpawn }],
+  "decor-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID["decor-shop"].citySpawn }],
+  cafe: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID.cafe.citySpawn }],
+  diner: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID.diner.citySpawn }],
+  bakery: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID.bakery.citySpawn }],
+  sushi: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: CITY_PLAZA_SHOP_BY_ID.sushi.citySpawn }],
   museum: [
     ...MUSEUM_FOYER_DOORS,
     { destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit", spawn: CITY_COMMERCIAL_LAYOUT.museum.citySpawn },
@@ -1006,8 +1038,9 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
 
 export function locationBounds(location) {
   if (location.kind === "home") return { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell };
-  // Huddle Plaza is intentionally a fixed 1920px map. Residential sparse
-  // blocks return through its single west gate rather than extending this map.
+  // Huddle Plaza is intentionally the fixed 1152x1920 plaza. Residential
+  // sparse blocks return through its single west gate rather than extending
+  // this map or reusing the street field.
   return LOCATIONS[location.id].bounds;
 }
 

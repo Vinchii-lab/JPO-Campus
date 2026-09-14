@@ -65,11 +65,14 @@ for (const zoom of [0.5, 0.7, 1, 4]) {
   scene.cameras.main.zoom = zoom;
   scene._syncTileField();
   const visible = scene._groundTiles.filter(t => t.visible);
-  const left = 720 * (1 - 1 / zoom), top = 450 * (1 - 1 / zoom);
-  assert(Math.min(...visible.map(t => t.x)) <= left);
-  assert(Math.max(...visible.map(t => t.x + 240)) >= left + 1440 / zoom);
-  assert(Math.min(...visible.map(t => t.y)) <= top);
-  assert(Math.max(...visible.map(t => t.y + 240)) >= top + 900 / zoom);
+  const top = 450 * (1 - 1 / zoom);
+  // Ground is clipped to the current authoritative world rectangle. At
+  // zoom-out a compact map may not fill the entire camera viewport; that
+  // overhang must be clear background, never a second grass field.
+  assert(Math.min(...visible.map(t => t.x)) >= 0);
+  assert(Math.max(...visible.map(t => t.x + 240)) <= scene.mapWidth);
+  assert(Math.min(...visible.map(t => t.y)) <= Math.max(0, top));
+  assert(Math.max(...visible.map(t => t.y + 240)) >= Math.min(scene.mapHeight, top + 900 / zoom));
   assert(scene._groundTiles.length < 200, 'pool stays viewport-bounded even in a huge world');
 }
 scene.cameras.main.zoom = 1;
@@ -108,7 +111,7 @@ for (const width of [390, 1024, 1920, 2560]) {
 }
 scene.location = 'city';
 scene.mapWidth = 1152;
-scene.mapHeight = 912;
+scene.mapHeight = 1920;
 scene._fitNeighborhoodCamera();
 const fittedZoom = scene.cameras.main.zoom;
 scene._setOutdoorZoom(2);

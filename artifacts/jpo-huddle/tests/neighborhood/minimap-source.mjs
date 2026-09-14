@@ -213,7 +213,7 @@ function sceneFor(location, width, height) {
 
 // Every live NeighborhoodScene location uses the same draw/layout contract.
 for (const [location, width, height] of [
-  ["city", 1152, 912], ["home:qa", 1152, 864],
+  ["city", 1152, 1920], ["home:qa", 1152, 864],
   ["furniture-shop", 960, 720], ["garden-shop", 960, 720], ["decor-shop", 960, 720],
 ]) {
   const scene = sceneFor(location, width, height);
@@ -239,7 +239,7 @@ const office = {
   _tileMap: { width: 200, height: 136, tileWidth: 16, getLayer() { return null; } },
   player: { x: 20, y: 20 }, otherPlayers: {},
 };
-sandbox._neighborhoodScene = sceneFor("city", 1152, 912);
+sandbox._neighborhoodScene = sceneFor("city", 1152, 1920);
 sandbox._gameScene = office;
 sandbox._jpoAuthoritativeLocation = "office";
 sandbox.__minimapProbe.draw();

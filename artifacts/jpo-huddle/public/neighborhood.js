@@ -700,6 +700,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.localNameTag = null;
       this.interactHint = null;
       this._groundTiles = null;
+      this._groundMask?.destroy?.();
+      this._groundMaskGraphics?.destroy?.();
+      this._groundMask = null;
+      this._groundMaskGraphics = null;
       this._streetScenerySegments = null;
       this._groundSyncKey = this._streetVisibleKey = this._cameraFitKey = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
@@ -871,7 +875,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // repeatable five-cell palette cycle. Do not make a TileSprite as large
       // as the world: Canvas renderers allocate its backing canvas at display
       // size, and permanent sparse lot indices can make that world very tall.
-      const key = 'neighborhood-ground:' + base.toString(16) + ':' + alternate.toString(16);
+      // Include the authoritative map dimensions in the field identity: this
+      // scene is reused for Willow Walk and Huddle Plaza, and a retained field
+      // must never paint a street-sized canvas into the 1152x1920 city.
+      const mapWidth = Number(this.mapWidth) || 0;
+      const mapHeight = Number(this.mapHeight) || 0;
+      const key = 'neighborhood-ground:' + base.toString(16) + ':' + alternate.toString(16) +
+        ':' + mapWidth + 'x' + mapHeight;
       if (!this.textures.exists(key)) {
         const art = this.make.graphics({ x: 0, y: 0, add: false });
         const period = 48 * 5;
@@ -898,6 +908,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._groundTextureKey = key;
       this._groundTiles = [];
       this._groundSyncKey = null;
+      // The final 240px tile can overhang a map edge. A world-space mask is
+      // the last guard against showing that grass in the viewport when a
+      // small map is zoomed out or a reused camera has a larger view.
+      if (this.make?.graphics && mapWidth > 0 && mapHeight > 0) {
+        this._groundMaskGraphics = this.make.graphics({ x: 0, y: 0, add: false });
+        this._groundMaskGraphics.fillStyle(0xffffff, 1).fillRect(0, 0, mapWidth, mapHeight);
+        this._groundMask = this._groundMaskGraphics.createGeometryMask?.() || null;
+      }
       this._syncTileField();
       return this._groundTiles;
     }
@@ -908,13 +926,34 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const zoom = camera.zoom || 1;
       const width = camera.width || this.scale.width;
       const height = camera.height || this.scale.height;
-      const left = camera.scrollX + width * (camera.originX ?? 0.5) * (1 - 1 / zoom);
-      const top = camera.scrollY + height * (camera.originY ?? 0.5) * (1 - 1 / zoom);
+      const viewWidth = width / zoom;
+      const viewHeight = height / zoom;
+      const rawLeft = camera.scrollX + width * (camera.originX ?? 0.5) * (1 - 1 / zoom);
+      const rawTop = camera.scrollY + height * (camera.originY ?? 0.5) * (1 - 1 / zoom);
+      const mapWidth = Number(this.mapWidth);
+      const mapHeight = Number(this.mapHeight);
+      // Camera bounds can still expose a viewport wider than a compact map at
+      // zoom-out. Quantize only the intersection with the authoritative map
+      // rectangle; any overhang is left to the camera clear color, never grass.
+      const left = Number.isFinite(mapWidth) && mapWidth > 0
+        ? Math.max(0, Math.min(Math.max(0, mapWidth - viewWidth), rawLeft)) : rawLeft;
+      const top = Number.isFinite(mapHeight) && mapHeight > 0
+        ? Math.max(0, Math.min(Math.max(0, mapHeight - viewHeight), rawTop)) : rawTop;
       const size = 240;
-      const firstX = Math.floor(left / size) - 1;
-      const firstY = Math.floor(top / size) - 1;
-      const cols = Math.ceil(width / zoom / size) + 3;
-      const rows = Math.ceil(height / zoom / size) + 3;
+      const right = Number.isFinite(mapWidth) && mapWidth > 0
+        ? Math.min(mapWidth, left + viewWidth) : left + viewWidth;
+      const bottom = Number.isFinite(mapHeight) && mapHeight > 0
+        ? Math.min(mapHeight, top + viewHeight) : top + viewHeight;
+      const firstX = Math.max(0, Math.floor(left / size) - 1);
+      const firstY = Math.max(0, Math.floor(top / size) - 1);
+      const lastX = Number.isFinite(mapWidth) && mapWidth > 0
+        ? Math.min(Math.ceil(mapWidth / size), Math.ceil(right / size) + 1)
+        : Math.ceil(right / size) + 1;
+      const lastY = Number.isFinite(mapHeight) && mapHeight > 0
+        ? Math.min(Math.ceil(mapHeight / size), Math.ceil(bottom / size) + 1)
+        : Math.ceil(bottom / size) + 1;
+      const cols = Math.max(1, lastX - firstX);
+      const rows = Math.max(1, lastY - firstY);
       const syncKey = `${firstX}:${firstY}:${cols}:${rows}`;
       if (this._groundSyncKey === syncKey) return;
       this._groundSyncKey = syncKey;
@@ -927,6 +966,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (index < count) tile.setPosition(
           (firstX + index % cols) * size,
           (firstY + Math.floor(index / cols)) * size);
+        tile.setMask?.(this._groundMask || null);
       });
     }
 
@@ -1349,39 +1389,68 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _drawCity() {
       this._tileField(0x83aa68, 0x789d60);
-      this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
-      this._path({ x: 456, y: 0, width: 240, height: this.mapHeight }, 0x535e66, 0x3e4750);
-      this._path({ x: 0, y: 408, width: 1152, height: 24 });
-      this._path({ x: 0, y: 576, width: 1152, height: 24 });
-      this._path({ x: 432, y: 0, width: 24, height: this.mapHeight });
-      this._path({ x: 696, y: 0, width: 24, height: this.mapHeight });
-      // Short garden walks lead to the two south-lane shop thresholds without
-      // widening the road or making a new collision shortcut.
-      this._path({ x: 836, y: 328, width: 72, height: 104 });
-      this._path({ x: 254, y: 852, width: 72, height: 36 });
-      this._path({ x: 836, y: 852, width: 72, height: 36 });
-      this._path({ x: 254, y: 1180, width: 72, height: 36 });
-      this._path({ x: 836, y: 1180, width: 72, height: 36 });
-      this._path({ x: 254, y: 1480, width: 72, height: 36 });
-      this._path({ x: 836, y: 1480, width: 72, height: 36 });
-      this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
-      // Every open venue has its own silhouette and native-pixel detailing.
-      // Rectangles and door centres match the authoritative facade colliders.
-      this._exterior('shop', 290, 340);
-      [
-        { id: 'furniture-shop', x: 760, y: 106 },
-        { id: 'garden-shop', x: 178, y: 622 },
-        { id: 'decor-shop', x: 760, y: 622 },
-        { id: 'cafe', x: 178, y: 950 },
-        { id: 'diner', x: 760, y: 950 },
-        { id: 'bakery', x: 178, y: 1250 },
-        { id: 'sushi', x: 760, y: 1250 },
-      ].forEach((building) => window.JpoPlazaExteriors.draw(this, {
-        ...building, width: 224, height: 222,
-        doorX: building.x + 112, doorY: building.y + 222,
-      }));
-      const museum = this.info.geometry?.commercialExteriors?.museum || {
-        footprint: { x: 336, y: 1560, width: 480, height: 230 },
+      const square = this.info.geometry?.commercialExteriors?.gatheringSquare || {
+        x: 96, y: 432, width: 960, height: 672,
+      };
+      // One broad paved square is the plaza's organizing space. Short walks
+      // connect all authored thresholds to it; there is no reused vertical
+      // Willow Walk road and no decorative paving outside the city bounds.
+      this._path(square, 0x535e66, 0x3e4750);
+      this._path({ x: square.x, y: square.y - 24, width: square.width, height: 24 });
+      this._path({ x: square.x, y: square.y + square.height, width: square.width, height: 24 });
+      const venues = this.info.geometry?.commercialExteriors?.venues || [
+        { id: 'furniture-shop', footprint: { x: 48, y: 160, width: 224, height: 222 } },
+        { id: 'garden-shop', footprint: { x: 336, y: 160, width: 224, height: 222 } },
+        { id: 'decor-shop', footprint: { x: 624, y: 160, width: 224, height: 222 } },
+        { id: 'cafe', footprint: { x: 912, y: 160, width: 224, height: 222 } },
+        { id: 'diner', footprint: { x: 48, y: 1120, width: 224, height: 222 } },
+        { id: 'bakery', footprint: { x: 464, y: 1120, width: 224, height: 222 } },
+        { id: 'sushi', footprint: { x: 880, y: 1120, width: 224, height: 222 } },
+        { id: 'museum', footprint: { x: 336, y: 1560, width: 480, height: 230 } },
+      ];
+      venues.forEach((venue) => {
+        const rect = venue.footprint;
+        if (!rect || venue.id === 'museum') return;
+        // Existing verified facade renderer owns the venue art; this method
+        // only supplies the synchronized world-space placement.
+        window.JpoPlazaExteriors.draw(this, {
+          id: venue.id, ...rect,
+          doorX: rect.x + rect.width / 2,
+          doorY: rect.y + rect.height,
+        });
+        const doorCenterX = rect.x + rect.width / 2;
+        const topRow = rect.y < square.y;
+        if (topRow) {
+          this._path({
+            x: doorCenterX - 36,
+            y: rect.y + rect.height,
+            width: 72,
+            height: square.y - (rect.y + rect.height),
+          });
+        } else {
+          // The verified facade art opens on its south edge. Bring the square
+          // around one side of each lower-row venue, then across its door,
+          // rather than drawing an impossible path through the solid facade.
+          const leftSide = rect.x - 36;
+          const rightSide = rect.x + rect.width + 36;
+          const sideX = leftSide >= square.x && leftSide <= square.x + square.width
+            ? leftSide : rightSide;
+          this._path({
+            x: sideX - 24,
+            y: square.y + square.height,
+            width: 48,
+            height: rect.y + rect.height - (square.y + square.height),
+          });
+          this._path({
+            x: Math.min(sideX, doorCenterX) - 24,
+            y: rect.y + rect.height - 24,
+            width: Math.abs(sideX - doorCenterX) + 48,
+            height: 48,
+          });
+        }
+      });
+      const museum = venues.find((venue) => venue.id === 'museum') || {
+        footprint: { x: 456, y: 1440, width: 240, height: 350 },
       };
       const museumRect = museum.footprint;
       window.JpoPlazaExteriors.draw(this, {
@@ -1389,32 +1458,30 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         doorX: museumRect.x + museumRect.width / 2,
         doorY: museumRect.y + museumRect.height,
       });
-      this._path({ x: 336, y: 1790, width: 480, height: 96 });
-      [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 300], [1048, 300]].forEach(([x, y]) => this._exterior('tree', x, y));
-      [[398, 384], [744, 384], [90, 580], [1062, 580]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      this._path({ x: museumRect.x, y: museumRect.y + museumRect.height, width: museumRect.width, height: 96 });
+      [[120, 392], [1032, 392], [120, 1136], [1032, 1136], [120, 1816], [1032, 1816]]
+        .forEach(([x, y]) => this._exterior('tree', x, y));
+      [[168, 472], [984, 472], [168, 1064], [984, 1064]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
       // The seating pockets sit fully outside the crossing roads. Keep the
       // player seat coordinates in neighborhood.mjs in lockstep with these
       // visual ground contacts.
-      [[372, 416], [780, 416], [88, 696], [1064, 696]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
+      [[264, 520], [888, 520], [264, 1000], [888, 1000]]
+        .forEach(([x, y]) => this._exterior('bench', x, y, 2));
 
       // Decorative cheerful animated details
-      [[290, 480], [872, 480], [290, 960], [872, 960]].forEach(([x, y]) => {
+      [[336, 720], [816, 720], [336, 880], [816, 880]].forEach(([x, y]) => {
         this.add.image(x, y - 60, 'dec_flowers').setScale(3).setOrigin(0.5, 1).setDepth(y - 60);
         const balloons = this.add.image(x - 60, y - 60, 'dec_balloons').setScale(3).setOrigin(0.5, 1).setDepth(y);
         this._animateNeighborhoodObject(balloons, { y: { from: y - 60, to: y - 75 }, duration: 2500, yoyo: true, repeat: -1 });
       });
-      [240, 340, 820, 920].forEach(x => {
-        const bunting = this.add.image(x, 150, 'dec_bunting').setScale(3).setOrigin(0.5, 0).setDepth(300);
+      [192, 480, 768, 960].forEach(x => {
+        const bunting = this.add.image(x, 432, 'dec_bunting').setScale(3).setOrigin(0.5, 0).setDepth(300);
         this._animateNeighborhoodObject(bunting, { alpha: { from: 0.8, to: 1 }, duration: 1500, yoyo: true, repeat: -1 });
       });
 
-      // Keep the intersection open: no fountain disk or invisible core
-      // collider in the roadway. Animated accents belong to the storefronts.
-      this._sign(290, 80, 'PLAZA MARKET · CLOSED');
-      this._sign(576, 302, 'HUDDLE PLAZA');
+      this._sign(square.x + square.width / 2, square.y + 28, 'HUDDLE PLAZA');
       this._sign(94, 420, '← WILLOW WALK');
-      this._sign(290, 900, 'GARDEN LANE');
-      this._sign(872, 900, 'GARDEN LANE');
+      this._sign(square.x + 150, square.y + square.height - 18, 'GATHERING SQUARE');
     }
 
     _storefrontSign(x, y, text) {
@@ -2713,6 +2780,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.localNameTag = null;
       this.interactHint = null;
       this._groundTiles = null;
+      this._groundMask?.destroy?.();
+      this._groundMaskGraphics?.destroy?.();
+      this._groundMask = null;
+      this._groundMaskGraphics = null;
       this._streetScenerySegments?.forEach((objects) => objects.forEach((object) => object?.destroy?.()));
       this._streetScenerySegments = null;
       this._geometryBlocks = this._yardBlocks = this._furnitureBlocks = null;
