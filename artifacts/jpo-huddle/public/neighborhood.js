@@ -7,13 +7,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   ui.id = 'neighborhood-ui';
   // This is a location plaque, deliberately not a travel menu.
   ui.innerHTML = '<div id="neighborhood-nav"><span id="neighborhood-title">JPO HQ</span><button id="neighborhood-panel-toggle" type="button" aria-controls="home-panel shop-panel" hidden>Hide panel</button></div>' +
-    '<div id="home-panel" hidden></div>';
+    '<div id="home-panel" hidden></div><div id="placement-controls" style="position:fixed; bottom:var(--neighborhood-hud-bottom, 60px); left:50%; transform:translateX(-50%); z-index:300;" hidden></div>';
   document.body.appendChild(ui);
 
   const title = ui.querySelector('#neighborhood-title');
   const homePanel = ui.querySelector('#home-panel');
   let homeState = null;
   let furnitureCatalog = {};
+  let showroomDemos = [];
   let selectedInstance = null;
   let selectedRotation = 0;
   let selectedZone = 'indoor';
@@ -39,6 +40,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let nearbyConstructionLot = null;
   let directoryRequestId = 0;
   let activeDirectoryRequestId = 0;
+  // The owner invite picker is backed by a narrow server query rather than
+  // the admin/office roster cache. Keep its request generation separate from
+  // the street-directory request so a delayed response cannot populate a
+  // different home editor.
+  let homePeople = [];
+  let homePeopleLoaded = false;
+  let homePeopleRequestId = 0;
+  let activeHomePeopleRequestId = 0;
+  const pendingPurchasedItems = [];
   // A socket result can arrive while the prior map's cosmetic fade is still
   // pending. Keep one presentation generation and timer: an old completion
   // must never stop/restart the scene selected by a newer completion.
@@ -117,7 +127,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   // actor (local, remote, and pet). Characters use their world y as depth,
   // while the map's playable bounds keep their foot centre above this plane.
   const LOT_GROUND_DEPTH = 2;
-  const FURNITURE_ASSET_REVISION = 'native-3x-living-room-20260827';
   // A city transition includes this server-authoritative value so the personal
   // house is colored before the owner has entered its interior this session.
   let ownExteriorColor = 'teal';
@@ -196,6 +205,44 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     activeDirectoryRequestId = ++directoryRequestId;
     socket.emit('homeDirectoryRequest', { requestId: activeDirectoryRequestId });
   };
+  const requestHomePeople = () => {
+    activeHomePeopleRequestId = ++homePeopleRequestId;
+    homePeopleLoaded = false;
+    socket.emit('homePeopleRequest', { requestId: activeHomePeopleRequestId });
+  };
+  const hidePlacementControls = () => {
+    const container = document.getElementById('placement-controls');
+    if (!container) return;
+    if (typeof window.JpoUIBuilder?.renderPlacementControls === 'function') {
+      window.JpoUIBuilder.renderPlacementControls(container, { active: false });
+    } else {
+      container.hidden = true;
+      container.innerHTML = '';
+    }
+  };
+  const teardownPlacement = () => {
+    selectedInstance = null;
+    selectedRotation = 0;
+    selectedZone = 'indoor';
+    window._neighborhoodScene?._teardownPlacement?.();
+    hidePlacementControls();
+  };
+  const mergePurchasedItem = (state, item) => {
+    if (!state || !item?.id || !item.furnitureId) return false;
+    state.inventory = Array.isArray(state.inventory) ? state.inventory : [];
+    state.layout = Array.isArray(state.layout) ? state.layout : [];
+    state.yard = Array.isArray(state.yard) ? state.yard : [];
+    const exists = [...state.inventory, ...state.layout, ...state.yard]
+      .some((entry) => String(entry.id) === String(item.id));
+    if (exists) return false;
+    state.inventory.push({ id: item.id, furnitureId: item.furnitureId });
+    return true;
+  };
+  const mergePendingPurchases = (state) => {
+    if (!state?.canEdit || state.ownerEmail !== globals()._playerEmail) return;
+    for (const item of pendingPurchasedItems) mergePurchasedItem(state, item);
+    pendingPurchasedItems.length = 0;
+  };
   window.jpoSetConstructionLot = (lot) => {
     const ownerEmail = lot?.ownerEmail || null;
     if ((nearbyConstructionLot?.ownerEmail || null) === ownerEmail) return;
@@ -245,216 +292,61 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   function renderHome() {
     syncPanelControls();
-    if (!isHome() || !homeState) {
-      if (!isResidentialBlock()) {
-        homePanel.hidden = true;
-        window.jpoHouseColors?.render(homePanel);
-        return;
-      }
-      homePanel.hidden = false;
-      const homes = directory;
-      homePanel.innerHTML =
-        '<div class="home-panel-head"><b>Willow Walk</b><button type="button" data-collapse>Hide</button></div>' +
-        '<div class="home-section home-directory"><small>' + homes.length +
-        ' approved homes · every address is a persistent account lot on this one street.</small>' +
-        (homes.length ? homes.map((home) => '<span class="home-directory-item"><small>Lot ' + home.lotIndex + ' · </small>' +
-          escapeHtml(home.name || home.ownerEmail) + ' <small>(' + escapeHtml(home.accessMode) + ')</small></span>').join('') :
-          '<small>No homes available yet.</small>') +
-        '</div>' +
-        constructionMarkup() +
-        (homeState?.canEdit
-          ? '<div class="home-section"><small>Your fenced yard · choose an owned item, then click a clear square in your yard.</small>' +
-            (Array.isArray(homeState.inventory) && homeState.inventory.length
-              ? homeState.inventory.map((item) => '<span class="home-item ' + (selectedInstance === item.id ? 'selected' : '') + '">' +
-                escapeHtml(furnitureCatalog[item.furnitureId]?.name || item.furnitureId) +
-                '<button type="button" data-yard-select="' + escapeHtml(item.id) + '">Place outside</button></span>').join('')
-              : '<small>No unplaced furniture. Visit Huddle Home for furnishings or store an item from your room.</small>') +
-            (Array.isArray(homeState.yard) && homeState.yard.length
-              ? '<small>Yard items</small>' + homeState.yard.map((item) => '<span class="home-item">' +
-                escapeHtml(furnitureCatalog[item.furnitureId]?.name || item.furnitureId) +
-                '<button type="button" data-yard-move="' + escapeHtml(item.id) + '">Move</button>' +
-                '<button type="button" data-return="' + escapeHtml(item.id) + '">Store</button></span>').join('')
-              : '') + '</div>' : '') +
-        '<small class="home-panel-note">Walk to a lit front door to visit. Visitors can look, but only the owner can decorate.</small>';
-      homePanel.querySelector('[data-collapse]').onclick = () => { homePanel.hidden = true; };
-      const directoryBody = homePanel.querySelector('.home-directory');
-      const directoryNote = homePanel.querySelector('.home-panel-note');
-      const toggleDirectory = homePanel.querySelector('[data-collapse]');
-      directoryBody.hidden = true;
-      directoryNote.hidden = true;
-      toggleDirectory.textContent = 'Open';
-      toggleDirectory.onclick = () => {
-        directoryBody.hidden = !directoryBody.hidden;
-        directoryNote.hidden = directoryBody.hidden;
-        toggleDirectory.textContent = directoryBody.hidden ? 'Open' : 'Close';
-        scheduleHudReservation();
-      };
-      homePanel.querySelectorAll('[data-yard-select]').forEach((button) => {
-        button.onclick = () => {
-          selectedInstance = button.dataset.yardSelect;
-          selectedRotation = 0;
-          selectedZone = 'yard';
-          toast('Click an open square in your fenced yard.');
-          renderHome();
-        };
-      });
-      homePanel.querySelectorAll('[data-build]').forEach((button) => {
-        button.onclick = () => {
-          const componentId = button.dataset.build;
-          if (componentId && window.confirm('Build this component with coins? This is a one-time purchase.')) {
-            socket.emit('homeConstructionPurchase', { componentId });
-          }
-        };
-      });
-      homePanel.querySelectorAll('[data-return]').forEach((button) => {
-        button.onclick = () => socket.emit('homeLayoutReturn', { instanceId: button.dataset.return });
-      });
-      homePanel.querySelectorAll('[data-yard-move]').forEach((button) => {
-        button.onclick = () => {
-          selectedInstance = button.dataset.yardMove;
-          selectedRotation = 0;
-          selectedZone = 'yard';
-          toast('Click a new open square in your fenced yard.');
-          renderHome();
-        };
-      });
-      window.jpoHouseColors?.render(homePanel);
-      return;
-    }
-    homePanel.hidden = false;
-    const canEdit = homeState.canEdit === true;
-    const inventory = Array.isArray(homeState.inventory) ? homeState.inventory : [];
-    const layout = Array.isArray(homeState.layout) ? homeState.layout : [];
-    const itemName = (item) => furnitureCatalog[item.furnitureId]?.name || item.furnitureId;
-    const inventoryMarkup = inventory.map((item) =>
-      '<span class="home-item ' + (selectedInstance === item.id ? 'selected' : '') + '">' +
-        '<span>' + escapeHtml(itemName(item)) + '</span>' +
-        '<button type="button" data-select="' + escapeHtml(item.id) + '">Place</button></span>',
-    ).join('') || '<small>No unplaced furniture yet.</small>';
-    const layoutMarkup = layout.map((item) =>
-      '<span class="home-item"><span>' + escapeHtml(itemName(item)) + ' (' + item.gridX + ',' + item.gridY + ')</span>' +
-        '<button type="button" data-move="' + escapeHtml(item.id) + '">Move</button>' +
-        '<button type="button" data-return="' + escapeHtml(item.id) + '">Store</button></span>',
-    ).join('') || '<small>Your room is ready to furnish.</small>';
-    const directoryMarkup = directory.length
-      ? directory.map((home) => '<span class="home-directory-item">' + escapeHtml(home.name || home.ownerEmail) +
-          ' <small>(' + escapeHtml(home.accessMode) + ')</small></span>').join('')
-      : '<small>No homes available to visit.</small>';
-
-    const editor = canEdit ? (
-      '<div class="home-section home-editor-controls">' +
-        '<label>Access <select id="home-access"><option value="public">Public</option><option value="invite_only">Invite only</option><option value="private">Private</option></select></label>' +
-        '<button type="button" data-access>Save</button>' +
-        '<div class="home-invite"><input id="home-invite-email" type="email" maxlength="80" placeholder="coworker@email.com"><button type="button" data-invite>Invite</button></div>' +
-        (Array.isArray(homeState.invitations) && homeState.invitations.length
-          ? '<small>Invited</small>' + homeState.invitations.map((invite) =>
-              '<span class="home-item">' + escapeHtml(invite.name || invite.email) +
-              '<button type="button" data-revoke="' + escapeHtml(invite.email) + '">Revoke</button></span>',
-            ).join('')
-          : '') +
-        '<small>How furnishing works: buy at Huddle Home, return here, choose “Place” from Inventory, then click a clear floor tile. The front mat and exit path stay clear. Furniture uses supplied upright artwork, so rotation is unavailable.</small>' +
-        '<small>Inventory — bought items waiting to place</small>' + inventoryMarkup +
-        '<small>Placed items</small>' + layoutMarkup +
-      '</div>'
-    ) : '<div class="home-section"><small>The owner controls this room. Furniture updates live.</small></div>';
-
-    homePanel.innerHTML =
-      '<div class="home-panel-head"><b>' + (canEdit ? 'Your starter home' : 'Visiting a home') +
-      '</b><button type="button" data-collapse>' + (editorOpen ? 'Collapse' : 'Open panel') + '</button></div>' +
-        '<div class="home-section home-directory"><small>Willow Walk neighbors — each glowing home door belongs to this permanent lot.</small>' +
-      directoryMarkup + '</div>' +
-      (editorOpen ? editor : (canEdit ? '<small class="home-panel-note">Open panel to place, store, or manage your home.</small>' : ''));
-
-    homePanel.querySelector('[data-collapse]').onclick = () => { editorOpen = !editorOpen; renderHome(); };
-    homePanel.querySelectorAll('[data-select]').forEach((button) => {
-      button.onclick = () => {
-        selectedInstance = button.dataset.select;
+    window.JpoUIBuilder.renderHomePanel(homePanel, {
+      isHome: isHome(),
+      homeState: homeState,
+      isResidentialBlock: isResidentialBlock(),
+      directory: directory,
+      constructionMarkup: constructionMarkup(),
+      catalog: furnitureCatalog,
+      selectedInstance: selectedInstance,
+      editorOpen: editorOpen,
+      people: homePeople,
+      peopleLoaded: homePeopleLoaded,
+      scheduleHudReservation: scheduleHudReservation,
+      toggleEditor: () => { editorOpen = !editorOpen; renderHome(); },
+      onSelect: (id, zone) => {
+        // Replacing a selected item must release the previous lock, ghost, and
+        // controls before the new item captures placement coordinates.
+        teardownPlacement();
+        selectedInstance = id;
         selectedRotation = 0;
-        selectedZone = 'indoor';
+        selectedZone = zone;
         editorOpen = true;
+        toast('Click a valid spot to place.');
         renderHome();
-      };
-    });
-    homePanel.querySelectorAll('[data-return]').forEach((button) => {
-      button.onclick = () => socket.emit('homeLayoutReturn', { instanceId: button.dataset.return });
-    });
-    homePanel.querySelectorAll('[data-move]').forEach((button) => {
-      button.onclick = () => {
-        selectedInstance = button.dataset.move;
-        selectedRotation = 0;
-        selectedZone = 'indoor';
-        editorOpen = true;
+      },
+      onReturn: (id) => {
+        const instanceId = id || selectedInstance;
+        teardownPlacement();
+        socket.emit('homeLayoutReturn', { instanceId });
         renderHome();
-      };
+      },
+      onAccessSet: (mode) => socket.emit('homeAccessSet', { mode }),
+      onInvite: (email) => socket.emit('homeInvite', { email }),
+      onRevoke: (email) => socket.emit('homeInviteRevoke', { email }),
+      onPeopleRequest: requestHomePeople,
+      onBuild: (componentId) => socket.emit('homeConstructionPurchase', { componentId })
     });
-    const access = homePanel.querySelector('#home-access');
-    if (access) access.value = homeState.accessMode || 'public';
-    homePanel.querySelector('[data-access]')?.addEventListener('click', () => {
-      socket.emit('homeAccessSet', { mode: homePanel.querySelector('#home-access').value });
-    });
-    homePanel.querySelector('[data-invite]')?.addEventListener('click', () => {
-      socket.emit('homeInvite', { email: homePanel.querySelector('#home-invite-email').value });
-    });
-    homePanel.querySelectorAll('[data-revoke]').forEach((button) => {
-      button.onclick = () => socket.emit('homeInviteRevoke', { email: button.dataset.revoke });
-    });
-    // The color module uses safe DOM APIs and adds its owner-only controls only
-    // after this renderer has rebuilt the panel.
-    window.jpoHouseColors?.render(homePanel);
   }
 
   function renderShop() {
     syncPanelControls();
     let panel = document.getElementById('shop-panel');
-    if (typeof currentLocation !== 'string' || (!currentLocation.endsWith('-shop') && !['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation))) {
-      if (panel) panel.hidden = true;
-      return;
-    }
-    if (!panel) {
+    if (!panel && (typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation)))) {
       panel = document.createElement('div');
       panel.id = 'shop-panel';
       ui.appendChild(panel);
     }
-    panel.hidden = false;
-
-    const isRestaurant = ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation);
-    const shopCopy = {
-      'furniture-shop': { title: 'Huddle Home', category: 'Furnishings', copy: 'Comfort pieces for your Willow Walk home.' },
-      'garden-shop': { title: 'Willow & Green', category: 'Garden goods', copy: 'Leafy accents and a sunny seat for your home or yard.' },
-      'decor-shop': { title: 'Plaza Decor', category: 'Living-room accents', copy: 'Statement pieces for a warm, lived-in room.' },
-      'cafe': { title: 'The Daily Grind', category: 'Cafe', copy: 'Fresh coffee and pastries. Have a seat and enjoy the vibe!', isMenu: true },
-      'diner': { title: 'Neon Diner', category: 'American Diner', copy: 'Classic burgers and milkshakes.', isMenu: true },
-      'bakery': { title: 'Sweet Crust', category: 'Bakery', copy: 'Artisan bread and delicious cakes baked daily.', isMenu: true },
-      'sushi': { title: 'Sakura Sushi', category: 'Sushi Restaurant', copy: 'Fresh rolls directly from the conveyor.', isMenu: true },
-    }[currentLocation] || { title: 'Huddle shop', category: 'Home goods', copy: 'Furniture for your Willow Walk home.' };
-
-    const menuItems = {
-      cafe: ['Espresso', 'Latte', 'Matcha', 'Croissant', 'Muffin'],
-      diner: ['Classic Burger', 'Cheeseburger', 'Fries', 'Vanilla Shake', 'Cherry Pie'],
-      bakery: ['Sourdough', 'Baguette', 'Cupcake', 'Chocolate Cake', 'Macaron'],
-      sushi: ['Salmon Nigiri', 'Tuna Sashimi', 'Dragon Roll', 'Edamame', 'Green Tea']
-    };
-
-    let rows = '';
-    if (isRestaurant) {
-       rows = (menuItems[currentLocation] || []).map(item =>
-         '<span class="home-item"><span>' + escapeHtml(item) + '</span><small class="menu-only-label">Menu Only</small></span>'
-       ).join('');
-    } else {
-       rows = Object.values(furnitureCatalog).map((item) =>
-         '<span class="home-item"><span>' + escapeHtml(item.name) + ' · ' +
-         Number(item.price).toLocaleString() + ' coins</span><button type="button" data-buy="' +
-         escapeHtml(item.id) + '">Buy</button></span>',
-       ).join('') || '<small>The catalog is loading.</small>';
+    if (panel) {
+      window.JpoUIBuilder.renderShopPanel(panel, {
+        isShop: typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation)),
+        location: currentLocation,
+        catalog: furnitureCatalog,
+        showroom: showroomDemos,
+        onBuy: (id) => socket.emit('homePurchase', { furnitureId: id })
+      });
     }
-
-    const tipCopy = isRestaurant ? 'This is a reference menu. Food purchasing is not yet supported, but please enjoy the ambiance.' : 'Prices are coins; Buy adds the item to your home Inventory. Leave through the glowing PLAZA exit, walk to your permanent Willow Walk lot, then place it indoors or in your yard.';
-panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title) + ' · ' + escapeHtml(shopCopy.category) + '</b><button type="button" data-close>Close</button></div>' +
-        '<div class="home-section"><small>' + escapeHtml(shopCopy.copy) + ' ' + tipCopy + '</small>' + rows + '</div>';
-    panel.querySelector('[data-close]').onclick = () => { setPanelsCollapsed(true); };
-    panel.querySelectorAll('[data-buy]').forEach((button) => {
-      button.onclick = () => socket.emit('homePurchase', { furnitureId: button.dataset.buy });
-    });
   }
 
   window.initHouseColors?.(socket, () => ({
@@ -473,11 +365,26 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     rerenderHome: renderHome,
   }));
 
+  socket.on('furnitureShowroom', (result) => {
+    if (currentLocation !== 'furniture-shop' || result?.locationId !== 'furniture-shop') return;
+    if (!result?.ok) {
+      showroomDemos = [];
+      if (result?.message) toast(result.message);
+    } else {
+      showroomDemos = Array.isArray(result.demos) ? result.demos : [];
+    }
+    window._neighborhoodScene?.setFurnitureShowroomDemos?.(showroomDemos);
+    renderShop();
+  });
+
   requestDirectory();
   socket.on('homeDirectory', (payload) => {
     // Ignore delayed directory replies. Street lots are canonical account
     // addresses and never depend on a pagination page.
     if (Number.isInteger(payload?.requestId) && payload.requestId !== activeDirectoryRequestId) return;
+    if (payload?.catalog && typeof payload.catalog === 'object') {
+      furnitureCatalog = payload.catalog;
+    }
     directory = Array.isArray(payload) ? payload : (Array.isArray(payload?.homes) ? payload.homes : []);
     if (payload?.error) toast(payload.error);
     window._neighborhoodScene?.updateResidenceDirectory(directory);
@@ -486,7 +393,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   });
   socket.on('homeSnapshot', (state) => {
     if (!state || typeof state !== 'object') return;
+    teardownPlacement();
+    if (state.catalog && typeof state.catalog === 'object') furnitureCatalog = state.catalog;
     homeState = state;
+    mergePendingPurchases(homeState);
     if (state.canEdit && state.exteriorColor) {
       ownExteriorColor = state.exteriorColor;
       window._neighborhoodScene?.setOwnHomeColor(ownExteriorColor);
@@ -494,16 +404,46 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     window._neighborhoodScene?.renderFurniture(state);
     renderHome();
   });
+  socket.on('homePeopleResult', (result) => {
+    if (Number.isSafeInteger(result?.requestId) &&
+        result.requestId !== activeHomePeopleRequestId) return;
+    if (!result?.ok) {
+      homePeople = [];
+      homePeopleLoaded = false;
+      if (result?.message) toast(result.message);
+      return;
+    }
+    homePeople = Array.isArray(result.people) ? result.people : [];
+    homePeopleLoaded = true;
+    if (isHome() && homeState?.canEdit) renderHome();
+  });
   socket.on('homePurchaseResult', (result) => {
-    if (result?.home) homeState = result.home;
-    if (result?.message) toast(result.message);
+    teardownPlacement();
+    if (result?.home) {
+      homeState = result.home;
+      mergePurchasedItem(homeState, result.item);
+      mergePendingPurchases(homeState);
+    } else if (result?.ok && result.item) {
+      pendingPurchasedItems.push(result.item);
+      if (homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail) {
+        mergePurchasedItem(homeState, result.item);
+        pendingPurchasedItems.splice(
+          pendingPurchasedItems.findIndex((item) => String(item.id) === String(result.item.id)), 1,
+        );
+      }
+    }
+    if (result?.message && !result?.ok) toast(result.message);
     else if (result?.ok) {
       const name = furnitureCatalog[result.item?.furnitureId]?.name || 'Furniture';
       toast(name + ' purchased — added to your home inventory.');
+      if (result.refreshPending && (isHome() || isResidentialBlock())) {
+        socket.emit('homeSnapshotRequest');
+      }
     }
     if (isHome()) renderHome();
   });
   socket.on('homeConstructionResult', (result) => {
+    teardownPlacement();
     if (result?.home) homeState = result.home;
     if (result?.message) toast(result.message);
     if (isResidentialBlock()) renderHome();
@@ -511,14 +451,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   socket.on('homeActionResult', (result) => {
     // A mutation always ends its placement gesture. This prevents a stale
     // preview from being re-used after either a server rejection or a move.
-    selectedInstance = null;
-    selectedRotation = 0;
-    selectedZone = 'indoor';
-    window._neighborhoodScene?.clearPlacementPreview?.();
+    teardownPlacement();
     if (isHome() || isResidentialBlock()) renderHome();
     if (result?.message) toast(result.message);
   });
   socket.on('homeAccessResult', (result) => {
+    teardownPlacement();
     if (result?.ok && homeState) {
       homeState.accessMode = result.mode;
       renderHome();
@@ -526,6 +464,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     if (result?.message) toast(result.message);
   });
   socket.on('homeInviteResult', (result) => {
+    teardownPlacement();
     toast(result?.ok ? (result.revoked ? 'Invitation revoked.' : 'Invitation saved.') : (result?.message || 'Could not update invitation.'));
     if (result?.ok && isHome()) socket.emit('homeSnapshotRequest');
   });
@@ -538,8 +477,23 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
   socket.on('homeStreetChanged', (payload) => {
     if (payload?.refreshDirectory && isResidentialBlock()) requestDirectory();
   });
-  socket.on('homeEjected', (result) => toast(result?.message || 'You left the home.'));
+  socket.on('homeEjected', (result) => {
+    teardownPlacement();
+    toast(result?.message || 'You left the home.');
+  });
   socket.on('furnitureInteractionResult', (result) => {
+    const scene = window._neighborhoodScene;
+    if (!scene?.scene?.isActive?.() || !scene._neighborhoodReady) return;
+    scene._activityPending = false;
+    if (result?.ok && result.phase === 'start' && result.activity) {
+      scene._setLocalActivity(result.activity, result);
+    } else if (result?.ok && result.phase === 'stop') {
+      scene._setLocalActivity(null, result);
+    } else if (!result?.ok && result?.message) {
+      toast(result.message);
+    }
+  });
+  socket.on('furnitureDemoInteractionResult', (result) => {
     const scene = window._neighborhoodScene;
     if (!scene?.scene?.isActive?.() || !scene._neighborhoodReady) return;
     scene._activityPending = false;
@@ -590,6 +544,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       super('NeighborhoodScene');
       this.remotes = {};
       this.furniture = [];
+      this.showroomFurniture = [];
       this._lastCorrectionSeq = -1;
       this._neighborhoodReady = false;
     }
@@ -633,6 +588,20 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._placementMoveHandler = this._placementDownHandler = null;
     }
 
+    _teardownPlacement() {
+      this._placementLocked = false;
+      this._lockedGridX = this._lockedGridY = null;
+      this._clearGhost();
+      const container = document.getElementById('placement-controls');
+      if (!container) return;
+      if (typeof window.JpoUIBuilder?.renderPlacementControls === 'function') {
+        window.JpoUIBuilder.renderPlacementControls(container, { active: false });
+      } else {
+        container.hidden = true;
+        container.innerHTML = '';
+      }
+    }
+
     // These bridge methods deliberately call the live OfficeScene implementation
     // with this scene as its receiver. The helper methods it calls are bridged too,
     // retaining the established avatar/wearable/pet formats and signatures.
@@ -656,25 +625,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     preload() {
       window.JpoInteriors.preload(this);
       window.JpoPlazaExteriors.preload(this);
-      // These names deliberately do not overlap the old generic `furn_*`
-      // texture keys. The URL revision is equally deliberate: furniture files
-      // were replaced in place and the server legitimately caches PNGs for a
-      // day, which otherwise left an already-open browser decoding the former
-      // oversized artwork under a new scene.
-      const furnitureAssets = {
-        oak_chair: '/assets/neighborhood/furniture/oak_chair.png',
-        fern: '/assets/neighborhood/furniture/fern.png',
-        reading_lamp: '/assets/neighborhood/furniture/reading_lamp.png',
-        coffee_table: '/assets/neighborhood/furniture/coffee_table.png',
-        blue_sofa: '/assets/neighborhood/furniture/blue_sofa.png',
-        bookcase: '/assets/neighborhood/furniture/bookcase.png',
-        bed: '/assets/neighborhood/interiors/bedroom_bed.png',
-        bathtub: '/assets/room-furniture/animated_bathtub_with_duck.png',
-        television: '/assets/TV_Studio_16x16.png',
-      };
-      Object.entries(furnitureAssets).forEach(([id, path]) => {
-        this.load.image(this._furnitureTextureKey(id), path + (path.includes('?') ? '&' : '?') + 'v=' + FURNITURE_ASSET_REVISION);
-      });
+      // Furniture art is owned by the catalog renderer. Unlike the former
+      // hand-maintained six-item list this covers every server catalog row and
+      // uses the definition's real frame dimensions for animated sheets.
+      window.HomeFurnitureRenderer?.preload?.(this, furnitureCatalog);
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.load.image('int_' + id, '/assets/neighborhood/' + id.replace('_', '-') + '-16.png');
       });
@@ -701,8 +655,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         'pe_jp_roof', 'pe_neon_sign', 'pe_diner_window', 'pe_house_window'].forEach((key) => {
         this.textures.get(key)?.setFilter(nearest);
       });
-      ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase', 'bed', 'bathtub', 'television'].forEach((id) => {
-        this.textures.get(this._furnitureTextureKey(id))?.setFilter(nearest);
+      Object.values(furnitureCatalog || {}).forEach((definition) => {
+        const key = window.HomeFurnitureRenderer?.textureKey?.(definition);
+        if (key) this.textures.get(key)?.setFilter(nearest);
       });
       ['home_floor', 'shop_floor', 'home_wall', 'shop_wall'].forEach((id) => {
         this.textures.get('int_' + id)?.setFilter(nearest);
@@ -715,10 +670,6 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       });
     }
 
-    _furnitureTextureKey(id) {
-      return 'home-furniture-v2:' + id;
-    }
-
     create(data) {
       // ScenePlugin.restart() reuses this JavaScript instance. Phaser clears its
       // display list, but it does not invoke an arbitrary `shutdown()` method
@@ -729,10 +680,15 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // objects from the previous scene and abort the new scene lifecycle.
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
       this._neighborhoodReady = false;
+      this._teardownPlacement();
+      teardownPlacement();
       this._resetTransientTravel();
       this._removePlacementInput();
       this.remotes = {};
       this.furniture = [];
+      this.showroomFurniture?.forEach((object) => object?.destroy?.());
+      this.showroomFurniture = [];
+      this.showroomDemos = Array.isArray(data?.showroom) ? data.showroom : showroomDemos;
       this.streetLotsVisual = null;
       this.localBubble = null;
       this.localCosmetic = this.localWings = this.localPet = null;
@@ -1380,8 +1336,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         if (!def) continue;
         const footprint = this._footprint(def, item.rotation);
         const baseY = originY + (item.gridY + footprint.height) * 48;
-        const sprite = this.add.image(originX + item.gridX * 48 + footprint.width * 24, baseY, this._furnitureTextureKey(def.id))
-          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(baseY);
+        const sprite = this._drawFurniture(def,
+          originX + item.gridX * 48 + footprint.width * 24, baseY, {
+            rotation: item.rotation, depth: baseY, instanceId: item.id,
+          });
+        if (!sprite) continue;
         this._animateFurnitureObject(sprite, def.id, Number(item.gridX || 0) * 80 + Number(item.gridY || 0) * 120);
         objects.push(sprite);
       }
@@ -1559,6 +1518,57 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     _drawCommercialInterior() {
       window.JpoInteriors.draw(this, this.location);
+      if (this.location === 'furniture-shop') this._drawFurnitureShowroom();
+    }
+
+    _hideLegacyFurnitureShopObjects() {
+      const legacyKeys = new Set([
+        'furn_bookcase', 'decor_mirror', 'native_fern', 'native_reading_lamp',
+        'floor_lamp', 'native_blue_sofa', 'furn_armchair', 'furn_table',
+        'furn_bed', 'furn_tv', 'native_oak_chair',
+      ]);
+      for (const object of [...(this.children?.list || [])]) {
+        if (legacyKeys.has(object?.texture?.key)) {
+          this.tweens.killTweensOf(object);
+          object.destroy();
+        }
+      }
+    }
+
+    _drawFurnitureShowroom() {
+      this.showroomFurniture?.forEach((object) => {
+        this.tweens.killTweensOf(object);
+        object.destroy();
+      });
+      this.showroomFurniture = [];
+      this._hideLegacyFurnitureShopObjects();
+      for (const demo of this.showroomDemos || showroomDemos || []) {
+        const definition = furnitureCatalog[demo.furnitureId];
+        if (!definition || !demo?.instanceId) continue;
+        const sprite = this._drawFurniture(definition, Number(demo.x), Number(demo.y), {
+          depth: Number(demo.y), instanceId: demo.instanceId,
+        });
+        if (!sprite) continue;
+        const actions = Array.isArray(demo.actions) ? demo.actions : [];
+        sprite.setData('showroomDemo', demo);
+        sprite.setData('showroomActions', actions);
+        sprite.setData('actionRadius', Math.max(
+          96, ...actions.map((action) => Number(action?.radius) || 0),
+        ));
+        sprite.setData('height', demo.footprint?.height || definition.height || 1);
+        this.showroomFurniture.push(sprite);
+      }
+    }
+
+    setFurnitureShowroomDemos(demos) {
+      this.showroomDemos = Array.isArray(demos) ? demos : [];
+      if (this.location === 'furniture-shop' && this.player) this._drawFurnitureShowroom();
+    }
+
+    _drawFurniture(definition, x, y, options = {}) {
+      const renderer = window.HomeFurnitureRenderer;
+      if (!definition || typeof renderer?.draw !== 'function') return null;
+      return renderer.draw(this, definition, x, y, options);
     }
 
     _drawHome() {
@@ -1740,22 +1750,36 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         this.tweens?.remove?.(target._activityEffectTween);
         target._activityEffectTween = null;
       }
+      if (target._activityFurnitureSprite && target._activityFurnitureDef) {
+        window.HomeFurnitureRenderer?.clearEffect?.(
+          this, target._activityFurnitureSprite, target._activityFurnitureDef,
+        );
+      }
+      target._activityFurnitureSprite = null;
+      target._activityFurnitureDef = null;
     }
 
     _showActivityEffect(entry, activity) {
       this._clearActivityEffect(entry);
+      if (!activity) return;
       const sprite = entry.sprite || (entry === this ? this.player : null);
-      const icon = this._activityIcon(activity);
-      if (!sprite || !icon) return;
-      const fx = this.add.text(sprite.x, sprite.y - 54, icon, {
-        fontFamily: 'sans-serif', fontSize: '18px', color: '#fff7d6',
-        stroke: '#273247', strokeThickness: 3,
-      }).setOrigin(0.5).setDepth(3002);
-      entry._activityFx = fx;
-      entry._activityEffectTween = this.tweens.add({
-        targets: fx, y: sprite.y - 63, alpha: { from: 0.72, to: 1 },
-        duration: 820, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-      });
+      if (!sprite) return;
+
+      // Furniture activity animation is owned by the renderer. It receives the
+      // authoritative definition and activity packet, never a guessed effect
+      // name or a UI-only timer.
+      if (activity.instanceId) {
+        const furnitureSprites = [...(this.furniture || []), ...(this.showroomFurniture || [])];
+        const fSprite = furnitureSprites.find((candidate) =>
+          String(candidate.getData?.('instanceId') || '') === String(activity.instanceId));
+        const definition = furnitureCatalog[activity.furnitureId] ||
+          furnitureCatalog[fSprite?.getData?.('furnitureId')];
+        if (fSprite && definition && typeof window.HomeFurnitureRenderer?.updateActivity === 'function') {
+          entry._activityFurnitureSprite = fSprite;
+          entry._activityFurnitureDef = definition;
+          window.HomeFurnitureRenderer.updateActivity(this, fSprite, definition, activity);
+        }
+      }
     }
 
     _applyActivityPose(entry, activity, dir = 'down') {
@@ -1856,15 +1880,41 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       return best;
     }
 
+    _nearbyShowroomAction() {
+      if (!this.player || !this.showroomFurniture?.length) return null;
+      let best = null;
+      for (const sprite of this.showroomFurniture) {
+        const demo = sprite.getData('showroomDemo');
+        const actions = sprite.getData('showroomActions') || [];
+        const stand = demo?.stand;
+        if (!demo?.instanceId || !stand || !actions.length) continue;
+        const radius = Number(sprite.getData('actionRadius')) || 96;
+        const distance = Math.hypot(this.player.x - Number(stand.x), this.player.y - Number(stand.y));
+        if (distance > radius || (best && distance >= best.distance)) continue;
+        best = { sprite, demo, actions, distance };
+      }
+      return best;
+    }
+
+    _nearbyInteractiveAction() {
+      return this.location === 'furniture-shop'
+        ? this._nearbyShowroomAction() : this._nearbyFurnitureAction();
+    }
+
     _requestFurnitureAction() {
       if (this.activity || this._activityPending) return;
-      const nearby = this._nearbyFurnitureAction();
+      const nearby = this._nearbyInteractiveAction();
       if (!nearby) return;
-      const action = this.keyShift?.isDown && nearby.actions[1] ? nearby.actions[1] : nearby.actions[0];
+      const selectedAction = this.keyShift?.isDown && nearby.actions[1] ? nearby.actions[1] : nearby.actions[0];
+      const action = typeof selectedAction === 'string' ? selectedAction : selectedAction?.id;
       const instanceId = nearby.sprite.getData('instanceId');
       if (!instanceId || !action) return;
       this._activityPending = true;
-      movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'start', instanceId, action });
+      if (this.location === 'furniture-shop') {
+        socket.emit('furnitureDemoInteract', { phase: 'start', instanceId, action });
+      } else {
+        movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'start', instanceId, action });
+      }
     }
 
     _leaveFurnitureActivity(reason = 'exit') {
@@ -1881,7 +1931,13 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         this.playerDir = stand.dir || this.playerDir;
       }
       this._applyActivityPose(this, null, this.playerDir || 'down');
-      movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'exit', reason });
+      if (activity?.showroom || this.location === 'furniture-shop') {
+        socket.emit('furnitureDemoInteract', {
+          phase: 'exit', instanceId: activity?.instanceId || null, reason,
+        });
+      } else {
+        movement?.sendReliableEvent('furnitureInteract', this.location, { phase: 'exit', reason });
+      }
     }
 
     _parkSeatForState(state = this.staticSeatState) {
@@ -1980,47 +2036,133 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     _installPlacementInput(atHome) {
       this._removePlacementInput();
+      this._placementLocked = false;
       const atStreet = this.location === 'neighborhood';
       const yardLot = atStreet && Array.isArray(this.info.streetLots)
         ? this.info.streetLots.find((lot) => lot.ownerEmail === globals()._playerEmail) : null;
       const yardOrigin = yardLot ? {
         x: yardLot.x - 96, y: yardLot.northSide ? yardLot.bottom - 330 : yardLot.bottom - 66,
       } : null;
-      this._placementMoveHandler = (pointer) => {
+
+      this._updateGhostPosition = (pointer) => {
         const usingYard = atStreet && selectedZone === 'yard';
         if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || (usingYard && !yardOrigin)) return this._clearGhost();
         const item = [...(homeState.inventory || []), ...(homeState.layout || []), ...(homeState.yard || [])]
           .find((candidate) => candidate.id === selectedInstance);
         const def = item && furnitureCatalog[item.furnitureId];
         if (!def) return this._clearGhost();
-        const gridX = Math.floor((pointer.worldX - (usingYard ? yardOrigin.x : 0)) / 48);
-        const gridY = Math.floor((pointer.worldY - (usingYard ? yardOrigin.y : 0)) / 48);
+
+        let gridX, gridY;
+        if (this._placementLocked) {
+          gridX = this._lockedGridX;
+          gridY = this._lockedGridY;
+        } else {
+          gridX = Math.floor((pointer.worldX - (usingYard ? yardOrigin.x : 0)) / 48);
+          gridY = Math.floor((pointer.worldY - (usingYard ? yardOrigin.y : 0)) / 48);
+          this._lockedGridX = gridX;
+          this._lockedGridY = gridY;
+        }
+
         const footprint = this._footprint(def, selectedRotation);
         const blocked = usingYard
           ? !this._validYardPlacement(def, gridX, gridY, selectedRotation)
           : !this._validPlacement(def, gridX, gridY, selectedRotation);
-        if (!this.ghost) this.ghost = this.add.image(0, 0, this._furnitureTextureKey(def.id)).setAlpha(0.6).setDepth(25);
-        this.ghost.setTexture(this._furnitureTextureKey(def.id)).setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(selectedRotation)
-          .setPosition((usingYard ? yardOrigin.x : 0) + gridX * 48 + footprint.width * 24,
-            (usingYard ? yardOrigin.y : 0) + (gridY + footprint.height) * 48);
-        if (blocked) this.ghost.setTint(0xff5555); else this.ghost.clearTint();
-      };
-      this._placementDownHandler = (pointer) => {
-        const usingYard = atStreet && selectedZone === 'yard';
-        if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || !this.ghost || this.ghost.isTinted) {
-          if ((atHome || usingYard) && selectedInstance && this.ghost?.isTinted) toast('That furniture does not fit there.');
-          return;
+
+        const ghostX = (usingYard ? yardOrigin.x : 0) + gridX * 48 + footprint.width * 24;
+        const ghostY = (usingYard ? yardOrigin.y : 0) + (gridY + footprint.height) * 48;
+        const ghostFurnitureId = this.ghost?.getData?.('furnitureId');
+        if (!this.ghost || ghostFurnitureId !== def.id) {
+          this.ghost?.destroy?.();
+          this.ghost = this._drawFurniture(def, ghostX, ghostY, {
+            rotation: selectedRotation, depth: 25, instanceId: 'placement-preview',
+          });
+          this.ghost?.setAlpha?.(0.6);
+        } else {
+          this.ghost.setPosition?.(ghostX, ghostY);
+          this.ghost.setAngle?.(selectedRotation);
         }
-        socket.emit('homeLayoutSet', {
-          instanceId: selectedInstance,
-          gridX: Math.floor((pointer.worldX - (usingYard ? yardOrigin.x : 0)) / 48),
-          gridY: Math.floor((pointer.worldY - (usingYard ? yardOrigin.y : 0)) / 48),
-          rotation: selectedRotation, zone: usingYard ? 'yard' : 'indoor',
-        });
-        selectedInstance = null;
-        this._clearGhost();
-        renderHome();
+        if (this.ghost) {
+          this.ghost.setData?.('blocked', blocked);
+          if (blocked) this.ghost.setTint?.(0xff5555);
+          else this.ghost.clearTint?.();
+        }
       };
+
+      this._showPlacementControls = () => {
+        const container = document.getElementById('placement-controls');
+        if (!container) return;
+        const usingYard = atStreet && selectedZone === 'yard';
+        const isAlreadyPlaced = homeState.layout?.some(i => i.id === selectedInstance) || homeState.yard?.some(i => i.id === selectedInstance);
+        const valid = !!this.ghost && this.ghost.getData?.('blocked') !== true;
+        window.JpoUIBuilder.renderPlacementControls(container, {
+          active: true,
+          isValid: valid,
+          canReturn: isAlreadyPlaced,
+          onRotate: () => {
+            const item = [...(homeState.inventory || []), ...(homeState.layout || []), ...(homeState.yard || [])]
+              .find(candidate => candidate.id === selectedInstance);
+            const def = item && furnitureCatalog[item.furnitureId];
+            if (def && Array.isArray(def.rotations) && def.rotations.length > 0) {
+               const idx = def.rotations.indexOf(selectedRotation);
+               selectedRotation = def.rotations[(idx + 1) % def.rotations.length];
+            } else {
+               selectedRotation = (selectedRotation + 90) % 360;
+            }
+            this._updateGhostPosition({ worldX: 0, worldY: 0 }); // position uses locked grid
+            this._showPlacementControls();
+          },
+          onConfirm: () => {
+            if (!valid) return;
+            const confirmBtn = container.querySelector('#ghost-confirm');
+            if (confirmBtn) confirmBtn.disabled = true;
+            const instanceId = selectedInstance;
+            const layout = {
+              instanceId,
+              gridX: this._lockedGridX,
+              gridY: this._lockedGridY,
+              rotation: selectedRotation,
+              zone: usingYard ? 'yard' : 'indoor',
+            };
+            teardownPlacement();
+            socket.emit('homeLayoutSet', {
+              ...layout,
+            });
+            // We wait for snapshot to clear, but can hide UI immediately
+            renderHome();
+          },
+          onCancel: () => {
+            teardownPlacement();
+            renderHome();
+          },
+          onReturn: () => {
+            const instanceId = selectedInstance;
+            teardownPlacement();
+            socket.emit('homeLayoutReturn', { instanceId });
+            renderHome();
+          }
+        });
+      };
+
+      this._placementMoveHandler = (pointer) => {
+        if (this._placementLocked) return;
+        this._updateGhostPosition(pointer);
+      };
+
+      this._placementDownHandler = (pointer) => {
+        if (this._placementLocked) return;
+        const usingYard = atStreet && selectedZone === 'yard';
+        if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || !this.ghost) return;
+        this._placementLocked = true;
+        this._updateGhostPosition(pointer);
+
+        // Preserve red/green placement preview but lock position
+        if (this.ghost) {
+           if (this.ghost.setAlpha) this.ghost.setAlpha(0.9);
+        }
+
+        this._showPlacementControls();
+      };
+
       this.input.on('pointermove', this._placementMoveHandler);
       this.input.on('pointerdown', this._placementDownHandler);
     }
@@ -2031,11 +2173,13 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     clearPlacementPreview() {
-      this._clearGhost();
+      this._teardownPlacement();
     }
 
     _footprint(def, rotation) {
-      return rotation % 180 === 90 ? { width: def.height || 1, height: def.width || 1 } : { width: def.width || 1, height: def.height || 1 };
+      const width = def.width || def.footprint?.width || 1;
+      const height = def.height || def.footprint?.height || 1;
+      return rotation % 180 === 90 ? { width: height, height: width } : { width, height };
     }
 
     _validPlacement(def, gridX, gridY, rotation) {
@@ -2075,11 +2219,30 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       });
     }
 
+    _rebindFurnitureActivities() {
+      const activeEntries = [
+        { entry: this, activity: this.activity, dir: this.playerDir || 'down' },
+        ...Object.values(this.remotes || {}).map((entry) => ({
+          entry, activity: entry.activity, dir: entry.lastDir || 'down',
+        })),
+      ];
+      for (const { entry, activity, dir } of activeEntries) {
+        if (!activity?.action) continue;
+        // renderFurniture replaces the target sprite. Force the pose path to
+        // resolve the activity against the new furniture instance instead of
+        // treating the old action key as already applied.
+        entry._activityAction = null;
+        this._applyActivityPose(entry, activity, dir);
+      }
+    }
+
     renderFurniture(state) {
       // create() is still in Phaser's CREATING state, not ACTIVE. The incoming
       // home snapshot can already be complete at that point, and no second
       // snapshot is guaranteed, so do not suppress the initial furniture build.
       if (!this.location?.startsWith('home:') || !this._furnitureBlocks) return;
+      this._clearActivityEffect(this);
+      Object.values(this.remotes || {}).forEach((entry) => this._clearActivityEffect(entry));
       this.furniture.forEach((object) => {
         this.tweens.killTweensOf(object);
         object.destroy();
@@ -2089,31 +2252,32 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       for (const item of state?.layout || []) {
         const def = furnitureCatalog[item.furnitureId];
         if (!def) continue;
-        const uprightRotation = def.rotations.includes(item.rotation) ? item.rotation : 0;
+        const rotations = Array.isArray(def.rotations) && def.rotations.length ? def.rotations : [0];
+        const uprightRotation = rotations.includes(item.rotation) ? item.rotation : 0;
         const footprint = this._footprint(def, uprightRotation);
         const floorCenterX = item.gridX * 48 + footprint.width * 24;
         const floorBaseY = (item.gridY + footprint.height) * 48;
-        const sprite = this.add.image(floorCenterX, floorBaseY, this._furnitureTextureKey(def.id))
-          .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setAngle(uprightRotation).setDepth(floorBaseY);
-        // The supplied bath/TV files are native tileset sheets. Display one
-        // authored tile at the furniture's footprint rather than the whole
-        // sheet as an accidental oversized decoration.
-        if (def.id === 'bathtub') sprite.setCrop(0, 0, 16, 64);
-        if (def.id === 'television') sprite.setCrop(0, 0, 16, 16);
-        sprite.setData('instanceId', String(item.id));
-        sprite.setData('furnitureId', def.id);
-        sprite.setData('actions', Array.isArray(def.actions) ? def.actions : []);
-        sprite.setData('actionRadius', def.interaction?.radius || 86);
-        sprite.setData('anchor', def.interaction?.anchor || 'center');
-        sprite.setData('height', footprint.height);
-        sprite.setData('isSeat', Array.isArray(def.actions) && def.actions.includes('sit'));
-        sprite.setData('seatDir', 'down');
-        this._animateFurnitureObject(sprite, def.id, item.gridX * 90 + item.gridY * 130);
-        this.furniture.push(sprite);
+        const sprite = this._drawFurniture(def, floorCenterX, floorBaseY, {
+          rotation: uprightRotation, depth: floorBaseY, instanceId: item.id,
+        });
+
+        if (sprite) {
+           sprite.setData('instanceId', String(item.id));
+           sprite.setData('furnitureId', def.id);
+           sprite.setData('actions', Array.isArray(def.actions) ? def.actions : []);
+           sprite.setData('actionRadius', def.interaction?.radius || 86);
+           sprite.setData('anchor', def.interaction?.anchor || 'center');
+           sprite.setData('height', footprint.height);
+           sprite.setData('isSeat', Array.isArray(def.actions) && def.actions.includes('sit'));
+           sprite.setData('seatDir', 'down');
+           this._animateFurnitureObject(sprite, def.id, item.gridX * 90 + item.gridY * 130);
+           this.furniture.push(sprite);
+        }
         this._addBlock(this._furnitureBlocks, {
           x: item.gridX * 48, y: item.gridY * 48, width: footprint.width * 48, height: footprint.height * 48,
         });
       }
+      this._rebindFurnitureActivities();
     }
 
     _removeRemote(id) {
@@ -2434,8 +2598,9 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       if (this.localBubble) this.localBubble.setPosition(this.player.x, this.player.y - 78);
 
       const nearbyParkSeat = !this.activity && !this._activityPending ? this._nearbyParkSeat() : null;
-      const nearbyAction = !this.activity && !this._activityPending && !nearbyParkSeat && this.location.startsWith('home:')
-        ? this._nearbyFurnitureAction() : null;
+      const nearbyAction = !this.activity && !this._activityPending && !nearbyParkSeat &&
+        (this.location.startsWith('home:') || this.location === 'furniture-shop')
+        ? this._nearbyInteractiveAction() : null;
       if (!this.portalRelease && !this._insidePortal(this.player.x, this.player.y)) this.portalRelease = true;
       // Use an inner doorway that is derived from the authoritative foot
       // radius. The former fixed 12px inset included facade-overlap strips in
@@ -2460,10 +2625,14 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       else if (nearbyParkSeat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyAction) {
         const actions = nearbyAction.actions;
-        const primary = ({ sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower', bathe: 'Bathe', watch: 'Watch TV' })[actions[0]] || 'Use';
+        const actionId = (action) => typeof action === 'string' ? action : action?.id;
+        const actionLabel = (action) => typeof action === 'object' && action?.label
+          ? action.label
+          : ({ sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower', bathe: 'Bathe', watch: 'Watch TV' })[actionId(action)] || 'Use';
+        const primary = actionLabel(actions[0]);
         const secondaryAction = actions[1];
         const secondary = secondaryAction
-          ? ' · [Shift+E] ' + (({ lie: 'Lie down', bathe: 'Bathe', shower: 'Shower', sleep: 'Sleep', watch: 'Watch TV', sit: 'Sit' })[secondaryAction] || 'Use')
+          ? ' · [Shift+E] ' + actionLabel(secondaryAction)
           : '';
         this.interactHint.setText('[E] ' + primary + secondary).setPosition(this.player.x, this.player.y - 65).setVisible(true);
       }
@@ -2520,9 +2689,12 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._performanceCleanup?.();
       if (this._outdoorWheelHandler) this.game.canvas.removeEventListener('wheel', this._outdoorWheelHandler);
       this._outdoorWheelHandler = null;
+      this._clearActivityEffect(this);
+      Object.values(this.remotes || {}).forEach((entry) => this._clearActivityEffect(entry));
       this._resetTransientTravel();
       this._removePlacementInput();
-      this._clearGhost();
+      this._teardownPlacement();
+      teardownPlacement();
       (this._ambientTweens || []).forEach((tween) => tween?.remove?.());
       this._ambientTweens = [];
       this.portalCues?.forEach((object) => object.destroy());
@@ -2532,6 +2704,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       Object.keys(this.remotes).forEach((id) => this._removeRemote(id));
       this.remotes = {};
       this.furniture = [];
+      this.showroomFurniture?.forEach((object) => object?.destroy?.());
+      this.showroomFurniture = [];
       this.streetLotsVisual = null;
       this._streetPortalVisuals = null;
       this.localBubble = null;
@@ -2582,15 +2756,26 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // A delayed fade completion belongs to an older server result. In
       // particular, it must not stop a newly restarted shared scene.
       if (generation !== sceneTransitionGeneration) return;
+      teardownPlacement();
       currentLocation = result.location;
       title.textContent = result.map?.label || result.location;
       furnitureCatalog = result.catalog || furnitureCatalog;
+      showroomDemos = currentLocation === 'furniture-shop' && Array.isArray(result.showroom)
+        ? result.showroom : [];
+      if (currentLocation === 'furniture-shop' && !showroomDemos.length) {
+        socket.emit('furnitureShowroomRequest');
+      }
+      // A home owner may switch accounts/addresses during one browser
+      // session. Never reuse the previous owner's people list.
+      homePeople = [];
+      homePeopleLoaded = false;
+      activeHomePeopleRequestId = ++homePeopleRequestId;
       if (typeof result.self?.homeColor === 'string' || typeof result.homeColor === 'string') {
         ownExteriorColor = result.self?.homeColor || result.homeColor;
       }
       if (isHome()) {
         homeState = result.home || homeState;
-        editorOpen = false;
+        editorOpen = !!homeState?.canEdit;
         requestDirectory();
         renderHome();
       } else {

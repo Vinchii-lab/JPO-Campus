@@ -734,21 +734,235 @@ export const LOCATION_PORTALS = Object.freeze({
   home: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit", spawn: { x: 144, y: 504, dir: "right" } }],
 });
 
+// Catalog art is authored in a 16px grid, then presented at an integer scale.
+// `path` is the public URL consumed by furniture-renderer.js. `asset` remains
+// the legacy logical key so old saved instances and older clients keep working.
+// The six original living-room ids are intentionally retained verbatim; rows
+// in jpo_home_furniture refer to those ids and must never be renamed.
+const furniture = ({
+  id, name, price, category, path, width = 1, height = 1,
+  frameWidth = 16, frameHeight = 16, frameCount = 1, frameRate = 0,
+  initialFrame = 0, scale = 3, rotations = [0], actions = [], interaction, actionInteractions,
+  asset = id, anchor = "bottom-center", color = "#8d6e52",
+}) => ({
+  id, name, price, category, path, publicPath: path, assetPath: path, asset, scale, rotations,
+  width, height, footprint: { width, height }, anchor, color,
+  frames: { frameWidth, frameHeight, frameCount, frameRate, initialFrame, loop: frameCount > 1 },
+  ...(actions.length ? { actions } : {}),
+  ...(interaction ? { interaction } : {}),
+  ...(actionInteractions ? { actionInteractions } : {}),
+});
+
 export const FURNITURE_CATALOG = Object.freeze({
-  // Each image is an unmodified individual 16px-grid PNG from the uploaded
-  // pack. Art is rendered at native 3× and bottom-anchored. Occupancy remains
-  // the original catalog contract: an upper frame (plant leaves, lamp shade)
-  // is presentation, never extra blocked floor or changed saved layouts.
-  // IDs/prices deliberately remain stable for existing inventory instances.
-  oak_chair:   { id: "oak_chair",   name: "Gold armchair",    price: 90,  width: 1, height: 1, color: "#b98743", rotations: [0], actions: ["sit"], interaction: { facing: "down" } },
-  fern:        { id: "fern",        name: "Potted fern",      price: 130, width: 1, height: 1, color: "#4f9253", rotations: [0] },
-  reading_lamp:{ id: "reading_lamp",name: "Coral floor lamp", price: 160, width: 1, height: 1, color: "#d7634b", rotations: [0] },
-  coffee_table:{ id: "coffee_table",name: "Plum low table",   price: 280, width: 2, height: 1, color: "#74637e", rotations: [0] },
-  blue_sofa:   { id: "blue_sofa",   name: "Tan lounge sofa", price: 460, width: 2, height: 1, color: "#b77f45", rotations: [0], actions: ["sit", "lie"], interaction: { facing: "down", radius: 96 } },
-  bookcase:    { id: "bookcase",    name: "Gold bookcase",   price: 520, width: 1, height: 2, color: "#a87542", rotations: [0] },
-  bed:         { id: "bed",         name: "Bedroom bed",     price: 780, width: 1, height: 3, color: "#9d6d65", rotations: [0], asset: "bedroom_bed", actions: ["sleep"], interaction: { facing: "down", radius: 104, orientation: "lengthwise" } },
-  bathtub:     { id: "bathtub",     name: "Claw-foot bath",  price: 640, width: 1, height: 4, color: "#b9d7dc", rotations: [0], asset: "animated_bathtub_with_duck", actions: ["shower", "bathe"], interaction: { facing: "down", radius: 104 } },
-  television:  { id: "television",  name: "Television",      price: 540, width: 1, height: 1, color: "#4c536e", rotations: [0], asset: "TV_Studio_16x16", actions: ["watch"], interaction: { anchor: "front", facing: "up", radius: 96 } },
+  // Living — supplied individual silhouettes (not recoloured substitutes).
+  oak_chair: furniture({
+    id: "oak_chair", name: "Gold armchair", price: 5000, category: "Living",
+    path: "/assets/neighborhood/furniture/oak_chair.png", frameWidth: 16, frameHeight: 32,
+    asset: "oak_chair", actions: ["sit"], interaction: { facing: "down" }, color: "#b98743",
+  }),
+  fern: furniture({
+    id: "fern", name: "Potted fern", price: 5000, category: "Living",
+    path: "/assets/neighborhood/furniture/fern.png", frameWidth: 16, frameHeight: 48,
+    color: "#4f9253",
+  }),
+  reading_lamp: furniture({
+    id: "reading_lamp", name: "Coral floor lamp", price: 8000, category: "Living",
+    path: "/assets/neighborhood/furniture/reading_lamp.png", frameWidth: 16, frameHeight: 48,
+    color: "#d7634b",
+  }),
+  coffee_table: furniture({
+    id: "coffee_table", name: "Plum low table", price: 12000, category: "Living",
+    path: "/assets/neighborhood/furniture/coffee_table.png", width: 2, frameWidth: 32,
+    frameHeight: 32, color: "#74637e",
+  }),
+  blue_sofa: furniture({
+    id: "blue_sofa", name: "Cream lounge sofa", price: 18000, category: "Living",
+    path: "/assets/neighborhood/furniture/blue_sofa_full.png", width: 2, frameWidth: 32,
+    frameHeight: 32, actions: ["sit", "lie"],
+    interaction: { facing: "down", radius: 96 }, color: "#e4c8a1",
+  }),
+  bookcase: furniture({
+    id: "bookcase", name: "Gold bookcase", price: 18000, category: "Living",
+    path: "/assets/neighborhood/furniture/bookcase.png", height: 2, frameWidth: 16,
+    frameHeight: 32, color: "#a87542",
+  }),
+  lounge_sofa: furniture({
+    id: "lounge_sofa", name: "Ivory reading sofa", price: 25000, category: "Living",
+    path: "/assets/neighborhood/furniture/lounge_sofa.png", width: 2, frameWidth: 32,
+    frameHeight: 32, actions: ["sit", "lie"], interaction: { facing: "down", radius: 96 },
+    color: "#f2e0c8",
+  }),
+  living_shelf: furniture({
+    id: "living_shelf", name: "Tall bookcase", price: 18000, category: "Living",
+    path: "/assets/neighborhood/furniture/bookcase.png", height: 2, frameWidth: 16,
+    frameHeight: 32, color: "#9a623f",
+  }),
+  living_lamp: furniture({
+    id: "living_lamp", name: "Brass arc lamp", price: 12000, category: "Living",
+    path: "/assets/neighborhood/commercial/shop_lamp.png", frameWidth: 16,
+    frameHeight: 48, color: "#d7a34c",
+  }),
+  living_mirror: furniture({
+    id: "living_mirror", name: "Tall wall mirror", price: 18000, category: "Living",
+    path: "/assets/neighborhood/commercial/shop_mirror.png", frameWidth: 16,
+    frameHeight: 48, color: "#8eabc0",
+  }),
+
+  // Kitchen — the room-builder's verified appliance tiles plus real animated
+  // oven art from the same sprite pack.
+  kitchen_counter: furniture({
+    id: "kitchen_counter", name: "Oak kitchen counter", price: 12000, category: "Kitchen",
+    path: "/assets/neighborhood/furniture/kitchen_counter_full.png", width: 2,
+    frameWidth: 32, frameHeight: 32,
+  }),
+  kitchen_fridge: furniture({
+    id: "kitchen_fridge", name: "Grey refrigerator", price: 25000, category: "Kitchen",
+    path: "/assets/room-furniture/animated_fridge_grey.png", frameWidth: 32,
+    frameHeight: 48, frameCount: 6, frameRate: 2, scale: 3, color: "#8bb8c5",
+  }),
+  kitchen_sink: furniture({
+    id: "kitchen_sink", name: "Porcelain kitchen sink", price: 18000, category: "Kitchen",
+    path: "/assets/room-furniture/animated_kitchen_sink_1.png", width: 2, frameWidth: 32,
+    frameHeight: 16, frameCount: 3, frameRate: 8,
+    actions: ["toggle_water"], interaction: { facing: "down", radius: 88 }, color: "#b9d7dc",
+  }),
+  kitchen_stove: furniture({
+    id: "kitchen_stove", name: "Kitchen range", price: 25000, category: "Kitchen",
+    path: "/assets/room-furniture/animated_kitchen_oven.png", frameWidth: 16,
+    frameHeight: 32, frameCount: 6,
+  }),
+  kitchen_oven: furniture({
+    id: "kitchen_oven", name: "Open-door oven", price: 35000, category: "Kitchen",
+    path: "/assets/room-furniture/animated_kitchen_oven.png", frameWidth: 16,
+    frameHeight: 32, frameCount: 6, initialFrame: 3, scale: 3, color: "#b6774c",
+  }),
+  coffee_machine: furniture({
+    id: "coffee_machine", name: "Front-load washer", price: 12000, category: "Bathroom",
+    path: "/assets/neighborhood/commercial/cafe_coffee_machine.png", frameWidth: 16,
+    frameHeight: 32, color: "#77818f",
+  }),
+  chef_fridge: furniture({
+    id: "chef_fridge", name: "Chef's steel fridge", price: 50000, category: "Kitchen",
+    path: "/assets/room-furniture/animated_fridge_grey.png", frameWidth: 32,
+    frameHeight: 48, frameCount: 6, frameRate: 2, scale: 3, color: "#a6adb8",
+  }),
+
+  // Bedroom — portrait bed art is kept lengthwise so sleep anchors remain
+  // compatible with the original one-by-three saved footprint.
+  bed: furniture({
+    id: "bed", name: "Bedroom bed", price: 35000, category: "Bedroom",
+    path: "/assets/neighborhood/interiors/bedroom_bed.png", height: 3,
+    frameWidth: 16, frameHeight: 48, asset: "bedroom_bed", actions: ["lie", "sleep"],
+    interaction: { facing: "down", radius: 104, orientation: "lengthwise" }, color: "#9d6d65",
+  }),
+  plush_bed: furniture({
+    id: "plush_bed", name: "Walnut daybed", price: 50000, category: "Bedroom",
+    path: "/assets/neighborhood/commercial/furn_bed.png", width: 3, height: 2,
+    frameWidth: 144, frameHeight: 144, scale: 1, actions: ["lie", "sleep"],
+    interaction: { facing: "down", radius: 104 }, color: "#8697b5",
+  }),
+  bedroom_shelf: furniture({
+    id: "bedroom_shelf", name: "Gold bedroom bookcase", price: 18000, category: "Bedroom",
+    path: "/assets/neighborhood/furniture/bookcase.png", height: 2,
+    frameWidth: 16, frameHeight: 32, color: "#8f6245",
+  }),
+  bedroom_lamp: furniture({
+    id: "bedroom_lamp", name: "Bedside lamp", price: 8000, category: "Bedroom",
+    path: "/assets/neighborhood/commercial/shop_lamp.png", frameWidth: 16,
+    frameHeight: 48, color: "#d7a34c",
+  }),
+  bedroom_mirror: furniture({
+    id: "bedroom_mirror", name: "Dressing mirror", price: 18000, category: "Bedroom",
+    path: "/assets/neighborhood/commercial/shop_mirror.png", frameWidth: 16,
+    frameHeight: 48, color: "#8eabc0",
+  }),
+  bedroom_dresser: furniture({
+    id: "bedroom_dresser", name: "Blue linen dresser", price: 25000, category: "Bedroom",
+    path: "/assets/room-furniture/animated_bathroom_cabinet_blue_empty.png",
+    frameWidth: 16, frameHeight: 32, frameCount: 10, frameRate: 0, scale: 3, color: "#7595ae",
+  }),
+
+  // Bathroom — all water-capable pieces use actual bath/sink/shower frames.
+  bathtub: furniture({
+    id: "bathtub", name: "Claw-foot bath", price: 35000, category: "Bathroom",
+    path: "/assets/room-furniture/animated_bathtub_2.png", width: 2,
+    frameWidth: 32, frameHeight: 48, frameCount: 4, frameRate: 2, scale: 3,
+    asset: "animated_bathtub_with_duck", actions: ["shower", "bathe"],
+    interaction: { facing: "down", radius: 104 }, color: "#b9d7dc",
+  }),
+  bathroom_sink: furniture({
+    id: "bathroom_sink", name: "Bathroom sink", price: 12000, category: "Bathroom",
+    path: "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png", width: 2,
+    frameWidth: 32, frameHeight: 32, frameCount: 14, frameRate: 8, scale: 3,
+    actions: ["toggle_water"], interaction: { facing: "down", radius: 88 },
+    color: "#b9d7dc",
+  }),
+  bathroom_sink_tap: furniture({
+    id: "bathroom_sink_tap", name: "Animated tap sink", price: 25000, category: "Bathroom",
+    path: "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png", width: 2,
+    frameWidth: 32, frameHeight: 32, frameCount: 14, frameRate: 8, scale: 3,
+    actions: ["toggle_water"], interaction: { facing: "down", radius: 88 }, color: "#c2d5dd",
+  }),
+  bathroom_toilet: furniture({
+    id: "bathroom_toilet", name: "Porcelain toilet", price: 12000, category: "Bathroom",
+    path: "/assets/neighborhood/interiors/bathroom_toilet.png", height: 3,
+    frameWidth: 16, frameHeight: 48, color: "#d5dce1",
+  }),
+  bathroom_cabinet: furniture({
+    id: "bathroom_cabinet", name: "White bathroom cabinet", price: 18000, category: "Bathroom",
+    path: "/assets/room-furniture/animated_bathroom_cabinet_white_empty.png",
+    frameWidth: 16, frameHeight: 32, frameCount: 10, scale: 3, color: "#e6e8e9",
+  }),
+  shower: furniture({
+    id: "shower", name: "Rain shower", price: 35000, category: "Bathroom",
+    path: "/assets/room-furniture/animated_jail_shower_4-8%20loop.png",
+    frameWidth: 16, frameHeight: 48, frameCount: 11, frameRate: 8, scale: 3,
+    actions: ["shower"], interaction: { facing: "down", radius: 96 }, color: "#76acd1",
+  }),
+
+  // Miscellaneous — accents are still floor-anchored real silhouettes, not
+  // generated rectangles. They can be placed indoors or in the yard.
+  floor_rug: furniture({
+    id: "floor_rug", name: "Lavender ottoman", price: 12000, category: "Living",
+    path: "/assets/neighborhood/commercial/shop_rug.png", width: 2, height: 2,
+    frameWidth: 32, frameHeight: 32, scale: 3, color: "#9a8fc0",
+    actions: ["sit"], interaction: { facing: "down", radius: 96 },
+  }),
+  plant_palm: furniture({
+    id: "plant_palm", name: "Garden topiary", price: 18000, category: "Miscellaneous",
+    path: "/assets/neighborhood/commercial/garden_tree.png", width: 2, height: 2,
+    frameWidth: 96, frameHeight: 96, scale: 1, color: "#579b68",
+  }),
+  plant_small: furniture({
+    id: "plant_small", name: "Window pot", price: 8000, category: "Miscellaneous",
+    path: "/assets/neighborhood/commercial/shop_plant_small.png", frameWidth: 16,
+    frameHeight: 32, color: "#579b68",
+  }),
+  wall_art: furniture({
+    id: "wall_art", name: "Framed print", price: 25000, category: "Miscellaneous",
+    path: "/assets/neighborhood/commercial/decor_art.png", width: 2, height: 2,
+    frameWidth: 96, frameHeight: 96, scale: 1, color: "#c29d63",
+  }),
+  planter: furniture({
+    id: "planter", name: "Potted plant", price: 8000, category: "Miscellaneous",
+    path: "/assets/neighborhood/commercial/garden_pot.png", height: 2,
+    frameWidth: 16, frameHeight: 32, color: "#c27550",
+  }),
+  tv: furniture({
+    id: "tv", name: "Animated television", price: 35000, category: "Miscellaneous",
+    path: "/assets/room-furniture/animated_old_tv.png", frameWidth: 32,
+    frameHeight: 32, frameCount: 6, frameRate: 6, scale: 3, actions: ["watch"],
+    interaction: { anchor: "front", facing: "up", radius: 96 }, color: "#4c536e",
+  }),
+  television: furniture({
+    id: "television", name: "Television", price: 35000, category: "Miscellaneous",
+    // The former 256x224 packed sheet began with a rocket fragment. Use the
+    // verified six-frame CRT instead while retaining the legacy id/asset.
+    path: "/assets/room-furniture/animated_old_tv.png", frameWidth: 32,
+    frameHeight: 32, frameCount: 6, frameRate: 6, scale: 3, asset: "TV_Studio_16x16",
+    actions: ["watch"], interaction: { anchor: "front", facing: "up", radius: 96 },
+    color: "#4c536e",
+  }),
 });
 
 export function parseLocation(value) {

@@ -26,6 +26,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const clientSource = fs.readFileSync(path.join(here, "../../public/neighborhood.js"), "utf8");
+const rendererSource = fs.readFileSync(path.join(here, "../../public/furniture-renderer.js"), "utf8");
 const serverSource = fs.readFileSync(path.join(here, "../../server.js"), "utf8");
 const bedPng = fs.readFileSync(path.join(here, "../../public/assets/neighborhood/interiors/bedroom_bed.png"));
 assert.equal(bedPng.readUInt32BE(16), 16, "bed artwork remains the supplied portrait width");
@@ -39,15 +40,26 @@ const actionMap = Object.fromEntries(
 assert.deepEqual(actionMap, {
   oak_chair: ["sit"],
   blue_sofa: ["sit", "lie"],
-  bed: ["sleep"],
+  lounge_sofa: ["sit", "lie"],
+  bed: ["lie", "sleep"],
   bathtub: ["shower", "bathe"],
+  kitchen_sink: ["toggle_water"],
+  plush_bed: ["lie", "sleep"],
+  bathroom_sink: ["toggle_water"],
+  bathroom_sink_tap: ["toggle_water"],
+  shower: ["shower"],
+  floor_rug: ["sit"],
+  tv: ["watch"],
   television: ["watch"],
 }, "only usable furniture exposes the expected ordinary-E actions");
 
 assert.equal(furnitureActionDefinition(FURNITURE_CATALOG.oak_chair, "sit").anim, "sit");
 assert.equal(furnitureActionDefinition(FURNITURE_CATALOG.bathtub, "shower").effect, "water");
+assert.equal(furnitureActionDefinition(FURNITURE_CATALOG.kitchen_sink, "toggle_water").toggle, true);
 assert.equal(furnitureActionDefinition(FURNITURE_CATALOG.television, "watch").anchor, "front",
   "TV action uses the front anchor, not the TV tile center");
+assert.equal(FURNITURE_CATALOG.television.path, "/assets/room-furniture/animated_old_tv.png",
+  "TV uses the verified CRT sheet rather than the packed rocket-leading sheet");
 assert.equal(FURNITURE_CATALOG.bed.width, 1);
 assert.equal(FURNITURE_CATALOG.bed.height, 3);
 assert.equal(FURNITURE_CATALOG.bed.rotations.length, 1);
@@ -175,13 +187,25 @@ assert.match(serverSource, /await withHomeOperation\(p\.email, async \(\) => \{/
   "layout mutation and action paths share the per-home operation lock");
 assert.match(serverSource, /if \(p\.activity\) stopFurnitureActivity\(socket\.id, "transition"\)/,
   "map transitions cleanly release an active furniture action");
+assert.match(serverSource, /p\.activity\.toggle[\s\S]{0,180}String\(p\.activity\.instanceId\)/,
+  "tap actions are server-owned toggles rather than client-only animations");
+assert.match(serverSource, /socket\.on\("homePeopleRequest"/,
+  "the owner-only people picker uses the existing socket transport");
+assert.match(serverSource, /accountIdentifier: row\.account_identifier/,
+  "people picker projects only a display name and account identifier");
+assert.match(serverSource, /furnitureShowroomRequest/,
+  "furniture shop exposes server-provided real catalog demo placements");
+assert.match(serverSource, /furnitureDemoInteract/,
+  "showroom pieces have a server-authoritative interaction path");
+assert.match(serverSource, /showroom-bath[\s\S]{0,180}bathtub/,
+  "the showroom demonstrates the real bath entry rather than only listing it for sale");
 
 assert.match(clientSource, /sprite\.setData\('actions', Array\.isArray\(def\.actions\)/,
   "placed sprites retain catalog action metadata for ordinary E prompts");
-assert.match(clientSource, /if \(def\.id === 'bathtub'\) sprite\.setCrop\(0, 0, 16, 64\)/,
-  "bath rendering crops the supplied sprite sheet to one native tile");
-assert.match(clientSource, /if \(def\.id === 'television'\) sprite\.setCrop\(0, 0, 16, 16\)/,
-  "TV rendering crops the supplied sprite sheet to one native tile");
+assert.match(clientSource, /HomeFurnitureRenderer\?\.preload/,
+  "the scene delegates furniture loading to the dedicated renderer");
+assert.match(rendererSource, /frameInfo\(definition\)[\s\S]{0,500}frameWidth/,
+  "renderer crops every supplied sheet from catalog frame metadata");
 assert.match(clientSource, /activity\?\.orientation === 'lengthwise'/,
   "portrait bed sleep does not use the sofa's sideways 90-degree pose");
 assert.match(clientSource, /sprite\.getData\('anchor'\) === 'front'/,

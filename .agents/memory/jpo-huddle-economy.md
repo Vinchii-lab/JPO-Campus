@@ -14,6 +14,13 @@ description: Design rules for coin gifting, direct item gifts, pet trades, playe
 
 **How to apply:** any new coin-moving or item-moving feature must (a) block mid-match, (b) settle in one guarded SQL statement/transaction, (c) keep client labels display-only.
 
+## Purchase acknowledgements after commit
+Treat a committed purchase as successful even if a subsequent inventory refresh fails.
+
+**Why:** A post-commit snapshot exception can otherwise tell the buyer that nothing was purchased after coins were already debited, encouraging a duplicate expensive purchase.
+
+**How to apply:** Separate settlement from readback, acknowledge the committed instance and balance, and let the client reconcile its inventory without retrying the charge.
+
 ## Bid stores (player market) — escrow rules
 - Bids ESCROW at placement (guarded `coins + old >= new` swap on raise); every path that deletes a bid row must refund in the SAME transaction — the listings→bids ON DELETE CASCADE will silently destroy escrow otherwise. The accept-time "seller no longer owns it" path must refund-all + delete + COMMIT, never rollback + bare delete.
 - A listed item is exclusive: tradeOffer pre-checks jpo_store_listings AND both tradeAccept UPDATEs carry `NOT EXISTS (... listings ...)` guards, so a listed pet can't be traded away under live bids.

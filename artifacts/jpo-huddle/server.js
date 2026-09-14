@@ -49,6 +49,7 @@ import {
 } from "./neighborhood.mjs";
 import {
   furnitureActionDefinition,
+  furnitureActionDefinitions,
   furnitureActionAnchor,
   furnitureActionStandCandidates,
   actionEffectKind,
@@ -71,7 +72,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3533,17 +3534,52 @@ function locationInfo(locationId) {
       : (LOCATION_PORTALS[key] || []),
   };
 }
-// Interaction-capable room pieces are sold at Huddle Home even when older
-// shop rows predate the expanded catalog. Keep this projection server-owned so
-// a forged furniture id cannot buy anything outside the published catalog.
+// Huddle Home is the public showroom for the complete furniture overhaul.
+// Older shop rows remain in SHOP_DEFINITIONS for compatibility with existing
+// clients/tests; this projection adds every server-owned catalog row without
+// changing the durable purchase or owned-instance schema.
 function homeShopCatalog(locationId) {
   const catalog = { ...shopCatalog(locationId) };
   if (locationId === "furniture-shop") {
-    for (const id of ["bed", "bathtub", "television"]) {
-      if (FURNITURE_CATALOG[id]) catalog[id] = FURNITURE_CATALOG[id];
-    }
+    for (const [id, item] of Object.entries(FURNITURE_CATALOG)) catalog[id] = item;
   }
   return catalog;
+}
+
+// Huddle Home is also a working showroom: these are real catalog instances,
+// not decorative placeholder ids. The commercial scene can render these
+// placements from the same definitions it uses for owned homes, while the
+// furnitureDemoInteract socket below exercises the normal server activity
+// broadcasts without writing anything to a customer's layout.
+const FURNITURE_SHOWROOM_DEMO_LAYOUT = Object.freeze([
+  Object.freeze({ instanceId: "showroom-blue-sofa", furnitureId: "blue_sofa", x: 180, y: 320, stand: { x: 180, y: 380, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-lounge-sofa", furnitureId: "lounge_sofa", x: 340, y: 320, stand: { x: 340, y: 380, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-bed", furnitureId: "plush_bed", x: 760, y: 320, stand: { x: 760, y: 420, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-counter", furnitureId: "kitchen_counter", x: 440, y: 480, stand: { x: 440, y: 540, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 560, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-sink", furnitureId: "bathroom_sink_tap", x: 760, y: 480, stand: { x: 760, y: 560, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-tv", furnitureId: "television", x: 500, y: 140, stand: { x: 500, y: 220, dir: "up" } }),
+]);
+
+function furnitureShowroomDemos() {
+  return FURNITURE_SHOWROOM_DEMO_LAYOUT.flatMap((demo) => {
+    const definition = FURNITURE_CATALOG[demo.furnitureId];
+    if (!definition) return [];
+    return [{
+      ...demo,
+      footprint: { ...(definition.footprint || { width: definition.width, height: definition.height }) },
+      category: definition.category,
+      name: definition.name,
+      actions: furnitureActionDefinitions(definition).map((action) => ({
+        id: action.id, label: action.label, effect: action.effect || actionEffectKind(action.id),
+        toggle: action.toggle === true,
+      })),
+    }];
+  });
+}
+
+function furnitureShowroomDemo(instanceId) {
+  return FURNITURE_SHOWROOM_DEMO_LAYOUT.find((demo) => demo.instanceId === instanceId) || null;
 }
 const homeLayoutCollisionCache = new Map();
 function indexedHomeLayoutBlockers(layout) {
@@ -3671,6 +3707,11 @@ function furnitureActivityPayload(id, phase, activity = null, player = players[i
     furnitureId: activity?.furnitureId || null,
     action: activity?.action || null,
     effect: activity?.effect || null,
+    // `effectState` is intentionally part of the room-wide event rather than
+    // inferred by visitors from a local animation clock. This keeps water/tv
+    // toggles authoritative for every connected viewer.
+    effectState: phase === "stop" ? "off" : (activity?.effectState || "on"),
+    toggle: !!activity?.toggle,
     orientation: activity?.orientation || null,
     x: Number.isFinite(player?.x) ? player.x : undefined,
     y: Number.isFinite(player?.y) ? player.y : undefined,
@@ -9728,8 +9769,9 @@ io.on("connection", (socket) => {
       spawn: { x: p.x, y: p.y, dir: p.dir },
       map: info, self: movementPayload(socket.id, p, { homeColor: ownHomeColor }), players: locationPlayers(socket.id), home,
       homeColor: ownHomeColor,
-      catalog: target.kind === "home" ? FURNITURE_CATALOG :
+      catalog: target.kind === "home" || target.id === "neighborhood" ? FURNITURE_CATALOG :
         isShopLocation(target.id) ? homeShopCatalog(target.id) : undefined,
+      showroom: target.id === "furniture-shop" ? furnitureShowroomDemos() : undefined,
     });
     // Existing clients understand this event and remove stale remote sprites.
     socket.emit("currentPlayers", filterPlayersForLocation(phMaskedPlayers(socket.id), target.id));
@@ -9778,16 +9820,32 @@ io.on("connection", (socket) => {
       commitSequence();
       return;
     }
-    if (p.activity) {
-      socket.emit("furnitureInteractionResult", {
-        ok: false, code: "busy", message: "Stand up before using another piece of furniture.",
-      });
-      return;
-    }
     const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId.slice(0, 80) : "";
     const actionId = typeof payload?.action === "string" ? payload.action.slice(0, 16) : "";
     if (!instanceId || !actionId) {
       socket.emit("furnitureInteractionResult", { ok: false, code: "invalid", message: "That interaction is unavailable." });
+      return;
+    }
+    if (p.activity) {
+      // Toggle actions are the one intentional exception to the normal
+      // "stand before another action" rule. The same actor/action request
+      // atomically stops the existing server activity, and the stop event is
+      // broadcast to every visitor before acknowledging the requester.
+      if (p.activity.toggle &&
+          String(p.activity.instanceId) === instanceId &&
+          p.activity.action === actionId) {
+        const activity = p.activity;
+        stopFurnitureActivity(socket.id, "toggle");
+        socket.emit("furnitureInteractionResult", {
+          ok: true, phase: "stop", instanceId: activity.instanceId, action: activity.action,
+          effect: activity.effect, effectState: "off", x: p.x, y: p.y, dir: p.dir,
+        });
+        commitSequence();
+        return;
+      }
+      socket.emit("furnitureInteractionResult", {
+        ok: false, code: "busy", message: "Stand up before using another piece of furniture.",
+      });
       return;
     }
     try {
@@ -9849,6 +9907,7 @@ io.on("connection", (socket) => {
         const activity = {
           instanceId, furnitureId: placed.furnitureId, action: action.id,
           effect: actionEffectKind(action.id), locationId: parsed.id,
+           effectState: "on", toggle: action.toggle === true,
           orientation: action.orientation || null,
           gridX: placed.gridX, gridY: placed.gridY, rotation: placed.rotation,
           targetBlock,
@@ -9886,6 +9945,108 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("furnitureShowroomRequest", () => {
+    const p = players[socket.id];
+    if (locationOf(p) !== "furniture-shop") {
+      socket.emit("furnitureShowroom", {
+        ok: false, code: "location", demos: [],
+      });
+      return;
+    }
+    socket.emit("furnitureShowroom", {
+      ok: true, locationId: "furniture-shop", demos: furnitureShowroomDemos(),
+    });
+  });
+
+  socket.on("furnitureDemoInteract", (payload) => {
+    const p = players[socket.id];
+    const locationId = locationOf(p);
+    const phase = payload?.phase === "exit" ? "exit" : "start";
+    if (!p?.email || isHuddleTestIdentity(p.email) || locationId !== "furniture-shop") {
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "location", message: "Showroom demos are available inside Huddle Home.",
+      });
+      return;
+    }
+    if (phase === "exit") {
+      const activity = p.activity;
+      if (!activity?.showroom) {
+        socket.emit("furnitureDemoInteractionResult", { ok: true, phase: "stop" });
+        return;
+      }
+      stopFurnitureActivity(socket.id, "exit", false);
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: true, phase: "stop", instanceId: activity.instanceId, action: activity.action,
+      });
+      return;
+    }
+    if (!takeToken(interactBucket)) return;
+    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId.slice(0, 80) : "";
+    const actionId = typeof payload?.action === "string" ? payload.action.slice(0, 16) : "";
+    const demo = furnitureShowroomDemo(instanceId);
+    const definition = demo && FURNITURE_CATALOG[demo.furnitureId];
+    const action = furnitureActionDefinition(definition, actionId);
+    if (!demo || !definition || !action) {
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "unsupported", message: "That showroom piece has no such demo.",
+      });
+      return;
+    }
+    if (p.activity) {
+      if (p.activity.showroom && p.activity.toggle &&
+          p.activity.instanceId === instanceId && p.activity.action === actionId) {
+        const activity = p.activity;
+        stopFurnitureActivity(socket.id, "toggle", false);
+        socket.emit("furnitureDemoInteractionResult", {
+          ok: true, phase: "stop", instanceId, action: actionId,
+          effect: activity.effect, effectState: "off",
+        });
+        return;
+      }
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "busy", message: "Stand up before trying another demo.",
+      });
+      return;
+    }
+    if (furnitureIsOccupied(players, locationId, instanceId, socket.id)) {
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "occupied", message: "Someone else is trying that demo.",
+      });
+      return;
+    }
+    if (!furnitureActionWithinRadius(p, demo.stand, action.radius || 96)) {
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "distance", message: `Walk closer to ${definition.name.toLowerCase()}.`,
+      });
+      return;
+    }
+    // Use the same pad anchor as owned furniture. The authored stand point
+    // is for approach/exit, not where a seated avatar belongs.
+    const demoAnchor = furnitureActionAnchor(
+      definition,
+      (demo.x - definition.width * HOME_GRID.cell / 2) / HOME_GRID.cell,
+      (demo.y - definition.height * HOME_GRID.cell) / HOME_GRID.cell,
+      HOME_GRID.cell, action.id,
+    );
+    const activity = {
+      showroom: true, instanceId, furnitureId: demo.furnitureId, action: action.id,
+      effect: actionEffectKind(action.id), effectState: "on", toggle: action.toggle === true,
+      orientation: action.orientation || null, locationId,
+      x: demoAnchor.x, y: demoAnchor.y, stand: demo.stand, startedAt: Date.now(),
+    };
+    p.x = demoAnchor.x;
+    p.y = demoAnchor.y;
+    p.dir = action.facing || demo.stand.dir || "down";
+    p.anim = action.anim;
+    p.activity = activity;
+    emitToLocation(locationId, "furnitureActivity", furnitureActivityPayload(socket.id, "start", activity, p));
+    bumpMovementRevision(p);
+    emitToLocation(locationId, "playerMoved", movementPayload(socket.id, p), socket.id);
+    socket.emit("furnitureDemoInteractionResult", {
+      ok: true, phase: "start", activity, x: p.x, y: p.y, dir: p.dir,
+    });
+  });
+
   socket.on("homeSnapshotRequest", async () => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
     if (!p?.email || (!parsed || (parsed.kind !== "home" && parsed.id !== "neighborhood"))) return;
@@ -9906,6 +10067,53 @@ io.on("connection", (socket) => {
       if (players[socket.id] === p && locationOf(p) === parsed.id && snapshot) socket.emit("homeSnapshot", snapshot);
     }
     catch (err) { console.error("home snapshot failed:", err); socket.emit("homeActionResult", { ok: false, message: "Could not load this home." }); }
+  });
+
+  // The invite picker is deliberately narrower than the public street
+  // directory. Only the authenticated owner can request it, and the response
+  // contains the minimum approved-account fields needed by the existing
+  // homeInvite channel: a display name and its account identifier (email).
+  // Visitors and arbitrary owner ids never reach this query.
+  socket.on("homePeopleRequest", async (payload) => {
+    const p = players[socket.id];
+    const parsed = parseLocation(locationOf(p));
+    const requestId = Number.isSafeInteger(payload?.requestId) ? payload.requestId : null;
+    const ownerContext = !!p?.email && !isHuddleTestIdentity(p.email) && (
+      parsed?.id === "neighborhood" ||
+      (parsed?.kind === "home" && parsed.ownerEmail === p.email)
+    );
+    if (!ownerContext) {
+      socket.emit("homePeopleResult", {
+        ok: false, code: "owner_only", requestId, people: [],
+      });
+      return;
+    }
+    try {
+      const { rows } = await pool.query(
+        `SELECT email AS account_identifier,
+                coalesce(nullif(nickname,''), first_name, name, email) AS display_name
+           FROM jpo_players
+          WHERE approved=true
+            AND email <> $1
+            AND lower(email) !~ '^huddle-[ab](-[a-z0-9]+)?@justpressone[.]com$'
+          ORDER BY display_name, email
+          LIMIT 200`,
+        [p.email],
+      );
+      if (players[socket.id] !== p) return;
+      socket.emit("homePeopleResult", {
+        ok: true, requestId,
+        people: rows.map((row) => ({
+          accountIdentifier: row.account_identifier,
+          displayName: row.display_name,
+        })),
+      });
+    } catch (err) {
+      console.error("home people picker failed:", err);
+      socket.emit("homePeopleResult", {
+        ok: false, code: "unavailable", requestId, people: [],
+      });
+    }
   });
 
   socket.on("homeDirectoryRequest", async (payload) => {
@@ -10041,7 +10249,17 @@ io.on("connection", (socket) => {
       });
       return;
     }
-    if (!p?.email || !isShopLocation(shopId) || !item || !takeToken(buyBucket)) return;
+    if (!p?.email || !isShopLocation(shopId) || !item) {
+      socket.emit("homePurchaseResult", {
+        ok: false, code: "shop_only",
+        message: "Visit the store that sells this furniture to buy it.",
+      });
+      return;
+    }
+    if (!takeToken(buyBucket)) {
+      socket.emit("homePurchaseResult", { ok: false, code: "rate_limit", message: "Please wait a moment before buying again." });
+      return;
+    }
     if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
       socket.emit("homePurchaseResult", { ok: false, message: "Finish your current activity before shopping." }); return;
     }
@@ -10063,10 +10281,20 @@ io.on("connection", (socket) => {
       );
       await client.query("COMMIT");
       p.coins = debit.rows[0].coins;
-      const home = await homeSnapshot(pool, p.email, p.email);
       socket.emit("coinUpdate", { coins: p.coins });
-      socket.emit("homePurchaseResult", { ok: true, item: { id: bought.rows[0].id, furnitureId }, coins: p.coins, home });
-      socket.emit("homeSnapshot", home);
+      // The purchase is final after COMMIT. A failed inventory refresh must
+      // never report a failed purchase and invite another expensive retry.
+      let home;
+      try {
+        home = await homeSnapshot(pool, p.email, p.email);
+      } catch (refreshError) {
+        console.error("home purchase committed; inventory refresh failed:", refreshError);
+      }
+      socket.emit("homePurchaseResult", {
+        ok: true, item: { id: bought.rows[0].id, furnitureId }, coins: p.coins,
+        ...(home ? { home } : { refreshPending: true }),
+      });
+      if (home) socket.emit("homeSnapshot", home);
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       console.error("home purchase failed:", err);

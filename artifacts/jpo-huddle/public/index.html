@@ -4008,6 +4008,8 @@
   <script src="neighborhood-interiors.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="plaza-exteriors.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="focused-movement-helper.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="furniture-renderer.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="neighborhood-ui.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script>
     const socket = io();
@@ -21065,7 +21067,7 @@
         effectiveMovementSpeed: () => _effectiveMovementSpeed(SPEED),
         _playerChar, _playerName, _playerEmail, _playerHairIdx, _playerSkinIdx,
         _playerShirtIdx, _playerPantsIdx, _equippedCosmetic, _equippedWings,
-        _equippedSlots, _equippedPet, _equippedPetAcc, _bakedWearIds, _myPetXp, _petStageFor
+        _equippedSlots, _equippedPet, _equippedPetAcc, _bakedWearIds, _myPetXp, _petStageFor, _rosterList
       }));
     }
     window._phaserGame = new Phaser.Game({

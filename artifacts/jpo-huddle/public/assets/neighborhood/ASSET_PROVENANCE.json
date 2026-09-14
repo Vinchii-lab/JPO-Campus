@@ -41,9 +41,27 @@
     {
       "destination": "furniture/blue_sofa.png",
       "catalogId": "blue_sofa",
-      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_97.png",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_29.png",
       "sourcePixels": "individual PNG (uncropped)",
-      "nativeImageSize": "16x16",
+      "nativeImageSize": "32x32",
+      "renderScale": 3,
+      "floorOccupancyCells": "2x1"
+    },
+    {
+      "destination": "furniture/lounge_sofa.png",
+      "catalogId": "lounge_sofa",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_33.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "32x32",
+      "renderScale": 3,
+      "floorOccupancyCells": "2x1"
+    },
+    {
+      "destination": "furniture/kitchen_counter_full.png",
+      "catalogId": "kitchen_counter",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/12_Kitchen_Black_Shadow_Singles_16x16/Kitchen_Shadow_Singles_121.png",
+      "sourcePixels": "individual PNG (uncropped)",
+      "nativeImageSize": "32x32",
       "renderScale": 3,
       "floorOccupancyCells": "2x1"
     },

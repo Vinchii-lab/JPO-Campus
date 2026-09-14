@@ -27,6 +27,14 @@ export const FURNITURE_ACTIONS = Object.freeze({
     id: "watch", label: "Watch TV", anim: "watch", pose: "watch",
     occupancy: 1, duration: "until_exit", effect: "tv", anchor: "front",
   }),
+  // Unlike a seat or a bath, a tap is a switch.  Starting the action turns
+  // the water animation on and sending the same action again turns it off.
+  // The server owns that toggle; clients only render the resulting activity
+  // broadcast.
+  toggle_water: Object.freeze({
+    id: "toggle_water", label: "Tap water", anim: "water", pose: "use",
+    occupancy: 1, duration: "toggle", effect: "water", toggle: true,
+  }),
 });
 
 const DEFAULT_ACTION = Object.freeze({
@@ -41,10 +49,12 @@ export function furnitureActionDefinitions(item) {
   return ids.map((id) => {
     const action = FURNITURE_ACTIONS[id];
     if (!action) return null;
+    const actionInteraction = item.actionInteractions?.[id] || {};
     return Object.freeze({
       ...DEFAULT_ACTION,
       ...action,
       ...(item.interaction || {}),
+      ...actionInteraction,
       id,
     });
   }).filter(Boolean);
@@ -111,6 +121,7 @@ export function actionEffectKind(action) {
     shower: "water",
     bathe: "water",
     watch: "tv",
+    toggle_water: "water",
   })[action] || "comfort";
 }
 
