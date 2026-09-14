@@ -21,6 +21,7 @@ ${method('_tileField', '_streetYardKey')}
 ${method('_drawNeighborhood', '_residenceSignText')}
     _path() { this.paths = (this.paths || 0) + 1; }
     _roadDetails() { this.roads = (this.roads || 0) + 1; }
+    _streetSurfaceTexture() { this.roads = (this.roads || 0) + 1; return 'shared-road'; }
     _exterior() { return {}; }
     _sign() { return { setText() {} }; }
     _residenceSignText() { return 'LOT'; }

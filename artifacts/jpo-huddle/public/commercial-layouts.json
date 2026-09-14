@@ -106,7 +106,6 @@
       "height": 720,
       "floor": { "asset": "floor_museum", "scale": 1 },
       "objects": [
-        { "asset": "wall_museum", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "museum_desk", "x": 240, "y": 400, "depth": 400, "scale": 1 },
         { "asset": "museum_desk", "x": 288, "y": 400, "depth": 400, "scale": 1 },
         { "asset": "museum_sign", "x": 264, "y": 352, "depth": 399, "scale": 1 },
@@ -150,7 +149,6 @@
       "height": 720,
       "floor": { "asset": "floor_museum", "scale": 1 },
       "objects": [
-        { "asset": "wall_museum", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "museum_art_1", "x": 150, "y": 96, "depth": -4, "scale": 1 },
         { "asset": "museum_art_2", "x": 300, "y": 96, "depth": -4, "scale": 1 },
         { "asset": "museum_art_3", "x": 450, "y": 96, "depth": -4, "scale": 1 },
@@ -185,7 +183,6 @@
       "height": 720,
       "floor": { "asset": "floor_museum", "scale": 1 },
       "objects": [
-        { "asset": "wall_museum", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "museum_fossil_trex_head", "x": 250, "y": 300, "depth": 300, "scale": 1 },
         { "asset": "museum_fossil_trex_body", "x": 298, "y": 300, "depth": 300, "scale": 1 },
         { "asset": "museum_fossil_trex_tail", "x": 346, "y": 300, "depth": 300, "scale": 1 },
@@ -219,7 +216,6 @@
       "height": 720,
       "floor": { "asset": "floor_museum", "scale": 1 },
       "objects": [
-        { "asset": "wall_museum", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "museum_display_1", "x": 160, "y": 220, "depth": 220, "scale": 1 },
         { "asset": "museum_display_1", "x": 300, "y": 220, "depth": 220, "scale": 1 },
         { "asset": "museum_display_2", "x": 660, "y": 220, "depth": 220, "scale": 1 },
@@ -259,7 +255,6 @@
       "height": 720,
       "floor": { "asset": "floor_museum", "scale": 1 },
       "objects": [
-        { "asset": "wall_museum", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "museum_plant_disp", "x": 160, "y": 220, "depth": 220, "scale": 1 },
         { "asset": "museum_plant_disp", "x": 300, "y": 220, "depth": 220, "scale": 1 },
         { "asset": "museum_plant_disp", "x": 660, "y": 220, "depth": 220, "scale": 1 },
@@ -300,7 +295,6 @@
       "height": 720,
       "floor": { "asset": "floor_wood", "scale": 1 },
       "objects": [
-        { "asset": "wall_brick", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "cafe_counter", "x": 150, "y": 150, "depth": 150, "scale": 1 },
         { "asset": "cafe_counter", "x": 150, "y": 198, "depth": 198, "scale": 1 },
         { "asset": "cafe_counter", "x": 150, "y": 246, "depth": 246, "scale": 1 },
@@ -310,22 +304,22 @@
         { "asset": "cafe_counter", "x": 150, "y": 438, "depth": 438, "scale": 1 },
         { "asset": "cafe_machine", "x": 150, "y": 250, "depth": 250, "scale": 1 },
         { "asset": "cafe_shelf", "x": 100, "y": 150, "depth": 149, "scale": 1 },
-        { "asset": "cafe_table", "x": 350, "y": 340, "depth": 340, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 350, "y": 340, "depth": 340, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 350, "y": 280, "depth": 280, "scale": 1 },
         { "asset": "cafe_chair", "x": 350, "y": 400, "depth": 400, "scale": 1 },
-        { "asset": "cafe_table", "x": 550, "y": 340, "depth": 340, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 550, "y": 340, "depth": 340, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 550, "y": 280, "depth": 280, "scale": 1 },
         { "asset": "cafe_chair", "x": 550, "y": 400, "depth": 400, "scale": 1 },
-        { "asset": "cafe_table", "x": 850, "y": 340, "depth": 340, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 850, "y": 340, "depth": 340, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 850, "y": 280, "depth": 280, "scale": 1 },
         { "asset": "cafe_chair", "x": 850, "y": 400, "depth": 400, "scale": 1 },
-        { "asset": "cafe_table", "x": 350, "y": 540, "depth": 540, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 350, "y": 540, "depth": 540, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 350, "y": 480, "depth": 480, "scale": 1 },
         { "asset": "cafe_chair", "x": 350, "y": 600, "depth": 600, "scale": 1 },
-        { "asset": "cafe_table", "x": 550, "y": 540, "depth": 540, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 550, "y": 540, "depth": 540, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 550, "y": 480, "depth": 480, "scale": 1 },
         { "asset": "cafe_chair", "x": 550, "y": 600, "depth": 600, "scale": 1 },
-        { "asset": "cafe_table", "x": 850, "y": 540, "depth": 540, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 850, "y": 540, "depth": 540, "scale": 1.5 },
         { "asset": "cafe_chair", "x": 850, "y": 480, "depth": 480, "scale": 1 },
         { "asset": "cafe_chair", "x": 850, "y": 600, "depth": 600, "scale": 1 }
       ],
@@ -365,7 +359,6 @@
       "height": 720,
       "floor": { "asset": "floor_tile", "scale": 1 },
       "objects": [
-        { "asset": "wall_brick", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "diner_counter", "x": 150, "y": 250, "depth": 250, "scale": 1 },
         { "asset": "diner_counter", "x": 198, "y": 250, "depth": 250, "scale": 1 },
         { "asset": "diner_counter", "x": 246, "y": 250, "depth": 250, "scale": 1 },
@@ -383,9 +376,15 @@
         { "asset": "diner_jukebox", "x": 850, "y": 150, "depth": 150, "scale": 1 },
         { "asset": "diner_grill", "x": 300, "y": 150, "depth": 150, "scale": 1 },
         { "asset": "diner_grill", "x": 600, "y": 150, "depth": 150, "scale": 1 },
-        { "asset": "diner_booth", "x": 200, "y": 320, "depth": 320, "scale": 1 },
-        { "asset": "diner_booth", "x": 450, "y": 320, "depth": 320, "scale": 1 },
-        { "asset": "diner_booth", "x": 700, "y": 320, "depth": 320, "scale": 1 }
+        { "asset": "diner_booth", "x": 176, "y": 320, "depth": 320, "scale": 1 },
+        { "asset": "diner_booth", "x": 224, "y": 320, "depth": 320, "scale": 1, "flipX": true },
+        { "asset": "sushi_table", "x": 200, "y": 320, "depth": 319, "scale": 1 },
+        { "asset": "diner_booth", "x": 426, "y": 320, "depth": 320, "scale": 1 },
+        { "asset": "diner_booth", "x": 474, "y": 320, "depth": 320, "scale": 1, "flipX": true },
+        { "asset": "sushi_table", "x": 450, "y": 320, "depth": 319, "scale": 1 },
+        { "asset": "diner_booth", "x": 676, "y": 320, "depth": 320, "scale": 1 },
+        { "asset": "diner_booth", "x": 724, "y": 320, "depth": 320, "scale": 1, "flipX": true },
+        { "asset": "sushi_table", "x": 700, "y": 320, "depth": 319, "scale": 1 }
       ],
       "blockers": [
         { "x": 126, "y": 226, "width": 48, "height": 40 },
@@ -424,7 +423,6 @@
       "height": 720,
       "floor": { "asset": "floor_wood", "scale": 1 },
       "objects": [
-        { "asset": "wall_brick", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "bakery_counter", "x": 250, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "bakery_counter", "x": 298, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "bakery_counter", "x": 346, "y": 200, "depth": 200, "scale": 1 },
@@ -438,10 +436,10 @@
         { "asset": "bakery_counter", "x": 730, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "bakery_bread", "x": 150, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "bakery_bread", "x": 810, "y": 200, "depth": 200, "scale": 1 },
-        { "asset": "bakery_table", "x": 450, "y": 520, "depth": 520, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 450, "y": 520, "depth": 520, "scale": 1.5 },
         { "asset": "bakery_chair", "x": 450, "y": 460, "depth": 460, "scale": 1 },
         { "asset": "bakery_chair", "x": 450, "y": 580, "depth": 580, "scale": 1 },
-        { "asset": "bakery_table", "x": 510, "y": 520, "depth": 520, "scale": 1 },
+        { "asset": "native_coffee_table", "x": 510, "y": 520, "depth": 520, "scale": 1.5 },
         { "asset": "bakery_chair", "x": 510, "y": 460, "depth": 460, "scale": 1 },
         { "asset": "bakery_chair", "x": 510, "y": 580, "depth": 580, "scale": 1 }
       ],
@@ -475,7 +473,6 @@
       "height": 720,
       "floor": { "asset": "floor_tatami", "scale": 1 },
       "objects": [
-        { "asset": "wall_japanese", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "sushi_counter", "x": 250, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "sushi_counter", "x": 298, "y": 200, "depth": 200, "scale": 1 },
         { "asset": "sushi_counter", "x": 346, "y": 200, "depth": 200, "scale": 1 },
@@ -527,7 +524,6 @@
       "height": 720,
       "floor": { "asset": "floor_wood", "scale": 1 },
       "objects": [
-        { "asset": "wall_paper", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "furn_bookcase", "x": 120, "y": 140, "depth": 140, "scale": 1 },
         { "asset": "furn_bookcase", "x": 280, "y": 140, "depth": 140, "scale": 1 },
         { "asset": "furn_bookcase", "x": 680, "y": 140, "depth": 140, "scale": 1 },
@@ -575,7 +571,6 @@
       "height": 720,
       "floor": { "asset": "floor_wood", "scale": 1 },
       "objects": [
-        { "asset": "wall_paper", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "garden_shelf", "x": 120, "y": 140, "depth": 140, "scale": 1 },
         { "asset": "garden_shelf", "x": 280, "y": 140, "depth": 140, "scale": 1 },
         { "asset": "garden_shelf", "x": 440, "y": 140, "depth": 140, "scale": 1 },
@@ -613,7 +608,6 @@
       "height": 720,
       "floor": { "asset": "floor_wood", "scale": 1 },
       "objects": [
-        { "asset": "wall_paper", "x": 480, "y": 48, "depth": -20, "scale": 1 },
         { "asset": "decor_rug", "x": 250, "y": 300, "depth": 1, "scale": 1 },
         { "asset": "furn_armchair", "x": 250, "y": 300, "depth": 300, "scale": 1 },
         { "asset": "floor_lamp", "x": 180, "y": 300, "depth": 300, "scale": 1 },

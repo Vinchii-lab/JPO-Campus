@@ -7729,7 +7729,7 @@ io.on("connection", (socket) => {
     performanceReports++;
     lastPerformanceReport = now;
     const report = {
-      source: "client-reported", location: locationOf(player),
+      source: "client-reported", location: locationOf(player).startsWith("home:") ? "home" : locationOf(player),
       renderer: sample.renderer === "WebGL" ? "WebGL" : "Canvas",
       localPet: sample.localPet === true,
       acceptedMoves: performanceAcceptedMoves,

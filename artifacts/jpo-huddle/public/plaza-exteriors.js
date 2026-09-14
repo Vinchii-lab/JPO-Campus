@@ -9,6 +9,9 @@ window.JpoPlazaExteriors = {
     load('pe_neon_sign', 'assets/neighborhood/facades/neon_sign.png');
     load('pe_diner_window', 'assets/neighborhood/facades/diner_window.png');
     load('pe_house_window', 'assets/neighborhood/facades/house_window.png');
+    load('pe_museum_column', 'assets/neighborhood/facades/museum_column.png');
+    load('pe_museum_door', 'assets/neighborhood/facades/museum_door.png');
+    load('pe_museum_pediment', 'assets/neighborhood/facades/museum_pediment.png');
   },
 
   draw(scene, { id, x, y, width, height, doorX, doorY }) {
@@ -34,8 +37,26 @@ window.JpoPlazaExteriors = {
     }
 
     if (id !== 'museum') {
-      g.fillStyle(mainColor);
-      g.fillRect(x, y, width, height);
+      if (!scene.textures.exists('pe_facade_base')) {
+        const canvas = scene.textures.createCanvas('pe_facade_base', 16, 16);
+        const ctx = canvas.context;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 16, 16);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+        ctx.fillRect(0, 7, 16, 1);
+        ctx.fillRect(0, 15, 16, 1);
+        ctx.fillRect(7, 0, 1, 7);
+        ctx.fillRect(15, 8, 1, 7);
+        canvas.refresh();
+        scene.textures.get('pe_facade_base').setFilter(Phaser.Textures.FilterMode.NEAREST);
+      }
+
+      const tileScale = 3;
+      scene.add.tileSprite(x, y, width / tileScale, height / tileScale, 'pe_facade_base')
+        .setOrigin(0, 0)
+        .setScale(tileScale)
+        .setTint(mainColor)
+        .setDepth(depth - 0.3);
 
       g.fillStyle(trimColor);
       g.fillRect(x, y + height - 8, width, 8);
@@ -110,7 +131,7 @@ window.JpoPlazaExteriors = {
       g.strokeRect(x + 16, y + 48, width / 2 - 64, height - 64);
       g.strokeRect(x + width / 2 + 48, y + 48, width / 2 - 64, height - 64);
       addProp('pe_shop_door', doorX, doorY);
-    } 
+    }
     else if (id === 'garden-shop') {
       g.fillStyle(0xa1c4c8, 0.6);
       g.fillRect(x + 16, y + 32, width - 32, height - 48);
@@ -142,13 +163,13 @@ window.JpoPlazaExteriors = {
       addProp('pe_shop_window', x + width * 0.25, doorY - 24);
       addProp('pe_shop_window', x + width * 0.75, doorY - 24);
       addProp('pe_shop_door', doorX, doorY);
-      addProp('pe_shop_awning', cx, doorY - 72, 0.5, 1, 100, 3.5); 
-      
+      addProp('pe_shop_awning', cx, doorY - 72, 0.5, 1, 100, 3.5);
+
       const t = scene.add.graphics();
-      t.setDepth(2); 
+      t.setDepth(2);
       t.fillStyle(0xa39d91);
       t.fillRect(x, doorY, width, 48);
-      
+
       const drawTable = (tx, ty) => {
         t.fillStyle(0xdddddd);
         t.fillRect(tx - 12, ty - 16, 24, 4);
@@ -181,41 +202,36 @@ window.JpoPlazaExteriors = {
       addProp('pe_house_window', x + width * 0.8, doorY - 32);
     }
     else if (id === 'museum') {
-      g.fillStyle(0xcbc7b9);
-      g.fillRect(x, y + 64, width, height - 64);
-      
-      g.fillStyle(0xe6e3d8);
-      g.beginPath();
-      g.moveTo(x - 32, y + 64);
-      g.lineTo(cx, y);
-      g.lineTo(x + width + 32, y + 64);
-      g.closePath();
-      g.fill();
-      g.lineStyle(4, 0xbab6a7);
-      g.strokePath();
+      const colScale = 2.5;
+      const pedimentY = doorY - (128 * colScale);
+      const bodyHeight = doorY - pedimentY;
 
-      g.fillStyle(0xa9a597);
-      g.fillRect(x + 64, doorY - 16, width - 128, 16);
-      g.fillRect(x + 32, doorY, width - 64, 16);
+      if (!scene.textures.exists('pe_facade_base')) {
+        const canvas = scene.textures.createCanvas('pe_facade_base', 16, 16);
+        const ctx = canvas.context;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 16, 16);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+        ctx.fillRect(0, 7, 16, 1);
+        ctx.fillRect(0, 15, 16, 1);
+        ctx.fillRect(7, 0, 1, 7);
+        ctx.fillRect(15, 8, 1, 7);
+        canvas.refresh();
+        scene.textures.get('pe_facade_base').setFilter(Phaser.Textures.FilterMode.NEAREST);
+      }
+      scene.add.tileSprite(x, pedimentY, width / 3, bodyHeight / 3, 'pe_facade_base')
+        .setOrigin(0, 0)
+        .setScale(3)
+        .setTint(0xcbc7b9)
+        .setDepth(depth - 0.3);
 
-      g.fillStyle(0xffffff);
-      const colWidth = 32;
-      const colHeight = height - 64 - 16;
-      [x + 64, cx - 112, cx + 112 - colWidth, x + width - 64 - colWidth].forEach(cxPos => {
-        g.fillRect(cxPos, y + 64, colWidth, colHeight);
-        g.fillStyle(0xbab6a7);
-        g.fillRect(cxPos - 4, y + 64, colWidth + 8, 8);
-        g.fillRect(cxPos - 4, y + 64 + colHeight - 8, colWidth + 8, 8);
-        g.fillStyle(0xffffff);
+      addProp('pe_museum_pediment', cx, pedimentY + 4, 0.5, 1, 1, colScale);
+
+      [x + 64, cx - 72, cx + 72, x + width - 64].forEach(cxPos => {
+        addProp('pe_museum_column', cxPos, doorY, 0.5, 1, 0.5, colScale);
       });
 
-      g.fillStyle(0x4a3c31);
-      g.fillRect(cx - 48, doorY - 112, 96, 96);
-      g.lineStyle(2, 0x2e251e);
-      g.strokeRect(cx - 48, doorY - 112, 96, 96);
-      g.beginPath();
-      g.moveTo(cx, doorY - 112); g.lineTo(cx, doorY - 16);
-      g.strokePath();
+      addProp('pe_museum_door', cx, doorY, 0.5, 1, 0, colScale);
     }
   }
 };

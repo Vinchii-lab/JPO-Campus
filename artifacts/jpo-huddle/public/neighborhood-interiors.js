@@ -55,19 +55,33 @@ window.JpoInteriors = {
       surface.setFilter(Phaser.Textures.FilterMode.NEAREST);
     }
     scene.add.image(0, 0, surfaceKey).setOrigin(0, 0).setScale(3).setDepth(-10);
+
+    if (room.wall) {
+      scene.textures.get(room.wall.asset).setFilter(Phaser.Textures.FilterMode.NEAREST);
+      const wallTex = scene.textures.get(room.wall.asset).getSourceImage();
+      const wallW = (wallTex?.width || 48) * 3;
+      for (let wx = wallW / 2; wx < room.width; wx += wallW) {
+        scene.add.image(wx, 48, room.wall.asset)
+          .setOrigin(0.5, 1)
+          .setScale(3)
+          .setDepth(-9);
+      }
+    }
+
     if (room.objects) {
       room.objects.forEach(obj => {
         // Perimeter walls come from shared collision geometry, including the
         // four actual foyer openings. The source ticket-office composite is
         // not a single gallery door and must not overlap adjacent entrances.
-        if (obj.asset.startsWith('floor_') || obj.asset.startsWith('wall_') || obj.asset === 'museum_door') return;
+        if (obj.asset.startsWith('floor_') || obj.asset === 'museum_door') return;
         if (!scene.textures.exists(obj.asset)) throw new Error('Missing interior sprite: ' + obj.asset);
         scene.textures.get(obj.asset).setFilter(Phaser.Textures.FilterMode.NEAREST);
         const depth = typeof obj.depth === 'number' ? obj.depth : obj.y;
-        scene.add.image(obj.x, obj.y, obj.asset)
+        const img = scene.add.image(obj.x, obj.y, obj.asset)
           .setOrigin(0.5, obj.asset.startsWith('floor_') ? 0.5 : 1)
           .setScale(obj.scale || 1)
           .setDepth(depth);
+        if (obj.flipX) img.setFlipX(true);
       });
     }
 

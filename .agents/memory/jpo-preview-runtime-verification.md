@@ -21,6 +21,12 @@ Treat absolute-coordinate Phaser Graphics as explicitly visibility-managed conte
 
 **How to apply:** Test with the full residential population, including distant lots. Bound rendering by padded camera-world bounds; include paths, markers, yards, signs, and portal cues. Reapply visibility when live directory updates replace objects, without removing authoritative geometry or ownership.
 
+Rebuild render-fixture seats and blockers from the current canonical layout before checking poses.
+
+**Why:** Retained fixtures placed a seated avatar at an old coordinate, falsely suggesting an animation-anchor defect. Separately, a genuine hint-label bug was visible even with the correct sit texture, so primitive state alone was insufficient.
+
+**How to apply:** Release movement inputs, use the current seat ID/coordinates, and inspect both the sprite and interaction label. Never move authoritative seat coordinates to compensate for a stale fixture.
+
 Build-update cooldowns must schedule another check, and recovery must not depend solely on a healthy gameplay socket.
 
 **Why:** Several fixes within a five-minute reload cooldown can leave an open page running the original code if its sole reconnect check returns early.

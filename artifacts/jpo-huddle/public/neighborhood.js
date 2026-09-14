@@ -874,7 +874,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         const count = Math.max(1, frames.length);
         const round = value => Math.round(value * 100) / 100;
         const sample = {
-          build: window.__BUILD__, location: this.location,
+          build: window.__BUILD__, location: this.location.startsWith('home:') ? 'home' : this.location,
           renderer: this.game.renderer?.type === Phaser.WEBGL ? 'WebGL' : 'Canvas',
           frames: frames.length, movingFrames, hidden: document.hidden,
           frameP50Ms: round(sorted[Math.floor(sorted.length * 0.5)] || 0),
@@ -1115,12 +1115,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _drawStreetSegment(segment) {
       const base = segment * 960;
       const objects = [
-        this._path({ x: 0, y: base + 432, width: this.mapWidth, height: 144 }, 0x55616a, 0x3f4950),
-        this._path({ x: 0, y: base + 408, width: this.mapWidth, height: 24 }, 0xd8ccb3),
-        this._path({ x: 0, y: base + 576, width: this.mapWidth, height: 24 }, 0xd8ccb3),
-        this._path({ x: 552, y: base, width: 48, height: 432 }),
-        this._path({ x: 552, y: base + 576, width: 48, height: 384 }),
-        this._roadDetails(base + 504, 576, [{ x: 540, y: base + 420 }, { x: 612, y: base + 588 }], base, base + 960),
+        this.add.image(0, base, this._streetSurfaceTexture()).setOrigin(0, 0).setScale(3).setDepth(1),
       ];
       [[90, base + 228], [1090, base + 228], [90, base + 760], [1090, base + 760]]
         .forEach(([x, y]) => objects.push(this._exterior('tree', x, y)));
@@ -1128,6 +1123,58 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         [270, base + 600], [486, base + 600], [810, base + 600], [1110, base + 600]]
         .forEach(([x, y]) => objects.push(this._exterior('lamp', x, y, 2)));
       return objects;
+    }
+
+    _streetSurfaceTexture() {
+      // Immutable native-resolution road surface shared by every segment.
+      // Trees, lamps, residents, signs and houses remain independently layered.
+      const key = `willow-road-surface:${this.mapWidth}`;
+      if (this.textures.exists(key)) return key;
+      const texture = this.textures.createCanvas(key, Math.ceil(this.mapWidth / 3), 320);
+      const ctx = texture.getContext();
+      ctx.imageSmoothingEnabled = false;
+      const path = (x, y, width, height, fill = '#d8ccb3', border = '#9b927e') => {
+        ctx.fillStyle = fill;
+        ctx.fillRect(x / 3, y / 3, width / 3, height / 3);
+        ctx.strokeStyle = border;
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 2 / 3;
+        ctx.strokeRect(x / 3, y / 3, width / 3, height / 3);
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1 / 3;
+        ctx.beginPath();
+        for (let px = x + 24; px < x + width; px += 48) {
+          ctx.moveTo(px / 3, y / 3); ctx.lineTo(px / 3, (y + height) / 3);
+        }
+        for (let py = y + 24; py < y + height; py += 48) {
+          ctx.moveTo(x / 3, py / 3); ctx.lineTo((x + width) / 3, py / 3);
+        }
+        ctx.stroke(); ctx.globalAlpha = 1;
+      };
+      path(0, 432, this.mapWidth, 144, '#55616a', '#3f4950');
+      path(0, 408, this.mapWidth, 24);
+      path(0, 576, this.mapWidth, 24);
+      path(552, 0, 48, 432);
+      path(552, 576, 48, 384);
+      ctx.strokeStyle = '#f5e7a8';
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 24; x < this.mapWidth - 24; x += 56) {
+        ctx.moveTo(x / 3, 168); ctx.lineTo((x + 28) / 3, 168);
+      }
+      for (let y = 24; y < 960; y += 56) {
+        ctx.moveTo(192, y / 3); ctx.lineTo(192, (y + 28) / 3);
+      }
+      ctx.stroke();
+      ctx.fillStyle = '#f8f2d1';
+      ctx.globalAlpha = 0.75;
+      for (const [x, y] of [[540, 420], [612, 588]]) {
+        for (let n = -3; n <= 3; n++) ctx.fillRect((x - 18) / 3, (y + n * 10 - 3) / 3, 12, 2);
+      }
+      ctx.globalAlpha = 1;
+      texture.refresh();
+      return key;
     }
 
     _syncStreetScenery() {
@@ -1565,7 +1612,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       const baked = g._bakedWearIds?.(char, g._equippedCosmetic, g._equippedWings, g._equippedSlots) || [];
       this.playerTexKey = this._office('_buildPlayerTex', char, g._playerHairIdx || 0, g._playerSkinIdx || 0,
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || this.playerTexKey;
-      this.player.setTexture(this.playerTexKey);
+      // Sitting animation state owns the sprite texture. Outfit updates can
+      // arrive while a home/public-seat pose is active; resetting to the run
+      // sheet here would make the next pose tick render a standing frame.
+      if (!this.activity && !this.staticSeatState) this.player.setTexture(this.playerTexKey);
       this._applyActivityPose(this, this.activity, this.playerDir || 'down');
     }
 
@@ -1624,22 +1674,46 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       if (!sprite) return;
       const texKey = entry.playerTexKey || entry.texture || this.playerTexKey;
       const start = globals().DIR_START || { right: 0, up: 6, left: 12, down: 18 };
+      // The HQ renderer has three real seated sheets: the right profile,
+      // the face-visible profile used for its up slot, and the front-facing
+      // sheet.  Left deliberately mirrors the right sheet because no authored
+      // left seated sheet exists.  Keep this mapping here rather than using
+      // the furniture's action orientation: public-seat packets carry the
+      // server-authoritative facing in `dir`, while home actions do the same
+      // through their activity result.
+      const facing = ['right', 'up', 'left', 'down'].includes(dir) ? dir : 'down';
+      const sitFacing = { right: 'right', left: 'right', up: 'up', down: 'down' }[facing];
       const action = activity?.action;
       if (!action) {
         entry._activityAction = null;
         sprite.setAngle(0).setScale(3).setFlipX(false);
-        sprite.setTexture(texKey).setFrame(start[dir] ?? start.down);
         sprite.anims.stop();
+        // setTexture is intentional even when the current animation key is
+        // stale. Phaser leaves currentAnim attached after stop()/setTexture(),
+        // and a later sit can otherwise be mistaken for an already-active
+        // seated animation (leaving the sprite on a run-sheet frame).
+        sprite.setTexture(texKey).setFrame(start[facing] ?? start.down);
         this._clearActivityEffect(entry);
         return;
       }
       if (action === 'sit') {
-        sprite.setAngle(0).setScale(3).setFlipX(false).setTexture(texKey);
-        const sitDir = dir === 'left' ? 'right' : (dir === 'right' ? 'right' : 'down');
-        const sitKey = `sit_${texKey}_${sitDir}`;
-        if (this.anims.exists(sitKey) &&
-            (sprite.anims.currentAnim?.key !== sitKey || !sprite.anims.isPlaying)) sprite.play(sitKey);
-        else { sprite.anims.stop(); sprite.setFrame(start[dir] ?? start.down); }
+        // Do not reset the run texture on every park-seat update. Phaser's
+        // animation state owns the seated frame texture; repeatedly calling
+        // setTexture here makes a seated player flash/freeze on the standing
+        // sheet between animation ticks. play() switches to the authored sit
+        // sheet when entering the pose or when a stale animation is detected.
+        sprite.setAngle(0).setScale(3).setFlipX(facing === 'left');
+        const sitKey = `sit_${texKey}_${sitFacing}`;
+        if (this.anims.exists(sitKey)) {
+          if (sprite.anims.currentAnim?.key !== sitKey || !sprite.anims.isPlaying) sprite.play(sitKey);
+        } else {
+          // A missing optional seated sheet must never leave a previous sit
+          // texture/frame visible. Fall back to the current directional run
+          // frame, preserving the character and wearable texture key.
+          sprite.setFlipX(false);
+          sprite.anims.stop();
+          sprite.setTexture(texKey).setFrame(start[facing] ?? start.down);
+        }
       } else if (action === 'lie' || action === 'sleep') {
         // There is no separate lie sheet in the supplied avatar pack. Wide
         // sofas get a horizontal idle-down pose, while the supplied portrait
@@ -2069,18 +2143,33 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       remote.lastDir = dir;
       remote.seated = player.anim === 'sit';
       remote.activity = player.activity || (player.anim === 'sit' ? { action: 'sit' } : null);
-      remote.sprite.setPosition(player.x, player.y).setTexture(remote.texture);
+      remote.sprite.setPosition(player.x, player.y);
+      // An active sit animation owns the seated texture. Calling
+      // setTexture(runSheet) for every movement packet resets the visual sheet
+      // while leaving currentAnim/isPlaying intact, so remote sitters flash
+      // or appear to stand. Activity/seat pose application below switches
+      // textures only when entering or changing the animation.
+      if (!remote.activity) remote.sprite.setTexture(remote.texture);
       remote.sprite.setDepth(player.y);
       remote.nameTag?.setPosition(player.x, player.y - 40).setDepth(player.y + 2);
       if (remote.activity) {
         remote.playerTexKey = remote.texture;
         this._applyActivityPose(remote, remote.activity, dir);
       } else if (player.anim === 'walk') {
+        remote.sprite.setFlipX(false);
         const key = 'walk_' + remote.texture + '_' + dir;
         if (this.anims.exists(key) && remote.sprite.anims.currentAnim?.key !== key) remote.sprite.play(key);
       } else {
+        // Standing up leaves Phaser's seated texture/currentAnim attached
+        // until an explicit run texture is selected. Restore both the
+        // canonical palette/wearable sheet and the real directional frame;
+        // otherwise a remote left-facing sitter can remain mirrored or show
+        // a stale seated frame until their next walk packet.
+        remote.sprite.setFlipX(false);
         remote.sprite.anims.stop();
-        remote.sprite.setFrame(globals().DIR_START?.[dir] || 0);
+        remote.sprite.setTexture(remote.texture);
+        const runStart = globals().DIR_START || { right: 0, up: 6, left: 12, down: 18 };
+        remote.sprite.setFrame(runStart[dir] ?? runStart.down);
       }
       this._positionPresentation(remote, player.x, player.y, dir);
     }
@@ -2273,7 +2362,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
         .setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this.activity) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
-      else if (parkSeated || this._parkSeatPending === 'stand') this.interactHint.setText('Standing…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (this._parkSeatPending === 'stand') this.interactHint.setText('Standing…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (parkSeated) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyParkSeat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyAction) {
         const actions = nearbyAction.actions;
