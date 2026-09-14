@@ -79,15 +79,16 @@ for (let x = 1; x < 100; x++) { scene.cameras.main.scrollX = x; scene._syncTileF
 assert.equal(positions, beforePan, 'sub-chunk camera travel does not update/repaint ground objects');
 scene.cameras.main.zoom = 0.7;
 
-// Drawing a sparse street must derive its range from server map height rather
-// than `streetLots.length / 8`, but keep only near-camera scenery alive. The
-// lone lot itself is deliberately far down a ten-thousand-segment street.
+// A legacy snapshot without the authoritative block list gets one compact
+// fallback block. The lot itself may still carry a durable, sparse address;
+// that directory data must not make the client invent a ten-thousand-block
+// road.
 scene.mapHeight = 960 * 10000 + 96;
 scene.info = { streetLots: [{
   lot: 79993, x: 180, bottom: 9599380, northSide: true, construction: { stage: 'empty' }, yard: [],
 }] };
 scene._drawNeighborhood();
-assert.equal(scene.streetSegmentCount, 10000, 'road range derives from canonical map bounds');
+assert.equal(scene.streetSegmentCount, 1, 'legacy maps use one fallback street block');
 assert(scene._streetScenerySegments.size <= 3 && scene.roads <= 3,
   'initial street scenery stays viewport-bounded');
 scene.cameras.main.scrollY = 960 * 7500;

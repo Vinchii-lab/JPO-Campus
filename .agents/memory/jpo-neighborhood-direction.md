@@ -54,8 +54,8 @@ Homes must start completely unfurnished; players choose, buy, and place all furn
 
 **How to apply:** Keep only architecture in the base home. Never add free furnishings or their invisible blockers. Put furniture actions on placed shop items and make shared controls location-aware.
 
-Show nearby blocks for a long residential street map, not a uniformly shrunk image of its entire world.
+Use a compact landscape grid for the residential neighborhood, not one long vertical strip or a uniformly shrunk whole-world image.
 
-**Why:** Permanent sparse lot indices can make the street hundreds of thousands of pixels tall. Bounding canvas memory alone produces an unreadable thin strip; the map must remain useful at the player's location.
+**Why:** The user rejected the vertical street because it left most of the screen as unused grass. Permanent lot numbers represent ownership/address identity, not empty physical cells; sparse IDs must not inflate the map.
 
-**How to apply:** Use a player-local street region with consistent origin translation for geometry and markers. Keep whole-map views for the bounded plaza, shops, and homes.
+**How to apply:** Pack occupied lots across connected rows and columns while preserving permanent addresses and ownership. Render only nearby blocks on both axes. Any future directory change that reflows positions must synchronize the full geometry, not merely update owner labels.

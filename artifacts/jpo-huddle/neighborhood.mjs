@@ -128,8 +128,15 @@ export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["neighborhood"]);
 // coordinates in the shared contract so a sparse lot directory can still
 // produce a complete, continuous set of east-side city gates.
 export const STREET_BLOCK_LAYOUT = Object.freeze({
+  width: 1440,
   segmentHeight: 960,
+  height: 960,
   road: Object.freeze({ x: 0, y: 432, width: 1440, height: 144 }),
+  // The landscape renderer uses this clear north/south lane to join the
+  // horizontal road in this block to the same lane in the block above/below.
+  // It is deliberately a local coordinate: each block is translated by its
+  // grid column/row when the street is painted.
+  verticalRoad: Object.freeze({ x: 552, centerX: 576, y: 0, width: 48, height: 960 }),
   eastPortal: Object.freeze({ x: 1344, width: 96, height: 144 }),
   westPortal: Object.freeze({ x: 0, width: 96, height: 144 }),
 });
@@ -196,33 +203,77 @@ const residenceBlockers = (lots = STREET_LOT_OFFSETS) => lots.flatMap(([centerX,
   { x: centerX - 112, y: bottomY - 89, width: 76, height: 90 },
   { x: centerX + 36, y: bottomY - 89, width: 76, height: 90 },
 ]);
-// A segment is a real stretch of the continuous street: four homes face the
-// north pavement and four face the south pavement.  Extending the segment
-// below keeps every account on one physical map while retaining the normal
-// close camera inside a residence.  `ownerEmail` is the canonical address.
+// A block is a real stretch of the continuous street: four homes face the
+// north pavement and four face the south pavement.  Blocks are laid out as a
+// compact rectangular grid, while each home's durable `lotIndex` remains its
+// address. `displayIndex` is intentionally separate from that address: a
+// deleted/sparse lot must not leave an empty house-sized hole in the drawing.
 export function streetDefinition(entries = []) {
   // Retained Huddle A/B rows (including their possessions) are intentionally
   // not neighborhood residents.  Filtering here is the final presentation
   // guard in addition to homeDirectory's SQL filter, so stale snapshots can
   // never paint or address their old lots.
   const homes = Array.isArray(entries)
-    ? entries.filter((home) => !isHuddleTestIdentity(home?.ownerEmail))
+    ? entries
+      .filter((home) => !isHuddleTestIdentity(home?.ownerEmail))
+      // homeDirectory() already orders this snapshot by lot_index. Keep that
+      // contract explicit here as well so direct/unit callers cannot make a
+      // sparse durable address become a visual position.
+      .map((home, sourceIndex) => ({ home, sourceIndex }))
+      .sort((a, b) => {
+        const aLot = Number(a.home?.lotIndex), bLot = Number(b.home?.lotIndex);
+        const aValid = Number.isFinite(aLot) && aLot > 0;
+        const bValid = Number.isFinite(bLot) && bLot > 0;
+        if (aValid !== bValid) return aValid ? -1 : 1;
+        if (aValid && aLot !== bLot) return aLot - bLot;
+        return a.sourceIndex - b.sourceIndex;
+      })
+      .map(({ home }) => home)
     : [];
-  const slotFor = (home, index) => Number.isInteger(home?.lotIndex) && home.lotIndex > 0 ? home.lotIndex : index + 1;
-  const segmentCount = Math.max(1, Math.ceil(Math.max(0, ...homes.map(slotFor)) / STREET_LOT_OFFSETS.length));
+  const occupiedBlockCount = Math.max(1, Math.ceil(homes.length / STREET_LOT_OFFSETS.length));
+  const columns = Math.min(
+    occupiedBlockCount,
+    Math.max(1, Math.ceil(Math.sqrt(occupiedBlockCount * 960 / 1440 * 16 / 9))),
+  );
+  const rows = Math.ceil(occupiedBlockCount / columns);
+  const blocks = Array.from({ length: rows * columns }, (_, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    return {
+      index, row, column,
+      x: column * STREET_BLOCK_LAYOUT.width,
+      y: row * STREET_BLOCK_LAYOUT.height,
+      width: STREET_BLOCK_LAYOUT.width,
+      height: STREET_BLOCK_LAYOUT.height,
+    };
+  });
   const lots = homes.map((home, index) => {
-    const slot = slotFor(home, index);
-    const [x, localBottom] = STREET_LOT_OFFSETS[(slot - 1) % STREET_LOT_OFFSETS.length];
-    const segment = Math.floor((slot - 1) / STREET_LOT_OFFSETS.length);
-    const bottom = localBottom + segment * 960;
+    const displayIndex = index + 1;
+    const permanentLot = Number.isFinite(Number(home?.lotIndex)) && Number(home.lotIndex) > 0
+      ? Number(home.lotIndex) : displayIndex;
+    const displaySlot = displayIndex - 1;
+    const blockIndex = Math.floor(displaySlot / STREET_LOT_OFFSETS.length);
+    const block = blocks[blockIndex];
+    const [localX, localBottom] = STREET_LOT_OFFSETS[displaySlot % STREET_LOT_OFFSETS.length];
+    const x = block.x + localX;
+    const bottom = block.y + localBottom;
     const northSide = localBottom < 500;
     const door = {
-      destination: "home", residence: true, lot: slot, ownerEmail: home.ownerEmail,
+      destination: "home", residence: true, lot: permanentLot, ownerEmail: home.ownerEmail,
       x: x - 36, y: bottom - 90, width: 72, height: 100,
       label: `${home.name || home.ownerEmail}'s home`,
     };
     return {
-      ...home, construction: home.construction || homeConstruction(home), lot: slot, x, bottom, northSide, door,
+      ...home,
+      construction: home.construction || homeConstruction(home),
+      // `lot` is the durable address used by doorway authorization. Never
+      // replace it with the dense display slot when old addresses have gaps.
+      lot: permanentLot,
+      displayIndex,
+      blockIndex: block.index,
+      row: block.row,
+      column: block.column,
+      x, bottom, northSide, door,
       // North facades end at `bottom`; south facades begin at
       // `bottom - 234`. Keep the return point on the street-facing side of
       // either facade, with a 32px foot-centre margin, never inside the
@@ -251,17 +302,16 @@ export function streetDefinition(entries = []) {
     }];
   }));
   const doors = lots.filter((lot) => lot.construction?.complete).map((lot) => lot.door);
-  const height = segmentCount * 960 + 96;
-  // Each repeating residential block has its own east-side city gate.  Do not
-  // collapse this to the first segment: lot indices are durable and may be
-  // sparse after account removal, so the highest occupied segment determines
-  // the walkable world and every intervening road still needs a portal.
-  const roadPortals = Array.from({ length: segmentCount }, (_, segment) => {
-    const y = segment * STREET_BLOCK_LAYOUT.segmentHeight + STREET_BLOCK_LAYOUT.road.y;
+  const bounds = { width: columns * STREET_BLOCK_LAYOUT.width, height: rows * STREET_BLOCK_LAYOUT.height + 96 };
+  // City gates are only at the east OUTER edge. There is one per row, rather
+  // than one per block column; an interior-column gate would strand the
+  // compact landscape behind a visual road seam.
+  const roadPortals = Array.from({ length: rows }, (_, row) => {
+    const y = row * STREET_BLOCK_LAYOUT.segmentHeight + STREET_BLOCK_LAYOUT.road.y;
     const neighborhoodSpawn = {
       // Stop 192px west of the gate.  This is outside the trigger even with
       // the 16px foot radius, so a city return cannot immediately bounce back.
-      x: STREET_BLOCK_LAYOUT.road.width - 192,
+      x: bounds.width - 192,
       y: y + STREET_BLOCK_LAYOUT.road.height / 2,
       dir: "left",
     };
@@ -269,9 +319,12 @@ export function streetDefinition(entries = []) {
     // block is remembered server-side; Plaza itself has one west gate.
     const citySpawn = { x: 144, y: 480, dir: "right" };
     return {
-      segment,
+      // `segment` remains the metadata field used by connected clients and
+      // reconnect snapshots. In the landscape layout it is the row number.
+      segment: row,
+      row,
       destination: "city",
-      x: STREET_BLOCK_LAYOUT.eastPortal.x,
+      x: bounds.width - STREET_BLOCK_LAYOUT.eastPortal.width,
       y,
       width: STREET_BLOCK_LAYOUT.eastPortal.width,
       height: STREET_BLOCK_LAYOUT.eastPortal.height,
@@ -291,14 +344,21 @@ export function streetDefinition(entries = []) {
     height: STREET_BLOCK_LAYOUT.westPortal.height,
     label: "Willow Walk",
     segment: 0,
+    row: 0,
     spawn: { x: 1248, y: 504, dir: "left" },
   }];
   return {
-    bounds: { width: STREET_BLOCK_LAYOUT.road.width, height },
+    bounds,
     blockers: [...blockers, ...yardBlockers],
     doors,
     lots,
-    segmentCount,
+    blocks,
+    occupiedBlockCount,
+    columns,
+    rows,
+    // Existing renderers use segmentCount to decide how much road scenery to
+    // prepare. It now means row count; blocks is the authoritative grid.
+    segmentCount: rows,
     roadPortals,
     cityPortals,
   };
@@ -312,8 +372,14 @@ export function streetLotForOwner(entries, ownerEmail) {
 }
 
 export function streetReturnSpawnForOwner(entries, ownerEmail) {
-  const lot = streetLotForOwner(entries, ownerEmail);
-  return lot?.returnSpawn ? { ...lot.returnSpawn } : null;
+  const street = streetDefinition(entries);
+  const email = String(ownerEmail || "").trim().toLowerCase();
+  if (isHuddleTestIdentity(email)) return null;
+  const lot = street.lots.find((entry) =>
+    String(entry.ownerEmail || "").trim().toLowerCase() === email);
+  return lot?.returnSpawn &&
+    validStreetWorldMove(street, lot.returnSpawn.x, lot.returnSpawn.y)
+    ? { ...lot.returnSpawn } : null;
 }
 
 export function streetPortalForTransition(destination, x, y, entries) {
@@ -329,22 +395,34 @@ export function streetPortalForTransition(destination, x, y, entries) {
   return null;
 }
 
-// City has one west-side return gate for every residential road block.  A
-// remembered segment is an additional server-side guard: a player who entered
-// from block 3 cannot be redirected to block 0 by a stale client destination.
-// With no remembered block (a direct city join), the physical top gate remains
-// an explicit, valid fallback.
+// City has one west-side return gate. A remembered row is an additional
+// server-side guard: a player who entered from row 3 cannot be redirected to
+// row 0 by a stale client destination. With no remembered row (a direct city
+// join), the physical top gate remains an explicit, valid fallback.
 export function streetCityPortalForTransition(x, y, entries, preferredSegment = null) {
   const street = streetDefinition(entries);
   const gate = street.cityPortals[0];
   if (!gate || !pointHitsRect(x, y, gate, ACTOR_FOOT_RADIUS)) return null;
-  const segment = preferredSegment == null ? 0 : Number(preferredSegment);
-  const selected = street.roadPortals.find((portal) => portal.segment === segment) || street.roadPortals[0];
-  const returnPoint = selected?.returnPoint;
+  // Accept either the old numeric segment or the remembered metadata object.
+  // The field names remain `segment`, `roadY`, and `returnPoint`; only the
+  // meaning of segment changes from a vertical segment to a compact-grid row.
+  const metadata = preferredSegment && typeof preferredSegment === "object" ? preferredSegment : null;
+  const requestedSegment = metadata ? metadata.segment ?? metadata.row : preferredSegment;
+  const segment = Number(requestedSegment);
+  const roadY = Number(metadata?.roadY);
+  const selected = Number.isInteger(segment) && segment >= 0
+    ? street.roadPortals.find((portal) => portal.segment === segment)
+    : null;
+  const byRoadY = Number.isFinite(roadY)
+    ? street.roadPortals.find((portal) => portal.y === roadY)
+    : null;
+  const current = selected || byRoadY || street.roadPortals[0];
   return {
     ...gate,
-    segment: selected?.segment ?? 0,
-    spawn: returnPoint ? { ...returnPoint } : { ...gate.spawn },
+    segment: current?.segment ?? 0,
+    row: current?.row ?? current?.segment ?? 0,
+    roadY: current?.y ?? street.roadPortals[0]?.y ?? STREET_BLOCK_LAYOUT.road.y,
+    spawn: current?.returnPoint ? { ...current.returnPoint } : { ...gate.spawn },
   };
 }
 
@@ -624,12 +702,9 @@ export const LOCATION_PORTALS = Object.freeze({
   office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" } }],
   neighborhood: [
     // HQ Garden is the west end of Willow Walk's main horizontal road. It
-    // mirrors the east city gate and stays west of the first residential lot.
+    // stays west of the first residential lot. City gates are generated from
+    // the current rectangular street grid below, never from this fixed list.
     { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
-    // The complete per-block east gates are generated by streetDefinition().
-    // This first-block entry remains for legacy clients/direct joins; server
-    // validation uses the dynamic street snapshot instead.
-    { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" }, segment: 0 },
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },

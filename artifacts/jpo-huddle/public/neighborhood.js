@@ -1087,14 +1087,32 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _drawNeighborhood() {
       this._tileField(0x77a45f, 0x6f9b59);
       const lots = Array.isArray(this.info.streetLots) ? this.info.streetLots : [];
-      // `lot` values are durable and therefore sparse after deleted test or
-      // former accounts. Bounds come from the server's highest canonical lot,
-      // not the number of directory entries.
-      this.streetSegmentCount = Math.max(1, Math.ceil(Math.max(0, this.mapHeight - 96) / 960));
+      // The server owns the compact landscape layout.  Lot numbers are
+      // permanent addresses and may be sparse, so never derive a row/column
+      // from the highest lot id (or from the number of directory entries).
+      // Older snapshots have no streetBlocks; keep those maps renderable as a
+      // single legacy block rather than inventing a second client layout.
+      const suppliedBlocks = Array.isArray(this.info.streetBlocks) && this.info.streetBlocks.length
+        ? this.info.streetBlocks : null;
+      this.streetBlocks = suppliedBlocks
+        ? suppliedBlocks.map((block, position) => ({
+          ...block,
+          index: Number.isFinite(Number(block.index)) ? Number(block.index) : position,
+          row: Number.isFinite(Number(block.row)) ? Number(block.row) : 0,
+          column: Number.isFinite(Number(block.column)) ? Number(block.column) : 0,
+          x: Number.isFinite(Number(block.x)) ? Number(block.x) : 0,
+          y: Number.isFinite(Number(block.y)) ? Number(block.y) : 0,
+          width: Number.isFinite(Number(block.width)) ? Number(block.width) : 1440,
+          height: Number.isFinite(Number(block.height)) ? Number(block.height) : 960,
+        }))
+        : [{ index: 0, row: 0, column: 0, x: 0, y: 0, width: 1440, height: 960 }];
+      this._streetBlockByIndex = new Map(this.streetBlocks.map((block) => [block.index, block]));
+      this.streetSegmentCount = this.streetBlocks.length;
       this._streetScenerySegments = new Map();
       this.streetLotsVisual = [];
       this._streetPortalVisuals = [];
       this._streetLotVisibleKey = null;
+      this._streetVisibleKey = null;
       this._syncStreetScenery();
       lots.forEach((lot) => {
         const path = this._path({ x: lot.x - 36, y: lot.northSide ? lot.bottom - 90 : lot.bottom - 236,
@@ -1104,6 +1122,13 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         const sign = this._sign(lot.x, lot.bottom - 102, this._residenceSignText(lot));
         this.streetLotsVisual.push({
           lot, path, structure, sign, stage, color: lot.exteriorColor || 'teal',
+          // The union includes the facade, path, sign, and the 4x3 yard.  It
+          // is intentionally a little padded so a house cannot pop while its
+          // label or yard is entering the camera.
+          bounds: {
+            left: Number(lot.x) - 192, right: Number(lot.x) + 192,
+            top: Number(lot.bottom) - 480, bottom: Number(lot.bottom) + 192,
+          },
           yardKey: this._streetYardKey(lot.yard), yard: this._drawStreetYard(lot),
         });
       });
@@ -1113,24 +1138,36 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     _drawStreetSegment(segment) {
-      const base = segment * 960;
+      const block = this._streetBlockByIndex?.get(segment) ||
+        this.streetBlocks?.find((candidate) => Number(candidate.index) === Number(segment)) ||
+        this.streetBlocks?.[segment];
+      if (!block) return [];
+      const x = Number(block.x) || 0;
+      const y = Number(block.y) || 0;
+      const width = Number(block.width) || 1440;
       const objects = [
-        this.add.image(0, base, this._streetSurfaceTexture()).setOrigin(0, 0).setScale(3).setDepth(1),
+        this.add.image(x, y, this._streetSurfaceTexture(width)).setOrigin(0, 0).setScale(3).setDepth(1),
       ];
-      [[90, base + 228], [1090, base + 228], [90, base + 760], [1090, base + 760]]
+      [[90, 228], [1090, 228], [90, 760], [1090, 760]]
+        .map(([localX, localY]) => [x + localX, y + localY])
         .forEach(([x, y]) => objects.push(this._exterior('tree', x, y)));
-      [[270, base + 420], [486, base + 420], [810, base + 420], [1110, base + 420],
-        [270, base + 600], [486, base + 600], [810, base + 600], [1110, base + 600]]
+      [[270, 420], [486, 420], [810, 420], [1110, 420],
+        [270, 600], [486, 600], [810, 600], [1110, 600]]
+        .map(([localX, localY]) => [x + localX, y + localY])
         .forEach(([x, y]) => objects.push(this._exterior('lamp', x, y, 2)));
       return objects;
     }
 
-    _streetSurfaceTexture() {
+    _streetSurfaceTexture(blockWidth = 1440) {
       // Immutable native-resolution road surface shared by every segment.
       // Trees, lamps, residents, signs and houses remain independently layered.
-      const key = `willow-road-surface:${this.mapWidth}`;
+      const width = Number(blockWidth) || 1440;
+      const key = `willow-road-surface:${width}`;
       if (this.textures.exists(key)) return key;
-      const texture = this.textures.createCanvas(key, Math.ceil(this.mapWidth / 3), 320);
+      // Keep this a single 480x320 native road tile even when Willow Walk is
+      // a 7200px-wide 5x4 landscape.  A world-sized Canvas texture allocates a
+      // huge backing surface and also makes every block's road discontinuous.
+      const texture = this.textures.createCanvas(key, Math.ceil(width / 3), 320);
       const ctx = texture.getContext();
       ctx.imageSmoothingEnabled = false;
       const path = (x, y, width, height, fill = '#d8ccb3', border = '#9b927e') => {
@@ -1151,16 +1188,16 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         }
         ctx.stroke(); ctx.globalAlpha = 1;
       };
-      path(0, 432, this.mapWidth, 144, '#55616a', '#3f4950');
-      path(0, 408, this.mapWidth, 24);
-      path(0, 576, this.mapWidth, 24);
+      path(0, 432, width, 144, '#55616a', '#3f4950');
+      path(0, 408, width, 24);
+      path(0, 576, width, 24);
       path(552, 0, 48, 432);
       path(552, 576, 48, 384);
       ctx.strokeStyle = '#f5e7a8';
       ctx.globalAlpha = 0.7;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let x = 24; x < this.mapWidth - 24; x += 56) {
+      for (let x = 24; x < width - 24; x += 56) {
         ctx.moveTo(x / 3, 168); ctx.lineTo((x + 28) / 3, 168);
       }
       for (let y = 24; y < 960; y += 56) {
@@ -1181,18 +1218,38 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       if (!this._streetScenerySegments || !this.streetSegmentCount) return;
       this._syncStreetLotVisibility();
       const camera = this.cameras.main;
-      const top = camera.worldView?.top ?? camera.scrollY ?? 0;
-      const bottom = camera.worldView?.bottom ?? (top + (this.scale?.height || 768) / (camera.zoom || 1));
-      // One segment of prefetch on either side avoids an exposed road edge
-      // during camera motion, while bounding scenery objects as the street
-      // grows from sparse, permanent lot indices.
-      const first = Math.max(0, Math.floor(top / 960) - 1);
-      const last = Math.min(this.streetSegmentCount - 1, Math.floor(bottom / 960) + 1);
-      const visibleKey = `${first}:${last}`;
+      const view = camera.worldView || {};
+      const zoom = camera.zoom || 1;
+      const viewportWidth = Number(view.width || camera.width || this.scale?.width || 1440);
+      const viewportHeight = Number(view.height || camera.height || this.scale?.height || 768);
+      const left = Number.isFinite(Number(view.left)) ? Number(view.left)
+        : Number.isFinite(Number(view.x)) ? Number(view.x) : (camera.scrollX || 0);
+      const top = Number.isFinite(Number(view.top)) ? Number(view.top)
+        : Number.isFinite(Number(view.y)) ? Number(view.y) : (camera.scrollY || 0);
+      const right = Number.isFinite(Number(view.right)) ? Number(view.right)
+        : left + (view.width ? viewportWidth : viewportWidth / zoom);
+      const bottom = Number.isFinite(Number(view.bottom)) ? Number(view.bottom)
+        : top + (view.height ? viewportHeight : viewportHeight / zoom);
+      // Prefetch one block around the 2D camera rectangle.  Quantizing both
+      // axes avoids rebuilding scenery while the camera travels inside one
+      // grid cell, while rectangle intersections prevent a far block in the
+      // same row/column from staying alive.
+      const paddingX = 1440, paddingY = 960;
+      const firstColumn = Math.floor((left - paddingX) / 1440);
+      const lastColumn = Math.floor((right + paddingX) / 1440);
+      const firstRow = Math.floor((top - paddingY) / 960);
+      const lastRow = Math.floor((bottom + paddingY) / 960);
+      const visibleKey = `${firstColumn}:${lastColumn}:${firstRow}:${lastRow}`;
       if (this._streetVisibleKey === visibleKey) return;
       this._streetVisibleKey = visibleKey;
       const wanted = new Set();
-      for (let segment = first; segment <= last; segment++) wanted.add(segment);
+      (this.streetBlocks || []).forEach((block, position) => {
+        const index = Number.isFinite(Number(block.index)) ? Number(block.index) : position;
+        const x = Number(block.x) || 0, y = Number(block.y) || 0;
+        const width = Number(block.width) || 1440, height = Number(block.height) || 960;
+        if (x < right + paddingX && x + width > left - paddingX &&
+            y < bottom + paddingY && y + height > top - paddingY) wanted.add(index);
+      });
       this._streetScenerySegments.forEach((objects, segment) => {
         if (wanted.has(segment)) return;
         objects.forEach((object) => object?.destroy?.());
@@ -1208,32 +1265,58 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _syncStreetLotVisibility() {
       if (this.location !== 'neighborhood' || !this.streetLotsVisual) return;
       const camera = this.cameras.main;
-      const top = camera.worldView?.top ?? camera.scrollY ?? 0;
-      const bottom = camera.worldView?.bottom ?? (top + (this.scale?.height || 768) / (camera.zoom || 1));
+      const view = camera.worldView || {};
+      const zoom = camera.zoom || 1;
+      const viewportWidth = Number(view.width || camera.width || this.scale?.width || 1440);
+      const viewportHeight = Number(view.height || camera.height || this.scale?.height || 768);
+      const left = Number.isFinite(Number(view.left)) ? Number(view.left)
+        : Number.isFinite(Number(view.x)) ? Number(view.x) : (camera.scrollX || 0);
+      const top = Number.isFinite(Number(view.top)) ? Number(view.top)
+        : Number.isFinite(Number(view.y)) ? Number(view.y) : (camera.scrollY || 0);
+      const right = Number.isFinite(Number(view.right)) ? Number(view.right)
+        : left + (view.width ? viewportWidth : viewportWidth / zoom);
+      const bottom = Number.isFinite(Number(view.bottom)) ? Number(view.bottom)
+        : top + (view.height ? viewportHeight : viewportHeight / zoom);
       // Graphics command buffers use absolute world coordinates. Unlike a
       // tilemap they are not automatically culled by the camera: submitting
       // every distant lot was costing the real WebGL client ~167ms per frame.
-      // Quantized, padded bounds avoid per-frame scans and edge pop-in.
+      // Quantized, padded x/y bounds avoid per-frame scans and edge pop-in.
+      const firstX = Math.floor(left / 240) - 1;
+      const lastX = Math.ceil(right / 240) + 1;
       const first = Math.floor(top / 240) - 1;
       const last = Math.ceil(bottom / 240) + 1;
-      const key = `${first}:${last}`;
+      const key = `${firstX}:${lastX}:${first}:${last}`;
       if (key === this._streetLotVisibleKey) return;
       this._streetLotVisibleKey = key;
+      const lowX = firstX * 240, highX = lastX * 240;
       const low = first * 240, high = last * 240;
       for (const visual of this.streetLotsVisual) {
-        const visible = visual.lot.bottom + 192 >= low && visual.lot.bottom - 480 <= high;
+        const bounds = visual.bounds || (Number.isFinite(Number(visual.lot.x)) ? {
+          left: Number(visual.lot.x) - 192, right: Number(visual.lot.x) + 192,
+          top: Number(visual.lot.bottom) - 480, bottom: Number(visual.lot.bottom) + 192,
+        } : null);
+        const xVisible = !bounds || (bounds.right >= lowX && bounds.left <= highX);
+        const yVisible = !bounds
+          ? visual.lot.bottom + 192 >= low && visual.lot.bottom - 480 <= high
+          : bounds.bottom >= low && bounds.top <= high;
+        const visible = xVisible && yVisible;
         if (visual.visible === visible) continue;
         visual.visible = visible;
-        visual.path?.setVisible(visible);
-        visual.sign?.setVisible(visible);
-        visual.structure?.forEach(object => object.setVisible(visible));
-        visual.yard?.forEach(object => object.setVisible(visible));
+        visual.path?.setVisible?.(visible);
+        visual.sign?.setVisible?.(visible);
+        visual.structure?.forEach(object => object?.setVisible?.(visible));
+        visual.yard?.forEach(object => object?.setVisible?.(visible));
       }
       for (const visual of this._streetPortalVisuals || []) {
-        const visible = visual.bottom >= low && visual.top <= high;
+        const portalLeft = Number.isFinite(Number(visual.left)) ? Number(visual.left)
+          : Number.isFinite(Number(visual.x)) ? Number(visual.x) : null;
+        const portalRight = Number.isFinite(Number(visual.right)) ? Number(visual.right)
+          : portalLeft != null && Number.isFinite(Number(visual.width)) ? portalLeft + Number(visual.width) : null;
+        const xVisible = portalLeft == null || (portalRight >= lowX && portalLeft <= highX);
+        const visible = xVisible && visual.bottom >= low && visual.top <= high;
         if (visual.visible === visible) continue;
         visual.visible = visible;
-        visual.objects.forEach(object => object.setVisible(visible));
+        visual.objects?.forEach(object => object?.setVisible?.(visible));
       }
     }
 
@@ -1517,7 +1600,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         // "OWNER'S HOME" portal label over that sign.
         if (portal.residence) {
           this.portalCues?.push(cue);
-          this._streetPortalVisuals.push({ top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue] });
+          this._streetPortalVisuals.push({
+            x: portal.x, width: portal.width, left: portal.x, right: portal.x + portal.width,
+            top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue],
+          });
           continue;
         }
                 const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
@@ -1538,7 +1624,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
         }).setOrigin(0.5, 1).setDepth(2000);
         this.portalCues?.push(cue, text);
-        this._streetPortalVisuals.push({ top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue, text] });
+        this._streetPortalVisuals.push({
+          x: portal.x, width: portal.width, left: portal.x, right: portal.x + portal.width,
+          top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue, text],
+        });
       }
       this._streetLotVisibleKey = null;
       this._syncStreetLotVisibility();

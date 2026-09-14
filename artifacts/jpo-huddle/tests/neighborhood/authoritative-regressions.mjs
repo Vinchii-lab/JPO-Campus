@@ -17,6 +17,7 @@ import {
   pointHitsRect,
   portalForTransition,
   streetDefinition,
+  streetCityPortalForTransition,
   streetLotForOwner,
   staticSeatStandCandidates,
   validStreetWorldMove,
@@ -63,6 +64,84 @@ for (const lot of sparseStreet.lots) {
     lot.returnSpawn.x, lot.returnSpawn.y, block,
   )), `lot ${lot.lot} return point must clear its facade`);
 }
+
+// Dense accounts use a compact landscape grid, while sparse durable addresses
+// still retain their original lot identity and owner. The display slot is the
+// only value allowed to choose a visible position.
+const denseHomes = Array.from({ length: 132 }, (_, index) => ({
+  ownerEmail: `dense-${index + 1}@example.com`,
+  lotIndex: index + 1,
+  construction: { wallsBuilt: true, complete: true },
+}));
+const denseStreet = streetDefinition(denseHomes);
+assert.equal(denseStreet.occupiedBlockCount, 17);
+assert.equal(denseStreet.columns, 5);
+assert.equal(denseStreet.rows, 4);
+assert.equal(denseStreet.blocks.length, 20, "tail blocks complete the rectangular grid");
+assert.deepEqual(
+  denseStreet.blocks[19],
+  { index: 19, row: 3, column: 4, x: 5760, y: 2880, width: 1440, height: 960 },
+);
+assert.deepEqual(denseStreet.bounds, { width: 7200, height: 3936 });
+assert.equal(denseStreet.lots[131].displayIndex, 132);
+assert.equal(denseStreet.lots[131].row, 3);
+assert.equal(denseStreet.lots[131].column, 1);
+for (const block of denseStreet.blocks) {
+  const intersection = { x: block.x + 576, y: block.y + 504 };
+  assert(validStreetWorldMove(denseStreet, intersection.x, intersection.y),
+    `block ${block.index} road intersection remains walkable`);
+}
+for (let row = 0; row < denseStreet.rows; row++) {
+  const y = row * 960 + 504;
+  for (let x = 48; x < denseStreet.bounds.width; x += 48)
+    assert(validStreetWorldMove(denseStreet, x, y), `row ${row} horizontal road remains connected`);
+}
+for (let column = 0; column < denseStreet.columns; column++) {
+  const x = column * 1440 + 576;
+  for (let y = 48; y < denseStreet.rows * 960; y += 48)
+    assert(validStreetWorldMove(denseStreet, x, y), `column ${column} vertical road remains connected`);
+}
+for (const lot of denseStreet.lots) {
+  assert(validStreetWorldMove(denseStreet, lot.returnSpawn.x, lot.returnSpawn.y),
+    `dense lot ${lot.lot} return spawn remains walkable`);
+  assert(!denseStreet.blockers.some((block) =>
+    pointHitsRect(lot.returnSpawn.x, lot.returnSpawn.y, block)),
+  `dense lot ${lot.lot} return spawn clears its house`);
+}
+assert.equal(denseStreet.roadPortals.length, 4, "one east gate per row");
+assert(denseStreet.roadPortals.every((portal) =>
+  portal.x === denseStreet.bounds.width - 96 &&
+  portal.x + portal.width === denseStreet.bounds.width &&
+  portal.y === portal.row * 960 + 432),
+"city gates use only the east outer edge");
+for (const portal of denseStreet.roadPortals) {
+  const returned = streetCityPortalForTransition(
+    48, 504, denseHomes, { segment: portal.row, roadY: portal.y, returnPoint: portal.returnPoint },
+  );
+  assert.equal(returned.segment, portal.row);
+  assert(validStreetWorldMove(denseStreet, returned.spawn.x, returned.spawn.y),
+    `city return row ${portal.row} is current and walkable`);
+}
+const staleCityReturn = streetCityPortalForTransition(
+  48, 504, denseHomes, { segment: 99, roadY: 99_999, returnPoint: { x: -1, y: -1 } },
+);
+assert.equal(staleCityReturn.segment, 0, "stale city metadata resolves to a current gate row");
+assert(validStreetWorldMove(denseStreet, staleCityReturn.spawn.x, staleCityReturn.spawn.y));
+
+const sparseIds = [
+  { ownerEmail: "sparse-first@example.com", lotIndex: 3, name: "First" },
+  { ownerEmail: "sparse-middle@example.com", lotIndex: 900, name: "Middle" },
+  { ownerEmail: "sparse-last@example.com", lotIndex: 90_000, name: "Last" },
+];
+const sparseGrid = streetDefinition(sparseIds);
+assert.deepEqual(sparseGrid.lots.map((lot) => [lot.lot, lot.displayIndex, lot.ownerEmail]), [
+  [3, 1, "sparse-first@example.com"],
+  [900, 2, "sparse-middle@example.com"],
+  [90_000, 3, "sparse-last@example.com"],
+]);
+assert(sparseGrid.lots.every((lot) => lot.row === 0 && lot.column === 0),
+  "sparse permanent ids do not create positional holes");
+assert.deepEqual(sparseGrid.bounds, { width: 1440, height: 1056 });
 
 // Public benches publish more than one authored exit. Validate each candidate
 // against the same actor-radius geometry and sample the complete seat->stand
@@ -111,7 +190,7 @@ const clientSource = fs.readFileSync(path.join(here, "../../public/neighborhood.
 assert.match(clientSource, /const LOT_GROUND_DEPTH = 2/);
 assert.match(clientSource, /\.setDepth\(LOT_GROUND_DEPTH\)/, "foundation and yard planes share a low depth");
 assert.match(clientSource, /\.setDepth\(top \+ 48 \* \(row \+ 1\)\)/, "wall tiles must y-sort by their bottom edge");
-assert.match(clientSource, /if \(portal\.residence\) \{\s*this\.portalCues\?\.push\(cue\);\s*continue;/s,
+assert.match(clientSource, /if \(portal\.residence\) \{\s*this\.portalCues\?\.push\(cue\);(?:(?!scene\.add\.text|this\.add\.text)[\s\S])*?continue;/,
   "residence doors keep a cue but do not add a duplicate owner label");
 assert.doesNotMatch(clientSource, /setDepth\(Math\.max\(2, originY - 1\)\)/,
   "yard ground must not be y-sorted over actors");

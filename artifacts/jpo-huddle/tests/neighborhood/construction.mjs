@@ -208,15 +208,20 @@ try {
   // Visitor walks to the now-canonical completed door and can enter because the
   // default access mode is public; unfinished lots have no such door.
   const doorPoint = [finishedDoor.x + finishedDoor.width / 2, finishedDoor.y + finishedDoor.height / 2];
-  const roadY = (lot) => Math.floor((lot.lot - 1) / 8) * 960 + 504;
+  // Display slots are dense even when durable lot ids are sparse. Use the
+  // canonical compact-grid row/column metadata rather than the permanent lot
+  // number to walk the connected cross-streets.
+  const roadY = (lot) => lot.row * 960 + 504;
+  const roadX = (lot) => lot.column * 1440 + 576;
   // Follow the clear street/cross-street corridors rather than jumping from
   // the visitor's lot to a distant door. This proves the actual door contract
   // without relying on the server's deliberately capped move-distance budget.
   let visitorPosition = [visitorStreet.lot.returnSpawn.x, visitorStreet.lot.returnSpawn.y];
   for (const point of [
     [visitorPosition[0], roadY(visitorStreet.lot)],
-    [576, roadY(visitorStreet.lot)],
-    [576, roadY(builderStreet.lot)],
+    [roadX(visitorStreet.lot), roadY(visitorStreet.lot)],
+    [roadX(visitorStreet.lot), roadY(builderStreet.lot)],
+    [roadX(builderStreet.lot), roadY(builderStreet.lot)],
     [doorPoint[0], roadY(builderStreet.lot)],
     doorPoint,
   ]) visitorPosition = await walkLine(visitor.socket, visitorPosition, point);

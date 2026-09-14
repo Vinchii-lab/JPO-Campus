@@ -3453,6 +3453,46 @@ async function refreshStreetHomes() {
   streetDirectoryLoad = load;
   return load.promise;
 }
+// A grace snapshot can outlive a street-directory refresh. Never re-enter a
+// compact street at a stale coordinate that is now outside its new bounds or
+// inside a newly published house/yard blocker.
+function normalizeStreetReconnectState(state) {
+  if (!state || !["city", "neighborhood"].includes(state.locationId)) return;
+  if (state.locationId === "neighborhood") {
+    if (!validStreetWorldMove(streetWorld, state.x, state.y)) {
+      const ownLot = streetLotForOwner(streetHomes, state.email);
+      const spawn = ownLot?.returnSpawn || { x: 144, y: 504, dir: "right" };
+      state.x = spawn.x;
+      state.y = spawn.y;
+      state.dir = spawn.dir || "right";
+      state.anim = "idle";
+    }
+  }
+  if (state.residentialExitBlock) {
+    // Retain the established metadata field names while resolving its row
+    // against the current grid. A removed/compacted row falls back to the
+    // first current east gate rather than a stale roadY/returnPoint.
+    const remembered = state.residentialExitBlock;
+    const requested = Number(remembered.segment);
+    const bySegment = Number.isInteger(requested)
+      ? streetWorld.roadPortals.find((portal) => portal.segment === requested)
+      : null;
+    const byRoadY = Number.isFinite(Number(remembered.roadY))
+      ? streetWorld.roadPortals.find((portal) => portal.y === Number(remembered.roadY))
+      : null;
+    const gate = bySegment || byRoadY || streetWorld.roadPortals[0];
+    if (gate) {
+      state.residentialExitBlock = {
+        ...remembered,
+        segment: gate.segment,
+        roadY: gate.y,
+        returnPoint: gate.returnPoint ? { ...gate.returnPoint } : null,
+      };
+    } else {
+      delete state.residentialExitBlock;
+    }
+  }
+}
 function locationInfo(locationId) {
   const parsed = parseLocation(locationId);
   if (!parsed) return null;
@@ -3468,6 +3508,10 @@ function locationInfo(locationId) {
       // the browser and validated by the server.
       portals: [...fixedPortals, ...streetWorld.roadPortals, ...streetWorld.doors],
       streetLots: streetWorld.lots,
+      // Empty tail blocks are intentional: they keep the final row
+      // rectangular so crossing roads never dead-end at a sparse directory
+      // tail.
+      streetBlocks: streetWorld.blocks,
     };
   }
   const base = parsed.kind === "home" ? {
@@ -3835,6 +3879,20 @@ async function restorePlayer(socket, row) {
         state.dir = LOCATIONS.office.spawn.dir;
       }
     }
+  }
+  if (state.locationId === "neighborhood" || state.locationId === "city") {
+    normalizeStreetReconnectState(state);
+  }
+  if (state.locationId === "city" &&
+      !validLocationMove(parseLocation("city"), state.x, state.y)) {
+    // City bounds/blockers are fixed, but a grace snapshot can still contain a
+    // coordinate from an older map revision. Re-enter at the authored city
+    // spawn rather than restoring into a solid storefront or outside bounds.
+    const spawn = locationSpawn(parseLocation("city"));
+    state.x = spawn.x;
+    state.y = spawn.y;
+    state.dir = spawn.dir;
+    state.anim = "idle";
   }
 
   // Void rescue: a saved position that lands on an unpainted map tile (e.g. a
@@ -9540,8 +9598,11 @@ io.on("connection", (socket) => {
     }
     // Location changes are physical map portals, not menu travel. Validate this
     // before any home access query so a forged destination cannot probe homes.
-    const rememberedSegment = Number.isInteger(Number(p.residentialExitBlock?.segment))
-      ? Number(p.residentialExitBlock.segment) : null;
+    // Keep the existing remembered metadata shape intact. The street helper
+    // resolves its `segment` value as a compact-grid row and rejects stale
+    // roadY/returnPoint values in favor of a current gate.
+    const rememberedSegment = p.residentialExitBlock
+      ? { ...p.residentialExitBlock } : null;
     const portal = oldLocation === "neighborhood" && target.kind === "home"
       ? streetPortalForTransition(target.id, p.x, p.y, streetHomes)
       : oldLocation === "neighborhood" && target.id === "city"
@@ -9618,6 +9679,11 @@ io.on("connection", (socket) => {
       if (target.id === "neighborhood" && previousHome?.kind === "home") {
         spawn = { ...homeReturnSpawn };
       }
+      if (target.id === "neighborhood" && !validStreetWorldMove(streetWorld, spawn.x, spawn.y)) {
+        const fallback = streetLotForOwner(streetHomes, p.email)?.returnSpawn ||
+          { x: 144, y: 504, dir: "right" };
+        if (validStreetWorldMove(streetWorld, fallback.x, fallback.y)) spawn = { ...fallback };
+      }
       // Layout rules reserve this route for new placements. Older saved homes
       // may predate that rule, so recover to a nearby clear tile rather than
       // spawning a visitor inside a sofa after an upgrade.
@@ -9641,7 +9707,7 @@ io.on("connection", (socket) => {
         p.residentialExitBlock = {
           ...(p.residentialExitBlock || {}),
           segment: Number(portal.segment),
-          roadY: Number(portal.y),
+          roadY: Number(portal.roadY ?? portal.y),
           returnPoint: { ...spawn },
         };
       }
