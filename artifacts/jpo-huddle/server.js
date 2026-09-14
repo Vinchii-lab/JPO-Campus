@@ -7716,6 +7716,35 @@ function voicePairOk(aId, bId) {
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
+  // Bounded aggregate diagnostics, never raw client content or identity.
+  // Pair real-browser timing with server-observed movement rejections.
+  let performanceReports = 0, lastPerformanceReport = 0;
+  let performanceAcceptedMoves = 0;
+  const performanceRejectedMoves = Object.create(null);
+  socket.on("clientPerformanceSample", (sample) => {
+    const player = players[socket.id];
+    const now = Date.now();
+    if (!player || !sample || typeof sample !== "object" ||
+        performanceReports >= 3 || now - lastPerformanceReport < 8000) return;
+    performanceReports++;
+    lastPerformanceReport = now;
+    const report = {
+      source: "client-reported", location: locationOf(player),
+      renderer: sample.renderer === "WebGL" ? "WebGL" : "Canvas",
+      localPet: sample.localPet === true,
+      acceptedMoves: performanceAcceptedMoves,
+      rejectedMoves: { ...performanceRejectedMoves },
+    };
+    for (const key of ["frames", "movingFrames", "frameP50Ms", "frameP95Ms", "slowFrames",
+      "updateAvgMs", "updateMaxMs", "renderAvgMs", "renderMaxMs",
+      "objects", "visibleObjects", "blockers", "lots", "groundImages", "remotes", "zoom"]) {
+      if (typeof sample[key] === "number" && Number.isFinite(sample[key]))
+        report[key] = Math.max(0, Math.min(1000000, sample[key]));
+    }
+    console.log("[neighborhood-performance]", JSON.stringify(report));
+    performanceAcceptedMoves = 0;
+    for (const key of Object.keys(performanceRejectedMoves)) delete performanceRejectedMoves[key];
+  });
 
   // Build handshake — how "everyone gets the fix" works without chasing
   // people down: the client compares this stamp to the one baked into its
@@ -10251,10 +10280,14 @@ io.on("connection", (socket) => {
     // A rejected packet must put the local physics body back on the last
     // authoritative point. Otherwise a client can remain visibly inside a
     // facade until another accepted packet happens to correct it.
-    const rejectMove = (reason = "validation") => socket.emit("playerMoveCorrection", {
-      x: me.x, y: me.y, dir: me.dir || "down", anim: me.anim || "idle",
-      location: locationOf(me), seq: movementRevisionOf(me), clientSeq: packetSequence, reason,
-    });
+    const rejectMove = (reason = "validation") => {
+      if (performanceReports < 3)
+        performanceRejectedMoves[reason] = (performanceRejectedMoves[reason] || 0) + 1;
+      socket.emit("playerMoveCorrection", {
+        x: me.x, y: me.y, dir: me.dir || "down", anim: me.anim || "idle",
+        location: locationOf(me), seq: movementRevisionOf(me), clientSeq: packetSequence, reason,
+      });
+    };
 
     // Throttle: cap how often we accept + rebroadcast movement. The client sends
     // ~20/s (every 50ms); anything faster than MOVE_MIN_INTERVAL_MS is a flood.
@@ -10411,6 +10444,7 @@ io.on("connection", (socket) => {
     wasSitting = sitting;
     lastMoveAt = now;
     if (LT_METRICS) ltState.mvOk++;
+    if (performanceReports < 3) performanceAcceptedMoves++;
     // Red Light Green Light rides the validated pipeline: the move was already
     // accepted as legit, so red-light detection can't false-positive off junk.
     rlglOnMove(socket.id, rlglPrevX, rlglPrevY, x, y, now);

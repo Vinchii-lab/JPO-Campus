@@ -15,6 +15,12 @@ Performance checks must match the reported scene, movement, renderer, and sessio
 
 **How to apply:** Inspect the live browser renderer and measure frame intervals, update/render cost, and correction reasons during the reported action. Treat fixture-only FPS as a narrow rendering measurement, not proof of smooth signed-in gameplay.
 
+Treat absolute-coordinate Phaser Graphics as explicitly visibility-managed content, not automatically culled map tiles.
+
+**Why:** A real, fully populated residential street spent almost its entire frame in WebGL rendering while the same client's plaza and pet were fast. Small fixtures missed the cost of distant lot Graphics still being submitted.
+
+**How to apply:** Test with the full residential population, including distant lots. Bound rendering by padded camera-world bounds; include paths, markers, yards, signs, and portal cues. Reapply visibility when live directory updates replace objects, without removing authoritative geometry or ownership.
+
 Build-update cooldowns must schedule another check, and recovery must not depend solely on a healthy gameplay socket.
 
 **Why:** Several fixes within a five-minute reload cooldown can leave an open page running the original code if its sole reconnect check returns early.

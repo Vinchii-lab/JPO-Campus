@@ -873,7 +873,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         const sorted = frames.slice().sort((a, b) => a - b);
         const count = Math.max(1, frames.length);
         const round = value => Math.round(value * 100) / 100;
-        console.info('[neighborhood-performance]', JSON.stringify({
+        const sample = {
           build: window.__BUILD__, location: this.location,
           renderer: this.game.renderer?.type === Phaser.WEBGL ? 'WebGL' : 'Canvas',
           frames: frames.length, movingFrames, hidden: document.hidden,
@@ -883,12 +883,15 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           updateAvgMs: round(updateMs / count), updateMaxMs: round(maxUpdate),
           renderAvgMs: round(renderMs / count), renderMaxMs: round(maxRender),
           objects: this.children.length, blockers: this.info.geometry?.blockers?.length || 0,
+          visibleObjects: this.children.list.filter(object => object.visible).length,
           lots: this.info.streetLots?.length || 0, groundImages: this._groundTiles?.length || 0,
           remotes: Object.keys(this.remotes || {}).length, localPet: !!this.localPet,
           zoom: round(this.cameras.main.zoom),
           scenes: this.game.scene.getScenes(true).map(scene => scene.sys.settings.key),
           corrections: this._performanceCorrections,
-        }));
+        };
+        console.log('[neighborhood-performance]', JSON.stringify(sample));
+        if (socket.connected) socket.volatile.emit('clientPerformanceSample', sample);
         frames = []; updateMs = renderMs = maxUpdate = maxRender = movingFrames = 0;
         this._performanceCorrections = {};
         since = now;
@@ -1089,20 +1092,24 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // not the number of directory entries.
       this.streetSegmentCount = Math.max(1, Math.ceil(Math.max(0, this.mapHeight - 96) / 960));
       this._streetScenerySegments = new Map();
-      this._syncStreetScenery();
       this.streetLotsVisual = [];
+      this._streetPortalVisuals = [];
+      this._streetLotVisibleKey = null;
+      this._syncStreetScenery();
       lots.forEach((lot) => {
-        this._path({ x: lot.x - 36, y: lot.northSide ? lot.bottom - 90 : lot.bottom - 236,
+        const path = this._path({ x: lot.x - 36, y: lot.northSide ? lot.bottom - 90 : lot.bottom - 236,
           width: 72, height: lot.northSide ? 198 : 246 });
         const stage = lot.construction?.stage || 'empty';
         const structure = this._drawResidenceStage(lot);
         const sign = this._sign(lot.x, lot.bottom - 102, this._residenceSignText(lot));
         this.streetLotsVisual.push({
-          lot, structure, sign, stage, color: lot.exteriorColor || 'teal',
+          lot, path, structure, sign, stage, color: lot.exteriorColor || 'teal',
           yardKey: this._streetYardKey(lot.yard), yard: this._drawStreetYard(lot),
         });
       });
       this._sign(720, 72, 'WILLOW WALK · ONE SHARED STREET');
+      this._streetLotVisibleKey = null;
+      this._syncStreetLotVisibility();
     }
 
     _drawStreetSegment(segment) {
@@ -1125,6 +1132,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     _syncStreetScenery() {
       if (!this._streetScenerySegments || !this.streetSegmentCount) return;
+      this._syncStreetLotVisibility();
       const camera = this.cameras.main;
       const top = camera.worldView?.top ?? camera.scrollY ?? 0;
       const bottom = camera.worldView?.bottom ?? (top + (this.scale?.height || 768) / (camera.zoom || 1));
@@ -1148,6 +1156,38 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           this._streetScenerySegments.set(segment, this._drawStreetSegment(segment));
         }
       });
+    }
+
+    _syncStreetLotVisibility() {
+      if (this.location !== 'neighborhood' || !this.streetLotsVisual) return;
+      const camera = this.cameras.main;
+      const top = camera.worldView?.top ?? camera.scrollY ?? 0;
+      const bottom = camera.worldView?.bottom ?? (top + (this.scale?.height || 768) / (camera.zoom || 1));
+      // Graphics command buffers use absolute world coordinates. Unlike a
+      // tilemap they are not automatically culled by the camera: submitting
+      // every distant lot was costing the real WebGL client ~167ms per frame.
+      // Quantized, padded bounds avoid per-frame scans and edge pop-in.
+      const first = Math.floor(top / 240) - 1;
+      const last = Math.ceil(bottom / 240) + 1;
+      const key = `${first}:${last}`;
+      if (key === this._streetLotVisibleKey) return;
+      this._streetLotVisibleKey = key;
+      const low = first * 240, high = last * 240;
+      for (const visual of this.streetLotsVisual) {
+        const visible = visual.lot.bottom + 192 >= low && visual.lot.bottom - 480 <= high;
+        if (visual.visible === visible) continue;
+        visual.visible = visible;
+        visual.path?.setVisible(visible);
+        visual.sign?.setVisible(visible);
+        visual.structure?.forEach(object => object.setVisible(visible));
+        visual.yard?.forEach(object => object.setVisible(visible));
+      }
+      for (const visual of this._streetPortalVisuals || []) {
+        const visible = visual.bottom >= low && visual.top <= high;
+        if (visual.visible === visible) continue;
+        visual.visible = visible;
+        visual.objects.forEach(object => object.setVisible(visible));
+      }
     }
 
     _residenceSignText(lot) {
@@ -1332,6 +1372,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           yardChanged = true;
         }
         visual.lot = { ...visual.lot, ...current };
+        visual.visible = undefined;
       });
       this.info.streetLots = this.streetLotsVisual.map((visual) => visual.lot);
       // Rebuild only from the updated authoritative lot data. This keeps
@@ -1373,6 +1414,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         this._yardBlocks.clear(true, true);
         yardBlocks.forEach((block) => this._addBlock(this._yardBlocks, block));
       }
+      this._streetLotVisibleKey = null;
+      this._syncStreetLotVisibility();
     }
 
 
@@ -1417,6 +1460,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     _drawPortalCues() {
+      this._streetPortalVisuals = [];
       for (const portal of this.doors) {
         const cue = this.add.graphics().setDepth(3);
         cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
@@ -1426,6 +1470,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         // "OWNER'S HOME" portal label over that sign.
         if (portal.residence) {
           this.portalCues?.push(cue);
+          this._streetPortalVisuals.push({ top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue] });
           continue;
         }
                 const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
@@ -1446,7 +1491,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
         }).setOrigin(0.5, 1).setDepth(2000);
         this.portalCues?.push(cue, text);
+        this._streetPortalVisuals.push({ top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue, text] });
       }
+      this._streetLotVisibleKey = null;
+      this._syncStreetLotVisibility();
     }
 
     _insidePortal(x, y) {
@@ -2302,6 +2350,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this.remotes = {};
       this.furniture = [];
       this.streetLotsVisual = null;
+      this._streetPortalVisuals = null;
       this.localBubble = null;
       this.player = null;
       this.localNameTag = null;
