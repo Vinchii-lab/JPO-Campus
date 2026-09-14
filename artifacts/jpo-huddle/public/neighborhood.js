@@ -871,56 +871,41 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         art.generateTexture(key, period, period);
         art.destroy();
       }
-      // Cover only the screen with fixed-camera pieces. Each backing canvas is
-      // capped at 1024px in either dimension, regardless of world height; the
-      // tile offset is synchronized to camera travel in update().
-      const maxCanvasSide = 1024;
-      const viewportWidth = Math.max(1, this.scale?.width || maxCanvasSide);
-      const viewportHeight = Math.max(1, this.scale?.height || 768);
-      this._groundViewport = { width: viewportWidth, height: viewportHeight, base, alternate };
-      const tiles = [];
-      for (let y = 0; y < viewportHeight; y += maxCanvasSide) {
-        for (let x = 0; x < viewportWidth; x += maxCanvasSide) {
-          const width = Math.min(maxCanvasSide, viewportWidth - x);
-          const height = Math.min(maxCanvasSide, viewportHeight - y);
-          const tile = this.add.tileSprite(x + width / 2, y + height / 2, width, height, key)
-            .setScrollFactor(0).setDepth(0);
-          tile._groundScreenX = x;
-          tile._groundScreenY = y;
-          tile._groundWidth = width;
-          tile._groundHeight = height;
-          tiles.push(tile);
-        }
-      }
-      this._groundTiles = tiles;
-      return tiles;
+      // Shared immutable 240px images follow the normal world camera.
+      // Canvas TileSprite setters invalidate their backing canvas on EVERY
+      // camera-pan frame. A pooled image grid only moves on chunk crossings.
+      this._groundTextureKey = key;
+      this._groundTiles = [];
+      this._groundSyncKey = null;
+      this._syncTileField();
+      return this._groundTiles;
     }
 
     _syncTileField() {
-      if (!this._groundTiles?.length) return;
+      if (!this._groundTiles || !this._groundTextureKey) return;
       const camera = this.cameras.main;
-      const viewport = this._groundViewport;
-      if (viewport && (viewport.width !== this.scale.width || viewport.height !== this.scale.height)) {
-        this._groundTiles.forEach(tile => tile.destroy());
-        this._tileField(viewport.base, viewport.alternate);
-        this._groundSyncKey = null;
-      }
       const zoom = camera.zoom || 1;
-      const syncKey = `${camera.scrollX}:${camera.scrollY}:${zoom}:${camera.width}:${camera.height}`;
+      const width = camera.width || this.scale.width;
+      const height = camera.height || this.scale.height;
+      const left = camera.scrollX + width * (camera.originX ?? 0.5) * (1 - 1 / zoom);
+      const top = camera.scrollY + height * (camera.originY ?? 0.5) * (1 - 1 / zoom);
+      const size = 240;
+      const firstX = Math.floor(left / size) - 1;
+      const firstY = Math.floor(top / size) - 1;
+      const cols = Math.ceil(width / zoom / size) + 3;
+      const rows = Math.ceil(height / zoom / size) + 3;
+      const syncKey = `${firstX}:${firstY}:${cols}:${rows}`;
       if (this._groundSyncKey === syncKey) return;
       this._groundSyncKey = syncKey;
-      const originX = (camera.width || this.scale.width) * (camera.originX ?? 0.5);
-      const originY = (camera.height || this.scale.height) * (camera.originY ?? 0.5);
-      this._groundTiles.forEach((tile) => {
-        // ScrollFactor(0) ignores scroll, not camera zoom. Invert that zoom
-        // around its origin so the bounded canvases cover the entire screen.
-        tile.setScale(1 / zoom);
-        tile.setPosition(
-          originX + (tile._groundScreenX + tile._groundWidth / 2 - originX) / zoom,
-          originY + (tile._groundScreenY + tile._groundHeight / 2 - originY) / zoom);
-        tile.tileScaleX = tile.tileScaleY = zoom;
-        tile.tilePositionX = (camera.scrollX + originX) * zoom + tile._groundScreenX - originX;
-        tile.tilePositionY = (camera.scrollY + originY) * zoom + tile._groundScreenY - originY;
+      const count = cols * rows;
+      while (this._groundTiles.length < count) {
+        this._groundTiles.push(this.add.image(0, 0, this._groundTextureKey).setOrigin(0, 0).setDepth(0));
+      }
+      this._groundTiles.forEach((tile, index) => {
+        tile.setVisible(index < count);
+        if (index < count) tile.setPosition(
+          (firstX + index % cols) * size,
+          (firstY + Math.floor(index / cols)) * size);
       });
     }
 

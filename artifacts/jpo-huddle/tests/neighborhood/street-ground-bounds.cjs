@@ -31,21 +31,23 @@ ${method('_drawNeighborhood', '_residenceSignText')}
   return new Neighborhood();
 })()`, { syncZoomControls() {} });
 
+let positions = 0;
 const canvasSizes = [];
 const graphics = {
   fillStyle() { return this; }, fillRect() { return this; },
   lineStyle() { return this; }, strokeRect() { return this; },
-  fillCircle() { return this; }, generateTexture() {}, destroy() {},
+  fillCircle() { return this; }, generateTexture(_key, width, height) { canvasSizes.push({ width, height }); }, destroy() {},
 };
 scene.textures = { exists: () => false };
 scene.make = { graphics: () => graphics };
 scene.add = {
-  tileSprite(x, y, width, height) {
-    canvasSizes.push({ x, y, width, height });
+  tileSprite() { throw new Error('Ground must not repaint Canvas TileSprites while walking'); },
+  image() {
     return {
-      setScrollFactor() { return this; }, setDepth() { return this; },
+      setOrigin() { return this; }, setDepth() { return this; },
+      setVisible(value) { this.visible = value; return this; },
       setScale(value) { this.scale = value; return this; },
-      setPosition(x, y) { this.x = x; this.y = y; return this; },
+      setPosition(x, y) { positions++; this.x = x; this.y = y; return this; },
     };
   },
 };
@@ -54,17 +56,27 @@ scene.mapWidth = 1440;
 scene.mapHeight = 960 * 10000 + 96; // sparse durable lot far down Willow Walk
 scene.scale = { width: 1440, height: 900 };
 scene._tileField(0x77a45f, 0x6f9b59);
-assert.equal(canvasSizes.length, 2, 'ground has viewport pieces only, never one per street segment');
-assert(canvasSizes.every(({ width, height }) => width <= 1024 && height <= 1024),
-  `TileSprite canvas must stay bounded: ${JSON.stringify(canvasSizes)}`);
+assert.equal(canvasSizes.length, 1, 'one shared pattern, independent of street height');
+assert(canvasSizes.every(({ width, height }) => width === 240 && height === 240));
 scene.cameras.main.zoom = 0.7;
 scene._syncTileField();
-for (const tile of scene._groundTiles) {
-  const screenLeft = (tile.x - tile._groundWidth * tile.scale / 2 - 720) * 0.7 + 720;
-  const screenTop = (tile.y - tile._groundHeight * tile.scale / 2 - 450) * 0.7 + 450;
-  assert(Math.abs(screenLeft - tile._groundScreenX) < 1e-8, 'zoomed ground must cover left edge');
-  assert(Math.abs(screenTop - tile._groundScreenY) < 1e-8, 'zoomed ground must cover top edge');
+for (const zoom of [0.5, 0.7, 1, 4]) {
+  scene.cameras.main.zoom = zoom;
+  scene._syncTileField();
+  const visible = scene._groundTiles.filter(t => t.visible);
+  const left = 720 * (1 - 1 / zoom), top = 450 * (1 - 1 / zoom);
+  assert(Math.min(...visible.map(t => t.x)) <= left);
+  assert(Math.max(...visible.map(t => t.x + 240)) >= left + 1440 / zoom);
+  assert(Math.min(...visible.map(t => t.y)) <= top);
+  assert(Math.max(...visible.map(t => t.y + 240)) >= top + 900 / zoom);
+  assert(scene._groundTiles.length < 200, 'pool stays viewport-bounded even in a huge world');
 }
+scene.cameras.main.zoom = 1;
+scene._syncTileField();
+const beforePan = positions;
+for (let x = 1; x < 100; x++) { scene.cameras.main.scrollX = x; scene._syncTileField(); }
+assert.equal(positions, beforePan, 'sub-chunk camera travel does not update/repaint ground objects');
+scene.cameras.main.zoom = 0.7;
 
 // Drawing a sparse street must derive its range from server map height rather
 // than `streetLots.length / 8`, but keep only near-camera scenery alive. The
@@ -90,25 +102,23 @@ for (const width of [390, 1024, 1920, 2560]) {
   scene.cameras.main.width = width;
   scene.cameras.main.height = 900;
   scene._fitNeighborhoodCamera();
-  assert(width / scene.cameras.main.zoom <= scene.mapWidth,
-    'camera must not reveal grass beyond road endpoints');
+  assert.equal(scene.cameras.main.zoom, 1, 'viewport fitting does not override HQ zoom');
 }
 scene.location = 'city';
 scene.mapWidth = 1152;
 scene.mapHeight = 912;
 scene._fitNeighborhoodCamera();
-assert(scene.cameras.main.height / scene.cameras.main.zoom <= scene.mapHeight);
 const fittedZoom = scene.cameras.main.zoom;
 scene._setOutdoorZoom(2);
 assert(scene.cameras.main.zoom > fittedZoom, 'outdoor zoom can increase');
 scene._fitNeighborhoodCamera();
-assert.equal(scene._outdoorZoomFactor, 2, 'update preserves manual zoom');
+assert.equal(scene.cameras.main.zoom, 2, 'update preserves manual zoom');
 scene._setOutdoorZoom(0.1);
-assert.equal(scene._outdoorZoomFactor, 1, 'zoom out stops at map edges');
+assert.equal(scene.cameras.main.zoom, 0.5, 'zoom out matches HQ minimum');
 scene._setOutdoorZoom(10);
-assert.equal(scene._outdoorZoomFactor, 2.8, 'zoom in is bounded');
+assert.equal(scene.cameras.main.zoom, 4, 'zoom in matches HQ maximum');
 scene.location = 'home:owner';
 scene._fitNeighborhoodCamera();
-assert.equal(scene.cameras.main.zoom, 1, 'interiors keep normal scale');
+assert.equal(scene.cameras.main.zoom, 4, 'interiors preserve chosen zoom');
 
-console.log('PASS: bounded viewport ground/scenery, responsive framing, height-derived streets, and live lot signs');
+console.log('PASS: pooled immutable ground, no per-frame ground updates, bounded scenery, HQ zoom, and live lot signs');
