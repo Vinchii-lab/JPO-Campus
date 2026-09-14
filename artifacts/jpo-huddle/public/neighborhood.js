@@ -841,6 +841,68 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       };
       this.game.canvas.addEventListener('wheel', this._outdoorWheelHandler, { passive: false });
       this._neighborhoodReady = true;
+      this._startPerformanceSample();
+    }
+
+    _startPerformanceSample() {
+      this._performanceCleanup?.();
+      // Three bounded, aggregate samples from the real browser. No identity,
+      // coordinates, chat, inventory, or credentials are recorded.
+      const events = this.game.events;
+      const started = performance.now();
+      let since = started, previous = started, stepStart = started, renderStart = started;
+      let frames = [], updateMs = 0, renderMs = 0, maxUpdate = 0, maxRender = 0, movingFrames = 0;
+      this._performanceCorrections = {};
+      const preStep = () => {
+        const now = performance.now();
+        if (!document.hidden && this._neighborhoodReady) {
+          frames.push(now - previous);
+          if (this.player?.body?.velocity?.lengthSq() > 0) movingFrames++;
+        }
+        previous = stepStart = now;
+      };
+      const postStep = () => {
+        const ms = performance.now() - stepStart;
+        updateMs += ms; maxUpdate = Math.max(maxUpdate, ms);
+      };
+      const preRender = () => { renderStart = performance.now(); };
+      const postRender = () => {
+        const now = performance.now(), ms = now - renderStart;
+        renderMs += ms; maxRender = Math.max(maxRender, ms);
+        if (now - since < 10000) return;
+        const sorted = frames.slice().sort((a, b) => a - b);
+        const count = Math.max(1, frames.length);
+        const round = value => Math.round(value * 100) / 100;
+        console.info('[neighborhood-performance]', JSON.stringify({
+          build: window.__BUILD__, location: this.location,
+          renderer: this.game.renderer?.type === Phaser.WEBGL ? 'WebGL' : 'Canvas',
+          frames: frames.length, movingFrames, hidden: document.hidden,
+          frameP50Ms: round(sorted[Math.floor(sorted.length * 0.5)] || 0),
+          frameP95Ms: round(sorted[Math.floor(sorted.length * 0.95)] || 0),
+          slowFrames: frames.filter(value => value > 50).length,
+          updateAvgMs: round(updateMs / count), updateMaxMs: round(maxUpdate),
+          renderAvgMs: round(renderMs / count), renderMaxMs: round(maxRender),
+          objects: this.children.length, blockers: this.info.geometry?.blockers?.length || 0,
+          lots: this.info.streetLots?.length || 0, groundImages: this._groundTiles?.length || 0,
+          remotes: Object.keys(this.remotes || {}).length, localPet: !!this.localPet,
+          zoom: round(this.cameras.main.zoom),
+          scenes: this.game.scene.getScenes(true).map(scene => scene.sys.settings.key),
+          corrections: this._performanceCorrections,
+        }));
+        frames = []; updateMs = renderMs = maxUpdate = maxRender = movingFrames = 0;
+        this._performanceCorrections = {};
+        since = now;
+        if (now - started >= 30000) this._performanceCleanup?.();
+      };
+      events.on('prestep', preStep);
+      events.on('poststep', postStep);
+      events.on('prerender', preRender);
+      events.on('postrender', postRender);
+      this._performanceCleanup = () => {
+        events.off('prestep', preStep); events.off('poststep', postStep);
+        events.off('prerender', preRender); events.off('postrender', postRender);
+        this._performanceCleanup = null;
+      };
     }
 
     _tileField(base, alternate) {
@@ -1876,6 +1938,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     }
 
     correctLocal(serverPlayer) {
+      if (serverPlayer?.reason && this._performanceCorrections && this._isCurrentLocation(serverPlayer)) {
+        const reason = ['coordinates', 'bounds', 'collision', 'path', 'speed', 'seat', 'activity', 'validation']
+          .includes(serverPlayer.reason) ? serverPlayer.reason : 'other';
+        this._performanceCorrections[reason] = (this._performanceCorrections[reason] || 0) + 1;
+      }
       if (!serverPlayer || !this.player || !Number.isFinite(serverPlayer.x) || !Number.isFinite(serverPlayer.y)) return;
       if (!this._isCurrentLocation(serverPlayer) ||
           !window.JpoFocusedMovement?.shouldApplyCorrection(serverPlayer, this.location, this._lastCorrectionSeq)) return;
@@ -2219,6 +2286,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     shutdown() {
       this._neighborhoodReady = false;
+      this._performanceCleanup?.();
       if (this._outdoorWheelHandler) this.game.canvas.removeEventListener('wheel', this._outdoorWheelHandler);
       this._outdoorWheelHandler = null;
       this._resetTransientTravel();

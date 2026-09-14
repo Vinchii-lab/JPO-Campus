@@ -9,6 +9,12 @@ Verify the loaded browser build and live function source before treating a repea
 
 **How to apply:** Start a clean context without custom request headers, wait for actual exported globals and the real loader to finish, then inspect the build stamp and relevant prototype methods. Count only errors occurring after that check. Never invent texture names or readiness flags as preload assertions; obtain them from the real scene source.
 
+Performance checks must match the reported scene, movement, renderer, and session features.
+
+**Why:** Anonymous Canvas tests showed smooth rooms and streets while the user's signed-in WebGL session still felt heavy. Those tests omitted the actual pet and server corrections and could not establish that the reported problem was fixed.
+
+**How to apply:** Inspect the live browser renderer and measure frame intervals, update/render cost, and correction reasons during the reported action. Treat fixture-only FPS as a narrow rendering measurement, not proof of smooth signed-in gameplay.
+
 Build-update cooldowns must schedule another check, and recovery must not depend solely on a healthy gameplay socket.
 
 **Why:** Several fixes within a five-minute reload cooldown can leave an open page running the original code if its sole reconnect check returns early.
