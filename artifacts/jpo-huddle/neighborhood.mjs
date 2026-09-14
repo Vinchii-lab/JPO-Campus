@@ -1,3 +1,5 @@
+import commercialLayouts from "./public/commercial-layouts.json" with { type: "json" };
+
 // Authoritative neighborhood definitions.  These maps are intentionally
 // compact, deterministic, and editable source data rather than flattened
 // screenshots or a client-provided tilemap.
@@ -122,10 +124,22 @@ export function isHuddleTestIdentity(value) {
 // Willow Walk is the one shared residential world.  A lot is derived from its
 // stable approved-account order, never from a paginated directory slot.
 export const RESIDENTIAL_BLOCK_IDS = Object.freeze(["neighborhood"]);
+// Willow Walk is made from repeating 960px blocks.  Keep the road/end
+// coordinates in the shared contract so a sparse lot directory can still
+// produce a complete, continuous set of east-side city gates.
+export const STREET_BLOCK_LAYOUT = Object.freeze({
+  segmentHeight: 960,
+  road: Object.freeze({ x: 0, y: 432, width: 1440, height: 144 }),
+  eastPortal: Object.freeze({ x: 1344, width: 96, height: 144 }),
+  westPortal: Object.freeze({ x: 0, width: 96, height: 144 }),
+});
+export const CITY_DIRECT_JOIN_SPAWN = Object.freeze({ x: 144, y: 480, dir: "right" });
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" }, bounds: { width: 1440, height: 1056 } },
-  city: { id: "city", label: "Huddle Plaza", spawn: { x: 144, y: 480, dir: "right" }, bounds: { width: 1152, height: 1600 } },
+  // The museum occupies the additional bottom row.  Keep a little clear
+  // ground below its 1740px door so the city arrival point is walkable.
+  city: { id: "city", label: "Huddle Plaza", spawn: CITY_DIRECT_JOIN_SPAWN, bounds: { width: 1152, height: 1920 } },
   cafe: { id: "cafe", label: "Cafe", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   diner: { id: "diner", label: "Diner", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   bakery: { id: "bakery", label: "Bakery", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
@@ -133,6 +147,11 @@ export const LOCATIONS = Object.freeze({
   "furniture-shop": { id: "furniture-shop", label: "Huddle Home", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "garden-shop": { id: "garden-shop", label: "Willow & Green", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   "decor-shop": { id: "decor-shop", label: "Plaza Decor", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  museum: { id: "museum", label: "Huddle Museum", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "museum-room-1": { id: "museum-room-1", label: "Museum Gallery 1", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "museum-room-2": { id: "museum-room-2", label: "Museum Gallery 2", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "museum-room-3": { id: "museum-room-3", label: "Museum Gallery 3", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  "museum-room-4": { id: "museum-room-4", label: "Museum Gallery 4", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
 });
 
 // The three storefronts share the same durable furniture inventory and coin
@@ -233,7 +252,56 @@ export function streetDefinition(entries = []) {
   }));
   const doors = lots.filter((lot) => lot.construction?.complete).map((lot) => lot.door);
   const height = segmentCount * 960 + 96;
-  return { bounds: { width: 1440, height }, blockers: [...blockers, ...yardBlockers], doors, lots };
+  // Each repeating residential block has its own east-side city gate.  Do not
+  // collapse this to the first segment: lot indices are durable and may be
+  // sparse after account removal, so the highest occupied segment determines
+  // the walkable world and every intervening road still needs a portal.
+  const roadPortals = Array.from({ length: segmentCount }, (_, segment) => {
+    const y = segment * STREET_BLOCK_LAYOUT.segmentHeight + STREET_BLOCK_LAYOUT.road.y;
+    const neighborhoodSpawn = {
+      // Stop 192px west of the gate.  This is outside the trigger even with
+      // the 16px foot radius, so a city return cannot immediately bounce back.
+      x: STREET_BLOCK_LAYOUT.road.width - 192,
+      y: y + STREET_BLOCK_LAYOUT.road.height / 2,
+      dir: "left",
+    };
+    // Every east road end opens onto the same top plaza west arrival. The
+    // block is remembered server-side; Plaza itself has one west gate.
+    const citySpawn = { x: 144, y: 480, dir: "right" };
+    return {
+      segment,
+      destination: "city",
+      x: STREET_BLOCK_LAYOUT.eastPortal.x,
+      y,
+      width: STREET_BLOCK_LAYOUT.eastPortal.width,
+      height: STREET_BLOCK_LAYOUT.eastPortal.height,
+      label: "Huddle Plaza",
+      spawn: citySpawn,
+      returnPoint: neighborhoodSpawn,
+    };
+  });
+  // Plaza intentionally has one west gate. Do not mirror sparse residential
+  // road rows into the city; the player's remembered segment selects the
+  // return point when they leave this gate.
+  const cityPortals = [{
+    destination: "neighborhood",
+    x: STREET_BLOCK_LAYOUT.westPortal.x,
+    y: STREET_BLOCK_LAYOUT.road.y,
+    width: STREET_BLOCK_LAYOUT.westPortal.width,
+    height: STREET_BLOCK_LAYOUT.westPortal.height,
+    label: "Willow Walk",
+    segment: 0,
+    spawn: { x: 1248, y: 504, dir: "left" },
+  }];
+  return {
+    bounds: { width: STREET_BLOCK_LAYOUT.road.width, height },
+    blockers: [...blockers, ...yardBlockers],
+    doors,
+    lots,
+    segmentCount,
+    roadPortals,
+    cityPortals,
+  };
 }
 
 export function streetLotForOwner(entries, ownerEmail) {
@@ -250,14 +318,128 @@ export function streetReturnSpawnForOwner(entries, ownerEmail) {
 
 export function streetPortalForTransition(destination, x, y, entries) {
   const target = parseLocation(destination);
-  if (target?.kind !== "home") return null;
-  return streetDefinition(entries).doors.find((portal) =>
-    portal.ownerEmail === target.ownerEmail && pointHitsRect(x, y, portal, 0)) || null;
+  const street = streetDefinition(entries);
+  if (target?.kind === "home") {
+    return street.doors.find((portal) =>
+      portal.ownerEmail === target.ownerEmail && pointHitsRect(x, y, portal, ACTOR_FOOT_RADIUS)) || null;
+  }
+  if (target?.id === "city") {
+    return street.roadPortals.find((portal) => pointHitsRect(x, y, portal, ACTOR_FOOT_RADIUS)) || null;
+  }
+  return null;
 }
+
+// City has one west-side return gate for every residential road block.  A
+// remembered segment is an additional server-side guard: a player who entered
+// from block 3 cannot be redirected to block 0 by a stale client destination.
+// With no remembered block (a direct city join), the physical top gate remains
+// an explicit, valid fallback.
+export function streetCityPortalForTransition(x, y, entries, preferredSegment = null) {
+  const street = streetDefinition(entries);
+  const gate = street.cityPortals[0];
+  if (!gate || !pointHitsRect(x, y, gate, ACTOR_FOOT_RADIUS)) return null;
+  const segment = preferredSegment == null ? 0 : Number(preferredSegment);
+  const selected = street.roadPortals.find((portal) => portal.segment === segment) || street.roadPortals[0];
+  const returnPoint = selected?.returnPoint;
+  return {
+    ...gate,
+    segment: selected?.segment ?? 0,
+    spawn: returnPoint ? { ...returnPoint } : { ...gate.spawn },
+  };
+}
+
+// Commercial interiors are authored in a shared manifest so the renderer and
+// server never disagree about display/seat occupancy. The manifest owns props;
+// the perimeter and threshold walls below remain this module's architecture
+// contract.
+const COMMERCIAL_ROOMS = commercialLayouts?.rooms || commercialLayouts || {};
+const COMMERCIAL_ROOM_IDS = Object.freeze([
+  "furniture-shop", "garden-shop", "decor-shop", "cafe", "diner", "bakery",
+  "sushi", "museum", "museum-room-1", "museum-room-2", "museum-room-3",
+  "museum-room-4",
+]);
+function commercialRoomManifest(id) {
+  const room = COMMERCIAL_ROOMS?.[id];
+  return room && Number(room.width) === 960 && Number(room.height) === 720 ? room : null;
+}
+function isInteriorBoundary(rect) {
+  return rect?.x === 0 || rect?.y === 0 ||
+    Number(rect.x) + Number(rect.width) === 960 ||
+    Number(rect.y) + Number(rect.height) === 720;
+}
+function commercialRoomGeometry(id, architecture) {
+  const room = commercialRoomManifest(id);
+  if (!room) return architecture;
+  const walls = (architecture.blockers || []).filter(isInteriorBoundary);
+  return {
+    ...architecture,
+    blockers: [...walls, ...(Array.isArray(room.blockers) ? room.blockers : [])],
+    seats: Array.isArray(room.seats) ? room.seats : (architecture.seats || []),
+    commercialLayout: room,
+  };
+}
+
+// City contract for the museum bottom row. The exterior footprint is centered
+// at (576, 1675); its clear door is centered at (576, 1740).
+export const CITY_COMMERCIAL_LAYOUT = Object.freeze({
+  cityBounds: Object.freeze({ width: 1152, height: 1920 }),
+  museum: Object.freeze({
+    id: "museum",
+    label: "Huddle Museum",
+    footprint: Object.freeze({ x: 336, y: 1560, width: 480, height: 230 }),
+    door: Object.freeze({ x: 528, y: 1690, width: 96, height: 100 }),
+    citySpawn: Object.freeze({ x: 576, y: 1830, dir: "up" }),
+    museumSpawn: Object.freeze({ x: 480, y: 576, dir: "up" }),
+    blockers: Object.freeze([
+      Object.freeze({ x: 336, y: 1560, width: 480, height: 130 }),
+      Object.freeze({ x: 336, y: 1690, width: 192, height: 100 }),
+      Object.freeze({ x: 624, y: 1690, width: 192, height: 100 }),
+    ]),
+  }),
+});
+// Renderer-facing aliases keep the imported design manifest and the city
+// exterior contract discoverable from one shared module.
+export const COMMERCIAL_LAYOUTS = commercialLayouts;
+export const COMMERCIAL_INTERIOR_LAYOUT = COMMERCIAL_LAYOUTS;
+export const CITY_LAYOUT = CITY_COMMERCIAL_LAYOUT;
+
+const MUSEUM_FOYER_DOORS = Object.freeze([
+  Object.freeze({ destination: "museum-room-1", x: 144, y: 0, width: 96, height: 72, label: "Gallery 1", spawn: { x: 480, y: 576, dir: "up" } }),
+  Object.freeze({ destination: "museum-room-2", x: 336, y: 0, width: 96, height: 72, label: "Gallery 2", spawn: { x: 480, y: 576, dir: "up" } }),
+  Object.freeze({ destination: "museum-room-3", x: 528, y: 0, width: 96, height: 72, label: "Gallery 3", spawn: { x: 480, y: 576, dir: "up" } }),
+  Object.freeze({ destination: "museum-room-4", x: 720, y: 0, width: 96, height: 72, label: "Gallery 4", spawn: { x: 480, y: 576, dir: "up" } }),
+]);
+const MUSEUM_FOYER_WALLS = Object.freeze([
+  { x: 0, y: 0, width: 144, height: 48 },
+  { x: 240, y: 0, width: 96, height: 48 },
+  { x: 432, y: 0, width: 96, height: 48 },
+  { x: 624, y: 0, width: 96, height: 48 },
+  { x: 816, y: 0, width: 144, height: 48 },
+  { x: 0, y: 0, width: 48, height: 720 },
+  { x: 912, y: 0, width: 48, height: 720 },
+  { x: 0, y: 672, width: 408, height: 48 },
+  { x: 552, y: 672, width: 408, height: 48 },
+]);
+const MUSEUM_GALLERY_WALLS = Object.freeze([
+  { x: 0, y: 0, width: 960, height: 48 },
+  { x: 0, y: 0, width: 48, height: 720 },
+  { x: 912, y: 0, width: 48, height: 720 },
+  { x: 0, y: 672, width: 408, height: 48 },
+  { x: 552, y: 672, width: 408, height: 48 },
+]);
+const museumGalleryGeometry = (id) => commercialRoomGeometry(id, {
+  blockers: [...MUSEUM_GALLERY_WALLS, { x: 384, y: 286, width: 192, height: 96 }],
+  doors: [{
+    destination: "museum", x: 408, y: 648, width: 144, height: 72, label: "Foyer",
+    spawn: { x: ({ "museum-room-1": 192, "museum-room-2": 384, "museum-room-3": 576, "museum-room-4": 768 })[id], y: 96, dir: "down" },
+  }],
+  seats: [],
+});
+
 // This is the shared world contract for the client map and server validator.
 // Every facade below has a matching explicit collider.  The narrow gaps are
 // intentional paved doorways, never visual-only entrances.
-export const LOCATION_GEOMETRY = Object.freeze({
+const BASE_LOCATION_GEOMETRY = Object.freeze({
   office: { blockers: [], doors: [] },
   neighborhood: {
     // Street houses, colliders, and front doors are generated from the
@@ -287,6 +469,9 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { x: 384, y: 354, width: 28, height: 30 }, { x: 730, y: 354, width: 28, height: 30 },
       { x: 40, y: 660, width: 96, height: 30 }, { x: 1016, y: 660, width: 96, height: 30 },
       { x: 324, y: 370, width: 96, height: 30 }, { x: 732, y: 370, width: 96, height: 30 },
+      // Huddle Museum: centered bottom-row footprint with a clear 96px door
+      // at x=576 / y=1740. The threshold itself is intentionally not blocked.
+      ...CITY_COMMERCIAL_LAYOUT.museum.blockers,
     ],
     doors: [
       { destination: "furniture-shop", x: 836, y: 236, width: 72, height: 100, label: "Huddle Home" },
@@ -296,6 +481,8 @@ export const LOCATION_GEOMETRY = Object.freeze({
       { destination: "diner", x: 836, y: 1080, width: 72, height: 100, label: "Diner" },
       { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, label: "Bakery" },
       { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, label: "Sushi" },
+      { destination: "museum", ...CITY_COMMERCIAL_LAYOUT.museum.door, label: "Huddle Museum",
+        spawn: CITY_COMMERCIAL_LAYOUT.museum.museumSpawn },
     ],
     seats: [
       // Benches sit in grass pockets around the plaza rather than on either
@@ -310,6 +497,26 @@ export const LOCATION_GEOMETRY = Object.freeze({
         stands: [{ x: 1064, y: 776, dir: "up" }, { x: 1032, y: 740, dir: "up" }] },
     ],
   },
+  museum: commercialRoomGeometry("museum", {
+    blockers: [...MUSEUM_FOYER_WALLS],
+    doors: [
+      ...MUSEUM_FOYER_DOORS,
+      { destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit",
+        spawn: CITY_COMMERCIAL_LAYOUT.museum.citySpawn },
+    ],
+    seats: [],
+    rooms: [
+      { id: "museum", label: "Foyer", x: 48, y: 48, width: 864, height: 624 },
+      { id: "museum-room-1", label: "Gallery 1", x: 144, y: 0, width: 96, height: 72 },
+      { id: "museum-room-2", label: "Gallery 2", x: 336, y: 0, width: 96, height: 72 },
+      { id: "museum-room-3", label: "Gallery 3", x: 528, y: 0, width: 96, height: 72 },
+      { id: "museum-room-4", label: "Gallery 4", x: 720, y: 0, width: 96, height: 72 },
+    ],
+  }),
+  "museum-room-1": museumGalleryGeometry("museum-room-1"),
+  "museum-room-2": museumGalleryGeometry("museum-room-2"),
+  "museum-room-3": museumGalleryGeometry("museum-room-3"),
+  "museum-room-4": museumGalleryGeometry("museum-room-4"),
   "furniture-shop": {
     blockers: [
       { x: 0, y: 0, width: 960, height: 48 }, { x: 0, y: 0, width: 48, height: 720 }, { x: 912, y: 0, width: 48, height: 720 },
@@ -399,6 +606,18 @@ export const LOCATION_GEOMETRY = Object.freeze({
   },
 });
 
+// Keep the existing architecture walls above, but source every commercial
+// venue's movable blockers/seats from the shared design manifest.
+const COMMERCIAL_VENUE_IDS = Object.freeze([
+  "furniture-shop", "garden-shop", "decor-shop", "cafe", "diner", "bakery", "sushi",
+]);
+export const LOCATION_GEOMETRY = Object.freeze({
+  ...BASE_LOCATION_GEOMETRY,
+  ...Object.fromEntries(COMMERCIAL_VENUE_IDS.map((id) => [
+    id, commercialRoomGeometry(id, BASE_LOCATION_GEOMETRY[id]),
+  ])),
+});
+
 // The only allowed map links. `spawn` is selected by the server based on the
 // source portal, not supplied by a browser.
 export const LOCATION_PORTALS = Object.freeze({
@@ -407,7 +626,10 @@ export const LOCATION_PORTALS = Object.freeze({
     // HQ Garden is the west end of Willow Walk's main horizontal road. It
     // mirrors the east city gate and stays west of the first residential lot.
     { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
-    { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" } },
+    // The complete per-block east gates are generated by streetDefinition().
+    // This first-block entry remains for legacy clients/direct joins; server
+    // validation uses the dynamic street snapshot instead.
+    { destination: "city", x: 1344, y: 432, width: 96, height: 144, spawn: { x: 144, y: 480, dir: "right" }, segment: 0 },
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
@@ -418,6 +640,7 @@ export const LOCATION_PORTALS = Object.freeze({
     { destination: "diner", x: 836, y: 1080, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
     { destination: "bakery", x: 254, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
     { destination: "sushi", x: 836, y: 1380, width: 72, height: 100, spawn: { x: 480, y: 576, dir: "up" } },
+    { destination: "museum", ...CITY_COMMERCIAL_LAYOUT.museum.door, spawn: CITY_COMMERCIAL_LAYOUT.museum.museumSpawn },
   ],
   "furniture-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 852, y: 360, dir: "down" } }],
   "garden-shop": [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 880, dir: "down" } }],
@@ -426,6 +649,14 @@ export const LOCATION_PORTALS = Object.freeze({
   diner: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1190, dir: "down" } }],
   bakery: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 290, y: 1490, dir: "down" } }],
   sushi: [{ destination: "city", x: 408, y: 648, width: 144, height: 72, spawn: { x: 872, y: 1490, dir: "down" } }],
+  museum: [
+    ...MUSEUM_FOYER_DOORS,
+    { destination: "city", x: 408, y: 648, width: 144, height: 72, label: "Plaza exit", spawn: CITY_COMMERCIAL_LAYOUT.museum.citySpawn },
+  ],
+  "museum-room-1": [{ destination: "museum", x: 408, y: 648, width: 144, height: 72, label: "Foyer", spawn: { x: 192, y: 96, dir: "down" } }],
+  "museum-room-2": [{ destination: "museum", x: 408, y: 648, width: 144, height: 72, label: "Foyer", spawn: { x: 384, y: 96, dir: "down" } }],
+  "museum-room-3": [{ destination: "museum", x: 408, y: 648, width: 144, height: 72, label: "Foyer", spawn: { x: 576, y: 96, dir: "down" } }],
+  "museum-room-4": [{ destination: "museum", x: 408, y: 648, width: 144, height: 72, label: "Foyer", spawn: { x: 768, y: 96, dir: "down" } }],
   home: [{ destination: "neighborhood", x: 528, y: 768, width: 96, height: 96, label: "Willow Walk exit", spawn: { x: 144, y: 504, dir: "right" } }],
 });
 
@@ -447,7 +678,9 @@ export const FURNITURE_CATALOG = Object.freeze({
 });
 
 export function parseLocation(value) {
-  if (["office", "neighborhood", "city", "cafe", "diner", "bakery", "sushi"].includes(value) || isShopLocation(value)) return { id: value, kind: value };
+  if (["office", "neighborhood", "city", "cafe", "diner", "bakery", "sushi",
+    "museum", "museum-room-1", "museum-room-2", "museum-room-3", "museum-room-4"].includes(value)
+      || isShopLocation(value)) return { id: value, kind: value };
   if (typeof value === "string" && value.startsWith("home:")) {
     const ownerEmail = value.slice(5).trim().toLowerCase();
     // Canonicalize BOTH the owner and room id.  A case-variant client must not
@@ -480,11 +713,13 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
   // only be entered through that account's marked Willow Walk front door.
   if (targetKind === "home" && target.ownerEmail !== String(actorEmail).trim().toLowerCase() && !RESIDENTIAL_BLOCK_IDS.includes(fromKind)) return null;
   return (LOCATION_PORTALS[fromKind] || []).find((portal) =>
-    portal.destination === targetKind && pointHitsRect(x, y, portal, 0)) || null;
+    portal.destination === targetKind && pointHitsRect(x, y, portal, ACTOR_FOOT_RADIUS)) || null;
 }
 
 export function locationBounds(location) {
   if (location.kind === "home") return { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell };
+  // Huddle Plaza is intentionally a fixed 1920px map. Residential sparse
+  // blocks return through its single west gate rather than extending this map.
   return LOCATIONS[location.id].bounds;
 }
 
@@ -551,6 +786,28 @@ export function validStreetWorldMove(street, x, y, dynamicBlockers = []) {
       x > b.width - ACTOR_FOOT_RADIUS || y > b.height - ACTOR_FOOT_RADIUS) return false;
   return !(street.blockers || []).some((rect) => pointHitsRect(x, y, rect)) &&
     !(dynamicBlockers || []).some((rect) => pointHitsRect(x, y, rect));
+}
+
+// Movement packets are normally only a few pixels apart, but checking the
+// complete segment prevents a forged frame (or a lag catch-up) from tunnelling
+// through a 30px prop or a doorway wall.
+function continuousSamples(x0, y0, x1, y1, isValid) {
+  if (![x0, y0, x1, y1].every(Number.isFinite)) return false;
+  const distance = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(1, Math.ceil(distance / 8));
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    if (!isValid(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+  }
+  return true;
+}
+export function validContinuousStreetWorldMove(street, x0, y0, x1, y1, dynamicBlockers = []) {
+  return continuousSamples(x0, y0, x1, y1,
+    (x, y) => validStreetWorldMove(street, x, y, dynamicBlockers));
+}
+export function validContinuousLocationMove(location, x0, y0, x1, y1, dynamicBlockers = []) {
+  return continuousSamples(x0, y0, x1, y1,
+    (x, y) => validLocationMove(location, x, y, dynamicBlockers));
 }
 
 // Persisted layouts predate the upright-art policy. This is the one canonical

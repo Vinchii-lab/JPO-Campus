@@ -16,6 +16,8 @@ Use the user's uploaded 16×16 pack for housing furniture and interior tiles, no
 
 **Why:** The user rejected the furniture implementation after mismatched sprite selections and the wrong source scale undermined the purpose of providing the ZIP. Filename suffixes alone did not identify the furniture.
 
+**How to apply:** Review a labeled contact sheet of the actual extracted assets before trusting descriptive aliases. “16×16 pack” describes the source grid, not every PNG's dimensions: singles include multi-tile furniture, ticket-office composites, and wide floor pieces. Tiling all of them at 48px spacing caused overlapping floors and misleading furniture arrangements. Verify the assembled room screenshot, not just asset existence or object counts (hundreds of floor tiles can conceal an almost empty room).
+
 Version asset URLs and Phaser texture keys when replacing artwork with different native dimensions.
 
 **Why:** Replacing furniture files in place while changing to native-scale rendering left browsers using cached, oversized old images. A page/code reload does not necessarily invalidate the image cache.

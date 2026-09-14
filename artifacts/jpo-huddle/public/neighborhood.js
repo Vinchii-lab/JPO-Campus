@@ -654,6 +654,8 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _stepPet(...args) { return this._office('_stepPet', ...args); }
 
     preload() {
+      window.JpoInteriors.preload(this);
+      window.JpoPlazaExteriors.preload(this);
       // These names deliberately do not overlap the old generic `furn_*`
       // texture keys. The URL revision is equally deliberate: furniture files
       // were replaced in place and the server legitimately caches PNGs for a
@@ -695,6 +697,10 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // this to the supplied furniture/interior assets; house-color textures
       // keep their own preparation path and are intentionally untouched.
       const nearest = Phaser.Textures.FilterMode.NEAREST;
+      ['pe_shop_window', 'pe_shop_door', 'pe_shop_awning', 'pe_jp_door',
+        'pe_jp_roof', 'pe_neon_sign', 'pe_diner_window', 'pe_house_window'].forEach((key) => {
+        this.textures.get(key)?.setFilter(nearest);
+      });
       ['oak_chair', 'fern', 'reading_lamp', 'coffee_table', 'blue_sofa', 'bookcase', 'bed', 'bathtub', 'television'].forEach((id) => {
         this.textures.get(this._furnitureTextureKey(id))?.setFilter(nearest);
       });
@@ -772,6 +778,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       if (atHome) this._drawHome();
       else if (typeof this.location === 'string' && this.location.endsWith('-shop')) this._drawShop();
       else if (typeof this.location === 'string' && ['cafe', 'diner', 'bakery', 'sushi'].includes(this.location)) this._drawRestaurant();
+      else if (this.location === 'museum' || this.location.startsWith('museum-room-')) this._drawCommercialInterior();
       else if (this.location === 'neighborhood') this._drawNeighborhood();
       else this._drawCity();
 
@@ -1167,11 +1174,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
     _drawCity() {
       this._tileField(0x83aa68, 0x789d60);
       this._path({ x: 0, y: 432, width: 1152, height: 144 }, 0x535e66, 0x3e4750);
-      this._path({ x: 456, y: 0, width: 240, height: 1600 }, 0x535e66, 0x3e4750);
+      this._path({ x: 456, y: 0, width: 240, height: this.mapHeight }, 0x535e66, 0x3e4750);
       this._path({ x: 0, y: 408, width: 1152, height: 24 });
       this._path({ x: 0, y: 576, width: 1152, height: 24 });
-      this._path({ x: 432, y: 0, width: 24, height: 1600 });
-      this._path({ x: 696, y: 0, width: 24, height: 1600 });
+      this._path({ x: 432, y: 0, width: 24, height: this.mapHeight });
+      this._path({ x: 696, y: 0, width: 24, height: this.mapHeight });
       // Short garden walks lead to the two south-lane shop thresholds without
       // widening the road or making a new collision shortcut.
       this._path({ x: 836, y: 328, width: 72, height: 104 });
@@ -1182,30 +1189,37 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       this._path({ x: 254, y: 1480, width: 72, height: 36 });
       this._path({ x: 836, y: 1480, width: 72, height: 36 });
       this._roadDetails(504, 576, [{ x: 444, y: 504 }, { x: 708, y: 504 }, { x: 576, y: 420, vertical: true }, { x: 576, y: 588, vertical: true }]);
-      // City is commerce and transit. The market remains a closed facade; the
-      // three actual shop portals belong to Huddle Home and the two south-lane
-      // themed stores.
+      // Every open venue has its own silhouette and native-pixel detailing.
+      // Rectangles and door centres match the authoritative facade colliders.
       this._exterior('shop', 290, 340);
-      this._exterior('shop', 872, 328);
-      this._exterior('shop', 290, 860);
-      this._exterior('shop', 872, 860);
-      // New food district venues
-      this._exterior('shop', 290, 1188);
-      this._exterior('shop', 872, 1188);
-      this._exterior('shop', 290, 1488);
-      this._exterior('shop', 872, 1488);
+      [
+        { id: 'furniture-shop', x: 760, y: 106 },
+        { id: 'garden-shop', x: 178, y: 622 },
+        { id: 'decor-shop', x: 760, y: 622 },
+        { id: 'cafe', x: 178, y: 950 },
+        { id: 'diner', x: 760, y: 950 },
+        { id: 'bakery', x: 178, y: 1250 },
+        { id: 'sushi', x: 760, y: 1250 },
+      ].forEach((building) => window.JpoPlazaExteriors.draw(this, {
+        ...building, width: 224, height: 222,
+        doorX: building.x + 112, doorY: building.y + 222,
+      }));
+      const museum = this.info.geometry?.commercialExteriors?.museum || {
+        footprint: { x: 336, y: 1560, width: 480, height: 230 },
+      };
+      const museumRect = museum.footprint;
+      window.JpoPlazaExteriors.draw(this, {
+        id: 'museum', ...museumRect,
+        doorX: museumRect.x + museumRect.width / 2,
+        doorY: museumRect.y + museumRect.height,
+      });
+      this._path({ x: 336, y: 1790, width: 480, height: 96 });
       [[120, 236], [445, 210], [705, 206], [1032, 224], [92, 300], [1048, 300]].forEach(([x, y]) => this._exterior('tree', x, y));
       [[398, 384], [744, 384], [90, 580], [1062, 580]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
       // The seating pockets sit fully outside the crossing roads. Keep the
       // player seat coordinates in neighborhood.mjs in lockstep with these
       // visual ground contacts.
       [[372, 416], [780, 416], [88, 696], [1064, 696]].forEach(([x, y]) => this._exterior('bench', x, y, 2));
-      this._storefrontSign(290, 604, 'WILLOW & GREEN');
-      this._storefrontSign(872, 604, 'PLAZA DECOR');
-      this._storefrontSign(290, 932, 'THE DAILY GRIND');
-      this._storefrontSign(872, 932, 'NEON DINER');
-      this._storefrontSign(290, 1232, 'SWEET CRUST BAKERY');
-      this._storefrontSign(872, 1232, 'SAKURA SUSHI');
 
       // Decorative cheerful animated details
       [[290, 480], [872, 480], [290, 960], [872, 960]].forEach(([x, y]) => {
@@ -1221,7 +1235,6 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       // Keep the intersection open: no fountain disk or invisible core
       // collider in the roadway. Animated accents belong to the storefronts.
       this._sign(290, 80, 'PLAZA MARKET · CLOSED');
-      this._sign(872, 88, 'HUDDLE HOME');
       this._sign(576, 302, 'HUDDLE PLAZA');
       this._sign(94, 420, '← WILLOW WALK');
       this._sign(290, 900, 'GARDEN LANE');
@@ -1317,59 +1330,15 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
 
     _drawRestaurant() {
-      this._interiorTileField('shop_floor', 'shop_wall', { x: 408, width: 144 });
-      if (window.JpoInteriors?.drawRestaurantVignettes) {
-        window.JpoInteriors.drawRestaurantVignettes(this, INTERIOR_ART_SCALE, this.location);
-      }
+      this._drawCommercialInterior();
     }
 
     _drawShop() {
-      this._interiorTileField('shop_floor', 'shop_wall', { x: 408, width: 144 });
-      const themes = {
-        'furniture-shop': {
-          title: 'HUDDLE HOME · FURNISHINGS',
-          intro: 'A warm room of everyday pieces',
-          accent: 0xb85f5c,
-          display: ['oak_chair', 'coffee_table', 'blue_sofa', 'bookcase'],
-        },
-        'garden-shop': {
-          title: 'WILLOW & GREEN · GARDEN GOODS',
-          intro: 'Leafy accents for a brighter home',
-          accent: 0x6d9855,
-          display: ['fern', 'fern', 'oak_chair', 'reading_lamp'],
-        },
-        'decor-shop': {
-          title: 'PLAZA DECOR · LIVING ACCENTS',
-          intro: 'Colorful finishing touches for your room',
-          accent: 0x76627f,
-          display: ['blue_sofa', 'coffee_table', 'bookcase', 'reading_lamp'],
-        },
-      };
-      const theme = themes[this.location] || themes['furniture-shop'];
-      if (window.JpoInteriors?.drawShopVignettes) {
-        window.JpoInteriors.drawShopVignettes(this, INTERIOR_ART_SCALE, theme, furnitureCatalog);
-      } else {
-        const art = this.add.graphics().setDepth(2);
-        art.fillStyle(0x80583f, 1).fillRect(144, 154, 672, 74).lineStyle(3, 0x533826, 1).strokeRect(144, 154, 672, 74);
-        [140, 662].forEach((x) => art.fillStyle(0x9c7357, 1).fillRect(x, 378, 156, 80).lineStyle(2, 0x624431, 1).strokeRect(x, 378, 156, 80));
-        art.fillStyle(theme.accent, 0.82).fillRoundedRect(344, 324, 272, 150, 16).lineStyle(3, 0xf0d8ab, 0.8).strokeRoundedRect(344, 324, 272, 150, 16);
-        const displays = [[200, 458], [310, 458], [650, 458], [760, 458]];
-        theme.display.forEach((id, index) => {
-          const [x, y] = displays[index];
-          const item = this.add.image(x, y, this._furnitureTextureKey(id))
-            .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y);
-          this._animateFurnitureObject(item, id, index * 90);
-        });
-        [[96, 350], [864, 350], [96, 640], [864, 640]].forEach(([x, y], index) => {
-          const fern = this.add.image(x, y, this._furnitureTextureKey('fern'))
-            .setOrigin(0.5, 1).setScale(INTERIOR_ART_SCALE).setDepth(y);
-          this._animateFurnitureObject(fern, 'fern', index * 120);
-        });
-        this._sign(480, 112, theme.title);
-        this.add.text(480, 190, theme.intro + ' · prices in coins · purchases go to your home inventory.', {
-          fontFamily: 'monospace', fontSize: '12px', color: '#fff7db', backgroundColor: '#493c36cc', padding: { x: 6, y: 4 }, align: 'center',
-        }).setOrigin(0.5).setDepth(18);
-      }
+      this._drawCommercialInterior();
+    }
+
+    _drawCommercialInterior() {
+      window.JpoInteriors.draw(this, this.location);
     }
 
     _drawHome() {
@@ -1420,10 +1389,13 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
           portal.destination === 'diner' ? 'NEON DINER' :
           portal.destination === 'bakery' ? 'SWEET CRUST BAKERY' :
           portal.destination === 'sushi' ? 'SAKURA SUSHI' :
+          portal.destination === 'museum' ? (this.location.startsWith('museum-room-') ? 'MUSEUM FOYER' : 'HUDDLE MUSEUM') :
+          portal.destination?.startsWith('museum-room-') ? String(portal.label || portal.destination).toUpperCase() :
           portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'neighborhood' ? String(portal.label || 'WILLOW WALK').toUpperCase() :
           String(portal.label || 'HQ GARDEN').toUpperCase();
-        const text = this.add.text(portal.x + portal.width / 2, portal.y - 5, label, {
+        const labelY = portal.y <= 0 ? portal.y + portal.height + 22 : portal.y - 5;
+        const text = this.add.text(portal.x + portal.width / 2, labelY, label, {
           fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
         }).setOrigin(0.5, 1).setDepth(2000);
         this.portalCues?.push(cue, text);
@@ -1710,7 +1682,7 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
 
     _nearbyParkSeat() {
       if (!this.player || this.location.startsWith('home:') ||
-          this.location.endsWith('-shop') || this.staticSeatState || this._parkSeatPending) return null;
+          this.staticSeatState || this._parkSeatPending) return null;
       let best = null;
       for (const seat of this.seats || []) {
         const distance = Math.hypot(this.player.x - Number(seat.x), this.player.y - Number(seat.y));

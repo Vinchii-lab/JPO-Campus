@@ -14,3 +14,9 @@ Build-update cooldowns must schedule another check, and recovery must not depend
 **Why:** Several fixes within a five-minute reload cooldown can leave an open page running the original code if its sole reconnect check returns early.
 
 **How to apply:** Preserve loop protection while retrying when the cooldown expires; use bounded visible-page/focus checks to recover when a broken socket callback prevents reconnect.
+
+Discard Phaser return values inside browser-evaluation mutations; return only small plain values.
+
+**Why:** Returning `scene.start(...)` implicitly from an arrow expression repeatedly disconnected the testing notebook without a page error. Using a braced callback with `return true` completed the same room transitions successfully. Scene managers are large cyclic object graphs, not useful test results.
+
+**How to apply:** Use `data => { game.scene.start('NeighborhoodScene', data); return true; }`, then inspect readiness/location in a separate evaluation returning a small plain object. Do not diagnose a test transport disconnect alone as an app runtime crash.

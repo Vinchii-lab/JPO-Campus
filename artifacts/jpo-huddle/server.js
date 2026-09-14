@@ -35,12 +35,15 @@ import {
   portalForTransition,
   validLocationMove,
   validStreetWorldMove,
+  validContinuousLocationMove,
+  validContinuousStreetWorldMove,
   validPlacement,
   validYardPlacement,
   streetDefinition,
   streetLotForOwner,
   streetReturnSpawnForOwner,
   streetPortalForTransition,
+  streetCityPortalForTransition,
   staticSeatForPoint,
   staticSeatStandCandidates,
 } from "./neighborhood.mjs";
@@ -68,7 +71,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3454,12 +3457,16 @@ function locationInfo(locationId) {
   const parsed = parseLocation(locationId);
   if (!parsed) return null;
   if (parsed.id === "neighborhood") {
-    const fixedPortals = (LOCATION_PORTALS.neighborhood || []).filter((portal) => portal.destination !== "home");
+    const fixedPortals = (LOCATION_PORTALS.neighborhood || [])
+      .filter((portal) => portal.destination !== "home" && portal.destination !== "city");
     return {
       ...LOCATIONS.neighborhood, kind: "neighborhood", bounds: streetWorld.bounds,
       actorFootRadius: ACTOR_FOOT_RADIUS,
       geometry: { blockers: streetWorld.blockers, seats: [] },
-      portals: [...fixedPortals, ...streetWorld.doors],
+      // Road-end city gates are generated from the same sparse-lot-derived
+      // street snapshot as the bounds, so every physical block is visible to
+      // the browser and validated by the server.
+      portals: [...fixedPortals, ...streetWorld.roadPortals, ...streetWorld.doors],
       streetLots: streetWorld.lots,
     };
   }
@@ -3469,7 +3476,18 @@ function locationInfo(locationId) {
     bounds: { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
   const key = parsed.kind === "home" ? "home" : parsed.id;
-  return { ...base, actorFootRadius: ACTOR_FOOT_RADIUS, geometry: LOCATION_GEOMETRY[key], portals: LOCATION_PORTALS[key] || [] };
+  return {
+    ...base,
+    bounds: base.bounds,
+    actorFootRadius: ACTOR_FOOT_RADIUS,
+    geometry: LOCATION_GEOMETRY[key],
+    // Plaza deliberately has one west gate. The remembered residential block
+    // is server state, not a second rendered road in the city map.
+    portals: parsed.id === "city"
+      ? (LOCATION_PORTALS.city || []).filter((portal) => portal.destination !== "neighborhood" ||
+        portal.segment == null || portal.segment === 0)
+      : (LOCATION_PORTALS[key] || []),
+  };
 }
 // Interaction-capable room pieces are sold at Huddle Home even when older
 // shop rows predate the expanded catalog. Keep this projection server-owned so
@@ -3796,13 +3814,34 @@ async function restorePlayer(socket, row) {
   if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
     state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
     state.anim = g.anim === "sit" ? "sit" : "idle";
+    // Location is normally an ephemeral session choice, but a residential
+    // city/neighborhood reconnect is safe to restore from the in-memory grace
+    // snapshot. This also carries the block that owns the next city-west exit.
+    if (g.locationId === "city" || g.locationId === "neighborhood") {
+      state.locationId = g.locationId;
+      if (g.residentialExitBlock) state.residentialExitBlock = { ...g.residentialExitBlock };
+    }
+  }
+  if (state.locationId === "city" || state.locationId === "neighborhood") {
+    try {
+      await refreshStreetHomes();
+    } catch (err) {
+      // A direct city join remains the explicit safe fallback if the directory
+      // is temporarily unavailable; a neighborhood reconnect must not enter a
+      // stale street snapshot.
+      if (state.locationId === "neighborhood") {
+        state.locationId = "office";
+        state.x = LOCATIONS.office.spawn.x; state.y = LOCATIONS.office.spawn.y;
+        state.dir = LOCATIONS.office.spawn.dir;
+      }
+    }
   }
 
   // Void rescue: a saved position that lands on an unpainted map tile (e.g. a
   // position stored under an older layout, restored after a map change went
   // live) would strand the player in the black nothing outside the building.
   // Respawn them on the grass by the west entrance instead, standing.
-  if (isVoidPosition(state.x, state.y)) {
+  if (state.locationId === "office" && isVoidPosition(state.x, state.y)) {
     state.x = GRASS_SPAWN.x; state.y = GRASS_SPAWN.y;
     state.dir = "down"; state.anim = "idle";
   }
@@ -9472,9 +9511,15 @@ io.on("connection", (socket) => {
     }
     // Location changes are physical map portals, not menu travel. Validate this
     // before any home access query so a forged destination cannot probe homes.
+    const rememberedSegment = Number.isInteger(Number(p.residentialExitBlock?.segment))
+      ? Number(p.residentialExitBlock.segment) : null;
     const portal = oldLocation === "neighborhood" && target.kind === "home"
       ? streetPortalForTransition(target.id, p.x, p.y, streetHomes)
-      : portalForTransition(oldLocation, target.id, p.x, p.y, p.email);
+      : oldLocation === "neighborhood" && target.id === "city"
+        ? streetPortalForTransition(target.id, p.x, p.y, streetHomes)
+        : oldLocation === "city" && target.id === "neighborhood"
+          ? streetCityPortalForTransition(p.x, p.y, streetHomes, rememberedSegment)
+          : portalForTransition(oldLocation, target.id, p.x, p.y, p.email);
     if (!portal) {
       socket.emit("locationTransitionResult", { ok: false, code: "portal", message: "Walk through the marked gate or doorway to travel." });
       return false;
@@ -9538,7 +9583,9 @@ io.on("connection", (socket) => {
     if (oldLocation !== target.id) {
       emitToLocation(oldLocation, "playerLeft", socket.id);
       socket.leave(locationRoom(oldLocation));
-      let spawn = locationSpawn(target, oldLocation);
+      // The portal resolves the remembered block against the CURRENT street.
+      // Never overwrite its safe fallback with an old, possibly removed lot.
+      let spawn = portal?.spawn ? { ...portal.spawn } : locationSpawn(target, oldLocation);
       if (target.id === "neighborhood" && previousHome?.kind === "home") {
         spawn = { ...homeReturnSpawn };
       }
@@ -9552,6 +9599,23 @@ io.on("connection", (socket) => {
       }
       p.locationId = target.id;
       p.x = spawn.x; p.y = spawn.y; p.dir = spawn.dir || "down"; p.anim = "idle";
+      if (oldLocation === "neighborhood" && target.id === "city" && Number.isInteger(Number(portal?.segment))) {
+        p.residentialExitBlock = {
+          segment: Number(portal.segment),
+          roadY: Number(portal.y),
+          returnPoint: portal.returnPoint ? { ...portal.returnPoint } : null,
+        };
+      } else if (oldLocation === "city" && target.id === "neighborhood" && Number.isInteger(Number(portal?.segment))) {
+        // Keep the remembered block attached for reconnects and for a second
+        // plaza visit through a venue. The actual portal position was checked
+        // above against that segment.
+        p.residentialExitBlock = {
+          ...(p.residentialExitBlock || {}),
+          segment: Number(portal.segment),
+          roadY: Number(portal.y),
+          returnPoint: { ...spawn },
+        };
+      }
       bumpMovementRevision(p);
       socket.join(locationRoom(target.id));
       lastMoveAt = 0; wasSitting = false;
@@ -10069,6 +10133,7 @@ io.on("connection", (socket) => {
           emitToLocation(`home:${p.email}`, "playerLeft", id);
           const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
           visitor.locationId = "city";
+          delete visitor.residentialExitBlock;
           const spawn = locationSpawn(parseLocation("city"));
           visitor.x = spawn.x; visitor.y = spawn.y; visitor.dir = spawn.dir; visitor.anim = "idle";
           bumpMovementRevision(visitor);
@@ -10163,7 +10228,7 @@ io.on("connection", (socket) => {
            if (v.activity) stopFurnitureActivity(id, "revoke");
           emitToLocation(`home:${p.email}`, "playerLeft", id);
           const vs = io.sockets.sockets.get(id); vs?.leave(locationRoom(`home:${p.email}`));
-          v.locationId = "city"; const spawn = locationSpawn(parseLocation("city"));
+          v.locationId = "city"; delete v.residentialExitBlock; const spawn = locationSpawn(parseLocation("city"));
           v.x = spawn.x; v.y = spawn.y; v.dir = spawn.dir; v.anim = "idle"; vs?.join(locationRoom("city"));
           io.to(id).emit("homeEjected", { message: "Your invitation was revoked.", destination: "city" });
           io.to(id).emit("locationTransitionResult", { ok: true, location: "city", spawn, map: locationInfo("city"), self: movementPayload(id, v), players: locationPlayers(id) });
@@ -10284,6 +10349,17 @@ io.on("connection", (socket) => {
     if (sitting !== wasSitting && now - lastSnapAt >= SEAT_SNAP_COOLDOWN_MS) {
       snapBonus = SEAT_SNAP_ALLOWANCE;
       lastSnapAt = now;
+    }
+    // Endpoint checks alone permit a large forged frame to jump through a
+    // narrow wall. Normal movement must remain clear at every sampled point;
+    // an authored seat snap is the one intentional short teleport.
+    if (!snapBonus && location && !isOfficePlayer(socket.id)) {
+      const clearPath = location.id === "neighborhood"
+        ? validContinuousStreetWorldMove(streetWorld, me.x, me.y, x, y, movementBlockers)
+        : validContinuousLocationMove(
+          location, me.x, me.y, x, y, movementBlockers,
+        );
+      if (!clearPath) return rejectMove("path");
     }
 
     // Reject impossible jumps once we have a baseline. The FIRST move after
@@ -13502,6 +13578,7 @@ io.on("connection", (socket) => {
         }
         graceByEmail[email] = {
           oldId: socket.id, name: p.name, x: p.x, y: p.y, dir: p.dir, anim: p.anim, locationId,
+          residentialExitBlock: p.residentialExitBlock ? { ...p.residentialExitBlock } : null,
           timer: setTimeout(() => {
             emitToLocation(locationId, "playerLeft", socket.id);
             delete graceByEmail[email];
