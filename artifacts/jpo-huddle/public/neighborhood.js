@@ -2351,7 +2351,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
         window.jpoSetConstructionLot?.(null);
       }
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
-      const { SPEED, touchMove = {} } = globals();
+      const g = globals();
+      const { SPEED, touchMove = {} } = g;
+      const spd = typeof g.effectiveMovementSpeed === 'function'
+        ? g.effectiveMovementSpeed()
+        : SPEED;
       const left = !typing && (this.keys.left.isDown || this.wasd.left.isDown || touchMove.left);
       const right = !typing && (this.keys.right.isDown || this.wasd.right.isDown || touchMove.right);
       const up = !typing && (this.keys.up.isDown || this.wasd.up.isDown || touchMove.up);
@@ -2383,11 +2387,11 @@ panel.innerHTML = '<div class="home-panel-head"><b>' + escapeHtml(shopCopy.title
       body.setVelocity(0, 0);
       if (!this.activity && !parkSeated && !this._parkSeatPending && !this._activityPending && !this.transitionRequested) {
         // Independent axes, matching HQ; diagonals retain the same total speed.
-        if (up) { body.setVelocityY(-SPEED); dir = 'up'; anim = 'walk'; }
-        else if (down) { body.setVelocityY(SPEED); dir = 'down'; anim = 'walk'; }
-        if (left) { body.setVelocityX(-SPEED); dir = 'left'; anim = 'walk'; }
-        else if (right) { body.setVelocityX(SPEED); dir = 'right'; anim = 'walk'; }
-        if ((left || right) && (up || down)) body.velocity.normalize().scale(SPEED);
+        if (up) { body.setVelocityY(-spd); dir = 'up'; anim = 'walk'; }
+        else if (down) { body.setVelocityY(spd); dir = 'down'; anim = 'walk'; }
+        if (left) { body.setVelocityX(-spd); dir = 'left'; anim = 'walk'; }
+        else if (right) { body.setVelocityX(spd); dir = 'right'; anim = 'walk'; }
+        if ((left || right) && (up || down)) body.velocity.normalize().scale(spd);
       }
       ui.classList.toggle('neighborhood-walking', anim === 'walk');
       this.playerDir = dir;

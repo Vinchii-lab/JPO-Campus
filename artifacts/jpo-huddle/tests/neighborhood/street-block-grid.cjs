@@ -25,22 +25,22 @@ ${source.slice(start, end)}
 
 scene.info = {
   // 132 durable addresses can occupy 17 blocks, but the server sends a
-  // complete 5x4 rectangle so every block edge remains connected.
+  // complete 4x5 rectangle so every block edge remains connected.
   streetBlocks: Array.from({ length: 20 }, (_, index) => {
-    const column = index % 5, row = Math.floor(index / 5);
+    const column = index % 4, row = Math.floor(index / 4);
     return { index, row, column, x: column * 1440, y: row * 960, width: 1440, height: 960 };
   }),
   streetLots: [{ lot: 132, x: 972, bottom: 812, northSide: false }],
 };
-scene.mapWidth = 7200;
-scene.mapHeight = 3936;
+scene.mapWidth = 5760;
+scene.mapHeight = 4896;
 scene.cameras = { main: { worldView: { left: 0, top: 0, right: 1440, bottom: 960 }, zoom: 1 } };
 scene._syncStreetScenery = () => {};
 scene._drawNeighborhood();
 
 assert.equal(scene.streetSegmentCount, 20);
-assert.equal(scene.streetBlocks[19].x, 5760);
-assert.equal(scene.streetBlocks[19].y, 2880);
+assert.equal(scene.streetBlocks[19].x, 4320);
+assert.equal(scene.streetBlocks[19].y, 3840);
 assert.equal(scene.streetLotsVisual[0].lot.lot, 132, 'durable lot numbers remain unchanged');
 
 const captured = [];
@@ -56,6 +56,6 @@ scene.add = {
 };
 scene._streetSurfaceTexture = width => `road:${width}`;
 scene._drawStreetSegment(19);
-assert.deepEqual(captured[0], { x: 5760, y: 2880, texture: 'road:1440' });
+assert.deepEqual(captured[0], { x: 4320, y: 3840, texture: 'road:1440' });
 
-console.log('PASS: authoritative dense Willow Walk 5x4 block grid and sparse lot addresses');
+console.log('PASS: authoritative dense Willow Walk 4x5 block grid and sparse lot addresses');

@@ -231,10 +231,9 @@ export function streetDefinition(entries = []) {
       .map(({ home }) => home)
     : [];
   const occupiedBlockCount = Math.max(1, Math.ceil(homes.length / STREET_LOT_OFFSETS.length));
-  const columns = Math.min(
-    occupiedBlockCount,
-    Math.max(1, Math.ceil(Math.sqrt(occupiedBlockCount * 960 / 1440 * 16 / 9))),
-  );
+  // Keep the east-side plaza within four blocks of the west entrance.
+  // Additional homes extend rows rather than widening that walk.
+  const columns = Math.min(occupiedBlockCount, 4);
   const rows = Math.ceil(occupiedBlockCount / columns);
   const blocks = Array.from({ length: rows * columns }, (_, index) => {
     const row = Math.floor(index / columns);

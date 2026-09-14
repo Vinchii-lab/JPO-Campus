@@ -75,17 +75,17 @@ const denseHomes = Array.from({ length: 132 }, (_, index) => ({
 }));
 const denseStreet = streetDefinition(denseHomes);
 assert.equal(denseStreet.occupiedBlockCount, 17);
-assert.equal(denseStreet.columns, 5);
-assert.equal(denseStreet.rows, 4);
+assert.equal(denseStreet.columns, 4);
+assert.equal(denseStreet.rows, 5);
 assert.equal(denseStreet.blocks.length, 20, "tail blocks complete the rectangular grid");
 assert.deepEqual(
   denseStreet.blocks[19],
-  { index: 19, row: 3, column: 4, x: 5760, y: 2880, width: 1440, height: 960 },
+  { index: 19, row: 4, column: 3, x: 4320, y: 3840, width: 1440, height: 960 },
 );
-assert.deepEqual(denseStreet.bounds, { width: 7200, height: 3936 });
+assert.deepEqual(denseStreet.bounds, { width: 5760, height: 4896 });
 assert.equal(denseStreet.lots[131].displayIndex, 132);
-assert.equal(denseStreet.lots[131].row, 3);
-assert.equal(denseStreet.lots[131].column, 1);
+assert.equal(denseStreet.lots[131].row, 4);
+assert.equal(denseStreet.lots[131].column, 0);
 for (const block of denseStreet.blocks) {
   const intersection = { x: block.x + 576, y: block.y + 504 };
   assert(validStreetWorldMove(denseStreet, intersection.x, intersection.y),
@@ -108,7 +108,7 @@ for (const lot of denseStreet.lots) {
     pointHitsRect(lot.returnSpawn.x, lot.returnSpawn.y, block)),
   `dense lot ${lot.lot} return spawn clears its house`);
 }
-assert.equal(denseStreet.roadPortals.length, 4, "one east gate per row");
+assert.equal(denseStreet.roadPortals.length, 5, "one east gate per row");
 assert(denseStreet.roadPortals.every((portal) =>
   portal.x === denseStreet.bounds.width - 96 &&
   portal.x + portal.width === denseStreet.bounds.width &&

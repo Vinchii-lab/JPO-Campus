@@ -54,8 +54,8 @@ Homes must start completely unfurnished; players choose, buy, and place all furn
 
 **How to apply:** Keep only architecture in the base home. Never add free furnishings or their invisible blockers. Put furniture actions on placed shop items and make shared controls location-aware.
 
-Use a compact landscape grid for the residential neighborhood, not one long vertical strip or a uniformly shrunk whole-world image.
+Use a compact residential grid no wider than four blocks, not one long vertical strip or a uniformly shrunk whole-world image.
 
-**Why:** The user rejected the vertical street because it left most of the screen as unused grass. Permanent lot numbers represent ownership/address identity, not empty physical cells; sparse IDs must not inflate the map.
+**Why:** The user rejected the vertical street because it left most of the screen as unused grass, then rejected five columns because the walk to the plaza was too long. They requested four columns and five rows for the current neighborhood. Permanent lot numbers represent ownership/address identity, not empty physical cells; sparse IDs must not inflate the map.
 
 **How to apply:** Pack occupied lots across connected rows and columns while preserving permanent addresses and ownership. Render only nearby blocks on both axes. Any future directory change that reflows positions must synchronize the full geometry, not merely update owner labels.

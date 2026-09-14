@@ -5040,6 +5040,38 @@
     let _playerItems    = {};   // usable items: itemId → remaining uses (server-authoritative)
     let _boostUntil     = 0;    // coffee boost end (client mirror; the server enforces its own copy)
 
+    // One speed selector feeds both OfficeScene and the shared
+    // NeighborhoodScene.  The round overrides intentionally stay in the same
+    // order as the established HQ movement code: Prop Hunt can raise the
+    // speed, After Dark chooses the larger killer edge (or clamps crew), and
+    // RLGL runners always return to base speed.
+    function _effectiveMovementSpeed(baseSpeed = SPEED) {
+      let spd = _boostUntil > Date.now() ? baseSpeed * COFFEE_MULT : baseSpeed;
+      if (window._ph.role === 'hider' && window._ph.phase === 'hiding') {
+        spd = Math.max(spd, baseSpeed * 2);
+      }
+      if (_roundPhase === 'active' && _roundAlive) {
+        spd = _roundRole === 'killer'
+          ? baseSpeed * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)
+          : baseSpeed;
+      }
+      if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished) spd = baseSpeed;
+      return spd;
+    }
+
+    function _updateBoostTimer(durationMs, mult, emoji) {
+      const now = Date.now();
+      const duration = Number(durationMs);
+      // RLGL sends the explicit { mult: 1, durationMs: 1 } off signal.
+      if (Number(mult) === 1 && duration <= 1) {
+        _boostUntil = now;
+        return;
+      }
+      const nextUntil = now + (Number.isFinite(duration) && duration > 0 ? duration : 45000);
+      if (nextUntil >= _boostUntil) _boostEmoji = emoji;
+      _boostUntil = Math.max(_boostUntil, nextUntil);
+    }
+
     let _builderStep   = 0;
     let _phaserKbd     = null;
     let _approvedQueue = null;
@@ -6489,15 +6521,17 @@
     // Group items reuse this event per recipient with an optional emoji
     // (🍕 for pizza party) — the boost mechanics are identical.
     socket.on('coffeeBoost', (payload) => {
-      const { id, durationMs, emoji, machine } = payload || {};
+      const { id, durationMs, emoji, machine, mult } = payload || {};
       const scene = window._gameScene;
       const em = (typeof emoji === 'string' && emoji.length > 0 && emoji.length <= 8) ? emoji : '☕';
       // Machine brews carry the machine id — play the brew animation at the
       // machine itself so everyone nearby sees it actually making the coffee.
       if (typeof machine === 'string' && scene) scene._brewFx(machine);
       if (id === socket.id) {
-        _boostUntil = Date.now() + (durationMs || 45000);
-        _boostEmoji = em;
+        // Group treats can overlap, but they never stack their multiplier.
+        // Keep the longest client timer too, so a later coffee event cannot
+        // shorten an already-live pizza boost.
+        _updateBoostTimer(durationMs, mult, em);
         _startBoostChip();
         if (scene?.player) scene._showEmoteBubble(scene.player, em, true);
       } else if (scene) {
@@ -18817,28 +18851,9 @@
           }
         } else {
           player.setVelocity(0,0);
-          // Coffee boost: walk faster while it's live. The server's movement
-          // budget is widened by the same multiplier for the same window, so
-          // boosted steps aren't rejected as speed hacks.
-          // Office After Dark overrides (MUST mirror the server's playerMove
-          // budget rule): alive killers use the LARGER of their private edge
-          // and a live coffee boost (never the product); alive crew are
-          // clamped to base speed — any boost timer resumes after the round.
-          let spd = _boostUntil > Date.now() ? SPEED * COFFEE_MULT : SPEED;
-          // Prop Hunt hider zooms at 2× while sneaking (MUST mirror the
-          // server's playerMove budget rule above).
-          if (window._ph.role === 'hider' && window._ph.phase === 'hiding') spd = Math.max(spd, SPEED * 2);
-          if (_roundPhase === 'active' && _roundAlive) {
-            spd = _roundRole === 'killer'
-              ? SPEED * Math.max(_roundSpeedMult, _boostUntil > Date.now() ? COFFEE_MULT : 1)
-              : SPEED;
-          }
-          // Red Light Green Light: ANY speed boost is banned on the lawn
-          // (MUST mirror the server's playerMove budget rule — the server
-          // gives runners NO boosted budget, so a client still moving at
-          // boost speed gets every step silently rejected and looks frozen
-          // to the whole office).
-          if (_rlgl.running && _rlgl.meAlive && !_rlgl.meFinished) spd = SPEED;
+          // The shared selector preserves HQ's coffee, Prop Hunt, After Dark,
+          // and RLGL precedence while also serving NeighborhoodScene.
+          let spd = _effectiveMovementSpeed(SPEED);
           if (left)       player.setVelocityX(-spd);
           else if (right) player.setVelocityX( spd);
           if (up)         player.setVelocityY(-spd);
@@ -21047,6 +21062,7 @@
     if (window.initNeighborhoodUI) {
       window.initNeighborhoodUI(socket, () => ({
         showToast, DIR_START, SPEED, touchMove,
+        effectiveMovementSpeed: () => _effectiveMovementSpeed(SPEED),
         _playerChar, _playerName, _playerEmail, _playerHairIdx, _playerSkinIdx,
         _playerShirtIdx, _playerPantsIdx, _equippedCosmetic, _equippedWings,
         _equippedSlots, _equippedPet, _equippedPetAcc, _bakedWearIds, _myPetXp, _petStageFor
