@@ -47,3 +47,9 @@ During shutdown or blur/disconnect cleanup, guard the physics body itself; a sur
 **Why:** An actual city→shop browser transition crashed inside sprite.setVelocity after Arcade had already destroyed its body. Optional chaining on the sprite did not help because the method dereferences the missing body internally.
 
 **How to apply:** Stop velocity through an optional body reference in cleanup. Include a retained sprite with a destroyed body in teardown tests. Keep CDN scripts CORS-enabled so library exceptions expose their stack instead of only “Script error.”
+
+Gate relocation needs three independent checks: continuous client approach, the live trigger predicate, and server portal acceptance.
+
+**Why:** Moving the HQ gate passed server geometry checks while decorative wall tiles blocked the approach; clearing those then exposed a separate stale client trigger rectangle. A visible doorway and legal server coordinates did not imply working travel.
+
+**How to apply:** Derive the client trigger from the same rectangle used for its visible cue. Execute the actual trigger in regression tests, not just assertions against portal metadata. Include the complete approach through client tile collisions.

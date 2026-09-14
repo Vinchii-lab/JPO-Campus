@@ -25,6 +25,7 @@ import {
 } from "../../neighborhood.mjs";
 
 const officeLink = LOCATION_PORTALS.neighborhood.find((portal) => portal.destination === "office");
+const hqWillowGate = LOCATION_PORTALS.office.find((portal) => portal.destination === "neighborhood");
 assert.deepEqual(
   { x: officeLink.x, y: officeLink.y, width: officeLink.width, height: officeLink.height },
   { x: 0, y: 432, width: 96, height: 144 },
@@ -37,6 +38,11 @@ assert.equal(locationSpawn(parseLocation("neighborhood"), "office").y, 504);
 assert(pointHitsRect(48, 504, officeLink, ACTOR_FOOT_RADIUS), "HQ trigger must be foot-safe");
 assert(validStreetWorldMove(streetDefinition([]), 144, 504), "west-end arrival must be walkable");
 assert(validStreetWorldMove(streetDefinition([]), 48, 504), "west-end portal floor must be walkable");
+assert.deepEqual(
+  { x: hqWillowGate.x, y: hqWillowGate.y, width: hqWillowGate.width, height: hqWillowGate.height },
+  { x: 192, y: 2208, width: 96, height: 144 },
+  "HQ Willow Walk gate must stay in the highlighted garden clearing",
+);
 const populatedStreet = streetDefinition([
   { ownerEmail: "resident@example.com", lotIndex: 1, construction: { wallsBuilt: true, complete: true } },
 ]);
@@ -187,6 +193,26 @@ assert.equal((await homeAccess(publicHomePool, 'resident@example.com', 'huddle-a
 assert.equal((await homeAccess(publicHomePool, 'huddle-a@justpressone.com', 'resident@example.com')).ok, false,
   'test-owned homes remain unavailable');
 const clientSource = fs.readFileSync(path.join(here, "../../public/neighborhood.js"), "utf8");
+const hqMap = JSON.parse(fs.readFileSync(path.join(here, "../../public/assets/JPO_HQ.tmj"), "utf8"));
+const hqFloor = hqMap.layers.find((layer) => layer.name === "Floor")?.data || [];
+const hqWall = hqMap.layers.find((layer) => layer.name === "Wall")?.data || [];
+const hqFurniture = hqMap.layers.find((layer) => layer.name === "Furniture")?.data || [];
+for (let row = 46; row <= 48; row++) for (let col = 4; col <= 7; col++) {
+  const index = row * hqMap.width + col;
+  assert(hqFloor[index] > 0 || hqWall[index] > 0 || hqFurniture[index] > 0,
+    `HQ garden approach tile (${col},${row}) must remain painted`);
+}
+for (let x = 402; x >= 240; x -= 12) {
+  const col = Math.floor(x / 48), row = Math.floor((2280 + 27) / 48);
+  const index = row * hqMap.width + col;
+  assert(hqFloor[index] > 0 || hqWall[index] > 0 || hqFurniture[index] > 0,
+    `HQ spawn-to-gate path must remain painted at (${x},2280)`);
+}
+const officeSource = fs.readFileSync(path.join(here, "../../public/index.html"), "utf8");
+assert.match(officeSource, /GARDEN_APPROACH_CELLS[\s\S]*for \(const \[c, r\] of GARDEN_APPROACH_CELLS\)/,
+  "client must clear only the authored HQ garden approach cells");
+assert.match(officeSource, /for \(let r = 46; r <= 48; r\+\+\) for \(let c = 4; c <= 7; c\+\+\)/,
+  "client HQ garden approach must cover the continuous y≈2280 corridor");
 assert.match(clientSource, /const LOT_GROUND_DEPTH = 2/);
 assert.match(clientSource, /\.setDepth\(LOT_GROUND_DEPTH\)/, "foundation and yard planes share a low depth");
 assert.match(clientSource, /\.setDepth\(top \+ 48 \* \(row \+ 1\)\)/, "wall tiles must y-sort by their bottom edge");

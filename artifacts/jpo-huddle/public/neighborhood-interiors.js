@@ -54,7 +54,11 @@ window.JpoInteriors = {
       surface.refresh();
       surface.setFilter(Phaser.Textures.FilterMode.NEAREST);
     }
-    scene.add.image(0, 0, surfaceKey).setOrigin(0, 0).setScale(3).setDepth(-10);
+    // Interior floor/wall art is a backdrop. Furniture and actors share the
+    // authored floor-contact y sort below; keeping the backdrop in a distinct
+    // band prevents tall room surfaces from covering a character.
+    scene.add.image(0, 0, surfaceKey).setOrigin(0, 0).setScale(3)
+      .setDepth(-10000).setData('layerRole', 'interior-background');
 
     if (room.wall) {
       scene.textures.get(room.wall.asset).setFilter(Phaser.Textures.FilterMode.NEAREST);
@@ -64,7 +68,9 @@ window.JpoInteriors = {
         scene.add.image(wx, 48, room.wall.asset)
           .setOrigin(0.5, 1)
           .setScale(3)
-          .setDepth(-9);
+          .setDepth(-9000)
+          .setData('floorAnchor', 48)
+          .setData('layerRole', 'interior-wall');
       }
     }
 
@@ -80,7 +86,9 @@ window.JpoInteriors = {
         const img = scene.add.image(obj.x, obj.y, obj.asset)
           .setOrigin(0.5, obj.asset.startsWith('floor_') ? 0.5 : 1)
           .setScale(obj.scale || 1)
-          .setDepth(depth);
+          .setDepth(depth)
+          .setData('floorAnchor', depth)
+          .setData('layerRole', depth < 0 ? 'interior-wall-prop' : 'interior-furniture');
         if (obj.flipX) img.setFlipX(true);
       });
     }
@@ -88,7 +96,9 @@ window.JpoInteriors = {
     for (const portal of scene.info.portals || []) {
       if (portal.y !== 0) continue;
       scene.add.image(portal.x + portal.width / 2, portal.y + portal.height, 'pe_shop_door')
-        .setOrigin(0.5, 1).setScale(3).setDepth(1);
+        .setOrigin(0.5, 1).setScale(3).setDepth(portal.y + portal.height)
+        .setData('floorAnchor', portal.y + portal.height)
+        .setData('layerRole', 'interior-portal');
     }
 
     if (room.label && scene._sign) {

@@ -127,6 +127,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   // actor (local, remote, and pet). Characters use their world y as depth,
   // while the map's playable bounds keep their foot centre above this plane.
   const LOT_GROUND_DEPTH = 2;
+  // Interior presentation uses one depth contract for authored room art,
+  // placed furniture, and actors. Floor/background graphics are deliberately
+  // below the y-sorted plane; all objects on that plane use their actual
+  // floor-contact anchor rather than bitmap centres. A tiny front bias is
+  // enough to split an occluding furniture base without changing movement or
+  // persisted geometry.
+  const INTERIOR_DEPTH = Object.freeze({
+    BACKGROUND: -10000,
+    WALL_BACK: -9000,
+    SEATED_ACTOR_BIAS: 0.005,
+    FRONT_BIAS: 0.01,
+  });
+  const finiteDepth = (value, fallback = 0) =>
+    Number.isFinite(Number(value)) ? Number(value) : fallback;
   // A city transition includes this server-authoritative value so the personal
   // house is colored before the owner has entered its interior this session.
   let ownExteriorColor = 'teal';
@@ -169,16 +183,18 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     camera.fadeOut(220, 16, 22, 34);
   };
   // The gate lies on an existing, walkable western garden tile in JPO_HQ.tmj
-  // (columns 2–3, rows 74–76). It is deliberately proximity-only: no action
+  // (columns 4–5, rows 46–48). It is deliberately proximity-only: no action
   // key and no travel button can bypass the walk through the garden.
-  window.jpoTryOfficePortal = function(player, dir) {
-    if (currentLocation !== 'office' || !player) return false;
-    const inGate = player.x >= 96 && player.x <= 192 && player.y >= 3552 && player.y <= 3696;
+  window.jpoTryOfficePortal = function(player, dir, gate) {
+    if (currentLocation !== 'office' || !player || !gate) return false;
+    const inGate = player.x >= gate.x && player.x <= gate.x + gate.width &&
+      player.y >= gate.y && player.y <= gate.y + gate.height;
     if (!inGate) { officePortalRelease = true; return false; }
     // The direct move packet can trail one visual frame. Require an interior
     // point so that normal 50ms packet latency still lands inside the server's
     // authoritative larger portal rather than correcting the player back.
-    const inside = player.x >= 112 && player.x <= 176 && player.y >= 3564 && player.y <= 3684;
+    const inside = player.x >= gate.x + 16 && player.x <= gate.x + gate.width - 16 &&
+      player.y >= gate.y + 12 && player.y <= gate.y + gate.height - 12;
     if (!inside || !officePortalRelease || officePortalTransition) return false;
     officePortalTransition = true;
     movement?.sendReliable('office', { x: player.x, y: player.y, dir: dir || 'left', anim: 'idle' });
@@ -292,6 +308,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   function renderHome() {
     syncPanelControls();
+    if (typeof window.JpoUIBuilder?.renderHomePanel !== 'function') return;
     window.JpoUIBuilder.renderHomePanel(homePanel, {
       isHome: isHome(),
       homeState: homeState,
@@ -339,6 +356,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       ui.appendChild(panel);
     }
     if (panel) {
+      if (typeof window.JpoUIBuilder?.renderShopPanel !== 'function') return;
       window.JpoUIBuilder.renderShopPanel(panel, {
         isShop: typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation)),
         location: currentLocation,
@@ -750,13 +768,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.playerTexKey = this._office('_buildPlayerTex', char, g._playerHairIdx || 0, g._playerSkinIdx || 0,
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || ('run_' + char);
       this.playerDir = self.dir || 'down';
-      this.player = this.physics.add.sprite(self.x || 24, self.y || 24, this.playerTexKey, g.DIR_START?.[this.playerDir] || 0)
-        .setScale(3).setOrigin(0.5, 0.5).setDepth(self.y || 24);
+      this.player = this.physics.add.sprite(
+        finiteDepth(self.x, 24), finiteDepth(self.y, 24), this.playerTexKey,
+        g.DIR_START?.[this.playerDir] || 0,
+      ).setScale(3).setOrigin(0.5, 0.5);
+      this._setActorDepth(this.player, this.player.y);
       this.player.body.setSize(12, 10).setOffset(2, 20);
       this.player.body.setCollideWorldBounds(true);
       this.localNameTag = this._makeNameTag(this.player.x, this.player.y, g._playerName || self.name || 'You') ||
         this.add.text(this.player.x, this.player.y - 40, g._playerName || 'You', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1);
-      this.localNameTag.setDepth((self.y || 24) + 2);
+      this._setActorDepth(this.localNameTag, this.player.y, 2);
       this.cameras.main.startFollow(this.player);
 
       this._geometryBlocks = this.physics.add.staticGroup();
@@ -970,6 +991,92 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       });
     }
 
+    _floorDepth(anchor, bias = 0) {
+      return finiteDepth(anchor) + finiteDepth(bias);
+    }
+
+    _setFloorDepth(object, anchor, bias = 0, role = 'floor-object') {
+      if (!object) return object;
+      const floorAnchor = finiteDepth(anchor);
+      object.setDepth?.(this._floorDepth(floorAnchor, bias));
+      object.setData?.('floorAnchor', floorAnchor);
+      object.setData?.('layerRole', role);
+      return object;
+    }
+
+    _setActorDepth(object, anchor, bias = 0) {
+      return this._setFloorDepth(object, anchor, bias, 'actor');
+    }
+
+    _activityDepthAnchor(entry, fallback) {
+      const furniture = entry?._activityFurnitureSprite;
+      if (!furniture || !furniture.getData?.('occluderParts')?.length) return finiteDepth(fallback);
+      return finiteDepth(
+        furniture.getData?.('floorAnchor'),
+        finiteDepth(furniture.depth, fallback),
+      );
+    }
+
+    _activityDepthBias(entry) {
+      return entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length
+        ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 0;
+    }
+
+    _interiorObjectNeedsOccluder(asset) {
+      // Commercial objects have no catalog row, but their authored names
+      // identify the same front-row furniture contract used by home items.
+      // Wall art and small props intentionally remain single sprites.
+      return /(?:chair|booth|bench|sofa|table|counter|cushion|bed|display|plant_disp|tree)/i.test(
+        String(asset || ''),
+      );
+    }
+
+    _normaliseInteriorLayers(beforeChildren = [], locationId = this.location) {
+      const data = this.cache?.json?.get?.('commercial-layouts');
+      const room = data?.rooms?.[locationId];
+      if (!room) return;
+      const before = new Set(beforeChildren);
+      const added = (this.children?.list || []).filter((object) => !before.has(object));
+      // The generated room surface is the complete floor/wall backdrop. Keep
+      // it below all y-sorted content, including a player at y=0.
+      added.forEach((object) => {
+        const key = object?.texture?.key;
+        if (typeof key === 'string' && key.startsWith('commercial-surface:')) {
+          this._setFloorDepth(object, INTERIOR_DEPTH.BACKGROUND, 0, 'interior-background');
+        } else if (key === 'commercial-wall-native') {
+          this._setFloorDepth(object, INTERIOR_DEPTH.WALL_BACK, 0, 'interior-wall');
+        }
+      });
+      const candidates = added.filter((object) => {
+        const key = object?.texture?.key;
+        return key && key !== 'commercial-wall-native' &&
+          !String(key).startsWith('commercial-surface:');
+      });
+      const used = new Set();
+      for (const authored of room.objects || []) {
+        if (!authored?.asset || authored.asset.startsWith('floor_') || authored.asset === 'museum_door') continue;
+        const object = candidates.find((candidate) => {
+          if (used.has(candidate)) return false;
+          return candidate?.texture?.key === authored.asset &&
+            Math.abs(finiteDepth(candidate.x) - finiteDepth(authored.x)) < 0.01 &&
+            Math.abs(finiteDepth(candidate.y) - finiteDepth(authored.y)) < 0.01;
+        });
+        if (!object) continue;
+        used.add(object);
+        // `depth` in the authored manifest is the floor-contact anchor. Keep
+        // explicit negative values for wall art as a back-wall layer.
+        const anchor = finiteDepth(authored.depth, authored.y);
+        const role = anchor < 0 ? 'interior-wall-prop' : 'interior-furniture';
+        this._setFloorDepth(object, anchor, 0, role);
+        if (anchor >= 0 && this._interiorObjectNeedsOccluder(authored.asset)) {
+          window.HomeFurnitureRenderer?.splitOccluder?.(this, object, {
+            fromRatio: 0.62,
+            depthBias: INTERIOR_DEPTH.FRONT_BIAS,
+          });
+        }
+      }
+    }
+
     _streetYardKey(yard) {
       return (yard || []).map((item) => [
         item.id, item.furnitureId, item.gridX, item.gridY, item.rotation,
@@ -982,17 +1089,29 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // tile occupies one 48px home cell only through integer 3× scaling.
       for (let y = 0; y < this.mapHeight; y += 48) {
         for (let x = 0; x < this.mapWidth; x += 48) {
-          this.add.image(x + 24, y + 24, 'int_' + floorKey).setScale(INTERIOR_ART_SCALE).setDepth(0);
+          const floor = this.add.image(x + 24, y + 24, 'int_' + floorKey)
+            .setScale(INTERIOR_ART_SCALE);
+          this._setFloorDepth(floor, INTERIOR_DEPTH.BACKGROUND, 0, 'interior-floor');
         }
       }
       for (let x = 0; x < this.mapWidth; x += 48) {
-        this.add.image(x + 24, 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
+        const topWall = this.add.image(x + 24, 24, 'int_' + wallKey)
+          .setScale(INTERIOR_ART_SCALE);
+        this._setFloorDepth(topWall, 48, 0, 'interior-wall');
         const overlapsExit = x < exit.x + exit.width && x + 48 > exit.x;
-        if (!overlapsExit) this.add.image(x + 24, this.mapHeight - 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
+        if (!overlapsExit) {
+          const bottomWall = this.add.image(x + 24, this.mapHeight - 24, 'int_' + wallKey)
+            .setScale(INTERIOR_ART_SCALE);
+          this._setFloorDepth(bottomWall, this.mapHeight, 0, 'interior-wall');
+        }
       }
       for (let y = 48; y < this.mapHeight - 48; y += 48) {
-        this.add.image(24, y + 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
-        this.add.image(this.mapWidth - 24, y + 24, 'int_' + wallKey).setScale(INTERIOR_ART_SCALE).setDepth(1);
+        const leftWall = this.add.image(24, y + 24, 'int_' + wallKey)
+          .setScale(INTERIOR_ART_SCALE);
+        const rightWall = this.add.image(this.mapWidth - 24, y + 24, 'int_' + wallKey)
+          .setScale(INTERIOR_ART_SCALE);
+        this._setFloorDepth(leftWall, y + 48, 0, 'interior-wall');
+        this._setFloorDepth(rightWall, y + 48, 0, 'interior-wall');
       }
     }
 
@@ -1584,7 +1703,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _drawCommercialInterior() {
+      const beforeChildren = [...(this.children?.list || [])];
       window.JpoInteriors.draw(this, this.location);
+      this._normaliseInteriorLayers(beforeChildren, this.location);
       if (this.location === 'furniture-shop') this._drawFurnitureShowroom();
     }
 
@@ -1644,9 +1765,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
       // The centered exit stays open from the arrival tile to the threshold.
       // This is the one non-tile cue in an otherwise unfurnished residence.
-      const doorArt = this.add.graphics().setDepth(2);
+      const doorArt = this.add.graphics();
       doorArt.fillStyle(0x9e7355, 1).fillRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
       doorArt.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
+      this._setFloorDepth(doorArt, HOME_EXIT.y + HOME_EXIT.height, INTERIOR_DEPTH.FRONT_BIAS, 'interior-exit');
       this.add.text(HOME_EXIT.x + HOME_EXIT.width / 2, HOME_EXIT.y + 30, 'WILLOW EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
     }
 
@@ -1659,8 +1781,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       walls.forEach((wall) => {
         for (let y = wall.y; y < wall.y + wall.height; y += 48) {
           for (let x = wall.x; x < wall.x + wall.width; x += 48) {
-            this.add.image(x + 24, y + 24, 'int_home_wall')
-              .setScale(INTERIOR_ART_SCALE).setDepth(4);
+            const tile = this.add.image(x + 24, y + 24, 'int_home_wall')
+              .setScale(INTERIOR_ART_SCALE);
+            this._setFloorDepth(tile, y + 48, 0, 'interior-divider');
           }
         }
       });
@@ -1774,7 +1897,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const localPet = g._equippedPet || '';
       this.localPet = this._makePet(localPet, this.player.x, this.player.y, g._equippedPetAcc || '',
         g._petStageFor?.(localPet, (g._myPetXp || {})[localPet] || 0) || 1, socket.id);
-       this.localPet?.setDepth?.(19);
+      if (this.localPet) this._setActorDepth(this.localPet, this.localPet.y, -1);
       const baked = g._bakedWearIds?.(char, g._equippedCosmetic, g._equippedWings, g._equippedSlots) || [];
       this.playerTexKey = this._office('_buildPlayerTex', char, g._playerHairIdx || 0, g._playerSkinIdx || 0,
         g._playerShirtIdx || 0, g._playerPantsIdx || 0, baked) || this.playerTexKey;
@@ -1824,6 +1947,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       target._activityFurnitureSprite = null;
       target._activityFurnitureDef = null;
+      const actor = target.sprite || (target === this ? this.player : null);
+      if (actor) this._setActorDepth(actor, actor.y);
     }
 
     _showActivityEffect(entry, activity) {
@@ -1844,6 +1969,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (fSprite && definition && typeof window.HomeFurnitureRenderer?.updateActivity === 'function') {
           entry._activityFurnitureSprite = fSprite;
           entry._activityFurnitureDef = definition;
+          this._setActorDepth(
+            sprite,
+            this._activityDepthAnchor(entry, sprite.y),
+            this._activityDepthBias(entry),
+          );
           window.HomeFurnitureRenderer.updateActivity(this, fSprite, definition, activity);
         }
       }
@@ -2141,7 +2271,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!this.ghost || ghostFurnitureId !== def.id) {
           this.ghost?.destroy?.();
           this.ghost = this._drawFurniture(def, ghostX, ghostY, {
-            rotation: selectedRotation, depth: 25, instanceId: 'placement-preview',
+            rotation: selectedRotation, depth: 25, occluder: false, instanceId: 'placement-preview',
           });
           this.ghost?.setAlpha?.(0.6);
         } else {
@@ -2421,9 +2551,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const baked = globals()._bakedWearIds?.(character, player.equipped, player.wings, player.slots) || [];
       const texture = this._office('_buildPlayerTex', character, hairIdx, skinIdx, shirtIdx, pantsIdx, baked) || ('run_' + character);
       if (!remote) {
-        const sprite = this.add.sprite(player.x, player.y, texture).setScale(3).setOrigin(0.5, 0.5).setDepth(player.y);
+        const sprite = this.add.sprite(player.x, player.y, texture).setScale(3).setOrigin(0.5, 0.5);
+        this._setActorDepth(sprite, player.y);
         const nameTag = this._makeNameTag(player.x, player.y, player.name || 'Coworker') ||
-          this.add.text(player.x, player.y - 40, player.name || 'Coworker', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1).setDepth(player.y + 2);
+          this.add.text(player.x, player.y - 40, player.name || 'Coworker', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1);
+        this._setActorDepth(nameTag, player.y, 2);
         remote = this.remotes[id] = {
           sprite, nameTag, slotObjs: {}, character, texture, name: player.name || 'Coworker',
           appear: { character, hairIdx, skinIdx, shirtIdx, pantsIdx },
@@ -2455,7 +2587,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       remote.petAcc = player.petAcc || '';
       remote.petStage = stage;
       remote.pet = this._makePet(player.pet || '', remote.sprite.x, remote.sprite.y, player.petAcc || '', stage, id);
-      remote.pet?.setDepth?.(player.y - 1);
+      if (remote.pet) this._setActorDepth(remote.pet, remote.sprite.y, -1);
     }
 
     _applyRemote(remote, player) {
@@ -2463,6 +2595,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       remote.lastDir = dir;
       remote.seated = player.anim === 'sit';
       remote.activity = player.activity || (player.anim === 'sit' ? { action: 'sit' } : null);
+      if (!remote.activity) {
+        this._clearActivityEffect(remote);
+        remote._activityAction = null;
+      }
       remote.sprite.setPosition(player.x, player.y);
       // An active sit animation owns the seated texture. Calling
       // setTexture(runSheet) for every movement packet resets the visual sheet
@@ -2470,11 +2606,17 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // or appear to stand. Activity/seat pose application below switches
       // textures only when entering or changing the animation.
       if (!remote.activity) remote.sprite.setTexture(remote.texture);
-      remote.sprite.setDepth(player.y);
-      remote.nameTag?.setPosition(player.x, player.y - 40).setDepth(player.y + 2);
+      this._setActorDepth(remote.sprite, player.y);
+      remote.nameTag?.setPosition(player.x, player.y - 40);
+      this._setActorDepth(remote.nameTag, player.y, 2);
       if (remote.activity) {
         remote.playerTexKey = remote.texture;
         this._applyActivityPose(remote, remote.activity, dir);
+        this._setActorDepth(
+          remote.sprite,
+          this._activityDepthAnchor(remote, remote.sprite.y),
+          this._activityDepthBias(remote),
+        );
       } else if (player.anim === 'walk') {
         remote.sprite.setFlipX(false);
         const key = 'walk_' + remote.texture + '_' + dir;
@@ -2495,15 +2637,18 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _positionPresentation(entry, x, y, dir) {
+      const depthAnchor = this._activityDepthAnchor(entry, y);
+      const depthBias = entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length
+        ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 1;
       for (const [object, def] of [[entry.cosmetic, entry.cosmeticDef], [entry.wings, entry.wingsDef]]) {
         if (!object) continue;
-        object.setDepth?.(y + 1);
+        this._setActorDepth(object, depthAnchor, depthBias);
         if (def) this._placeWearable(object, def, x, y, dir);
         else object.setPosition(x, y - 68);
       }
       for (const slot of Object.values(entry.slotObjs || {})) {
         if (!slot?.obj) continue;
-        slot.obj.setDepth?.(y + 1);
+        this._setActorDepth(slot.obj, depthAnchor, depthBias);
         if (slot.def) this._placeWearable(slot.obj, slot.def, x, y, dir);
         else slot.obj.setPosition(x, y - 68);
       }
@@ -2544,7 +2689,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       remote.petAcc = payload.petAcc || '';
       remote.petStage = stage;
       remote.pet = this._makePet(payload.pet || '', remote.sprite.x, remote.sprite.y, payload.petAcc || '', stage, id);
-      remote.pet?.setDepth?.(remote.sprite.y - 1);
+      if (remote.pet) this._setActorDepth(remote.pet, remote.sprite.y, -1);
     }
 
     showChat(playerId, message) {
@@ -2646,19 +2791,25 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this.player.setTexture(this.playerTexKey).setFrame(globals().DIR_START?.[dir] || 0);
       }
       this.localNameTag?.setPosition(this.player.x, this.player.y - 40);
-      this.player.setDepth(this.player.y);
-      this.localNameTag?.setDepth(this.player.y + 2);
-      this._positionPresentation({ cosmetic: this.localCosmetic, cosmeticDef: this.localCosmeticDef, wings: this.localWings, wingsDef: this.localWingsDef, slotObjs: this.localSlotObjs }, this.player.x, this.player.y, dir);
+      const localDepthAnchor = this._activityDepthAnchor(this, this.player.y);
+      const localDepthBias = this._activityDepthBias(this);
+      this._setActorDepth(this.player, localDepthAnchor, localDepthBias);
+      this._setActorDepth(this.localNameTag, localDepthAnchor, localDepthBias + 2);
+      this._positionPresentation({
+        cosmetic: this.localCosmetic, cosmeticDef: this.localCosmeticDef,
+        wings: this.localWings, wingsDef: this.localWingsDef, slotObjs: this.localSlotObjs,
+        _activityFurnitureSprite: this._activityFurnitureSprite,
+      }, this.player.x, this.player.y, dir);
       if (this._activityFx) this._activityFx.setPosition(this.player.x, this.player.y - 54);
       if (this.localPet) {
         this._stepPet(this.localPet, this.player.x, this.player.y, delta, !!this.activity);
-        this.localPet.setDepth?.(this.localPet.y - 1);
+        this._setActorDepth(this.localPet, this.localPet.y, -1);
       }
       for (const remote of Object.values(this.remotes)) {
         if (remote._activityFx) remote._activityFx.setPosition(remote.sprite.x, remote.sprite.y - 54);
         if (remote.pet) {
           this._stepPet(remote.pet, remote.sprite.x, remote.sprite.y, delta, remote.seated);
-          remote.pet.setDepth?.(remote.pet.y - 1);
+          this._setActorDepth(remote.pet, remote.pet.y, -1);
         }
         if (remote.chatBubble) remote.chatBubble.setPosition(remote.sprite.x, remote.sprite.y - 85);
       }

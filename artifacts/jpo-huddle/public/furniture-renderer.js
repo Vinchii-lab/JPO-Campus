@@ -10,6 +10,11 @@
   const DEFAULT_SCALE = 3;
   const texturePrefix = "home-furniture:";
   const animationPrefix = "home-furniture-animation:";
+  // The y coordinate supplied by the home/commercial layout is the contact
+  // point with the floor, not the centre of the bitmap. Keep the contract
+  // explicit here so an image's visual height can never move it in front of
+  // an actor standing on the same row.
+  const OCCLUDER_EPSILON = 0.01;
 
   function entries(catalog) {
     return Object.entries(catalog || {}).filter(([, definition]) =>
@@ -46,6 +51,21 @@
 
   function isAnimated(definition) {
     return (frameInfo(definition)?.frameCount || 1) > 1;
+  }
+
+  function finite(value, fallback) {
+    return Number.isFinite(Number(value)) ? Number(value) : fallback;
+  }
+
+  function floorAnchor(definition, x, y, options = {}) {
+    // `depth` was the original renderer option and remains an accepted
+    // alias. New callers can name the value `floorAnchor` to make accidental
+    // bitmap-centre sorting harder to introduce.
+    return finite(options.floorAnchor, finite(options.depth, finite(y, 0)));
+  }
+
+  function floorDepth(anchor, bias = 0) {
+    return finite(anchor, 0) + finite(bias, 0);
   }
 
   function setNearest(scene, key) {
@@ -119,11 +139,14 @@
 
   function clearEffect(scene, object) {
     if (!object) return object;
-    if (typeof object.stop === "function") object.stop();
-    if (typeof object.setFrame === "function") {
-      const frame = frameInfo(object.getData?.("furnitureDefinition"))?.initialFrame || 0;
-      object.setFrame(frame);
-    }
+    const parts = [object, ...(object.getData?.("occluderParts") || [])];
+    const definition = object.getData?.("furnitureDefinition");
+    const frame = frameInfo(definition)?.initialFrame || 0;
+    parts.forEach((part) => {
+      if (!part) return;
+      if (typeof part.stop === "function") part.stop();
+      if (typeof part.setFrame === "function") part.setFrame(frame);
+    });
     object.setData?.("activity", null);
     object.setData?.("effect", null);
     object.setData?.("effectState", "off");
@@ -139,13 +162,86 @@
     if (!active) return clearEffect(scene, object);
 
     const key = ensureAnimation(scene, definition);
-    if (key && typeof object.play === "function") object.play(key, true);
+    const parts = [object, ...(object.getData?.("occluderParts") || [])];
+    if (key) parts.forEach((part) => part?.play?.(key, true));
     object.setData?.("activity", action);
     object.setData?.("effect", effect);
     object.setData?.("effectState", activity.effectState || "on");
     // Consumers can use this stable marker to add water/screen particles
     // without guessing from a local timer. No fake geometry is drawn here.
     object.setData?.("effectActive", true);
+    return object;
+  }
+
+  function textureFrameSize(scene, object, definition) {
+    const frames = frameInfo(definition);
+    if (frames) return { width: frames.frameWidth, height: frames.frameHeight };
+    const key = object?.texture?.key;
+    const source = key && scene?.textures?.get?.(key)?.getSourceImage?.();
+    return {
+      width: finite(source?.width, 0),
+      height: finite(source?.height, 0),
+    };
+  }
+
+  function occluderConfig(definition, options = {}) {
+    if (options.occluder === false) return null;
+    if (options.occluder && typeof options.occluder === "object") return options.occluder;
+    if (definition?.occluder && typeof definition.occluder === "object") return definition.occluder;
+    // A placed seat/bed is one of the few cases where a single bitmap cannot
+    // express the intended depth: the actor is behind its back/top but in
+    // front of its lower/front row. Keep the default opt-in deliberately tied
+    // to the existing action contract; callers without actions retain the
+    // old single sprite behaviour.
+    const actions = Array.isArray(definition?.actions) ? definition.actions : [];
+    return actions.some((action) => ["sit", "lie", "sleep"].includes(
+      typeof action === "string" ? action : action?.id,
+    )) ? {} : null;
+  }
+
+  // Split the lower/front portion of a bitmap into a second display object.
+  // The original object remains the back portion and therefore still sorts
+  // against actors by its actual floor anchor. The front copy is only an
+  // occluder; it does not alter the saved footprint or interaction metadata.
+  // This is also exported for authored commercial-layout objects, which do not
+  // have a catalog definition but use the same Phaser image contract.
+  function splitOccluder(scene, object, options = {}) {
+    if (!scene?.add || !object || typeof object.setCrop !== "function") return null;
+    if (object.getData?.("occluderParts")?.length) return object;
+    const size = textureFrameSize(scene, object, object.getData?.("furnitureDefinition"));
+    if (!(size.width > 0 && size.height > 0)) return null;
+    const fromRatio = Math.max(0, Math.min(1,
+      finite(options.fromRatio, finite(options.from, 0.62))));
+    const from = Math.max(0, Math.min(size.height - 1, Math.floor(size.height * fromRatio)));
+    const height = Math.max(1, size.height - from);
+    const depth = finite(object.depth, finite(object.y, 0));
+    const frontDepth = floorDepth(depth, finite(options.depthBias, OCCLUDER_EPSILON));
+    const animated = !!object.anims && typeof scene.add.sprite === "function";
+    const front = animated
+      ? scene.add.sprite(object.x, object.y, object.texture?.key, object.frame?.name ?? object.frame?.index ?? 0)
+      : scene.add.image(object.x, object.y, object.texture?.key);
+    if (!front) return null;
+    const originX = finite(object.originX, 0.5);
+    const originY = finite(object.originY, 1);
+    front.setOrigin?.(originX, originY);
+    front.setScale?.(object.scaleX ?? object.scale ?? 1, object.scaleY ?? object.scale ?? 1);
+    if (Number.isFinite(Number(object.angle))) front.setAngle?.(object.angle);
+    if (object.flipX !== undefined) front.setFlipX?.(!!object.flipX);
+    if (object.flipY !== undefined) front.setFlipY?.(!!object.flipY);
+    front.setCrop(0, from, size.width, height);
+    front.setDepth?.(frontDepth);
+    front.setData?.("floorAnchor", finite(object.getData?.("floorAnchor"), depth));
+    front.setData?.("layerRole", "furniture-occluder");
+    const parts = object.getData?.("occluderParts") || [];
+    parts.push(front);
+    object.setData?.("occluderParts", parts);
+    // Phaser's destroy event keeps commercial/home cleanup symmetrical: the
+    // scene only needs to retain and destroy the returned base object.
+    object.once?.("destroy", () => {
+      parts.forEach((part) => {
+        if (!part?.destroyed) part.destroy?.();
+      });
+    });
     return object;
   }
 
@@ -169,7 +265,9 @@
     object.setOrigin?.(origin.x, origin.y);
     object.setScale?.(scale);
     if (Number.isFinite(rotation)) object.setAngle?.(rotation);
-    if (options.depth !== undefined) object.setDepth?.(options.depth);
+    const anchorY = floorAnchor(definition, x, y, options);
+    const depth = finite(options.depth, anchorY);
+    object.setDepth?.(depth);
     object.setData?.("furnitureId", definition.id);
     object.setData?.("furnitureDefinition", definition);
     object.setData?.("category", definition.category || "Miscellaneous");
@@ -179,7 +277,13 @@
     object.setData?.("anchor", anchor);
     object.setData?.("actions", Array.isArray(definition.actions) ? definition.actions : []);
     object.setData?.("instanceId", options.instanceId == null ? null : String(options.instanceId));
+    object.setData?.("floorAnchor", anchorY);
+    object.setData?.("depth", depth);
+    object.setData?.("layerRole", "furniture");
     setNearest(scene, key);
+
+    const occluder = occluderConfig(definition, options);
+    if (occluder) splitOccluder(scene, object, occluder);
 
     if (options.activity || options.effect) {
       applyEffect(scene, object, definition, options.activity || {
@@ -196,6 +300,9 @@
   global.HomeFurnitureRenderer = Object.freeze({
     preload,
     draw,
+    floorAnchor,
+    floorDepth,
+    splitOccluder,
     textureKey,
     assetPath,
     frameInfo,

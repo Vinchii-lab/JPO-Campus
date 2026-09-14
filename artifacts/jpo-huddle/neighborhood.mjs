@@ -733,12 +733,18 @@ export const LOCATION_GEOMETRY = Object.freeze({
 // The only allowed map links. `spawn` is selected by the server based on the
 // source portal, not supplied by a browser.
 export const LOCATION_PORTALS = Object.freeze({
-  office: [{ destination: "neighborhood", x: 96, y: 3552, width: 96, height: 144, label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" } }],
+  // The Willow Walk gate sits in the west garden's highlighted orange
+  // clearing (map tiles c4-c5 / r46-r48), not at the old south-west edge.
+  // Keep the trigger centered in the clearing; the client opens the matching
+  // narrow c4-c7 / r46-r48 approach after its map-wide Wall collision pass.
+  office: [{ destination: "neighborhood", x: 192, y: 2208, width: 96, height: 144, label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" } }],
   neighborhood: [
     // HQ Garden is the west end of Willow Walk's main horizontal road. It
     // stays west of the first residential lot. City gates are generated from
     // the current rectangular street grid below, never from this fixed list.
-    { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 216, y: 3624, dir: "right" } },
+    // Enter just east of the new clearing gate; the point is outside the
+    // trigger until the player walks west into the doorway.
+    { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 312, y: 2280, dir: "right" } },
   ],
   city: [
     { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },

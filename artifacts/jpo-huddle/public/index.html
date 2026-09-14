@@ -14218,6 +14218,22 @@
           if (isSeatCell(c,r) || isSeatCell(c,r-1) || isSeatCell(c,r+1)) t.setCollision(false, false, false, false);
         }
 
+        // The west-garden clearing is intentionally reached from the main
+        // path at y≈2280 (feet row 48).  The map's decorative tree bases on
+        // Wall cells c4-c7 / r46-r48 are not structural walls, but the
+        // map-wide Wall collision pass above cannot distinguish them from
+        // office architecture.  Open only this narrow, authored approach;
+        // do not disable the Ext/Wall collision GIDs globally.
+        const GARDEN_APPROACH_CELLS = [];
+        for (let r = 46; r <= 48; r++) for (let c = 4; c <= 7; c++)
+          GARDEN_APPROACH_CELLS.push([c, r]);
+        for (const [c, r] of GARDEN_APPROACH_CELLS) {
+          const wall = wallLayer.getTileAt(c, r);
+          if (wall && wall.index > 0) wall.setCollision(false, false, false, false);
+          const furniture = furnitureLayer.getTileAt(c, r);
+          if (furniture && furniture.index > 0) furniture.setCollision(false, false, false, false);
+        }
+
         // --- Load-time manager-desk reachability guard (survives Tiled re-imports) ---
         // JPO_HQ.tmj is regenerated from the user's Tiled project and re-imported
         // periodically; a manager desk can end up walled off behind structural walls,
@@ -14254,15 +14270,15 @@
         })();
 
         this.eHint = this.add.text(0,0,'[ E ] Sit',{fontSize:'11px',fontFamily:'monospace',color:'#fff',backgroundColor:'#222222cc',padding:{x:5,y:3}}).setOrigin(0.5,1).setVisible(false).setDepth(500);
-        // Existing JPO_HQ.tmj garden edge: columns 2–3 / rows 74–76 are
-        // painted outdoor ground with no furniture or wall collision. This is
-        // a cue layered over the unchanged HQ map, not a replacement map.
-        this._gardenExit = { x: 96, y: 3552, width: 96, height: 144 };
+        // Existing JPO_HQ.tmj west garden clearing: columns 4–5 / rows 46–48
+        // are painted outdoor ground with no furniture or wall collision. This
+        // is a cue layered over the unchanged HQ map, not a replacement map.
+        this._gardenExit = { x: 192, y: 2208, width: 96, height: 144 };
         const gardenGate = this.add.graphics().setDepth(350);
-        gardenGate.fillStyle(0xd9c681, 0.55).fillRect(96, 3552, 96, 144);
-        gardenGate.lineStyle(3, 0xfff1a8, 0.95).strokeRect(98, 3554, 92, 140);
-        gardenGate.lineStyle(5, 0x6d4b32, 1).lineBetween(105, 3566, 105, 3682).lineBetween(181, 3566, 181, 3682);
-        this.add.text(144, 3546, 'WILLOW WALK  ←', {
+        gardenGate.fillStyle(0xd9c681, 0.55).fillRect(192, 2208, 96, 144);
+        gardenGate.lineStyle(3, 0xfff1a8, 0.95).strokeRect(194, 2210, 92, 140);
+        gardenGate.lineStyle(5, 0x6d4b32, 1).lineBetween(201, 2222, 201, 2338).lineBetween(277, 2222, 277, 2338);
+        this.add.text(240, 2202, 'WILLOW WALK  ←', {
           fontSize: '11px', fontFamily: 'monospace', color: '#fff6c6',
           backgroundColor: '#263b31dd', padding: { x: 5, y: 3 },
         }).setOrigin(0.5, 1).setDepth(351);
@@ -18577,7 +18593,7 @@
         // Walking into the western garden gate begins a map fade and asks the
         // server for the adjacent Willow Walk map. There is intentionally no
         // E-key or destination UI path for this transition.
-        if (window.jpoTryOfficePortal?.(player, this.lastDir)) {
+        if (window.jpoTryOfficePortal?.(player, this.lastDir, this._gardenExit)) {
           player.setVelocity(0, 0);
           this.eHint.setVisible(false);
           return;
