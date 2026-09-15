@@ -29,14 +29,12 @@ const sparseHomes = [
 
 test("sparse lot indices still produce one city gate per residential block", () => {
   const street = streetDefinition(sparseHomes);
-  assert.equal(street.segmentCount, 3);
-  assert.equal(street.roadPortals.length, 3);
-  assert.deepEqual(street.roadPortals.map((portal) => portal.segment), [0, 1, 2]);
+  assert.equal(street.segmentCount, 1);
+  assert.equal(street.roadPortals.length, 1);
+  assert.deepEqual(street.roadPortals.map((portal) => portal.segment), [0]);
   assert.deepEqual(street.cityPortals.map((portal) => portal.segment), [0]);
   assert.deepEqual(street.roadPortals.map((portal) => portal.spawn), [
-    { x: 144, y: 480, dir: "right" },
-    { x: 144, y: 480, dir: "right" },
-    { x: 144, y: 480, dir: "right" },
+    { x: 144, y: 960, dir: "right" },
   ]);
   for (const [segment, portal] of street.roadPortals.entries()) {
     assert.equal(portal.y, 432 + segment * 960);
@@ -61,7 +59,7 @@ test("road gates use the real actor radius at both map edges", () => {
     )?.segment, portal.segment);
   }
   assert.equal(pointHitsRect(15, 504, street.cityPortals[0]), true);
-  assert.equal(streetCityPortalForTransition(48, 504, sparseHomes, 2)?.spawn.y, 504 + 2 * 960);
+  assert.equal(streetCityPortalForTransition(48, 504, sparseHomes, 2)?.spawn.y, 504);
 });
 
 test("continuous road center remains walkable around sparse edge blocks", () => {
@@ -110,10 +108,10 @@ test("museum foyer and all four galleries have connected, clear exits", () => {
     assert.equal(foyerPortal?.spawn.x, room * 192);
     assert.equal(validLocationMove(parseLocation(`museum-room-${room}`), 480, 576), true);
   }
-  assert.deepEqual(CITY_COMMERCIAL_LAYOUT.museum.door, { x: 528, y: 1690, width: 96, height: 100 });
-  assert.equal(CITY_COMMERCIAL_LAYOUT.museum.door.x + 48, 576);
-  assert.equal(CITY_COMMERCIAL_LAYOUT.museum.door.y + 50, 1740);
-  assert.equal(portalForTransition("city", "museum", 576, 1740)?.destination, "museum");
+  assert.deepEqual(CITY_COMMERCIAL_LAYOUT.museum.door, { x: 3072, y: 1370, width: 96, height: 100 });
+  assert.equal(CITY_COMMERCIAL_LAYOUT.museum.door.x + 48, 3120);
+  assert.equal(CITY_COMMERCIAL_LAYOUT.museum.door.y + 50, 1420);
+  assert.equal(portalForTransition("city", "museum", 3120, 1420)?.destination, "museum");
   assert.equal(portalForTransition("museum", "city", 480, 684)?.destination, "city");
   assert.equal(validLocationMove(parseLocation("museum"), 480, 576), true);
   assert.equal(locationBounds(parseLocation("city")).height, 1920);
@@ -129,7 +127,7 @@ test("existing venue bottom doors remain city-facing", () => {
   assert.equal(LOCATION_GEOMETRY.city.blockers.some((blocker) =>
     blocker.x === CITY_COMMERCIAL_LAYOUT.museum.blockers[0].x &&
     blocker.y === CITY_COMMERCIAL_LAYOUT.museum.blockers[0].y), true);
-  assert.equal(LOCATIONS.city.bounds.width, 1152);
+  assert.equal(LOCATIONS.city.bounds.width, 3600);
 });
 
 test("a removed residential segment returns through a current valid road", () => {

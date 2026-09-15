@@ -30,3 +30,4 @@
 - [Neighborhood collisions](jpo-neighborhood-collision.md) — refresh Arcade body measurements before offset conversion; reused scenes must reset travel flags and timers.
 - [Movement synchronization](jpo-huddle-movement-sync.md) — don't buffer walking samples; map-scoped corrections, separate client/server ordering, and explicit reconnect scene synchronization.
 - [Preview runtime verification](jpo-preview-runtime-verification.md) — verify live loaded code, not retained errors; update cooldowns must retry independently of gameplay sockets.
+- [Furniture pose verification](jpo-furniture-pose-proof.md) — use canonical action anchors and real wearable metadata; passing depth order alone does not prove a correct pose.

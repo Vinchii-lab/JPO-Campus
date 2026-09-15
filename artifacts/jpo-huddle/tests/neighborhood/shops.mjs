@@ -85,21 +85,12 @@ assert.equal(Object.keys(shopCatalog("furniture-shop")).length, 6);
 assert.equal(shopCatalog("garden-shop").fern.price, shopCatalog("furniture-shop").fern.price,
   "themed shops reuse server catalog pricing");
 
-// These are the four visual seat points used by _drawCity. They must remain
-// outside the two road rectangles even with the server's actor foot radius.
-const benches = [{ x: 372, y: 416 }, { x: 780, y: 416 }, { x: 88, y: 712 }, { x: 1064, y: 712 }];
-const roads = [
-  { x: 0, y: 432, width: 1152, height: 144 },
-  { x: 456, y: 0, width: 240, height: 1600 },
-];
-for (const seat of benches) {
-  for (const road of roads) {
-    const overlaps = seat.x + ACTOR_FOOT_RADIUS > road.x &&
-      seat.x - ACTOR_FOOT_RADIUS < road.x + road.width &&
-      seat.y + ACTOR_FOOT_RADIUS > road.y &&
-      seat.y - ACTOR_FOOT_RADIUS < road.y + road.height;
-    assert.equal(overlaps, false, `bench at ${seat.x},${seat.y} is off the road`);
-  }
+// These are the eight visual seat points used by _drawCity. They remain clear
+// of facade blockers and have an authored walkable stand on the same square.
+for (const seat of LOCATION_GEOMETRY.city.seats) {
+  assert.equal(validLocationMove(city, seat.x, seat.y), true, `bench at ${seat.x},${seat.y} is walkable`);
+  assert((seat.stands || []).some((stand) => validLocationMove(city, stand.x, stand.y)),
+    `bench at ${seat.x},${seat.y} has a walkable stand`);
 }
 
-console.log(`✓ ${shopIds.length} enterable shops, 4 new venues, filtered catalogs, and off-road benches`);
+console.log(`✓ ${shopIds.length} enterable shops, 4 new venues, filtered catalogs, and eight off-facade benches`);

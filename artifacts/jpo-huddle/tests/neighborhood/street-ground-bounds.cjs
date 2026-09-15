@@ -110,7 +110,7 @@ for (const width of [390, 1024, 1920, 2560]) {
   assert.equal(scene.cameras.main.zoom, 1, 'viewport fitting does not override HQ zoom');
 }
 scene.location = 'city';
-scene.mapWidth = 1152;
+scene.mapWidth = 3600;
 scene.mapHeight = 1920;
 scene._fitNeighborhoodCamera();
 const fittedZoom = scene.cameras.main.zoom;

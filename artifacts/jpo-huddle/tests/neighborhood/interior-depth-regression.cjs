@@ -78,6 +78,7 @@ const rendererScene = {
 const chair = renderer.draw(rendererScene, {
   id: 'oak_chair',
   actions: ['sit'],
+  occluder: { default: { fromPx: 19, depthBias: 0.01 } },
   frames: { frameWidth: 16, frameHeight: 32, frameCount: 1, initialFrame: 0 },
 }, 240, 288, { depth: 288 });
 assert.equal(chair.getData('floorAnchor'), 288, 'chair retains its contact anchor');

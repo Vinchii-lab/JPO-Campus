@@ -186,17 +186,26 @@
 
   function occluderConfig(definition, options = {}) {
     if (options.occluder === false) return null;
-    if (options.occluder && typeof options.occluder === "object") return options.occluder;
-    if (definition?.occluder && typeof definition.occluder === "object") return definition.occluder;
-    // A placed seat/bed is one of the few cases where a single bitmap cannot
-    // express the intended depth: the actor is behind its back/top but in
-    // front of its lower/front row. Keep the default opt-in deliberately tied
-    // to the existing action contract; callers without actions retain the
-    // old single sprite behaviour.
-    const actions = Array.isArray(definition?.actions) ? definition.actions : [];
-    return actions.some((action) => ["sit", "lie", "sleep"].includes(
-      typeof action === "string" ? action : action?.id,
-    )) ? {} : null;
+    const configured = options.occluder && typeof options.occluder === "object"
+      ? options.occluder : definition?.occluder;
+    if (!configured || typeof configured !== "object") return null;
+    // Occlusion is authored against the actual source art.  A definition can
+    // provide a default front row plus a narrower action-specific row (for
+    // example a bath rim versus a sofa rail); actions never opt in through a
+    // guessed global crop.
+    const action = options.action || options.activity?.action || null;
+    if (configured.actions && action && configured.actions[action]) {
+      return configured.actions[action];
+    }
+    if (configured.default && typeof configured.default === "object") {
+      return configured.default;
+    }
+    // Accept a direct `{ fromPx, ... }` authored config for commercial
+    // manifests and tests.  Nested action maps are handled above.
+    return Number.isFinite(Number(configured.fromPx)) ||
+      Number.isFinite(Number(configured.fromRatio)) ||
+      Number.isFinite(Number(configured.from))
+      ? configured : null;
   }
 
   // Split the lower/front portion of a bitmap into a second display object.
@@ -210,10 +219,23 @@
     if (object.getData?.("occluderParts")?.length) return object;
     const size = textureFrameSize(scene, object, object.getData?.("furnitureDefinition"));
     if (!(size.width > 0 && size.height > 0)) return null;
-    const fromRatio = Math.max(0, Math.min(1,
-      finite(options.fromRatio, finite(options.from, 0.62))));
-    const from = Math.max(0, Math.min(size.height - 1, Math.floor(size.height * fromRatio)));
-    const height = Math.max(1, size.height - from);
+    const authoredFromPx = Number.isFinite(Number(options.fromPx))
+      ? Number(options.fromPx) : null;
+    const authoredFromRatio = Number.isFinite(Number(options.fromRatio))
+      ? Number(options.fromRatio) : null;
+    const authoredFrom = Number.isFinite(Number(options.from))
+      ? Number(options.from) : null;
+    if (authoredFromPx == null && authoredFromRatio == null && authoredFrom == null) return null;
+    const from = Math.max(0, Math.min(size.height - 1, Math.floor(
+      authoredFromPx != null
+        ? authoredFromPx
+        : authoredFromRatio != null
+          ? size.height * authoredFromRatio
+          : authoredFrom,
+    )));
+    const requestedHeight = Number.isFinite(Number(options.heightPx))
+      ? Number(options.heightPx) : size.height - from;
+    const height = Math.max(1, Math.min(size.height - from, Math.floor(requestedHeight)));
     const depth = finite(object.depth, finite(object.y, 0));
     const frontDepth = floorDepth(depth, finite(options.depthBias, OCCLUDER_EPSILON));
     const animated = !!object.anims && typeof scene.add.sprite === "function";
@@ -237,11 +259,35 @@
     object.setData?.("occluderParts", parts);
     // Phaser's destroy event keeps commercial/home cleanup symmetrical: the
     // scene only needs to retain and destroy the returned base object.
-    object.once?.("destroy", () => {
-      parts.forEach((part) => {
+    if (!object.getData?.("occluderDestroyBound")) object.once?.("destroy", () => {
+      (object.getData?.("occluderParts") || []).forEach((part) => {
         if (!part?.destroyed) part.destroy?.();
       });
     });
+    object.setData?.("occluderDestroyBound", true);
+    object.setData?.("occluderConfig", { ...options });
+    return object;
+  }
+
+  function clearOccluder(object) {
+    const parts = object?.getData?.("occluderParts") || [];
+    parts.forEach((part) => {
+      if (!part?.destroyed) part.destroy?.();
+    });
+    object?.setData?.("occluderParts", []);
+    object?.setData?.("occluderConfig", null);
+    return object;
+  }
+
+  function ensureOccluder(scene, object, definition, options = {}) {
+    const config = occluderConfig(definition, options);
+    const existing = object?.getData?.("occluderConfig");
+    const same = existing && config &&
+      Object.keys(config).every((key) => Number(existing[key]) === Number(config[key])) &&
+      Object.keys(existing).every((key) => Number(existing[key]) === Number(config[key]));
+    if (same && object?.getData?.("occluderParts")?.length) return object;
+    clearOccluder(object);
+    if (config) splitOccluder(scene, object, config);
     return object;
   }
 
@@ -282,8 +328,10 @@
     object.setData?.("layerRole", "furniture");
     setNearest(scene, key);
 
-    const occluder = occluderConfig(definition, options);
-    if (occluder) splitOccluder(scene, object, occluder);
+    ensureOccluder(scene, object, definition, {
+      ...options,
+      action: options.action || options.activity?.action,
+    });
 
     if (options.activity || options.effect) {
       applyEffect(scene, object, definition, options.activity || {
@@ -294,6 +342,7 @@
   }
 
   function updateActivity(scene, object, definition, activity) {
+    ensureOccluder(scene, object, definition, { activity });
     return applyEffect(scene, object, definition, activity);
   }
 
@@ -303,6 +352,7 @@
     floorAnchor,
     floorDepth,
     splitOccluder,
+    clearOccluder,
     textureKey,
     assetPath,
     frameInfo,

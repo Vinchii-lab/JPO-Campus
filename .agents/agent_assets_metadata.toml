@@ -709,3 +709,32 @@ uri = "file://attached_assets/generated_images/plaza-storefronts-pixel-preview.p
 type = "image"
 title = "New plaza storefront artwork"
 description = "The eight generated pixel-art storefront sprites now used in the plaza, with dark outlines, textured materials, and detailed awnings and windows."
+logical_id = "14f841cd-b252-4ad5-8727-57a7e42b1f90"
+
+[[outputs]]
+id = "I4mUj66sPN9sN-lNoyymB"
+uri = "file://attached_assets/previews/wide-plaza.png"
+type = "image"
+title = "Wider Huddle Plaza"
+description = "Visual check using the actual plaza renderer at 1024×576 and the same approximate zoom as your screenshot. This isolated render shows the layout without players or HUD."
+logical_id = "2fb11cfe-a161-4da5-b3ff-71da894e3010"
+content_hash = "sha256:6035c2030770fbcc8b00d7bb96238ea68b2a3c99ece806c073506d45d719a8df"
+size = 135504
+mtime_ms = 1789497392305
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/2fb11cfe-a161-4da5-b3ff-71da894e3010/079c6376-4bee-4ea2-a836-1fac8ebb3535"
+storage_version_token = "1789497417938917"
+content_type = "image/png"
+
+[[outputs]]
+id = "lJbaQUABbKUWOwzXhmWE1"
+uri = "file://attached_assets/previews/furniture-activity-poses.png"
+type = "image"
+title = "Furniture pose and layering check"
+description = "Isolated visual check using the real furniture assets, avatar animations, shared action positions, and production rendering methods: bed, sofa, chair, and bath."
+logical_id = "a77138eb-66db-4faa-bc76-f214b0e8cfeb"
+content_hash = "sha256:8c862a0004d1b09f7f38053fbc6b2db87bdc0d0c2981f6ff22e12cdb09649d0e"
+size = 19271
+mtime_ms = 1789499465272
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/a77138eb-66db-4faa-bc76-f214b0e8cfeb/3ddec50b-9def-4133-8d15-83572be767cc"
+storage_version_token = "1789499521869490"
+content_type = "image/png"

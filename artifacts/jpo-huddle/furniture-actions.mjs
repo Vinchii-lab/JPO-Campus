@@ -84,10 +84,26 @@ export function furnitureActionAnchor(item, gridX, gridY, cell = 48, actionId = 
   // Front-facing props (the TV is the current example) must leave the actor
   // outside the prop footprint. This keeps the avatar standing in front of,
   // and looking toward, the screen instead of being snapped into the TV tile.
-  const y = action.anchor === "front"
+  const baseY = action.anchor === "front"
     ? (Number(gridY) + footprint.height) * cell + 18
     : centerY + (action.pose === "sit" ? 10 : 6);
-  return { x, y, dir: action.facing || "down" };
+  // Bitmap authors can place the interaction point on the actual cushion,
+  // mattress, or water basin instead of forcing every piece through the
+  // footprint centre.  Offsets are presentation pixels (the same world
+  // units used by Phaser), and are rotated with the placed footprint so a
+  // rotated item retains the same art-relative anchor.
+  const offset = action.actorOffset && typeof action.actorOffset === "object"
+    ? action.actorOffset : null;
+  const offsetX = Number(offset?.x) || 0;
+  const offsetY = Number(offset?.y) || 0;
+  const radians = (rotation * Math.PI) / 180;
+  const xOffset = offsetX * Math.cos(radians) - offsetY * Math.sin(radians);
+  const yOffset = offsetX * Math.sin(radians) + offsetY * Math.cos(radians);
+  return {
+    x: x + xOffset,
+    y: baseY + yOffset,
+    dir: action.facing || "down",
+  };
 }
 
 export function furnitureActionStandCandidates(item, gridX, gridY, cell = 48, actionId = "sit") {

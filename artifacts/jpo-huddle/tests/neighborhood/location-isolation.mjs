@@ -361,7 +361,7 @@ try {
   a.socket.emit("homeInviteRevoke", { email: emails[1] });
   check(!!(await revoked.next().catch(() => null)), "revoking an invite ejects an invite-only visitor");
   await b.q.transition.next(); // authoritative ejection map result
-  b.location = "city"; b.position = [144, 480];
+  b.location = "city"; b.position = [144, 960];
 
   // Regression: access changes queued behind a case-variant physical doorway
   // request must win before a visitor remains in a stale alternate-cased room.

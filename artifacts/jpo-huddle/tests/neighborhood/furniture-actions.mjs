@@ -68,8 +68,8 @@ assert.equal(FURNITURE_CATALOG.bed.interaction.orientation, "lengthwise",
 assert.equal(FURNITURE_CATALOG.bed.asset, "bedroom_bed");
 
 const sofa = furnitureActionAnchor(FURNITURE_CATALOG.blue_sofa, 4, 4, HOME_GRID.cell, "sit");
-assert.deepEqual(sofa, { x: 240, y: 226, dir: "down" },
-  "sofa sit anchor is centered on its two-cell pad");
+assert.deepEqual(sofa, { x: 240, y: 192, dir: "down" },
+  "sofa sit anchor is centered on its two-cell seat pad");
 const tv = furnitureActionAnchor(FURNITURE_CATALOG.television, 13, 5, HOME_GRID.cell, "watch");
 assert.deepEqual(tv, { x: 648, y: 306, dir: "up" },
   "TV viewer anchor is below the screen and faces up");
@@ -113,6 +113,8 @@ const chair = FURNITURE_CATALOG.oak_chair;
 assert.equal(validPlacement(chair, 13, 5, 0, []), true,
   "a clear home cell accepts a sit-capable chair");
 const chairAnchor = furnitureActionAnchor(chair, 13, 5, HOME_GRID.cell, "sit");
+assert.deepEqual(chairAnchor, { x: 648, y: 248, dir: "down" },
+  "chair sit anchor uses the authored seat pad offset");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, []), true,
   "server path check accepts an action anchor when its own blocker is excluded");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
@@ -123,6 +125,10 @@ assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
 assert.ok(furnitureActionStandCandidates(chair, 13, 5).some((point) =>
   validLocationMove(home, point.x, point.y, [])),
   "at least one authoritative exit stand is walkable");
+
+const bathAnchor = furnitureActionAnchor(FURNITURE_CATALOG.bathtub, 17, 4, HOME_GRID.cell, "bathe");
+assert.deepEqual(bathAnchor, { x: 864, y: 152, dir: "down" },
+  "bath anchor uses the authored basin/head presentation offset");
 
 const occupants = {
   alice: { locationId: "home:actions@example.com", activity: { instanceId: "chair-1" } },

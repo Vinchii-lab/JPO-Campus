@@ -13,7 +13,10 @@ import {
 
 const city = parseLocation("city");
 const bounds = LOCATIONS.city.bounds;
-assert.deepEqual(bounds, { width: 1152, height: 1920 }, "Huddle Plaza keeps its canonical bounds");
+assert.deepEqual(bounds, { width: 3600, height: 1920 }, "Huddle Plaza keeps its landscape bounds");
+assert.deepEqual(CITY_PLAZA_LAYOUT.cityBounds, bounds, "renderer and validator share plaza bounds");
+assert(validLocationMove(city, LOCATIONS.city.spawn.x, LOCATIONS.city.spawn.y),
+  "direct plaza arrival is walkable");
 assert.equal(CITY_PLAZA_LAYOUT.venues.length, 8, "all eight venues have authored footprints");
 assert.deepEqual(
   CITY_PLAZA_LAYOUT.venues.map((venue) => venue.id),
@@ -30,7 +33,7 @@ function assertRectInBounds(rect, label) {
 }
 
 assertRectInBounds(CITY_PLAZA_LAYOUT.gatheringSquare, "gathering square");
-assert(CITY_PLAZA_LAYOUT.gatheringSquare.width >= 800, "gathering square is broad");
+assert(CITY_PLAZA_LAYOUT.gatheringSquare.width >= 3000, "gathering square spans the plaza");
 assert(CITY_PLAZA_LAYOUT.gatheringSquare.height >= 600, "gathering square is deep");
 for (const venue of CITY_PLAZA_LAYOUT.venues) {
   assertRectInBounds(venue.footprint, `${venue.id} footprint`);
@@ -87,13 +90,18 @@ for (const seat of LOCATION_GEOMETRY.city.seats) {
 
 assert.equal(
   Math.min(...CITY_PLAZA_LAYOUT.venues.map((venue) => venue.footprint.x)),
-  48,
-  "venues use the west side of the usable city width",
+  368,
+  "venues retain a landscaped west margin",
 );
 assert.equal(
   Math.max(...CITY_PLAZA_LAYOUT.venues.map((venue) => venue.footprint.x + venue.footprint.width)),
-  1136,
-  "venues use the east side of the usable city width",
+  3240,
+  "venues retain a landscaped east margin",
+);
+assert(
+  CITY_PLAZA_LAYOUT.venues.filter((venue) => venue.footprint.y < CITY_PLAZA_LAYOUT.gatheringSquare.y).length === 4 &&
+  CITY_PLAZA_LAYOUT.venues.filter((venue) => venue.footprint.y >= CITY_PLAZA_LAYOUT.gatheringSquare.y).length === 4,
+  "four venues occupy each plaza row",
 );
 assert(ACTOR_FOOT_RADIUS > 0);
 console.log("PASS: Huddle Plaza bounds, eight venue thresholds, seats, and routes");

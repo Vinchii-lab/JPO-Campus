@@ -545,15 +545,34 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     const remote = scene.remotes[payload.id];
     if (!remote) return;
     if (payload.phase === 'start' && payload.action) {
+        remote.lastDir = payload.dir || remote.lastDir || 'down';
+        if (Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.y))) {
+          remote.sprite.setPosition(Number(payload.x), Number(payload.y));
+          remote.nameTag?.setPosition(Number(payload.x), Number(payload.y) - 40);
+        }
       remote.activity = {
         instanceId: payload.instanceId, furnitureId: payload.furnitureId,
         action: payload.action, effect: payload.effect, orientation: payload.orientation,
-        x: payload.x, y: payload.y,
+          effectState: payload.effectState, toggle: !!payload.toggle,
+          x: payload.x, y: payload.y, dir: payload.dir,
       };
-      scene._applyActivityPose(remote, remote.activity, payload.dir || remote.lastDir || 'down');
+        scene._applyActivityPose(remote, remote.activity, remote.lastDir);
+        scene._setActorDepth(
+          remote.sprite,
+          scene._activityDepthAnchor(remote, remote.sprite.y),
+          scene._activityDepthBias(remote),
+        );
+        scene._positionPresentation(remote, remote.sprite.x, remote.sprite.y, remote.lastDir);
     } else if (payload.phase === 'stop') {
+        if (Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.y))) {
+          remote.sprite.setPosition(Number(payload.x), Number(payload.y));
+          remote.nameTag?.setPosition(Number(payload.x), Number(payload.y) - 40);
+        }
       remote.activity = null;
-      scene._applyActivityPose(remote, null, payload.dir || remote.lastDir || 'down');
+        remote.lastDir = payload.dir || remote.lastDir || 'down';
+        scene._applyActivityPose(remote, null, remote.lastDir);
+        scene._setActorDepth(remote.sprite, remote.sprite.y);
+        scene._positionPresentation(remote, remote.sprite.x, remote.sprite.y, remote.lastDir);
     }
   });
 
@@ -739,7 +758,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           data._sceneTransitionGeneration !== sceneTransitionGeneration) return;
       this.info = data?.map || {};
       this.location = data?.location || currentLocation;
-      const bounds = this.info.bounds || { width: this.info.width || 1152, height: this.info.height || 816 };
+      const bounds = this.info.bounds || {
+        width: this.info.width || (this.location === 'city' ? 3600 : 1152),
+        height: this.info.height || (this.location === 'city' ? 1920 : 816),
+      };
       this.mapWidth = bounds.width;
       this.mapHeight = bounds.height;
       this.actorFootRadius = Number(this.info.actorFootRadius) || 16;
@@ -898,7 +920,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // size, and permanent sparse lot indices can make that world very tall.
       // Include the authoritative map dimensions in the field identity: this
       // scene is reused for Willow Walk and Huddle Plaza, and a retained field
-      // must never paint a street-sized canvas into the 1152x1920 city.
+      // must never paint a street-sized canvas into a plaza map.
       const mapWidth = Number(this.mapWidth) || 0;
       const mapHeight = Number(this.mapHeight) || 0;
       const key = 'neighborhood-ground:' + base.toString(16) + ':' + alternate.toString(16) +
@@ -1031,6 +1053,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       );
     }
 
+    _interiorOccluderOptions(asset) {
+      // These are source-art rows, not a universal bitmap crop.  Commercial
+      // layouts predate the furniture catalog, so their filenames are the
+      // only stable definition key available here.  Keep each silhouette's
+      // front edge explicit and leave wall props without an occluder.
+      const key = String(asset || '');
+      if (/(?:furn_bed|furniture_bed)/i.test(key)) return { fromRatio: 0.75, depthBias: INTERIOR_DEPTH.FRONT_BIAS };
+      if (/(?:sofa|couch)/i.test(key)) return { fromRatio: 0.75, depthBias: INTERIOR_DEPTH.FRONT_BIAS };
+      if (/(?:chair|booth|bench)/i.test(key)) return { fromRatio: 0.68, depthBias: INTERIOR_DEPTH.FRONT_BIAS };
+      if (/(?:table|counter)/i.test(key)) return { fromRatio: 0.72, depthBias: INTERIOR_DEPTH.FRONT_BIAS };
+      if (/(?:cushion|rug)/i.test(key)) return { fromRatio: 0.82, depthBias: INTERIOR_DEPTH.FRONT_BIAS };
+      return null;
+    }
+
     _normaliseInteriorLayers(beforeChildren = [], locationId = this.location) {
       const data = this.cache?.json?.get?.('commercial-layouts');
       const room = data?.rooms?.[locationId];
@@ -1069,10 +1105,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const role = anchor < 0 ? 'interior-wall-prop' : 'interior-furniture';
         this._setFloorDepth(object, anchor, 0, role);
         if (anchor >= 0 && this._interiorObjectNeedsOccluder(authored.asset)) {
-          window.HomeFurnitureRenderer?.splitOccluder?.(this, object, {
-            fromRatio: 0.62,
-            depthBias: INTERIOR_DEPTH.FRONT_BIAS,
-          });
+          const occluder = this._interiorOccluderOptions?.(authored.asset);
+          window.HomeFurnitureRenderer?.splitOccluder?.(this, object, occluder || {});
         }
       }
     }
@@ -1509,23 +1543,26 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _drawCity() {
       this._tileField(0x83aa68, 0x789d60);
       const square = this.info.geometry?.commercialExteriors?.gatheringSquare || {
-        x: 96, y: 432, width: 960, height: 672,
+        x: 192, y: 448, width: 3216, height: 640,
       };
       // One broad paved square is the plaza's organizing space. Short walks
-      // connect all authored thresholds to it; there is no reused vertical
-      // Willow Walk road and no decorative paving outside the city bounds.
+      // connect all authored thresholds to it; the landscape uses explicit
+      // paths and planted pockets rather than a stretched building or a bare
+      // asphalt field.
       this._path(square, 0x535e66, 0x3e4750);
       this._path({ x: square.x, y: square.y - 24, width: square.width, height: 24 });
       this._path({ x: square.x, y: square.y + square.height, width: square.width, height: 24 });
+      // The west arrival gate opens directly onto the square.
+      this._path({ x: 96, y: square.y + square.height - 168, width: square.x - 96, height: 144 });
       const venues = this.info.geometry?.commercialExteriors?.venues || [
-        { id: 'furniture-shop', footprint: { x: 48, y: 160, width: 224, height: 222 } },
-        { id: 'garden-shop', footprint: { x: 336, y: 160, width: 224, height: 222 } },
-        { id: 'decor-shop', footprint: { x: 624, y: 160, width: 224, height: 222 } },
-        { id: 'cafe', footprint: { x: 912, y: 160, width: 224, height: 222 } },
-        { id: 'diner', footprint: { x: 48, y: 1120, width: 224, height: 222 } },
-        { id: 'bakery', footprint: { x: 464, y: 1120, width: 224, height: 222 } },
-        { id: 'sushi', footprint: { x: 880, y: 1120, width: 224, height: 222 } },
-        { id: 'museum', footprint: { x: 336, y: 1560, width: 480, height: 230 } },
+        { id: 'furniture-shop', footprint: { x: 368, y: 160, width: 224, height: 222 } },
+        { id: 'garden-shop', footprint: { x: 1248, y: 160, width: 224, height: 222 } },
+        { id: 'decor-shop', footprint: { x: 2128, y: 160, width: 224, height: 222 } },
+        { id: 'cafe', footprint: { x: 3008, y: 160, width: 224, height: 222 } },
+        { id: 'diner', footprint: { x: 368, y: 1120, width: 224, height: 222 } },
+        { id: 'bakery', footprint: { x: 1248, y: 1120, width: 224, height: 222 } },
+        { id: 'sushi', footprint: { x: 2128, y: 1120, width: 224, height: 222 } },
+        { id: 'museum', footprint: { x: 3000, y: 1120, width: 240, height: 350 } },
       ];
       venues.forEach((venue) => {
         const rect = venue.footprint;
@@ -1569,7 +1606,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         }
       });
       const museum = venues.find((venue) => venue.id === 'museum') || {
-        footprint: { x: 456, y: 1440, width: 240, height: 350 },
+        footprint: { x: 3000, y: 1120, width: 240, height: 350 },
       };
       const museumRect = museum.footprint;
       window.JpoPlazaExteriors.draw(this, {
@@ -1578,28 +1615,43 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         doorY: museumRect.y + museumRect.height,
       });
       this._path({ x: museumRect.x, y: museumRect.y + museumRect.height, width: museumRect.width, height: 96 });
-      [[120, 392], [1032, 392], [120, 1136], [1032, 1136], [120, 1816], [1032, 1816]]
+      // Trees, lamps, benches, and planted pockets make the long plaza
+      // traversable and legible at the authored camera scale.
+      [[144, 408], [960, 408], [1776, 408], [2592, 408], [3456, 408],
+        [144, 1080], [960, 1080], [1776, 1080], [2592, 1080], [3456, 1080],
+        [144, 1552], [960, 1552], [1776, 1552], [2592, 1552], [3456, 1552]]
         .forEach(([x, y]) => this._exterior('tree', x, y));
-      [[168, 472], [984, 472], [168, 1064], [984, 1064]].forEach(([x, y]) => this._exterior('lamp', x, y, 2));
-      // The seating pockets sit fully outside the crossing roads. Keep the
-      // player seat coordinates in neighborhood.mjs in lockstep with these
-      // visual ground contacts.
-      [[264, 520], [888, 520], [264, 1000], [888, 1000]]
+      [[256, 464], [1056, 464], [1856, 464], [2656, 464], [3360, 464],
+        [256, 1072], [1056, 1072], [1856, 1072], [2656, 1072], [3360, 1072]]
+        .forEach(([x, y]) => this._exterior('lamp', x, y, 2));
+      // Keep the visual bench contacts in lockstep with the authoritative
+      // public-seat coordinates in neighborhood.mjs.
+      [[720, 640], [1520, 640], [2320, 640], [3120, 640],
+        [720, 896], [1520, 896], [2320, 896], [3120, 896]]
         .forEach(([x, y]) => this._exterior('bench', x, y, 2));
 
-      // Decorative cheerful animated details
-      [[336, 720], [816, 720], [336, 880], [816, 880]].forEach(([x, y]) => {
+      // Decorative cheerful animated details sit in planted pockets spread
+      // across both sides of the square, breaking up the paving without
+      // blocking the walkways.
+      const pocketGraphics = this.add.graphics().setDepth(1);
+      [[400, 536], [1200, 536], [2000, 536], [2800, 536],
+        [400, 904], [1200, 904], [2000, 904], [2800, 904]].forEach(([x, y]) => {
+        pocketGraphics.fillStyle(0x6d9855, 0.92).fillRoundedRect(x, y, 224, 96, 18);
+        pocketGraphics.lineStyle(2, 0xa7b86b, 0.78).strokeRoundedRect(x, y, 224, 96, 18);
+      });
+      [[512, 584], [1312, 584], [2112, 584], [2912, 584],
+        [512, 952], [1312, 952], [2112, 952], [2912, 952]].forEach(([x, y]) => {
         this.add.image(x, y - 60, 'dec_flowers').setScale(3).setOrigin(0.5, 1).setDepth(y - 60);
         const balloons = this.add.image(x - 60, y - 60, 'dec_balloons').setScale(3).setOrigin(0.5, 1).setDepth(y);
         this._animateNeighborhoodObject(balloons, { y: { from: y - 60, to: y - 75 }, duration: 2500, yoyo: true, repeat: -1 });
       });
-      [192, 480, 768, 960].forEach(x => {
-        const bunting = this.add.image(x, 432, 'dec_bunting').setScale(3).setOrigin(0.5, 0).setDepth(300);
+      [288, 960, 1632, 2304, 2976, 3456].forEach(x => {
+        const bunting = this.add.image(x, square.y, 'dec_bunting').setScale(3).setOrigin(0.5, 0).setDepth(300);
         this._animateNeighborhoodObject(bunting, { alpha: { from: 0.8, to: 1 }, duration: 1500, yoyo: true, repeat: -1 });
       });
 
       this._sign(square.x + square.width / 2, square.y + 28, 'HUDDLE PLAZA');
-      this._sign(94, 420, '← WILLOW WALK');
+      this._sign(94, square.y + square.height - 168, '← WILLOW WALK');
       this._sign(square.x + 150, square.y + square.height - 18, 'GATHERING SQUARE');
     }
 
@@ -1969,12 +2021,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (fSprite && definition && typeof window.HomeFurnitureRenderer?.updateActivity === 'function') {
           entry._activityFurnitureSprite = fSprite;
           entry._activityFurnitureDef = definition;
+          window.HomeFurnitureRenderer.updateActivity(this, fSprite, definition, activity);
           this._setActorDepth(
             sprite,
             this._activityDepthAnchor(entry, sprite.y),
             this._activityDepthBias(entry),
           );
-          window.HomeFurnitureRenderer.updateActivity(this, fSprite, definition, activity);
         }
       }
     }
@@ -1984,6 +2036,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (!sprite) return;
       const texKey = entry.playerTexKey || entry.texture || this.playerTexKey;
       const start = globals().DIR_START || { right: 0, up: 6, left: 12, down: 18 };
+      const definition = furnitureCatalog[activity?.furnitureId] ||
+        entry._activityFurnitureDef || null;
       // The HQ renderer has three real seated sheets: the right profile,
       // the face-visible profile used for its up slot, and the front-facing
       // sheet.  Left deliberately mirrors the right sheet because no authored
@@ -2025,18 +2079,25 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           sprite.setTexture(texKey).setFrame(start[facing] ?? start.down);
         }
       } else if (action === 'lie' || action === 'sleep') {
-        // There is no separate lie sheet in the supplied avatar pack. Wide
-        // sofas get a horizontal idle-down pose, while the supplied portrait
-        // 16x48 bed keeps the avatar lengthwise instead of turning it 90°
-        // across its one-cell width.
+        // There is no separate lie sheet in the supplied avatar pack.  The
+        // catalog supplies the art-aware angle/scale: wide furniture places
+        // the head on its long pad, while the portrait bed stays lengthwise.
+        const authored = definition?.activityPose?.[action] ||
+          definition?.activityPose?.lie || {};
         const lengthwise = activity?.orientation === 'lengthwise';
         sprite.anims.stop();
         sprite.setTexture(texKey).setFrame(start.down)
-          .setScale(2.7).setAngle(lengthwise ? 0 : -90).setFlipX(false);
+          .setScale(Number.isFinite(Number(authored.scale)) ? Number(authored.scale) : 2.7)
+          .setAngle(Number.isFinite(Number(authored.angle))
+            ? Number(authored.angle) : (lengthwise ? 0 : -90))
+          .setFlipX(false);
       } else {
+        const authored = definition?.activityPose?.[action] || {};
         sprite.anims.stop();
         sprite.setTexture(texKey).setFrame(action === 'watch' ? (start[dir] ?? start.up) : start.down)
-          .setScale(3).setAngle(0).setFlipX(false);
+          .setScale(Number.isFinite(Number(authored.scale)) ? Number(authored.scale) : 3)
+          .setAngle(Number.isFinite(Number(authored.angle)) ? Number(authored.angle) : 0)
+          .setFlipX(false);
       }
       if (entry._activityAction !== action) {
         entry._activityAction = action;
@@ -2152,7 +2213,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const validAuthored = authored.find((candidate) =>
         Number.isFinite(Number(candidate?.x)) && Number.isFinite(Number(candidate?.y)));
       if (validAuthored) return validAuthored;
-      const northPocket = Number(seat.y) < (this.location === 'city' ? 576 : this.mapHeight / 2);
+      const northPocket = Number(seat.y) < this.mapHeight / 2;
       return { x: Number(seat.x), y: Number(seat.y) + (northPocket ? -64 : 64), dir: northPocket ? 'down' : 'up' };
     }
 
@@ -2640,17 +2701,70 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const depthAnchor = this._activityDepthAnchor(entry, y);
       const depthBias = entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length
         ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 1;
+      const actor = entry?.sprite || (entry === this ? this.player : null);
+      const action = entry?.activity?.action;
+      const reclining = action === 'lie' || action === 'sleep';
+      const actorScale = Number(actor?.scaleX);
+      const poseScale = Number.isFinite(actorScale) && actorScale > 0 ? actorScale / 3 : 1;
+      const poseAngle = reclining ? finiteDepth(actor?.angle, 0) : 0;
+      const radians = (poseAngle * Math.PI) / 180;
+      const poseWearableOffset = action
+        ? entry?._activityFurnitureDef?.activityPose?.[action]?.wearableOffset
+        : null;
+      const poseObject = (object, def) => {
+        if (!object) return;
+        const beforeX = finiteDepth(object.x, x);
+        const beforeY = finiteDepth(object.y, y);
+        if (def) this._placeWearable(object, def, x, y, dir);
+        else object.setPosition(x, y - 68);
+        // Wearables are authored in the standing body coordinate system.
+        // Rotate and proportionally scale those offsets with a reclining or
+        // bath pose so hats, wings, and slot cosmetics stay attached instead
+        // of remaining upright at the old standing position.
+        if (object._activityBaseScaleX == null) {
+          object._activityBaseScaleX = Math.abs(Number(def?.scale)) ||
+            Math.abs(Number(object.scaleX)) || 3;
+          object._activityBaseScaleY = Math.abs(Number(def?.scale)) ||
+            Math.abs(Number(object.scaleY)) || 3;
+        }
+        if (poseWearableOffset && (reclining || action === 'sit' ||
+            action === 'bathe' || action === 'shower')) {
+          object.setPosition(
+            x + finiteDepth(poseWearableOffset.x, 0),
+            y + finiteDepth(poseWearableOffset.y, 0),
+          );
+          object.setAngle?.(poseAngle);
+          object.setScale?.(
+            object._activityBaseScaleX * poseScale,
+            object._activityBaseScaleY * poseScale,
+          );
+        } else if (reclining || action === 'bathe' || action === 'shower') {
+          const dx = finiteDepth(object.x, beforeX) - x;
+          const dy = finiteDepth(object.y, beforeY) - y;
+          const rx = dx * Math.cos(radians) - dy * Math.sin(radians);
+          const ry = dx * Math.sin(radians) + dy * Math.cos(radians);
+          object.setPosition(x + rx, y + ry);
+          object.setAngle?.(poseAngle);
+          object.setScale?.(
+            object._activityBaseScaleX * poseScale,
+            object._activityBaseScaleY * poseScale,
+          );
+        } else {
+          object.setAngle?.(0);
+          // Standing/sitting presentation is still owned by _placeWearable;
+          // restore the authored size after leaving an activity pose.
+          object.setScale?.(object._activityBaseScaleX, object._activityBaseScaleY);
+        }
+      };
       for (const [object, def] of [[entry.cosmetic, entry.cosmeticDef], [entry.wings, entry.wingsDef]]) {
         if (!object) continue;
         this._setActorDepth(object, depthAnchor, depthBias);
-        if (def) this._placeWearable(object, def, x, y, dir);
-        else object.setPosition(x, y - 68);
+        poseObject(object, def);
       }
       for (const slot of Object.values(entry.slotObjs || {})) {
         if (!slot?.obj) continue;
         this._setActorDepth(slot.obj, depthAnchor, depthBias);
-        if (slot.def) this._placeWearable(slot.obj, slot.def, x, y, dir);
-        else slot.obj.setPosition(x, y - 68);
+        poseObject(slot.obj, slot.def);
       }
     }
 
@@ -2799,6 +2913,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         cosmetic: this.localCosmetic, cosmeticDef: this.localCosmeticDef,
         wings: this.localWings, wingsDef: this.localWingsDef, slotObjs: this.localSlotObjs,
         _activityFurnitureSprite: this._activityFurnitureSprite,
+        _activityFurnitureDef: this._activityFurnitureDef,
+        activity: this.activity, sprite: this.player,
       }, this.player.x, this.player.y, dir);
       if (this._activityFx) this._activityFx.setPosition(this.player.x, this.player.y - 54);
       if (this.localPet) {

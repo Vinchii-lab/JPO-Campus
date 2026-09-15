@@ -140,13 +140,15 @@ export const STREET_BLOCK_LAYOUT = Object.freeze({
   eastPortal: Object.freeze({ x: 1344, width: 96, height: 144 }),
   westPortal: Object.freeze({ x: 0, width: 96, height: 144 }),
 });
-export const CITY_DIRECT_JOIN_SPAWN = Object.freeze({ x: 144, y: 480, dir: "right" });
+// Huddle Plaza is a landscape map. Keep the direct arrival just inside the
+// west gate so the same point is useful for direct joins and Willow Walk
+// returns without immediately re-triggering the portal.
+const CITY_PLAZA_BOUNDS = Object.freeze({ width: 3600, height: 1920 });
+export const CITY_DIRECT_JOIN_SPAWN = Object.freeze({ x: 144, y: 960, dir: "right" });
 export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" }, bounds: { width: 1440, height: 1056 } },
-  // The museum occupies the additional bottom row.  Keep a little clear
-  // ground below its 1740px door so the city arrival point is walkable.
-  city: { id: "city", label: "Huddle Plaza", spawn: CITY_DIRECT_JOIN_SPAWN, bounds: { width: 1152, height: 1920 } },
+  city: { id: "city", label: "Huddle Plaza", spawn: CITY_DIRECT_JOIN_SPAWN, bounds: CITY_PLAZA_BOUNDS },
   cafe: { id: "cafe", label: "Cafe", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   diner: { id: "diner", label: "Diner", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   bakery: { id: "bakery", label: "Bakery", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
@@ -314,9 +316,9 @@ export function streetDefinition(entries = []) {
       y: y + STREET_BLOCK_LAYOUT.road.height / 2,
       dir: "left",
     };
-    // Every east road end opens onto the same top plaza west arrival. The
+    // Every east road end opens onto the same west plaza arrival. The
     // block is remembered server-side; Plaza itself has one west gate.
-    const citySpawn = { x: 144, y: 480, dir: "right" };
+    const citySpawn = { ...CITY_DIRECT_JOIN_SPAWN };
     return {
       // `segment` remains the metadata field used by connected clients and
       // reconnect snapshots. In the landscape layout it is the row number.
@@ -456,12 +458,11 @@ function commercialRoomGeometry(id, architecture) {
   };
 }
 
-// Huddle Plaza is a fixed 1152x1920 authored world.  The venue footprints
-// deliberately use the full width in two broad rows, leaving a large paved
-// square between them instead of reusing Willow Walk's long road field.
-const CITY_PLAZA_BOUNDS = Object.freeze({ width: 1152, height: 1920 });
+// Huddle Plaza is a fixed 3600x1920 authored world. The venue footprints keep
+// their native visual sizes while using four north and four south positions
+// across a broad, connected landscape instead of a narrow vertical strip.
 const CITY_GATHERING_SQUARE = Object.freeze({
-  x: 96, y: 432, width: 960, height: 672,
+  x: 192, y: 448, width: 3216, height: 640,
 });
 
 function cityShopLayout({ id, label, x, y }) {
@@ -491,13 +492,13 @@ function cityShopLayout({ id, label, x, y }) {
 }
 
 const CITY_PLAZA_SHOPS = Object.freeze([
-  cityShopLayout({ id: "furniture-shop", label: "Huddle Home", x: 48, y: 160 }),
-  cityShopLayout({ id: "garden-shop", label: "Willow & Green", x: 336, y: 160 }),
-  cityShopLayout({ id: "decor-shop", label: "Plaza Decor", x: 624, y: 160 }),
-  cityShopLayout({ id: "cafe", label: "Cafe", x: 912, y: 160 }),
-  cityShopLayout({ id: "diner", label: "Diner", x: 48, y: 1120 }),
-  cityShopLayout({ id: "bakery", label: "Sweet Crust Bakery", x: 464, y: 1120 }),
-  cityShopLayout({ id: "sushi", label: "Sakura Sushi", x: 880, y: 1120 }),
+  cityShopLayout({ id: "furniture-shop", label: "Huddle Home", x: 368, y: 160 }),
+  cityShopLayout({ id: "garden-shop", label: "Willow & Green", x: 1248, y: 160 }),
+  cityShopLayout({ id: "decor-shop", label: "Plaza Decor", x: 2128, y: 160 }),
+  cityShopLayout({ id: "cafe", label: "Cafe", x: 3008, y: 160 }),
+  cityShopLayout({ id: "diner", label: "Diner", x: 368, y: 1120 }),
+  cityShopLayout({ id: "bakery", label: "Sweet Crust Bakery", x: 1248, y: 1120 }),
+  cityShopLayout({ id: "sushi", label: "Sakura Sushi", x: 2128, y: 1120 }),
 ]);
 const CITY_PLAZA_SHOP_BY_ID = Object.freeze(Object.fromEntries(
   CITY_PLAZA_SHOPS.map((shop) => [shop.id, shop]),
@@ -506,14 +507,14 @@ const CITY_PLAZA_SHOP_BY_ID = Object.freeze(Object.fromEntries(
 const CITY_MUSEUM_LAYOUT = Object.freeze({
   id: "museum",
   label: "Huddle Museum",
-  footprint: Object.freeze({ x: 456, y: 1440, width: 240, height: 350 }),
-  door: Object.freeze({ x: 528, y: 1690, width: 96, height: 100 }),
-  citySpawn: Object.freeze({ x: 576, y: 1830, dir: "up" }),
+  footprint: Object.freeze({ x: 3000, y: 1120, width: 240, height: 350 }),
+  door: Object.freeze({ x: 3072, y: 1370, width: 96, height: 100 }),
+  citySpawn: Object.freeze({ x: 3120, y: 1512, dir: "up" }),
   museumSpawn: Object.freeze({ x: 480, y: 576, dir: "up" }),
   blockers: Object.freeze([
-    Object.freeze({ x: 456, y: 1440, width: 240, height: 250 }),
-    Object.freeze({ x: 456, y: 1690, width: 72, height: 100 }),
-    Object.freeze({ x: 624, y: 1690, width: 72, height: 100 }),
+    Object.freeze({ x: 3000, y: 1120, width: 240, height: 250 }),
+    Object.freeze({ x: 3000, y: 1370, width: 72, height: 100 }),
+    Object.freeze({ x: 3168, y: 1370, width: 72, height: 100 }),
   ]),
 });
 
@@ -591,16 +592,24 @@ const BASE_LOCATION_GEOMETRY = Object.freeze({
         spawn: CITY_COMMERCIAL_LAYOUT.museum.museumSpawn },
     ],
     seats: [
-      // Benches frame the paved gathering square.  Their authored exits are
-      // deliberately on the same open paving as the player's arrival route.
-      { id: "plaza-bench-northwest", x: 264, y: 520, dir: "down",
-        stands: [{ x: 264, y: 584, dir: "down" }, { x: 200, y: 520, dir: "down" }] },
-      { id: "plaza-bench-northeast", x: 888, y: 520, dir: "down",
-        stands: [{ x: 888, y: 584, dir: "down" }, { x: 824, y: 520, dir: "down" }] },
-      { id: "plaza-bench-southwest", x: 264, y: 1000, dir: "up",
-        stands: [{ x: 264, y: 936, dir: "up" }, { x: 200, y: 1000, dir: "up" }] },
-      { id: "plaza-bench-southeast", x: 888, y: 1000, dir: "up",
-        stands: [{ x: 888, y: 936, dir: "up" }, { x: 824, y: 1000, dir: "up" }] },
+      // Benches repeat across the paved gathering square. Their authored
+      // stands remain on open paving, not in a facade or a path edge.
+      { id: "plaza-bench-northwest", x: 720, y: 640, dir: "down",
+        stands: [{ x: 720, y: 704, dir: "down" }, { x: 656, y: 640, dir: "down" }] },
+      { id: "plaza-bench-north", x: 1520, y: 640, dir: "down",
+        stands: [{ x: 1520, y: 704, dir: "down" }, { x: 1456, y: 640, dir: "down" }] },
+      { id: "plaza-bench-south", x: 2320, y: 640, dir: "down",
+        stands: [{ x: 2320, y: 704, dir: "down" }, { x: 2256, y: 640, dir: "down" }] },
+      { id: "plaza-bench-northeast", x: 3120, y: 640, dir: "down",
+        stands: [{ x: 3120, y: 704, dir: "down" }, { x: 3056, y: 640, dir: "down" }] },
+      { id: "plaza-bench-southwest", x: 720, y: 896, dir: "up",
+        stands: [{ x: 720, y: 832, dir: "up" }, { x: 656, y: 896, dir: "up" }] },
+      { id: "plaza-bench-south", x: 1520, y: 896, dir: "up",
+        stands: [{ x: 1520, y: 832, dir: "up" }, { x: 1456, y: 896, dir: "up" }] },
+      { id: "plaza-bench-east", x: 2320, y: 896, dir: "up",
+        stands: [{ x: 2320, y: 832, dir: "up" }, { x: 2256, y: 896, dir: "up" }] },
+      { id: "plaza-bench-southeast", x: 3120, y: 896, dir: "up",
+        stands: [{ x: 3120, y: 832, dir: "up" }, { x: 3056, y: 896, dir: "up" }] },
     ],
     // The renderer consumes these same footprints, keeping museum and shop
     // facades discoverable in the serialized transition payload.
@@ -747,7 +756,7 @@ export const LOCATION_PORTALS = Object.freeze({
     { destination: "office", x: 0, y: 432, width: 96, height: 144, label: "HQ Garden", spawn: { x: 312, y: 2280, dir: "right" } },
   ],
   city: [
-    { destination: "neighborhood", x: 0, y: 432, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
+    { destination: "neighborhood", x: 0, y: 888, width: 96, height: 144, spawn: { x: 1248, y: 504, dir: "left" } },
     ...CITY_PLAZA_LAYOUT.shops.map((shop) => ({
       destination: shop.id, ...shop.door,
       spawn: { x: 480, y: 576, dir: "up" },
@@ -781,7 +790,7 @@ const furniture = ({
   id, name, price, category, path, width = 1, height = 1,
   frameWidth = 16, frameHeight = 16, frameCount = 1, frameRate = 0,
   initialFrame = 0, scale = 3, rotations = [0], actions = [], interaction, actionInteractions,
-  asset = id, anchor = "bottom-center", color = "#8d6e52",
+  activityPose, occluder, asset = id, anchor = "bottom-center", color = "#8d6e52",
 }) => ({
   id, name, price, category, path, publicPath: path, assetPath: path, asset, scale, rotations,
   width, height, footprint: { width, height }, anchor, color,
@@ -789,6 +798,8 @@ const furniture = ({
   ...(actions.length ? { actions } : {}),
   ...(interaction ? { interaction } : {}),
   ...(actionInteractions ? { actionInteractions } : {}),
+  ...(activityPose ? { activityPose } : {}),
+  ...(occluder ? { occluder } : {}),
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -797,6 +808,13 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "oak_chair", name: "Gold armchair", price: 5000, category: "Living",
     path: "/assets/neighborhood/furniture/oak_chair.png", frameWidth: 16, frameHeight: 32,
     asset: "oak_chair", actions: ["sit"], interaction: { facing: "down" }, color: "#b98743",
+    actionInteractions: {
+      sit: { actorOffset: { x: 0, y: -26 } },
+    },
+    activityPose: {
+      sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
+    },
+    occluder: { default: { fromPx: 19, depthBias: 0.01 } },
   }),
   fern: furniture({
     id: "fern", name: "Potted fern", price: 5000, category: "Living",
@@ -818,6 +836,21 @@ export const FURNITURE_CATALOG = Object.freeze({
     path: "/assets/neighborhood/furniture/blue_sofa_full.png", width: 2, frameWidth: 32,
     frameHeight: 32, actions: ["sit", "lie"],
     interaction: { facing: "down", radius: 96 }, color: "#e4c8a1",
+    actionInteractions: {
+      sit: { actorOffset: { x: 0, y: -34 } },
+    },
+    activityPose: {
+      sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
+      lie: { angle: -90, scale: 2.7, wearableOffset: { x: -30, y: 0 } },
+      sleep: { angle: -90, scale: 2.7, wearableOffset: { x: -30, y: 0 } },
+    },
+    occluder: {
+      default: { fromPx: 24, depthBias: 0.01 },
+      actions: {
+        sit: { fromPx: 24, depthBias: 0.01 },
+        lie: { fromPx: 24, depthBias: 0.01 },
+      },
+    },
   }),
   bookcase: furniture({
     id: "bookcase", name: "Gold bookcase", price: 18000, category: "Living",
@@ -828,7 +861,22 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "lounge_sofa", name: "Ivory reading sofa", price: 25000, category: "Living",
     path: "/assets/neighborhood/furniture/lounge_sofa.png", width: 2, frameWidth: 32,
     frameHeight: 32, actions: ["sit", "lie"], interaction: { facing: "down", radius: 96 },
+    actionInteractions: {
+      sit: { actorOffset: { x: 0, y: -34 } },
+    },
     color: "#f2e0c8",
+    activityPose: {
+      sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
+      lie: { angle: -90, scale: 2.7, wearableOffset: { x: -30, y: 0 } },
+      sleep: { angle: -90, scale: 2.7, wearableOffset: { x: -30, y: 0 } },
+    },
+    occluder: {
+      default: { fromPx: 24, depthBias: 0.01 },
+      actions: {
+        sit: { fromPx: 24, depthBias: 0.01 },
+        lie: { fromPx: 24, depthBias: 0.01 },
+      },
+    },
   }),
   living_shelf: furniture({
     id: "living_shelf", name: "Tall bookcase", price: 18000, category: "Living",
@@ -891,13 +939,42 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "bed", name: "Bedroom bed", price: 35000, category: "Bedroom",
     path: "/assets/neighborhood/interiors/bedroom_bed.png", height: 3,
     frameWidth: 16, frameHeight: 48, asset: "bedroom_bed", actions: ["lie", "sleep"],
-    interaction: { facing: "down", radius: 104, orientation: "lengthwise" }, color: "#9d6d65",
+    interaction: { facing: "down", radius: 104, orientation: "lengthwise" },
+    activityPose: {
+      lie: { angle: 0, scale: 2.7, wearableOffset: { x: 0, y: -42 } },
+      sleep: { angle: 0, scale: 2.7, wearableOffset: { x: 0, y: -42 } },
+    },
+    occluder: {
+      default: { fromPx: 31, depthBias: 0.01 },
+      actions: {
+        lie: { fromPx: 31, depthBias: 0.01 },
+        sleep: { fromPx: 31, depthBias: 0.01 },
+      },
+    },
+    color: "#9d6d65",
   }),
   plush_bed: furniture({
     id: "plush_bed", name: "Walnut daybed", price: 50000, category: "Bedroom",
     path: "/assets/neighborhood/commercial/furn_bed.png", width: 3, height: 2,
     frameWidth: 144, frameHeight: 144, scale: 1, actions: ["lie", "sleep"],
-    interaction: { facing: "down", radius: 104 }, color: "#8697b5",
+    // The source art's pillow is on the RIGHT.  A -90° down-facing avatar
+    // therefore puts its head on that pillow; the art-relative y nudge keeps
+    // the body on the mattress instead of the front rail.
+    interaction: { facing: "down", radius: 104, actorOffset: { x: 0, y: -20 } },
+    activityPose: {
+      lie: { angle: -90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
+      sleep: { angle: -90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
+    },
+    // Only the authored lower rail is in front of a reclining actor.  The
+    // previous generic 62% crop covered the head and most of the body.
+    occluder: {
+      default: { fromPx: 108, depthBias: 0.01 },
+      actions: {
+        lie: { fromPx: 108, depthBias: 0.01 },
+        sleep: { fromPx: 108, depthBias: 0.01 },
+      },
+    },
+    color: "#8697b5",
   }),
   bedroom_shelf: furniture({
     id: "bedroom_shelf", name: "Gold bedroom bookcase", price: 18000, category: "Bedroom",
@@ -926,7 +1003,21 @@ export const FURNITURE_CATALOG = Object.freeze({
     path: "/assets/room-furniture/animated_bathtub_2.png", width: 2,
     frameWidth: 32, frameHeight: 48, frameCount: 4, frameRate: 2, scale: 3,
     asset: "animated_bathtub_with_duck", actions: ["shower", "bathe"],
-    interaction: { facing: "down", radius: 104 }, color: "#b9d7dc",
+    // The basin sits above the authored front wall.  Keep the avatar's head
+    // above that wall while the lower body is cropped by the rim.
+    interaction: { facing: "down", radius: 104, actorOffset: { x: 0, y: -70 } },
+    activityPose: {
+      shower: { angle: 0, scale: 2.4, wearableOffset: { x: 0, y: -4 } },
+      bathe: { angle: 0, scale: 2.4, wearableOffset: { x: 0, y: -4 } },
+    },
+    occluder: {
+      default: { fromPx: 24, depthBias: 0.01 },
+      actions: {
+        shower: { fromPx: 24, depthBias: 0.01 },
+        bathe: { fromPx: 24, depthBias: 0.01 },
+      },
+    },
+    color: "#b9d7dc",
   }),
   bathroom_sink: furniture({
     id: "bathroom_sink", name: "Bathroom sink", price: 12000, category: "Bathroom",
@@ -955,7 +1046,10 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "shower", name: "Rain shower", price: 35000, category: "Bathroom",
     path: "/assets/room-furniture/animated_jail_shower_4-8%20loop.png",
     frameWidth: 16, frameHeight: 48, frameCount: 11, frameRate: 8, scale: 3,
-    actions: ["shower"], interaction: { facing: "down", radius: 96 }, color: "#76acd1",
+    actions: ["shower"], interaction: { facing: "down", radius: 96 },
+    activityPose: { shower: { angle: 0, scale: 2.7 } },
+    occluder: { default: { fromPx: 20, depthBias: 0.01 } },
+    color: "#76acd1",
   }),
 
   // Miscellaneous — accents are still floor-anchored real silhouettes, not
@@ -965,6 +1059,7 @@ export const FURNITURE_CATALOG = Object.freeze({
     path: "/assets/neighborhood/commercial/shop_rug.png", width: 2, height: 2,
     frameWidth: 32, frameHeight: 32, scale: 3, color: "#9a8fc0",
     actions: ["sit"], interaction: { facing: "down", radius: 96 },
+    occluder: { default: { fromPx: 27, depthBias: 0.01 } },
   }),
   plant_palm: furniture({
     id: "plant_palm", name: "Garden topiary", price: 18000, category: "Miscellaneous",
@@ -1044,7 +1139,7 @@ export function portalForTransition(fromLocation, destination, x, y, actorEmail 
 
 export function locationBounds(location) {
   if (location.kind === "home") return { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell };
-  // Huddle Plaza is intentionally the fixed 1152x1920 plaza. Residential
+  // Huddle Plaza is intentionally the fixed 3600x1920 plaza. Residential
   // sparse blocks return through its single west gate rather than extending
   // this map or reusing the street field.
   return LOCATIONS[location.id].bounds;
@@ -1071,7 +1166,9 @@ export function staticSeatStandCandidates(location, seat) {
     .filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
     .map((point) => ({ x: Number(point.x), y: Number(point.y), dir: point.dir || seat.dir || "down" }));
   if (!candidates.length) {
-    const pivot = location?.id === "city" ? 576 : (Number(locationBounds(location)?.height) || 0) / 2;
+    const pivot = location?.id === "city"
+      ? CITY_GATHERING_SQUARE.y + CITY_GATHERING_SQUARE.height / 2
+      : (Number(locationBounds(location)?.height) || 0) / 2;
     const northPocket = Number(seat.y) < pivot;
     candidates.push(
       { x: Number(seat.x), y: Number(seat.y) + (northPocket ? -64 : 64), dir: northPocket ? "down" : "up" },
