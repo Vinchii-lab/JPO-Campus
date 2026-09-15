@@ -552,15 +552,39 @@ window.JpoUIBuilder = {
     panel.querySelector('[data-browse]')?.addEventListener('click', () => ctx.onOpenMenu?.());
     panel.querySelector('[data-buy-menu]')?.addEventListener('click', () => ctx.onOpenMenu?.());
     panel.querySelectorAll('[data-buy]').forEach(btn => {
-      btn.onclick = () => {
-        if (window.confirm('Buy this item with coins?')) {
-          ctx.onBuy?.(btn.dataset.buy, 'furniture');
-        }
-      };
+      btn.onclick = () => this._confirmShopPurchase(panel, ctx, btn.dataset.buy, 'furniture');
     });
     panel.querySelectorAll('[data-food-buy]').forEach(btn => {
-      btn.onclick = () => ctx.onBuy?.(btn.dataset.foodBuy, 'food');
+      btn.onclick = () => this._confirmShopPurchase(panel, ctx, btn.dataset.foodBuy, 'food');
     });
+  },
+
+  _confirmShopPurchase: function(panel, ctx, itemId, kind) {
+    const item = ctx.cashierMenu?.items?.find(candidate => candidate.id === itemId);
+    if (!item || panel.hidden) return;
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price < 0) return;
+    panel.innerHTML = `<div class="cashier-speech-content">
+      <div class="home-panel-head"><b>${this._escape(ctx.cashier.name)} · Cashier</b></div>
+      <div class="home-section" role="group" aria-label="Confirm purchase">
+        <p>Buy <strong>${this._escape(item.name || item.id)}</strong> for
+          <strong>${price.toLocaleString()} coins</strong>?</p>
+        <button type="button" data-confirm-purchase>Buy · ${price.toLocaleString()} coins</button>
+        <button type="button" data-cancel-purchase>Cancel</button>
+      </div>
+    </div>`;
+    let settled = false;
+    const finish = (purchase) => {
+      if (settled || panel.hidden || !panel.querySelector('[data-confirm-purchase]')) return;
+      settled = true;
+      this.renderShopPanel(panel, ctx);
+      if (purchase) ctx.onBuy?.(itemId, kind);
+    };
+    panel.querySelector('[data-confirm-purchase]').onclick = () => finish(true);
+    panel.querySelector('[data-cancel-purchase]').onclick = () => finish(false);
+    ctx.positionBubble?.();
+    // Start on the safe choice; focusing never scrolls the game viewport.
+    panel.querySelector('[data-cancel-purchase]')?.focus({ preventScroll: true });
   },
 
   renderPlacementControls: function(container, ctx) {

@@ -450,9 +450,14 @@ function commercialRoomGeometry(id, architecture) {
   const room = commercialRoomManifest(id);
   if (!room) return architecture;
   const walls = (architecture.blockers || []).filter(isInteriorBoundary);
+  // The furniture shop replaces its legacy decorative props with the
+  // server-projected real catalog showroom. Those manifest rectangles belong
+  // to the removed props (the renderer explicitly destroys them), so retaining
+  // them would create invisible blockers over sofa/TV activity anchors.
+  const propBlockers = id === "furniture-shop" ? [] : room.blockers;
   return {
     ...architecture,
-    blockers: [...walls, ...(Array.isArray(room.blockers) ? room.blockers : [])],
+    blockers: [...walls, ...(Array.isArray(propBlockers) ? propBlockers : [])],
     seats: Array.isArray(room.seats) ? room.seats : (architecture.seats || []),
     commercialLayout: room,
   };

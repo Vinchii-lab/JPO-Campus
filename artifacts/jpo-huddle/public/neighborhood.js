@@ -649,9 +649,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (payload.id === socket.id) {
       if (payload.phase === 'start' && payload.action) {
         scene._setLocalActivity({
+          showroom: payload.showroom === true,
           instanceId: payload.instanceId, furnitureId: payload.furnitureId,
-          action: payload.action, effect: payload.effect, orientation: payload.orientation,
-          x: payload.x, y: payload.y,
+          action: payload.action, effect: payload.effect,
+          effectState: payload.effectState, toggle: !!payload.toggle,
+          orientation: payload.orientation, stand: payload.stand || null,
+          x: payload.x, y: payload.y, dir: payload.dir,
         }, payload);
       } else if (payload.phase === 'stop') {
         scene._setLocalActivity(null, payload);
@@ -661,24 +664,25 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     const remote = scene.remotes[payload.id];
     if (!remote) return;
     if (payload.phase === 'start' && payload.action) {
-        remote.lastDir = payload.dir || remote.lastDir || 'down';
-        if (Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.y))) {
-          remote.sprite.setPosition(Number(payload.x), Number(payload.y));
-          remote.nameTag?.setPosition(Number(payload.x), Number(payload.y) - 40);
-        }
+      remote.lastDir = payload.dir || remote.lastDir || 'down';
+      if (Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.y))) {
+        remote.sprite.setPosition(Number(payload.x), Number(payload.y));
+        remote.nameTag?.setPosition(Number(payload.x), Number(payload.y) - 40);
+      }
       remote.activity = {
+        showroom: payload.showroom === true,
         instanceId: payload.instanceId, furnitureId: payload.furnitureId,
         action: payload.action, effect: payload.effect, orientation: payload.orientation,
-          effectState: payload.effectState, toggle: !!payload.toggle,
-          x: payload.x, y: payload.y, dir: payload.dir,
+        effectState: payload.effectState, toggle: !!payload.toggle,
+        stand: payload.stand || null, x: payload.x, y: payload.y, dir: payload.dir,
       };
-        scene._applyActivityPose(remote, remote.activity, remote.lastDir);
-        scene._setActorDepth(
-          remote.sprite,
-          scene._activityDepthAnchor(remote, remote.sprite.y),
-          scene._activityDepthBias(remote),
-        );
-        scene._positionPresentation(remote, remote.sprite.x, remote.sprite.y, remote.lastDir);
+      scene._applyActivityPose(remote, remote.activity, remote.lastDir);
+      scene._setActorDepth(
+        remote.sprite,
+        scene._activityDepthAnchor(remote, remote.sprite.y),
+        scene._activityDepthBias(remote),
+      );
+      scene._positionPresentation(remote, remote.sprite.x, remote.sprite.y, remote.lastDir);
     } else if (payload.phase === 'stop') {
         if (Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.y))) {
           remote.sprite.setPosition(Number(payload.x), Number(payload.y));
@@ -2265,6 +2269,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this.player.body?.reset(this.player.x, this.player.y);
         this.player.body.enable = false;
       } else if (this.player.body) {
+        // Stop packets carry the server's validated stand (which may be a
+        // fallback when a home was edited or a showroom point changed). Do
+        // not let the optimistic local exit hide that authoritative coordinate
+        // from the next snapshot/live correction.
+        if (Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
+          this.player.setPosition(payload.x, payload.y);
+          this.playerDir = payload.dir || this.playerDir || 'down';
+          this.player.body.reset(this.player.x, this.player.y);
+        }
         this.player.body.enable = true;
       }
       this._applyActivityPose(this, this.activity, this.playerDir || 'down');
@@ -2277,15 +2290,43 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       for (const sprite of this.furniture) {
         const actions = sprite.getData('actions') || [];
         if (!actions.length) continue;
-        const radius = Number(sprite.getData('actionRadius')) || 86;
-        const anchorY = sprite.getData('anchor') === 'front'
-          ? sprite.y + 18
-          : sprite.y - (sprite.getData('height') || 1) * 24 + 10;
-        const distance = Math.hypot(this.player.x - sprite.x, this.player.y - anchorY);
+        const first = actions[0];
+        const interaction = this._furnitureActionAnchor(sprite, first);
+        const radius = Number(interaction?.radius) ||
+          Number(sprite.getData('actionRadius')) || 86;
+        const distance = Math.hypot(
+          this.player.x - interaction.x, this.player.y - interaction.y,
+        );
         if (distance > radius || (best && distance >= best.distance)) continue;
-        best = { sprite, actions, distance };
+        best = { sprite, actions, distance, anchor: interaction };
       }
       return best;
+    }
+
+    _furnitureActionAnchor(sprite, action) {
+      const id = typeof action === 'string' ? action : action?.id;
+      const furnitureId = sprite?.getData?.('furnitureId');
+      const definition = furnitureCatalog[furnitureId] || {};
+      const itemInteraction = definition.actionInteractions?.[id] || definition.interaction || {};
+      const interaction = typeof action === 'object' ? { ...itemInteraction, ...action } : itemInteraction;
+      const footprintHeight = Number(sprite?.getData?.('height')) ||
+        Number(definition.height) || 1;
+      const rotation = Number(sprite?.getData?.('rotation')) || 0;
+      const anchorKind = sprite.getData('anchor') === 'front'
+        ? 'front' : interaction.anchor;
+      const baseY = anchorKind === 'front'
+        ? Number(sprite.y) + 18
+        : Number(sprite.y) - footprintHeight * 24 +
+          (id === 'sit' ? 10 : 6);
+      const offset = interaction.actorOffset;
+      const offsetX = Number(offset?.x) || 0;
+      const offsetY = Number(offset?.y) || 0;
+      const radians = rotation * Math.PI / 180;
+      return {
+        x: Number(sprite.x) + offsetX * Math.cos(radians) - offsetY * Math.sin(radians),
+        y: baseY + offsetX * Math.sin(radians) + offsetY * Math.cos(radians),
+        radius: Number(interaction.radius) || 86,
+      };
     }
 
     _nearbyShowroomAction() {
@@ -2311,6 +2352,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _requestFurnitureAction() {
       if (this.activity || this._activityPending) return;
+      // Keep cashier interaction authoritative even when a caller invokes
+      // this helper outside the normal update-order calculation. A showroom
+      // E prompt must never win over a cashier at the same point.
+      const cashier = this.nearbyCashier || this._nearbyCashier();
+      if (cashier) {
+        this._interactCashier();
+        return;
+      }
       const nearby = this._nearbyInteractiveAction();
       if (!nearby) return;
       const selectedAction = this.keyShift?.isDown && nearby.actions[1] ? nearby.actions[1] : nearby.actions[0];
@@ -2675,6 +2724,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
            sprite.setData('actions', Array.isArray(def.actions) ? def.actions : []);
            sprite.setData('actionRadius', def.interaction?.radius || 86);
            sprite.setData('anchor', def.interaction?.anchor || 'center');
+            sprite.setData('rotation', uprightRotation);
            sprite.setData('height', footprint.height);
            sprite.setData('isSeat', Array.isArray(def.actions) && def.actions.includes('sit'));
            sprite.setData('seatDir', 'down');
@@ -3062,6 +3112,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (this.activity) {
         this.player.setPosition(this.activity.x, this.activity.y);
         body.setVelocity(0, 0);
+        // Keep the authoritative activity pose alive through every update.
+        // Position/depth presentation is intentionally separate from the
+        // avatar texture, but other live outfit/seat updates can touch the
+        // sprite between socket packets. _applyActivityPose is idempotent for
+        // the real seated animation key and therefore does not restart it.
+        this._applyActivityPose(this, this.activity, this.playerDir || 'down');
       } else if (parkSeated) {
         this.player.setPosition(this.staticSeatState.x, this.staticSeatState.y);
         body.setVelocity(0, 0);
@@ -3091,6 +3147,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this._setActorDepth(this.localPet, this.localPet.y, -1);
       }
       for (const remote of Object.values(this.remotes)) {
+        if (remote.activity) {
+          this._applyActivityPose(remote, remote.activity, remote.lastDir || 'down');
+        }
         if (remote._activityFx) remote._activityFx.setPosition(remote.sprite.x, remote.sprite.y - 54);
         if (remote.pet) {
           this._stepPet(remote.pet, remote.sprite.x, remote.sprite.y, delta, remote.seated);

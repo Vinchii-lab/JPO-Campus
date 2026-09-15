@@ -31,6 +31,7 @@ const outputDir = resolve(
 const cases = [
   { id: "desktop-greeting", width: 1280, height: 720, zoom: 0.267, menu: false },
   { id: "desktop-catalog", width: 1280, height: 720, zoom: 0.267, menu: true },
+  { id: "desktop-confirmation", width: 1280, height: 720, zoom: 0.267, menu: true, confirm: true },
   { id: "mobile-greeting", width: 390, height: 844, zoom: 1, menu: false },
   { id: "mobile-catalog", width: 390, height: 844, zoom: 1, menu: true },
 ];
@@ -330,6 +331,11 @@ async function main() {
         { timeout: 30000 },
       );
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 350));
+      if (fixtureCase.confirm) {
+        page.on("dialog", () => { throw new Error("Native browser dialog must never open for purchases"); });
+        await page.click('[data-buy]');
+        await page.waitForSelector('[data-cancel-purchase]');
+      }
       const report = await page.evaluate(() => {
         const panel = document.querySelector('#shop-panel');
         const scene = window.__cashierFixtureScene;

@@ -205,6 +205,12 @@ assert.match(serverSource, /furnitureDemoInteract/,
   "showroom pieces have a server-authoritative interaction path");
 assert.match(serverSource, /showroom-bath[\s\S]{0,180}bathtub/,
   "the showroom demonstrates the real bath entry rather than only listing it for sale");
+assert.match(serverSource, /const showroomLocation = parseLocation\(locationId\)[\s\S]{0,420}validLocationMove\(showroomLocation, demoAnchor\.x, demoAnchor\.y\)[\s\S]{0,240}furniturePathClear\(showroomLocation, p, demoAnchor/,
+  "showroom admission validates the catalog anchor and continuous path");
+assert.match(serverSource, /if \(moveToStand\) \{[\s\S]{0,180}safeFurnitureStand\(player, activity, locationId\)/,
+  "every authoritative activity exit, including showroom exits, resolves a safe stand");
+assert.match(serverSource, /furnitureDemoInteractionResult", \{\s*ok: true, phase: "stop", instanceId: activity\.instanceId, action: activity\.action,[\s\S]{0,120}x: p\.x, y: p\.y, dir: p\.dir/,
+  "showroom exit acknowledges the server's final stand coordinates");
 
 assert.match(clientSource, /sprite\.setData\('actions', Array\.isArray\(def\.actions\)/,
   "placed sprites retain catalog action metadata for ordinary E prompts");
@@ -216,5 +222,13 @@ assert.match(clientSource, /activity\?\.orientation === 'lengthwise'/,
   "portrait bed sleep does not use the sofa's sideways 90-degree pose");
 assert.match(clientSource, /sprite\.getData\('anchor'\) === 'front'/,
   "client proximity follows the TV front anchor");
+assert.match(clientSource, /if \(this\.activity\) \{[\s\S]{0,500}this\._applyActivityPose\(this, this\.activity, this\.playerDir/,
+  "the local update loop reapplies the authoritative activity pose");
+assert.match(clientSource, /for \(const remote of Object\.values\(this\.remotes\)\) \{[\s\S]{0,180}remote\.activity[\s\S]{0,180}this\._applyActivityPose\(remote, remote\.activity/,
+  "the remote update loop preserves activity poses across live ticks");
+assert.match(clientSource, /if \(Number\.isFinite\(payload\.x\) && Number\.isFinite\(payload\.y\)\) \{[\s\S]{0,220}this\.player\.body\.reset\(this\.player\.x, this\.player\.y\)/,
+  "local stop packets apply the server-authoritative stand after optimistic exit");
+assert.match(clientSource, /_requestFurnitureAction\(\) \{[\s\S]{0,300}const cashier = this\.nearbyCashier \|\| this\._nearbyCashier\(\)[\s\S]{0,180}this\._interactCashier\(\)/,
+  "cashier priority remains enforced even for direct furniture-action calls");
 
 console.log("PASS: furniture actions, anchors, occupancy, paths, access, and render metadata");

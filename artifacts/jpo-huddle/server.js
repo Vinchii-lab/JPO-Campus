@@ -3541,11 +3541,23 @@ function locationInfo(locationId) {
     bounds: { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell },
   } : { ...LOCATIONS[parsed.id], kind: parsed.kind };
   const key = parsed.kind === "home" ? "home" : parsed.id;
+  const geometry = parsed.id === "furniture-shop"
+    ? {
+      // The old commercial prop blockers are paired with the legacy showroom
+      // art that _drawFurnitureShowroom removes. Keeping those stale rectangles
+      // made real sofa/TV activity anchors collide with invisible furniture.
+      ...LOCATION_GEOMETRY[key],
+      blockers: (LOCATION_GEOMETRY[key]?.blockers || []).filter((block) =>
+        block.x === 0 || block.y === 0 ||
+        Number(block.x) + Number(block.width) === Number(base.bounds?.width) ||
+        Number(block.y) + Number(block.height) === Number(base.bounds?.height)),
+    }
+    : LOCATION_GEOMETRY[key];
   return {
     ...base,
     bounds: base.bounds,
     actorFootRadius: ACTOR_FOOT_RADIUS,
-    geometry: LOCATION_GEOMETRY[key],
+    geometry,
     cashiers: [COMMERCIAL_CASHIERS[parsed.id]].filter(Boolean),
     // Plaza deliberately has one west gate. The remembered residential block
     // is server state, not a second rendered road in the city map.
@@ -3603,12 +3615,16 @@ function cashierMenu(cashier) {
 // furnitureDemoInteract socket below exercises the normal server activity
 // broadcasts without writing anything to a customer's layout.
 const FURNITURE_SHOWROOM_DEMO_LAYOUT = Object.freeze([
-  Object.freeze({ instanceId: "showroom-blue-sofa", furnitureId: "blue_sofa", x: 180, y: 320, stand: { x: 180, y: 380, dir: "up" } }),
-  Object.freeze({ instanceId: "showroom-lounge-sofa", furnitureId: "lounge_sofa", x: 340, y: 320, stand: { x: 340, y: 380, dir: "up" } }),
-  Object.freeze({ instanceId: "showroom-bed", furnitureId: "plush_bed", x: 760, y: 320, stand: { x: 760, y: 420, dir: "up" } }),
+  // Stands are authored against the commercial-room collision geometry, not
+  // just the furniture's visual floor anchor. In particular, the old points
+  // for the sofa, bed, bath, sink, and TV did not line up with their
+  // catalog-derived anchors (and several overlapped removed legacy props).
+  Object.freeze({ instanceId: "showroom-blue-sofa", furnitureId: "blue_sofa", x: 180, y: 320, stand: { x: 180, y: 340, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-lounge-sofa", furnitureId: "lounge_sofa", x: 340, y: 320, stand: { x: 340, y: 340, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-bed", furnitureId: "plush_bed", x: 760, y: 320, stand: { x: 760, y: 352, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-counter", furnitureId: "kitchen_counter", x: 440, y: 480, stand: { x: 440, y: 540, dir: "up" } }),
-  Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 560, dir: "up" } }),
-  Object.freeze({ instanceId: "showroom-sink", furnitureId: "bathroom_sink_tap", x: 760, y: 480, stand: { x: 760, y: 560, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 490, dir: "up" } }),
+  Object.freeze({ instanceId: "showroom-sink", furnitureId: "bathroom_sink_tap", x: 760, y: 480, stand: { x: 760, y: 540, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-tv", furnitureId: "television", x: 500, y: 140, stand: { x: 500, y: 220, dir: "up" } }),
 ]);
 
@@ -3623,6 +3639,8 @@ function furnitureShowroomDemos() {
       name: definition.name,
       actions: furnitureActionDefinitions(definition).map((action) => ({
         id: action.id, label: action.label, effect: action.effect || actionEffectKind(action.id),
+        anchor: action.anchor, facing: action.facing, radius: action.radius,
+        actorOffset: action.actorOffset || null,
         toggle: action.toggle === true,
       })),
     }];
@@ -3713,16 +3731,20 @@ function furnitureStandCandidatesForActivity(activity) {
 
 function safeFurnitureStand(player, activity, locationId) {
   const location = parseLocation(locationId);
-  if (!player || !activity || location?.kind !== "home") return null;
+  if (!player || !activity ||
+      (location?.kind !== "home" && location?.id !== "furniture-shop")) return null;
+  const isHome = location.kind === "home";
   const targetId = String(activity.instanceId);
-  const allBlockers = [...homeBlockersFor(location)];
-  if (!allBlockers.some((block) => block.instanceId === targetId) && activity.targetBlock) {
+  const allBlockers = isHome
+    ? [...homeBlockersFor(location)]
+    : [];
+  if (isHome && !allBlockers.some((block) => block.instanceId === targetId) && activity.targetBlock) {
     allBlockers.push(activity.targetBlock);
   }
   const blockers = allBlockers.filter((block) => block.instanceId !== targetId);
   const candidates = [
     activity.stand,
-    ...furnitureStandCandidatesForActivity(activity),
+    ...(isHome ? furnitureStandCandidatesForActivity(activity) : []),
   ].filter(Boolean);
   const unique = [];
   const seen = new Set();
@@ -3743,8 +3765,14 @@ function safeFurnitureStand(player, activity, locationId) {
   // when it is clear of every current blocker.
   const spawn = locationSpawn(location);
   if (validLocationMove(location, spawn.x, spawn.y, allBlockers)) return spawn;
-  for (let y = HOME_GRID.cell / 2; y < HOME_GRID.height * HOME_GRID.cell; y += HOME_GRID.cell / 2) {
-    for (let x = HOME_GRID.cell / 2; x < HOME_GRID.width * HOME_GRID.cell; x += HOME_GRID.cell / 2) {
+  const bounds = isHome
+    ? { width: HOME_GRID.width * HOME_GRID.cell, height: HOME_GRID.height * HOME_GRID.cell }
+    : locationInfo(location.id)?.bounds;
+  const width = bounds?.width || 0;
+  const height = bounds?.height || 0;
+  if (!(width > 0 && height > 0)) return null;
+  for (let y = HOME_GRID.cell / 2; y < height; y += HOME_GRID.cell / 2) {
+    for (let x = HOME_GRID.cell / 2; x < width; x += HOME_GRID.cell / 2) {
       if (validLocationMove(location, x, y, allBlockers)) return { x, y, dir: "down" };
     }
   }
@@ -3754,6 +3782,7 @@ function safeFurnitureStand(player, activity, locationId) {
 function furnitureActivityPayload(id, phase, activity = null, player = players[id]) {
   return {
     id, phase,
+    showroom: activity?.showroom === true,
     instanceId: activity?.instanceId || null,
     furnitureId: activity?.furnitureId || null,
     action: activity?.action || null,
@@ -3764,6 +3793,7 @@ function furnitureActivityPayload(id, phase, activity = null, player = players[i
     effectState: phase === "stop" ? "off" : (activity?.effectState || "on"),
     toggle: !!activity?.toggle,
     orientation: activity?.orientation || null,
+    stand: activity?.stand || null,
     x: Number.isFinite(player?.x) ? player.x : undefined,
     y: Number.isFinite(player?.y) ? player.y : undefined,
     dir: player?.dir || "down",
@@ -3778,7 +3808,7 @@ function stopFurnitureActivity(socketId, reason = "exit", moveToStand = true) {
   const activity = player?.activity;
   if (!player || !activity) return false;
   const locationId = locationOf(player);
-  if (moveToStand && parseLocation(locationId)?.kind === "home") {
+  if (moveToStand) {
     const stand = safeFurnitureStand(player, activity, locationId);
     if (stand) {
       player.x = stand.x;
@@ -10025,9 +10055,14 @@ io.on("connection", (socket) => {
         socket.emit("furnitureDemoInteractionResult", { ok: true, phase: "stop" });
         return;
       }
-      stopFurnitureActivity(socket.id, "exit", false);
+      // Unlike a toggle stop, an explicit showroom exit must authoritatively
+      // release the actor onto its validated stand. The old false flag left
+      // the server/remote snapshot at the hidden activity anchor while the
+      // initiating client optimistically walked to the stand.
+      stopFurnitureActivity(socket.id, "exit");
       socket.emit("furnitureDemoInteractionResult", {
         ok: true, phase: "stop", instanceId: activity.instanceId, action: activity.action,
+        x: p.x, y: p.y, dir: p.dir,
       });
       return;
     }
@@ -10050,7 +10085,7 @@ io.on("connection", (socket) => {
         stopFurnitureActivity(socket.id, "toggle", false);
         socket.emit("furnitureDemoInteractionResult", {
           ok: true, phase: "stop", instanceId, action: actionId,
-          effect: activity.effect, effectState: "off",
+          effect: activity.effect, effectState: "off", x: p.x, y: p.y, dir: p.dir,
         });
         return;
       }
@@ -10065,7 +10100,17 @@ io.on("connection", (socket) => {
       });
       return;
     }
-    if (!furnitureActionWithinRadius(p, demo.stand, action.radius || 96)) {
+    // Keep the admission check tied to the same catalog-derived action anchor
+    // that becomes the authoritative activity coordinate. The authored stand
+    // remains the client affordance/exit point, but a valid stand can be
+    // farther than the action radius for an art-relative bath or bed offset.
+    const demoAnchor = furnitureActionAnchor(
+      definition,
+      (demo.x - definition.width * HOME_GRID.cell / 2) / HOME_GRID.cell,
+      (demo.y - definition.height * HOME_GRID.cell) / HOME_GRID.cell,
+      HOME_GRID.cell, action.id,
+    );
+    if (!furnitureActionWithinRadius(p, demoAnchor, action.radius || 96)) {
       socket.emit("furnitureDemoInteractionResult", {
         ok: false, code: "distance", message: `Walk closer to ${definition.name.toLowerCase()}.`,
       });
@@ -10073,12 +10118,20 @@ io.on("connection", (socket) => {
     }
     // Use the same pad anchor as owned furniture. The authored stand point
     // is for approach/exit, not where a seated avatar belongs.
-    const demoAnchor = furnitureActionAnchor(
-      definition,
-      (demo.x - definition.width * HOME_GRID.cell / 2) / HOME_GRID.cell,
-      (demo.y - definition.height * HOME_GRID.cell) / HOME_GRID.cell,
-      HOME_GRID.cell, action.id,
-    );
+    const showroomLocation = parseLocation(locationId);
+    // The showroom uses the same authoritative room geometry as movement.
+    // Validate both the real activity anchor and the continuous path to it;
+    // checking only the authored approach point allowed an actor to be
+    // accepted through a display wall and left remote clients at a blocked
+    // coordinate.
+    if (!showroomLocation ||
+        !validLocationMove(showroomLocation, demoAnchor.x, demoAnchor.y) ||
+        !furniturePathClear(showroomLocation, p, demoAnchor, [])) {
+      socket.emit("furnitureDemoInteractionResult", {
+        ok: false, code: "blocked", message: "You cannot reach that showroom demo from here.",
+      });
+      return;
+    }
     const activity = {
       showroom: true, instanceId, furnitureId: demo.furnitureId, action: action.id,
       effect: actionEffectKind(action.id), effectState: "on", toggle: action.toggle === true,
