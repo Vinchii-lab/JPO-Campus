@@ -739,6 +739,67 @@ export const LOCATION_GEOMETRY = Object.freeze({
   ])),
 });
 
+// Fixed, authored cashiers for the seven commercial rooms. These are map
+// actors, not player accounts: their identity, appearance, and stand point are
+// part of the shared room contract consumed by both the server and renderer.
+// Keep the points in the open floor in front of the existing displays.
+export const COMMERCIAL_CASHIERS = Object.freeze({
+  "furniture-shop": Object.freeze({
+    id: "cashier:furniture-shop", location: "furniture-shop",
+    name: "Mara", character: "amelia", x: 480, y: 340, radius: 116,
+    greeting: "Welcome to Huddle Home! Take a look around.",
+    info: "Furniture for making your home feel like yours.",
+    kind: "furniture",
+  }),
+  "garden-shop": Object.freeze({
+    id: "cashier:garden-shop", location: "garden-shop",
+    name: "Willow", character: "alex", x: 480, y: 580, radius: 116,
+    greeting: "Hi there! Looking to bring a little green home?",
+    info: "Plants and calm corners for your home.",
+    kind: "furniture",
+  }),
+  "decor-shop": Object.freeze({
+    id: "cashier:decor-shop", location: "decor-shop",
+    name: "Pip", character: "bob", x: 480, y: 580, radius: 116,
+    greeting: "Welcome in! Find something that brightens your space.",
+    info: "Decorative pieces and cozy finishing touches.",
+    kind: "furniture",
+  }),
+  cafe: Object.freeze({
+    id: "cashier:cafe", location: "cafe",
+    name: "Nia", character: "amelia", x: 760, y: 180, radius: 116,
+    greeting: "Welcome to the cafe! What can I get started for you?",
+    info: "Fresh drinks and small treats, served all day.",
+    kind: "food", menuKey: "cafe",
+  }),
+  diner: Object.freeze({
+    id: "cashier:diner", location: "diner",
+    name: "Jo", character: "adam", x: 800, y: 450, radius: 116,
+    greeting: "Hey! Pull up a chair and check out today's specials.",
+    info: "Classic diner favorites, made for a quick bite.",
+    kind: "food", menuKey: "diner",
+  }),
+  bakery: Object.freeze({
+    id: "cashier:bakery", location: "bakery",
+    name: "Crumb", character: "alex", x: 800, y: 400, radius: 116,
+    greeting: "Hello! Something warm from the oven sounds good, right?",
+    info: "Breads, pastries, and sweet things to share.",
+    kind: "food", menuKey: "bakery",
+  }),
+  sushi: Object.freeze({
+    id: "cashier:sushi", location: "sushi",
+    name: "Sora", character: "bob", x: 800, y: 400, radius: 116,
+    greeting: "Irasshaimase! Welcome to Sakura Sushi.",
+    info: "Fresh rolls and bowls prepared with care.",
+    kind: "food", menuKey: "sushi",
+  }),
+});
+
+export function commercialCashier(locationId, cashierId) {
+  const cashier = COMMERCIAL_CASHIERS[locationId];
+  return cashier && typeof cashierId === "string" && cashier.id === cashierId ? cashier : null;
+}
+
 // The only allowed map links. `spawn` is selected by the server based on the
 // source portal, not supplied by a browser.
 export const LOCATION_PORTALS = Object.freeze({

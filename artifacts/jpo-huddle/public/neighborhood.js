@@ -15,6 +15,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let homeState = null;
   let furnitureCatalog = {};
   let showroomDemos = [];
+  let cashierOpen = false;
+  let cashierMenu = null;
+  let activeCashier = null;
+  let nearbyCashier = null;
   let selectedInstance = null;
   let selectedRotation = 0;
   let selectedZone = 'indoor';
@@ -25,7 +29,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   const panelToggle = ui.querySelector('#neighborhood-panel-toggle');
   function syncPanelControls() {
     ui.classList.toggle('panels-collapsed', panelsCollapsed);
-    panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:') || currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation));
+    panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:'));
     panelToggle.textContent = panelsCollapsed ? 'Show panel' : 'Hide panel';
     panelToggle.setAttribute('aria-expanded', String(!panelsCollapsed));
   }
@@ -362,10 +366,49 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         location: currentLocation,
         catalog: furnitureCatalog,
         showroom: showroomDemos,
-        onBuy: (id) => socket.emit('homePurchase', { furnitureId: id })
+        cashierOpen,
+        cashier: activeCashier,
+        cashierMenu,
+        onOpenMenu: () => {
+          if (activeCashier?.id) socket.emit('cashierMenuRequest', { cashierId: activeCashier.id });
+        },
+        onGoodbye: () => closeCashier(),
+        onBuy: (id, kind) => {
+          if (!activeCashier?.id) return;
+          if (kind === 'food') socket.emit('buyFood', {
+            cashierId: activeCashier.id, station: activeCashier.id, item: id,
+          });
+          else socket.emit('homePurchase', { cashierId: activeCashier.id, furnitureId: id });
+        },
       });
     }
   }
+
+  function closeCashier() {
+    cashierOpen = false;
+    cashierMenu = null;
+    activeCashier = null;
+    renderShop();
+  }
+
+  function openCashier(cashier) {
+    if (!cashier?.id || cashier.location !== currentLocation) return;
+    nearbyCashier = cashier;
+    if (cashierOpen && activeCashier?.id === cashier.id) return;
+    if (panelsCollapsed) setPanelsCollapsed(false);
+    activeCashier = cashier;
+    cashierOpen = true;
+    cashierMenu = null;
+    renderShop();
+    scheduleHudReservation();
+  }
+
+  window.jpoOpenCashier = openCashier;
+  window.jpoCloseCashier = closeCashier;
+  window.jpoSetNearbyCashier = (cashier) => {
+    nearbyCashier = cashier || null;
+    if (cashierOpen && (!nearbyCashier || nearbyCashier.id !== activeCashier?.id)) closeCashier();
+  };
 
   window.initHouseColors?.(socket, () => ({
     get homeState() { return homeState; },
@@ -393,6 +436,24 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
     window._neighborhoodScene?.setFurnitureShowroomDemos?.(showroomDemos);
     renderShop();
+  });
+  socket.on('cashierMenuResult', (result) => {
+    if (!result?.ok) {
+      if (result?.message) toast(result.message);
+      if (result?.code === 'distance' || result?.code === 'cashier' || result?.code === 'location') closeCashier();
+      return;
+    }
+    if (!cashierOpen || !activeCashier || result.cashierId !== activeCashier.id ||
+        currentLocation !== result.location) return;
+    cashierMenu = {
+      kind: result.kind, title: result.title,
+      items: Array.isArray(result.items) ? result.items : [],
+    };
+    renderShop();
+    scheduleHudReservation();
+  });
+  socket.on('foodError', (result) => {
+    if (cashierOpen && ['distance', 'cashier', 'location'].includes(result?.code)) closeCashier();
   });
 
   requestDirectory();
@@ -436,6 +497,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (isHome() && homeState?.canEdit) renderHome();
   });
   socket.on('homePurchaseResult', (result) => {
+    if (!result?.ok && ['distance', 'cashier', 'location'].includes(result?.code)) closeCashier();
     teardownPlacement();
     if (result?.home) {
       homeState = result.home;
@@ -582,6 +644,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.remotes = {};
       this.furniture = [];
       this.showroomFurniture = [];
+      this.cashierNpcs = [];
+      this.nearbyCashier = null;
       this._lastCorrectionSeq = -1;
       this._neighborhoodReady = false;
     }
@@ -723,6 +787,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._removePlacementInput();
       this.remotes = {};
       this.furniture = [];
+      this.cashierNpcs?.forEach((entry) => {
+        entry.sprite?.destroy?.();
+        entry.nameTag?.destroy?.();
+      });
+      this.cashierNpcs = [];
+      this.nearbyCashier = null;
       this.showroomFurniture?.forEach((object) => object?.destroy?.());
       this.showroomFurniture = [];
       this.showroomDemos = Array.isArray(data?.showroom) ? data.showroom : showroomDemos;
@@ -1759,6 +1829,32 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       window.JpoInteriors.draw(this, this.location);
       this._normaliseInteriorLayers(beforeChildren, this.location);
       if (this.location === 'furniture-shop') this._drawFurnitureShowroom();
+      this._drawCashiers();
+    }
+
+    _drawCashiers() {
+      this.cashierNpcs?.forEach((entry) => {
+        entry.sprite?.destroy?.();
+        entry.nameTag?.destroy?.();
+      });
+      this.cashierNpcs = [];
+      const cashiers = Array.isArray(this.info?.cashiers) ? this.info.cashiers : [];
+      for (const cashier of cashiers) {
+        if (!cashier?.id || cashier.location !== this.location ||
+            !Number.isFinite(Number(cashier.x)) || !Number.isFinite(Number(cashier.y))) continue;
+        const texture = this._office('_buildPlayerTex', cashier.character || 'amelia', 0, 0, 0, 0, []) ||
+          ('run_' + (cashier.character || 'amelia'));
+        const sprite = this.add.sprite(Number(cashier.x), Number(cashier.y), texture,
+          globals().DIR_START?.down || 0).setScale(3).setOrigin(0.5, 0.5);
+        this._setActorDepth(sprite, Number(cashier.y));
+        const nameTag = this._makeNameTag(Number(cashier.x), Number(cashier.y), cashier.name) ||
+          this.add.text(Number(cashier.x), Number(cashier.y) - 40, cashier.name, {
+            fontSize: '14px', fontFamily: 'monospace', color: '#fff',
+            backgroundColor: '#000000bb', padding: { x: 5, y: 3 },
+          }).setOrigin(0.5, 1);
+        this._setActorDepth(nameTag, Number(cashier.y), 2);
+        this.cashierNpcs.push({ ...cashier, sprite, nameTag });
+      }
     }
 
     _hideLegacyFurnitureShopObjects() {
@@ -2819,6 +2915,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (local) this.localBubble = bubble; else entry.chatBubble = bubble;
     }
 
+    _nearbyCashier() {
+      if (!this.player || !Array.isArray(this.cashierNpcs)) return null;
+      return this.cashierNpcs
+        .map((cashier) => ({ cashier, distance: Math.hypot(this.player.x - cashier.x, this.player.y - cashier.y) }))
+        .filter(({ cashier, distance }) => distance <= (Number(cashier.radius) || 116))
+        .sort((left, right) => left.distance - right.distance)[0]?.cashier || null;
+    }
+
+    _interactCashier() {
+      const cashier = this.nearbyCashier || this._nearbyCashier();
+      if (!cashier || this.activity || this.staticSeatState) return false;
+      window.jpoOpenCashier?.(cashier);
+      return true;
+    }
+
     update(_time, delta) {
       // SceneManager can leave a reused instance briefly active while its
       // restart/create queue is draining. Do not let a destroyed player or a
@@ -2842,7 +2953,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
       const g = globals();
-      const { SPEED, touchMove = {} } = g;
+      const { SPEED, touchMove = {}, touchAction = {} } = g;
       const spd = typeof g.effectiveMovementSpeed === 'function'
         ? g.effectiveMovementSpeed()
         : SPEED;
@@ -2931,10 +3042,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       if (this.localBubble) this.localBubble.setPosition(this.player.x, this.player.y - 78);
 
-      const nearbyParkSeat = !this.activity && !this._activityPending ? this._nearbyParkSeat() : null;
+      this.nearbyCashier = !this.activity && !this._activityPending && !parkSeated
+        ? this._nearbyCashier() : null;
+      window.jpoSetNearbyCashier?.(this.nearbyCashier);
+      const nearbyParkSeat = !this.nearbyCashier && !this.activity && !this._activityPending
+        ? this._nearbyParkSeat() : null;
       const nearbyAction = !this.activity && !this._activityPending && !nearbyParkSeat &&
         (this.location.startsWith('home:') || this.location === 'furniture-shop')
         ? this._nearbyInteractiveAction() : null;
+      const touchButton = document.getElementById('touch-action');
+      if (touchButton) {
+        const touchAvailable = !!(this.nearbyCashier || nearbyParkSeat || nearbyAction ||
+          this.activity || parkSeated);
+        touchButton.classList.toggle('disabled', !touchAvailable);
+        touchButton.textContent = this.nearbyCashier ? 'Talk' : 'E';
+      }
       if (!this.portalRelease && !this._insidePortal(this.player.x, this.player.y)) this.portalRelease = true;
       // Use an inner doorway that is derived from the authoritative foot
       // radius. The former fixed 12px inset included facade-overlap strips in
@@ -2956,6 +3078,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       else if (this.activity) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this._parkSeatPending === 'stand') this.interactHint.setText('Standing…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (parkSeated) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      else if (this.nearbyCashier) this.interactHint.setText('[E] Talk to ' + this.nearbyCashier.name).setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyParkSeat) this.interactHint.setText('[E] Sit').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (nearbyAction) {
         const actions = nearbyAction.actions;
@@ -3004,9 +3127,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
            }, 42);
         }
       }
-      if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+      const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
+      touchAction.queued = false;
+      if (doAction) {
         if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
         else if (this.staticSeatState) this._leaveParkSeat('exit');
+        else if (this.nearbyCashier) this._interactCashier();
         else if (nearbyParkSeat) this._requestParkSeat();
         else this._requestFurnitureAction();
       }
@@ -3020,6 +3146,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     shutdown() {
       this._neighborhoodReady = false;
+      if (window._neighborhoodScene === this) window.jpoCloseCashier?.();
       this._performanceCleanup?.();
       if (this._outdoorWheelHandler) this.game.canvas.removeEventListener('wheel', this._outdoorWheelHandler);
       this._outdoorWheelHandler = null;
@@ -3038,6 +3165,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       Object.keys(this.remotes).forEach((id) => this._removeRemote(id));
       this.remotes = {};
       this.furniture = [];
+      this.cashierNpcs?.forEach((entry) => {
+        entry.sprite?.destroy?.();
+        entry.nameTag?.destroy?.();
+      });
+      this.cashierNpcs = [];
+      this.nearbyCashier = null;
       this.showroomFurniture?.forEach((object) => object?.destroy?.());
       this.showroomFurniture = [];
       this.streetLotsVisual = null;
@@ -3095,6 +3228,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // particular, it must not stop a newly restarted shared scene.
       if (generation !== sceneTransitionGeneration) return;
       teardownPlacement();
+      closeCashier();
+      nearbyCashier = null;
       currentLocation = result.location;
       title.textContent = result.map?.label || result.location;
       furnitureCatalog = result.catalog || furnitureCatalog;

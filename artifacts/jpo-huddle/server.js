@@ -46,6 +46,8 @@ import {
   streetCityPortalForTransition,
   staticSeatForPoint,
   staticSeatStandCandidates,
+  COMMERCIAL_CASHIERS,
+  commercialCashier,
 } from "./neighborhood.mjs";
 import {
   furnitureActionDefinition,
@@ -2417,6 +2419,24 @@ const FOOD_MENUS = {
     { id: "coconut",   name: "Coconut water",        icon: "🥥", price: 5 },
     { id: "boba",      name: "Bubble tea",           icon: "🧋", price: 6 },
   ] },
+  cafe: { title: "☕ Cafe Counter", items: [
+    { id: "espresso", name: "Espresso", icon: "☕", price: 5 },
+    { id: "latte", name: "Cafe latte", icon: "🥛", price: 7 },
+    { id: "tea", name: "Tea", icon: "🍵", price: 4 },
+    { id: "cafe_cookie", name: "Cafe cookie", icon: "🍪", price: 4 },
+  ] },
+  diner: { title: "🍔 Diner Menu", items: [
+    { id: "diner_burger", name: "Diner burger", icon: "🍔", price: 12 },
+    { id: "fries", name: "Crispy fries", icon: "🍟", price: 6 },
+    { id: "milkshake", name: "Milkshake", icon: "🥤", price: 8 },
+    { id: "diner_pie", name: "Pie slice", icon: "🥧", price: 7 },
+  ] },
+  sushi: { title: "🍣 Sushi Menu", items: [
+    { id: "maki", name: "Maki roll", icon: "🍣", price: 10 },
+    { id: "nigiri", name: "Nigiri set", icon: "🍙", price: 12 },
+    { id: "ramen", name: "Ramen bowl", icon: "🍜", price: 11 },
+    { id: "edamame", name: "Edamame", icon: "🫛", price: 5 },
+  ] },
 };
 // Station object id → FOOD_MENUS key. Ids MUST exist in OBJECTS (and in the
 // client's OFFICE_OBJECTS — the usual lockstep).
@@ -3526,6 +3546,7 @@ function locationInfo(locationId) {
     bounds: base.bounds,
     actorFootRadius: ACTOR_FOOT_RADIUS,
     geometry: LOCATION_GEOMETRY[key],
+    cashiers: [COMMERCIAL_CASHIERS[parsed.id]].filter(Boolean),
     // Plaza deliberately has one west gate. The remembered residential block
     // is server state, not a second rendered road in the city map.
     portals: parsed.id === "city"
@@ -3544,6 +3565,36 @@ function homeShopCatalog(locationId) {
     for (const [id, item] of Object.entries(FURNITURE_CATALOG)) catalog[id] = item;
   }
   return catalog;
+}
+
+function validateCommercialCashier(player, cashierId) {
+  const locationId = locationOf(player);
+  const cashier = commercialCashier(locationId, cashierId);
+  if (!player || !cashier || !Number.isFinite(player.x) || !Number.isFinite(player.y)) {
+    return { ok: false, code: "cashier", message: "That cashier is not available here." };
+  }
+  const distance = Math.hypot(player.x - cashier.x, player.y - cashier.y);
+  if (distance > cashier.radius) {
+    return { ok: false, code: "distance", message: `Walk closer to ${cashier.name}.` };
+  }
+  return { ok: true, locationId, cashier };
+}
+
+function cashierMenu(cashier) {
+  if (!cashier) return null;
+  if (cashier.kind === "furniture") {
+    return {
+      kind: "furniture", title: LOCATIONS[cashier.location]?.label || cashier.location,
+      items: Object.entries(homeShopCatalog(cashier.location)).map(([id, item]) => ({
+        id, name: item.name, category: item.category || "Furniture", price: item.price,
+      })),
+    };
+  }
+  const menu = FOOD_MENUS[cashier.menuKey];
+  return menu ? {
+    kind: "food", title: menu.title,
+    items: menu.items.map((item) => ({ ...item })),
+  } : null;
 }
 
 // Huddle Home is also a working showroom: these are real catalog instances,
@@ -10238,10 +10289,32 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("cashierMenuRequest", (payload) => {
+    const p = players[socket.id];
+    const cashierId = typeof payload?.cashierId === "string" ? payload.cashierId : "";
+    const check = validateCommercialCashier(p, cashierId);
+    if (!check.ok) {
+      socket.emit("cashierMenuResult", { ok: false, code: check.code, message: check.message, cashierId });
+      return;
+    }
+    const menu = cashierMenu(check.cashier);
+    if (!menu) {
+      socket.emit("cashierMenuResult", { ok: false, code: "menu", message: "That menu is unavailable.", cashierId });
+      return;
+    }
+    socket.emit("cashierMenuResult", {
+      ok: true, cashierId: check.cashier.id, location: check.locationId,
+      kind: menu.kind, title: menu.title, items: menu.items,
+    });
+  });
+
   socket.on("homePurchase", async (payload) => {
     const p = players[socket.id];
     const furnitureId = typeof payload?.furnitureId === "string" ? payload.furnitureId : "";
     const shopId = locationOf(p);
+    const cashierCheck = validateCommercialCashier(
+      p, typeof payload?.cashierId === "string" ? payload.cashierId : "",
+    );
     const item = isShopLocation(shopId) ? homeShopCatalog(shopId)[furnitureId] : null;
     if (p?.email && isHuddleTestIdentity(p.email)) {
       socket.emit("homePurchaseResult", {
@@ -10253,6 +10326,13 @@ io.on("connection", (socket) => {
       socket.emit("homePurchaseResult", {
         ok: false, code: "shop_only",
         message: "Visit the store that sells this furniture to buy it.",
+      });
+      return;
+    }
+    if (!cashierCheck.ok || cashierCheck.cashier.kind !== "furniture") {
+      socket.emit("homePurchaseResult", {
+        ok: false, code: cashierCheck.code || "cashier",
+        message: cashierCheck.message || "Stand by the named cashier to buy furniture.",
       });
       return;
     }
@@ -12157,21 +12237,37 @@ io.on("connection", (socket) => {
   // away. Paid food never reads or writes fridgeReadyAt (see FOOD_MENUS).
   socket.on("buyFood", async (payload) => {
     const { station, item } = payload || {};
+    const cashierId = typeof payload?.cashierId === "string" ? payload.cashierId : "";
     const p = players[socket.id];
     if (!p) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's buy-spam throttle
     if (typeof station !== "string" || typeof item !== "string") return;
-    // hasOwn so "__proto__"/"constructor" can't match (same as interact).
-    if (!Object.hasOwn(FOOD_STATIONS, station)) return;
-    if (inAnyMatch(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
-    if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
-    const obj = OBJECTS[station];
-    const dx = (p.x ?? 0) - obj.x, dy = (p.y ?? 0) - obj.y;
-    if (dx * dx + dy * dy > obj.r * obj.r) {
-      socket.emit("foodError", { message: "Walk back to the counter to order." });
+    const cashierCheck = cashierId ? validateCommercialCashier(p, cashierId) : null;
+    const cashierMode = !!cashierId;
+    // Existing cafeteria stations continue to use their object proximity
+    // contract. Commercial cashiers use the same purchase path but are checked
+    // against the authored cashier and the player's actual room instead.
+    if (cashierMode && (!cashierCheck?.ok || cashierCheck.cashier.kind !== "food")) {
+      socket.emit("foodError", {
+        code: cashierCheck?.code || "cashier",
+        message: cashierCheck?.message || "Stand by the named cashier to order.",
+      });
       return;
     }
-    const menuItem = FOOD_MENUS[FOOD_STATIONS[station]].items.find((it) => it.id === item);
+    // hasOwn so "__proto__"/"constructor" can't match (same as interact).
+    if (!cashierMode && !Object.hasOwn(FOOD_STATIONS, station)) return;
+    if (inAnyMatch(socket.id)) { socket.emit("foodError", { message: "Finish your match first!" }); return; }
+    if (inActiveRound(socket.id)) { socket.emit("foodError", { message: "The lights are out — no snacking until the round ends!" }); return; }
+    if (!cashierMode) {
+      const obj = OBJECTS[station];
+      const dx = (p.x ?? 0) - obj.x, dy = (p.y ?? 0) - obj.y;
+      if (dx * dx + dy * dy > obj.r * obj.r) {
+        socket.emit("foodError", { message: "Walk back to the counter to order." });
+        return;
+      }
+    }
+    const menuKey = cashierMode ? cashierCheck.cashier.menuKey : FOOD_STATIONS[station];
+    const menuItem = FOOD_MENUS[menuKey]?.items.find((it) => it.id === item);
     if (!menuItem) return;
 
     // ── Pet Treat: same shared feed path as the click-your-pet panel ─────
@@ -12193,7 +12289,11 @@ io.on("connection", (socket) => {
       } catch (err) { console.error("buyFood failed:", err); return; }
     }
     socket.emit("coinUpdate", { coins: p.coins });
-    socket.emit("foodBought", { station, item: menuItem.id, name: menuItem.name, icon: menuItem.icon, price: menuItem.price, coins: p.coins });
+    socket.emit("foodBought", {
+      station: cashierMode ? cashierCheck.cashier.id : station,
+      item: menuItem.id, name: menuItem.name, icon: menuItem.icon,
+      price: menuItem.price, coins: p.coins,
+    });
     // Everyone nearby sees the food bubble — same event the free snacks use.
     emitToLocation(locationOf(p), "objectEffect", { id: socket.id, kind: "snack", emoji: menuItem.icon });
     console.log(`${p.name} bought ${menuItem.name} (${menuItem.price} coins) at ${station}`);

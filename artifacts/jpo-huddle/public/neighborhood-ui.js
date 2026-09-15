@@ -18,7 +18,7 @@ window.JpoUIBuilder = {
   },
 
   renderShopPanel: function(panel, ctx) {
-    if (!ctx.isShop) {
+    if (!ctx.isShop || !ctx.cashierOpen || !ctx.cashier) {
       if (panel) panel.hidden = true;
       return;
     }
@@ -312,44 +312,36 @@ window.JpoUIBuilder = {
   },
 
   _buildShopMarkup: function(ctx) {
-    const isRestaurant = ['cafe', 'diner', 'bakery', 'sushi'].includes(ctx.location);
-    const shopCopy = {
-      'furniture-shop': { title: 'Huddle Home', category: 'Furnishings', copy: 'Comfort pieces for your Willow Walk home.' },
-      'garden-shop': { title: 'Willow & Green', category: 'Garden goods', copy: 'Leafy accents and a sunny seat for your home or yard.' },
-      'decor-shop': { title: 'Plaza Decor', category: 'Living-room accents', copy: 'Statement pieces for a warm, lived-in room.' },
-      'cafe': { title: 'The Daily Grind', category: 'Cafe', copy: 'Fresh coffee and pastries. Have a seat and enjoy the vibe!', isMenu: true },
-      'diner': { title: 'Neon Diner', category: 'American Diner', copy: 'Classic burgers and milkshakes.', isMenu: true },
-      'bakery': { title: 'Sweet Crust', category: 'Bakery', copy: 'Artisan bread and delicious cakes baked daily.', isMenu: true },
-      'sushi': { title: 'Sakura Sushi', category: 'Sushi Restaurant', copy: 'Fresh rolls directly from the conveyor.', isMenu: true },
-    }[ctx.location] || { title: 'Huddle shop', category: 'Home goods', copy: 'Furniture for your Willow Walk home.' };
-
-    let html = `<div class="home-panel-head"><b>${this._escape(shopCopy.title)}</b></div>`;
-    html += `<small class="home-panel-note">${this._escape(shopCopy.copy)}</small>`;
-
-    if (isRestaurant) {
-      const menuItems = {
-        cafe: ['Espresso', 'Latte', 'Matcha', 'Croissant', 'Muffin'],
-        diner: ['Classic Burger', 'Cheeseburger', 'Fries', 'Vanilla Shake', 'Cherry Pie'],
-        bakery: ['Sourdough', 'Baguette', 'Cupcake', 'Chocolate Cake', 'Macaron'],
-        sushi: ['Salmon Nigiri', 'Tuna Sashimi', 'Dragon Roll', 'Edamame', 'Green Tea']
-      }[ctx.location] || [];
-
-      html += '<div class="home-section">';
-      html += menuItems.map(item =>
-        `<span class="home-item"><span>${this._escape(item)}</span><small class="menu-only-label">Menu Only</small></span>`
-      ).join('');
+    const cashier = ctx.cashier;
+    const menu = ctx.cashierMenu;
+    const isFood = cashier.kind === 'food';
+    let html = `<div class="home-panel-head"><b>${this._escape(cashier.name)} · Cashier</b><button type="button" data-goodbye>Goodbye</button></div>`;
+    html += `<small class="home-panel-note">${this._escape(cashier.greeting || 'Welcome!')}</small>`;
+    if (cashier.info) html += `<small class="home-panel-note">${this._escape(cashier.info)}</small>`;
+    if (!menu) {
+      html += '<div class="home-section cashier-options">';
+      html += '<small>What would you like to do?</small>';
+      html += '<button type="button" data-browse>Browse</button> ';
+      html += '<button type="button" data-buy-menu>Buy</button>';
+      html += '</div>';
+    } else if (isFood) {
+      html += `<div class="home-section"><small>${this._escape(menu.title || 'Menu')}</small>`;
+      for (const item of menu.items || []) {
+        html += `<span class="home-item" style="display:flex; justify-content:space-between;">`;
+        html += `<span>${this._escape(item.icon || '🍽️')} ${this._escape(item.name || item.id)} &middot; ${Number(item.price || 0).toLocaleString()} coins</span>`;
+        html += `<button type="button" data-food-buy="${this._escape(item.id)}">Buy</button></span>`;
+      }
+      if (!menu.items?.length) html += '<small>The menu is empty.</small>';
       html += '</div>';
     } else {
       const categories = ['Kitchen', 'Living', 'Bedroom', 'Bathroom', 'Miscellaneous'];
       const itemsByCat = {};
       categories.forEach(c => itemsByCat[c] = []);
-
-      Object.values(ctx.catalog || {}).forEach(item => {
+      (menu.items || []).forEach(item => {
         const key = String(item?.category || '').trim().toLowerCase();
         const cat = categories.find((candidate) => candidate.toLowerCase() === key) || 'Miscellaneous';
         itemsByCat[cat].push(item);
       });
-
       html += '<div class="home-section">';
       let hasAny = false;
       categories.forEach(cat => {
@@ -359,7 +351,7 @@ window.JpoUIBuilder = {
           itemsByCat[cat].forEach(item => {
             html += `<span class="home-item" style="display:flex; justify-content:space-between;">`;
             html += `<span style="display:flex; align-items:center; gap:8px;">`;
-            html += this._thumbnail(item, item.id);
+            html += this._thumbnail(ctx.catalog?.[item.id], item.id);
             html += `<span>${this._escape(item.name || item.id)} &middot; ${Number(item.price || 0).toLocaleString()} coins</span></span>`;
             html += `<button type="button" data-buy="${this._escape(item.id)}">Buy</button></span>`;
           });
@@ -368,7 +360,7 @@ window.JpoUIBuilder = {
       if (!hasAny) html += '<small>The catalog is empty.</small>';
       html += '</div>';
     }
-    if (ctx.location === 'furniture-shop') html += this._buildShowroomMarkup(ctx);
+    if (ctx.location === 'furniture-shop' && menu) html += this._buildShowroomMarkup(ctx);
     return html;
   },
 
@@ -395,12 +387,18 @@ window.JpoUIBuilder = {
   },
 
   _attachShopHandlers: function(panel, ctx) {
+    panel.querySelector('[data-goodbye]')?.addEventListener('click', () => ctx.onGoodbye?.());
+    panel.querySelector('[data-browse]')?.addEventListener('click', () => ctx.onOpenMenu?.());
+    panel.querySelector('[data-buy-menu]')?.addEventListener('click', () => ctx.onOpenMenu?.());
     panel.querySelectorAll('[data-buy]').forEach(btn => {
       btn.onclick = () => {
         if (window.confirm('Buy this item with coins?')) {
-          ctx.onBuy?.(btn.dataset.buy);
+          ctx.onBuy?.(btn.dataset.buy, 'furniture');
         }
       };
+    });
+    panel.querySelectorAll('[data-food-buy]').forEach(btn => {
+      btn.onclick = () => ctx.onBuy?.(btn.dataset.foodBuy, 'food');
     });
   },
 

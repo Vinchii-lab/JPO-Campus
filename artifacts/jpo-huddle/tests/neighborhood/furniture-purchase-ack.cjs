@@ -8,10 +8,15 @@ const start = source.indexOf('  socket.on("homePurchase",');
 const end = source.indexOf('  socket.on("homeLayoutSet",', start);
 assert(start >= 0 && end > start);
 
-async function purchase({ location = 'furniture-shop', snapshotFails = false, affordable = true } = {}) {
+const CASHIER = { id: 'cashier:furniture-shop', x: 480, y: 340, radius: 116 };
+
+async function purchase({
+  location = 'furniture-shop', snapshotFails = false, affordable = true,
+  cashierId = CASHIER.id, x = CASHIER.x, y = CASHIER.y,
+} = {}) {
   const events = [], queries = [];
   let handler, connections = 0;
-  const player = { email: 'purchase-fixture@example.com', coins: 20000 };
+  const player = { email: 'purchase-fixture@example.com', coins: 20000, x, y };
   const client = {
     async query(sql) {
       queries.push(sql);
@@ -29,6 +34,15 @@ async function purchase({ location = 'furniture-shop', snapshotFails = false, af
     },
     players: { fixture: player },
     locationOf: () => location,
+    validateCommercialCashier: (candidate, id) => {
+      if (location !== 'furniture-shop' || id !== CASHIER.id) {
+        return { ok: false, code: 'cashier', message: 'That cashier is not available here.' };
+      }
+      if (Math.hypot(candidate.x - CASHIER.x, candidate.y - CASHIER.y) > CASHIER.radius) {
+        return { ok: false, code: 'distance', message: 'Walk closer to Mara.' };
+      }
+      return { ok: true, locationId: location, cashier: { ...CASHIER, kind: 'furniture' } };
+    },
     isShopLocation: value => value === 'furniture-shop',
     homeShopCatalog: () => ({ oak_chair: { price: 5000 } }),
     isHuddleTestIdentity: () => false,
@@ -45,7 +59,7 @@ async function purchase({ location = 'furniture-shop', snapshotFails = false, af
     console: { error() {} },
   };
   vm.runInNewContext(source.slice(start, end), context);
-  await handler({ furnitureId: 'oak_chair' });
+  await handler({ cashierId, furnitureId: 'oak_chair' });
   return { events, queries, connections, player };
 }
 
@@ -64,9 +78,21 @@ async function purchase({ location = 'furniture-shop', snapshotFails = false, af
   assert.equal(outside.connections, 0, 'remote purchases never touch the database');
   assert.equal(outside.events[0].data.code, 'shop_only');
 
+  const noCashier = await purchase({ cashierId: '' });
+  assert.equal(noCashier.connections, 0, 'a purchase without a cashier never touches the database');
+  assert.equal(noCashier.events[0].data.code, 'cashier');
+
+  const wrongCashier = await purchase({ cashierId: 'cashier:cafe' });
+  assert.equal(wrongCashier.connections, 0, 'a purchase through another venue cashier is rejected');
+  assert.equal(wrongCashier.events[0].data.code, 'cashier');
+
+  const outOfRange = await purchase({ x: CASHIER.x + CASHIER.radius + 1 });
+  assert.equal(outOfRange.connections, 0, 'an out-of-range purchase never touches the database');
+  assert.equal(outOfRange.events[0].data.code, 'distance');
+
   const poor = await purchase({ affordable: false });
   assert.equal(poor.events.find(event => event.name === 'homePurchaseResult').data.ok, false);
   assert(!poor.queries.some(sql => sql.includes('INSERT INTO jpo_home_furniture')));
   assert(poor.queries.includes('ROLLBACK'));
-  console.log('PASS: store-only purchases, insufficient funds, and committed-purchase acknowledgement');
+  console.log('PASS: cashier-authorized atomic purchase, cashier/range guards, and committed-purchase acknowledgement');
 })().catch(error => { console.error(error); process.exitCode = 1; });
