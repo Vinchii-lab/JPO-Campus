@@ -738,3 +738,17 @@ mtime_ms = 1789499465272
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/a77138eb-66db-4faa-bc76-f214b0e8cfeb/3ddec50b-9def-4133-8d15-83572be767cc"
 storage_version_token = "1789499521869490"
 content_type = "image/png"
+
+[[outputs]]
+id = "mL7qx-KAFG0OBSe3m47ei"
+uri = "file://attached_assets/previews/cashier-speech-bubble.png"
+type = "image"
+title = "Cashier speech bubble"
+description = "Isolated visual check of the actual dialogue UI anchored above the cashier at gameplay zoom."
+logical_id = "85178e13-be08-4aa1-b37a-a3c852807624"
+content_hash = "sha256:74de958bf73d8f6a3d5aa8df0a39eadff0f731cbdfc271d7e6120683725d364f"
+size = 87116
+mtime_ms = 1789502722435
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/85178e13-be08-4aa1-b37a-a3c852807624/0bdd92d2-abe7-4484-993c-7111465e38e9"
+storage_version_token = "1789502791292443"
+content_type = "image/png"

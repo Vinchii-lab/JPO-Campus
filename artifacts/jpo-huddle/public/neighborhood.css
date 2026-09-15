@@ -199,6 +199,82 @@
   border-radius: 12px;
   font: 14px/1.6 monospace;
 }
+
+/* Cashier dialogue is anchored to the NPC by neighborhood-ui.js instead of
+   occupying the persistent HUD column. Inline left/top are updated once per
+   animation frame from the Phaser camera transform. */
+#shop-panel.cashier-speech-bubble {
+  position: fixed;
+  z-index: 340;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: none;
+  padding: 11px;
+  overflow: visible;
+  background: rgba(21, 36, 56, 0.97);
+  border: 2px solid #f5ce64;
+  border-radius: 12px;
+  box-shadow: 0 7px 22px rgba(0, 0, 0, 0.68);
+  font: 12px/1.42 monospace;
+  transition: opacity 0.08s ease;
+}
+#shop-panel.cashier-speech-bubble::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: var(--cashier-tail-x, 50%);
+  bottom: -8px;
+  width: 14px;
+  height: 14px;
+  background: #152438;
+  border-right: 2px solid #f5ce64;
+  border-bottom: 2px solid #f5ce64;
+  transform: translateX(-50%) rotate(45deg);
+}
+#shop-panel.cashier-speech-bubble .cashier-speech-content {
+  position: relative;
+  z-index: 1;
+  max-height: min(62dvh, 480px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+#shop-panel.cashier-speech-bubble[data-tail="top"]::after {
+  top: -8px;
+  bottom: auto;
+  border: 0;
+  border-left: 2px solid #f5ce64;
+  border-top: 2px solid #f5ce64;
+}
+#shop-panel.cashier-speech-bubble .home-panel-head {
+  margin-bottom: 5px;
+}
+#shop-panel.cashier-speech-bubble .home-panel-head b {
+  font-size: 10px;
+}
+#shop-panel.cashier-speech-bubble .home-panel-note {
+  padding: 2px 1px;
+  font-size: 11px;
+}
+#shop-panel.cashier-speech-bubble .home-section {
+  padding: 6px;
+  margin-bottom: 5px;
+}
+#shop-panel.cashier-speech-bubble .home-section small {
+  margin-bottom: 5px;
+}
+#shop-panel.cashier-speech-bubble .home-item {
+  gap: 5px;
+  margin: 2px 0;
+  padding: 4px 5px;
+}
+#shop-panel.cashier-speech-bubble button {
+  font-size: 10px;
+  padding: 5px 7px;
+}
+#shop-panel.cashier-speech-bubble .showroom-section {
+  margin-bottom: 0;
+}
 body:not(.playing) #neighborhood-ui { display: none; }
 @media (max-width: 600px) {
   #coin-hud { top: 64px !important; right: 8px !important; }
@@ -210,6 +286,15 @@ body:not(.playing) #neighborhood-ui { display: none; }
   #home-panel, #shop-panel {
     width: min(350px, calc(100vw - var(--neighborhood-hud-gutter) - var(--neighborhood-hud-gutter)));
     max-height: calc(100dvh - var(--neighborhood-hud-bottom, 52px) - 56px);
+  }
+  #shop-panel.cashier-speech-bubble {
+    width: min(350px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+    max-height: none;
+    padding: 9px;
+  }
+  #shop-panel.cashier-speech-bubble .cashier-speech-content {
+    max-height: min(68dvh, 520px);
   }
   #neighborhood-nav { padding: 7px 9px; }
 }

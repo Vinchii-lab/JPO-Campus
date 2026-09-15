@@ -19,6 +19,55 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let cashierMenu = null;
   let activeCashier = null;
   let nearbyCashier = null;
+  let cashierBubbleFrame = 0;
+  const cancelCashierBubbleFrame = () => {
+    if (!cashierBubbleFrame) return;
+    cancelAnimationFrame(cashierBubbleFrame);
+    cashierBubbleFrame = 0;
+  };
+  const scheduleCashierBubblePosition = () => {
+    if (cashierBubbleFrame) return;
+    cashierBubbleFrame = requestAnimationFrame(() => {
+      cashierBubbleFrame = 0;
+      updateCashierBubblePosition();
+    });
+  };
+  const updateCashierBubblePosition = () => {
+    if (!cashierOpen || !activeCashier) return;
+    const panel = document.getElementById('shop-panel');
+    const game = window._phaserGame;
+    const scene = window._neighborhoodScene;
+    const canvas = game?.canvas;
+    const camera = scene?.cameras?.main;
+    const entry = scene?.cashierNpcs?.find((candidate) => candidate.id === activeCashier.id);
+    const sprite = entry?.sprite;
+    if (!panel || !canvas || !camera || !sprite) return;
+    const bounds = sprite.getBounds?.();
+    const displayHeight = Number(sprite.displayHeight) || Number(bounds?.height) || 72;
+    // Cashier sprites are centered on their feet/body. The head anchor stays
+    // tied to the authored sprite bounds as scale/zoom changes, rather than a
+    // second hard-coded screen coordinate.
+    const headY = Number.isFinite(Number(bounds?.top))
+      ? Number(bounds.top) + displayHeight * 0.2
+      : Number(sprite.y) - displayHeight * 0.3;
+    const result = window.JpoCashierSpeechBubble?.position?.(panel, {
+      anchor: { x: Number(sprite.x), y: headY },
+      camera,
+      canvas,
+      canvasRect: canvas.getBoundingClientRect(),
+      canvasWidth: scene.scale?.width || camera.width || canvas.width,
+      canvasHeight: scene.scale?.height || camera.height || canvas.height,
+      onOffscreen: closeCashier,
+    });
+    if (result?.offscreen) closeCashier();
+  };
+  window.jpoIsCashierOpen = () => cashierOpen;
+  document.addEventListener('keydown', (event) => {
+    if (!cashierOpen || event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCashier();
+  }, true);
   let selectedInstance = null;
   let selectedRotation = 0;
   let selectedZone = 'indoor';
@@ -173,6 +222,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     });
   }
   window.addEventListener('resize', scheduleHudReservation);
+  window.addEventListener('resize', scheduleCashierBubblePosition);
   scheduleHudReservation();
   let officePortalRelease = true;
   let officePortalTransition = false;
@@ -369,6 +419,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         cashierOpen,
         cashier: activeCashier,
         cashierMenu,
+         positionBubble: scheduleCashierBubblePosition,
         onOpenMenu: () => {
           if (activeCashier?.id) socket.emit('cashierMenuRequest', { cashierId: activeCashier.id });
         },
@@ -385,6 +436,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   }
 
   function closeCashier() {
+    cancelCashierBubbleFrame();
     cashierOpen = false;
     cashierMenu = null;
     activeCashier = null;
@@ -400,6 +452,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     cashierOpen = true;
     cashierMenu = null;
     renderShop();
+    scheduleCashierBubblePosition();
     scheduleHudReservation();
   }
 
@@ -408,6 +461,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   window.jpoSetNearbyCashier = (cashier) => {
     nearbyCashier = cashier || null;
     if (cashierOpen && (!nearbyCashier || nearbyCashier.id !== activeCashier?.id)) closeCashier();
+    else if (cashierOpen) scheduleCashierBubblePosition();
   };
 
   window.initHouseColors?.(socket, () => ({
@@ -2952,11 +3006,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         window.jpoSetConstructionLot?.(null);
       }
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+      const cashierDialogOpen = cashierOpen && !!activeCashier?.id;
       const g = globals();
       const { SPEED, touchMove = {}, touchAction = {} } = g;
       const spd = typeof g.effectiveMovementSpeed === 'function'
         ? g.effectiveMovementSpeed()
         : SPEED;
+      // Walking remains available while speaking so leaving the authored
+      // cashier radius still closes the dialogue through the normal proximity
+      // lifecycle. The dialogue only consumes its own E/action interaction.
       const left = !typing && (this.keys.left.isDown || this.wasd.left.isDown || touchMove.left);
       const right = !typing && (this.keys.right.isDown || this.wasd.right.isDown || touchMove.right);
       const up = !typing && (this.keys.up.isDown || this.wasd.up.isDown || touchMove.up);
@@ -3045,6 +3103,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.nearbyCashier = !this.activity && !this._activityPending && !parkSeated
         ? this._nearbyCashier() : null;
       window.jpoSetNearbyCashier?.(this.nearbyCashier);
+      if (cashierOpen) scheduleCashierBubblePosition();
       const nearbyParkSeat = !this.nearbyCashier && !this.activity && !this._activityPending
         ? this._nearbyParkSeat() : null;
       const nearbyAction = !this.activity && !this._activityPending && !nearbyParkSeat &&
@@ -3127,7 +3186,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
            }, 42);
         }
       }
-      const doAction = Phaser.Input.Keyboard.JustDown(this.keyE) || touchAction.queued;
+      // Consume E even while the speech bubble is open. Otherwise a key press
+      // made during dialogue can remain "just down" and trigger an unrelated
+      // world interaction on the first frame after closing it.
+      const actionKeyDown = Phaser.Input.Keyboard.JustDown(this.keyE);
+      const doAction = !cashierDialogOpen && (actionKeyDown || touchAction.queued);
       touchAction.queued = false;
       if (doAction) {
         if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');

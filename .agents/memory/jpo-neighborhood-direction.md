@@ -65,3 +65,9 @@ Check whether apparent empty map space is actually outside the authoritative wor
 **Why:** The plaza appeared to have a huge unused grass area because a reused outdoor ground field painted beyond its smaller map bounds. Changing camera zoom would have hidden the rendering error while violating the requested shared zoom behavior.
 
 **How to apply:** Keep ground-field cache identity and clipping tied to the active map dimensions, especially when reusing the same scene for a large neighborhood and smaller plaza.
+
+Verify world-anchored DOM at the actual low gameplay zoom as well as zoom 1.
+
+**Why:** Cashier speech bubbles initially drifted from the NPC because a simple scroll subtraction ignored Phaser's zoom origin. A desktop/mobile render also exposed a speech tail clipped by the catalog's scrolling container despite passing position tests.
+
+**How to apply:** Include actual camera projection and expanded scrollable content in visual fixtures, not just a centered bubble at zoom 1.

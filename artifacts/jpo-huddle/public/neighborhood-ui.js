@@ -1,3 +1,133 @@
+// Cashier conversations live in DOM so their controls remain accessible on
+// touch devices, but their position follows the Phaser world rather than the
+// HUD. Keep the projection/clamping math free of Phaser and DOM concerns so it
+// can be regression-tested without a browser.
+window.JpoCashierSpeechBubble = (() => {
+  const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
+
+  function worldToClientPoint(point, camera, canvasRect, canvasWidth, canvasHeight) {
+    if (!point || !camera || !canvasRect) return null;
+    const internalWidth = finite(canvasWidth, finite(camera.width, canvasRect.width)) || canvasRect.width;
+    const internalHeight = finite(canvasHeight, finite(camera.height, canvasRect.height)) || canvasRect.height;
+    const scaleX = canvasRect.width / Math.max(1, internalWidth);
+    const scaleY = canvasRect.height / Math.max(1, internalHeight);
+    const zoom = finite(camera.zoom, 1) || 1;
+    // Phaser keeps scrollX/scrollY in its unzoomed camera space while the
+    // viewport origin is zoom-adjusted around originX/originY. This mirrors
+    // the world-view calculation used by the scene's pooled tile renderer;
+    // using scrollX directly would drift the DOM bubble toward a corner at
+    // zoom levels below 1.
+    const worldLeft = finite(camera.scrollX) +
+      internalWidth * finite(camera.originX, 0.5) * (1 - 1 / zoom);
+    const worldTop = finite(camera.scrollY) +
+      internalHeight * finite(camera.originY, 0.5) * (1 - 1 / zoom);
+    return {
+      x: canvasRect.left + (finite(camera.x) + (finite(point.x) - worldLeft) * zoom) * scaleX,
+      y: canvasRect.top + (finite(camera.y) + (finite(point.y) - worldTop) * zoom) * scaleY,
+    };
+  }
+
+  function computeBubblePosition(anchor, size, viewport, options = {}) {
+    if (!anchor || !size || !viewport) return null;
+    const width = Math.max(1, finite(size.width, 1));
+    const height = Math.max(1, finite(size.height, 1));
+    const padding = Math.max(0, finite(options.padding, 12));
+    const gap = Math.max(0, finite(options.gap, 10));
+    const leftBound = finite(viewport.left);
+    const topBound = finite(viewport.top);
+    const rightBound = Math.max(leftBound, finite(viewport.right, leftBound + width));
+    const bottomBound = Math.max(topBound, finite(viewport.bottom, topBound + height));
+    const anchorX = finite(anchor.x);
+    const anchorY = finite(anchor.y);
+    const preferredLeft = anchorX - width / 2;
+    const left = clamp(preferredLeft, leftBound + padding, rightBound - width - padding);
+    const canPlaceAbove = !options.preferBelow &&
+      anchorY - gap - height >= topBound + padding;
+    const placement = canPlaceAbove ? 'bottom' : 'top';
+    const preferredTop = canPlaceAbove ? anchorY - gap - height : anchorY + gap;
+    const top = clamp(preferredTop, topBound + padding, bottomBound - height - padding);
+    return {
+      left,
+      top,
+      tailX: clamp(anchorX - left, 16, Math.max(16, width - 16)),
+      tailY: canPlaceAbove ? height + gap : -gap,
+      placement,
+    };
+  }
+
+  function position(element, options = {}) {
+    if (!element || !options.anchor || !options.camera || !options.canvasRect) return null;
+    const canvasRect = options.canvasRect;
+    const point = worldToClientPoint(
+      options.anchor,
+      options.camera,
+      canvasRect,
+      options.canvasWidth,
+      options.canvasHeight,
+    );
+    if (!point) return null;
+    const viewport = options.viewport || {
+      left: 0, top: 0,
+      right: document.documentElement?.clientWidth || window.innerWidth,
+      bottom: 0,
+    };
+    if (!viewport.bottom) viewport.bottom = document.documentElement?.clientHeight || window.innerHeight;
+    const canvasViewport = options.canvasViewport || {
+      left: canvasRect.left, top: canvasRect.top,
+      right: canvasRect.right, bottom: canvasRect.bottom,
+    };
+    const offscreen = point.x < canvasViewport.left - 2 ||
+      point.x > canvasViewport.right + 2 ||
+      point.y < canvasViewport.top - 2 ||
+      point.y > canvasViewport.bottom + 2;
+    if (offscreen) {
+      element.hidden = true;
+      element.style.visibility = 'hidden';
+      return { offscreen: true, anchor: point };
+    }
+    // A catalog can be taller than the space above a cashier, especially on a
+    // phone. Give it the larger side's available height before choosing the
+    // tail direction so the scrollable bubble still has a real edge touching
+    // the NPC instead of clamping over the actor with a tail pointing away.
+    element.style.removeProperty('max-height');
+    const scrollContent = element.querySelector('.cashier-speech-content');
+    scrollContent?.style.removeProperty('max-height');
+    let rect = element.getBoundingClientRect();
+    const padding = Math.max(0, finite(options.padding, 12));
+    const gap = Math.max(0, finite(options.gap, 10));
+    const aboveSpace = Math.max(0, point.y - viewport.top - padding - gap);
+    const belowSpace = Math.max(0, viewport.bottom - point.y - padding - gap);
+    // Preserve the requested "above the head" composition whenever a useful
+    // scroll viewport can fit there. Only use below placement when the NPC is
+    // genuinely near the top edge, where even a compact conversation would
+    // cover the actor.
+    const preferBelow = aboveSpace < 180 && belowSpace >= aboveSpace;
+    const available = preferBelow ? belowSpace : aboveSpace;
+    if (rect.height > available && available > 0) {
+      const contentHeight = scrollContent?.getBoundingClientRect().height || rect.height;
+      const chromeHeight = Math.max(0, rect.height - contentHeight);
+      if (scrollContent) {
+        scrollContent.style.maxHeight = `${Math.max(80, available - chromeHeight)}px`;
+      }
+      rect = element.getBoundingClientRect();
+    }
+    const computed = computeBubblePosition(point, rect, viewport, {
+      ...options, preferBelow,
+    });
+    if (!computed) return null;
+    element.hidden = false;
+    element.style.left = `${computed.left}px`;
+    element.style.top = `${computed.top}px`;
+    element.style.setProperty('--cashier-tail-x', `${computed.tailX}px`);
+    element.dataset.tail = computed.placement;
+    element.style.visibility = 'visible';
+    return { ...computed, anchor: point };
+  }
+
+  return { clamp, worldToClientPoint, computeBubblePosition, position };
+})();
+
 window.JpoUIBuilder = {
   renderHomePanel: function(panel, ctx) {
     if (!ctx.isHome || !ctx.homeState) {
@@ -19,12 +149,22 @@ window.JpoUIBuilder = {
 
   renderShopPanel: function(panel, ctx) {
     if (!ctx.isShop || !ctx.cashierOpen || !ctx.cashier) {
-      if (panel) panel.hidden = true;
+      if (panel) {
+        panel.hidden = true;
+        panel.innerHTML = '';
+        panel.style.visibility = 'hidden';
+        panel.removeAttribute('data-tail');
+      }
       return;
     }
     panel.hidden = false;
-    panel.innerHTML = this._buildShopMarkup(ctx);
+    panel.className = 'cashier-speech-bubble';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', `${ctx.cashier.name || 'Cashier'} conversation`);
+    panel.style.visibility = 'hidden';
+    panel.innerHTML = `<div class="cashier-speech-content">${this._buildShopMarkup(ctx)}</div>`;
     this._attachShopHandlers(panel, ctx);
+    ctx.positionBubble?.();
   },
 
   _buildOutsideMarkup: function(ctx) {
@@ -387,6 +527,27 @@ window.JpoUIBuilder = {
   },
 
   _attachShopHandlers: function(panel, ctx) {
+    // The bubble is a real interaction surface over the canvas. Keep pointer
+    // and keyboard events inside it so a touch/click cannot also pan the map or
+    // trigger the scene's E action.
+    if (!panel._cashierEventGuard) {
+      const guard = (event) => event.stopPropagation();
+      ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend'].forEach((type) => {
+        panel.addEventListener(type, guard);
+      });
+      panel.addEventListener('keydown', (event) => {
+        const key = String(event.key || '').toLowerCase();
+        if (key === 'escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          ctx.onGoodbye?.();
+        } else if (key === 'e') {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
+      panel._cashierEventGuard = true;
+    }
     panel.querySelector('[data-goodbye]')?.addEventListener('click', () => ctx.onGoodbye?.());
     panel.querySelector('[data-browse]')?.addEventListener('click', () => ctx.onOpenMenu?.());
     panel.querySelector('[data-buy-menu]')?.addEventListener('click', () => ctx.onOpenMenu?.());
