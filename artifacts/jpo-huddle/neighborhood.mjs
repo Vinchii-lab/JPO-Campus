@@ -458,7 +458,13 @@ function commercialRoomGeometry(id, architecture) {
   return {
     ...architecture,
     blockers: [...walls, ...(Array.isArray(propBlockers) ? propBlockers : [])],
-    seats: Array.isArray(room.seats) ? room.seats : (architecture.seats || []),
+    // Furniture-shop display seats are legacy props. The client removes those
+    // props and replaces them with the server-projected catalog demos, so
+    // retaining their park-seat metadata would expose invisible [E] Sit
+    // targets below the showroom. Other commercial rooms keep their authored
+    // benches/chairs unchanged.
+    seats: id === "furniture-shop" ? [] :
+      (Array.isArray(room.seats) ? room.seats : (architecture.seats || [])),
     commercialLayout: room,
   };
 }
@@ -609,7 +615,7 @@ const BASE_LOCATION_GEOMETRY = Object.freeze({
         stands: [{ x: 3120, y: 704, dir: "down" }, { x: 3056, y: 640, dir: "down" }] },
       { id: "plaza-bench-southwest", x: 720, y: 896, dir: "up",
         stands: [{ x: 720, y: 832, dir: "up" }, { x: 656, y: 896, dir: "up" }] },
-      { id: "plaza-bench-south", x: 1520, y: 896, dir: "up",
+      { id: "plaza-bench-south-center", x: 1520, y: 896, dir: "up",
         stands: [{ x: 1520, y: 832, dir: "up" }, { x: 1456, y: 896, dir: "up" }] },
       { id: "plaza-bench-east", x: 2320, y: 896, dir: "up",
         stands: [{ x: 2320, y: 832, dir: "up" }, { x: 2256, y: 896, dir: "up" }] },
@@ -1023,13 +1029,13 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "plush_bed", name: "Walnut daybed", price: 50000, category: "Bedroom",
     path: "/assets/neighborhood/commercial/furn_bed.png", width: 3, height: 2,
     frameWidth: 144, frameHeight: 144, scale: 1, actions: ["lie", "sleep"],
-    // The source art's pillow is on the RIGHT.  A -90° down-facing avatar
-    // therefore puts its head on that pillow; the art-relative y nudge keeps
+    // Phaser's positive rotation turns the avatar's head toward the RIGHT,
+    // onto the source art's pillow; the art-relative y nudge keeps
     // the body on the mattress instead of the front rail.
-    interaction: { facing: "down", radius: 104, actorOffset: { x: 0, y: -20 } },
+    interaction: { facing: "down", radius: 104, actorOffset: { x: 40, y: -20 } },
     activityPose: {
-      lie: { angle: -90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
-      sleep: { angle: -90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
+      lie: { angle: 90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
+      sleep: { angle: 90, scale: 2.7, wearableOffset: { x: 15, y: 0 } },
     },
     // Only the authored lower rail is in front of a reclining actor.  The
     // previous generic 62% crop covered the head and most of the body.
@@ -1463,7 +1469,11 @@ export async function repairLegacyLayout(pool, ownerEmail) {
 
 export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
   if (isHuddleTestIdentity(ownerEmail)) return null;
-  await repairLegacyLayout(pool, ownerEmail);
+  // Snapshot reads must be side-effect free. In particular, a Store request
+  // may be accompanied by an older/partially migrated layout; repairing every
+  // row while reading one item can make an unrelated placement disappear.
+  // Callers that explicitly run a migration can still invoke
+  // repairLegacyLayout() before requesting a snapshot.
   const home = await ensureHome(pool, ownerEmail);
   const { rows } = await pool.query(
     `SELECT f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation, l.placement_zone

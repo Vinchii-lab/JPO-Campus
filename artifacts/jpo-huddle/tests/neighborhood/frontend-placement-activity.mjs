@@ -29,11 +29,29 @@ assert.match(renderFurniture, /this\._rebindFurnitureActivities\(\);/,
   "rebuilding furniture reapplies current local and remote activities");
 assert.match(sceneSource, /entry\._activityAction = null;[\s\S]{0,180}this\._applyActivityPose\(entry, activity, dir\);/,
   "activity rebinding forces pose/effect resolution against the replacement sprite");
+assert.match(sceneSource, /if \(this\.activity\) \{[\s\S]{0,600}setVelocity\?\.\(0, 0\)/,
+  "accepted activity clears leftover local velocity before disabling the body");
+assert.match(sceneSource, /if \(!this\.activity && !this\._activityPending\) \{\s*movement\?\.tick\(delta, this\.location/,
+  "activity anchors do not emit periodic playerMove corrections while active or pending");
+assert.match(sceneSource, /if \(this\.activity && serverPlayer\.reason && !serverPlayer\.activity\) return;/,
+  "a delayed movement correction without activity cannot clear an accepted local action");
 
 assert.match(sceneSource, /const teardownPlacement = \(\) => \{[\s\S]{0,240}selectedInstance = null;[\s\S]{0,240}hidePlacementControls\(\);/,
   "placement teardown resets selection and hides the controls centrally");
 assert.match(sceneSource, /socket\.on\('homeActionResult', \(result\) => \{[\s\S]{0,180}teardownPlacement\(\);/,
   "server action completion tears down placement");
+assert.match(sceneSource, /const applyHomeState = \(state\) => \{[\s\S]{0,1800}incomingRevision <= currentRevision/,
+  "all full home states share a strict owner/revision gate");
+assert.match(sceneSource, /socket\.on\('homeSnapshot', \(state\) => \{[\s\S]{0,120}applyHomeState\(state\)/,
+  "snapshot events use the centralized full-state apply path");
+assert.match(sceneSource, /setHomeState\(state\) \{[\s\S]{0,80}applyHomeState\(state\);/,
+  "house-color full states cannot bypass the owner/revision gate");
+assert.match(sceneSource, /socket\.on\('homePurchaseResult',[\s\S]{0,900}applyHomeState\(result\.home\)/,
+  "purchase full states cannot bypass the owner/revision gate");
+assert.match(sceneSource, /socket\.on\('homeConstructionResult',[\s\S]{0,260}applyHomeState\(result\.home\)/,
+  "construction full states cannot bypass the owner/revision gate");
+assert.match(sceneSource, /if \(result\.home\) applyHomeState\(result\.home\);/,
+  "location transition full states cannot bypass the owner/revision gate");
 assert.match(sceneSource, /shutdown\(\) \{[\s\S]{0,520}teardownPlacement\(\);/,
   "scene shutdown tears down placement");
 assert.match(uiSource, /if \(!ctx\.active\) \{[\s\S]{0,100}container\.hidden = true;[\s\S]{0,100}container\.innerHTML = '';/,

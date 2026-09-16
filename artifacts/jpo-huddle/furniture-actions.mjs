@@ -43,12 +43,26 @@ const DEFAULT_ACTION = Object.freeze({
   radius: 86,
 });
 
+function actionId(value) {
+  return typeof value === "string" ? value : value?.id;
+}
+
+// Catalog rows are persisted data and a few older room manifests represented
+// actions as `{ id }` objects. Normalize both forms at this seam so the server,
+// renderer, and interaction prompt cannot silently disagree about whether a
+// piece is usable.
+export function furnitureActionIds(item) {
+  if (!item || typeof item !== "object" || !Array.isArray(item.actions)) return [];
+  return [...new Set(item.actions
+    .map(actionId)
+    .filter((id) => typeof id === "string" && FURNITURE_ACTIONS[id]))];
+}
+
 export function furnitureActionDefinitions(item) {
   if (!item || typeof item !== "object") return [];
-  const ids = Array.isArray(item.actions) ? item.actions : [];
+  const ids = furnitureActionIds(item);
   return ids.map((id) => {
     const action = FURNITURE_ACTIONS[id];
-    if (!action) return null;
     const actionInteraction = item.actionInteractions?.[id] || {};
     return Object.freeze({
       ...DEFAULT_ACTION,
@@ -61,31 +75,37 @@ export function furnitureActionDefinitions(item) {
 }
 
 export function furnitureActionDefinition(item, actionId) {
-  return furnitureActionDefinitions(item).find((action) => action.id === actionId) || null;
+  const id = typeof actionId === "string" ? actionId : actionId?.id;
+  return furnitureActionDefinitions(item).find((action) => action.id === id) || null;
 }
 
 export function furnitureActionAnim(action) {
-  return FURNITURE_ACTIONS[action]?.anim || null;
+  return FURNITURE_ACTIONS[actionId(action)]?.anim || null;
 }
 
 export function furnitureActionAnchor(item, gridX, gridY, cell = 48, actionId = "sit") {
   const width = Number(item?.width) > 0 ? Number(item.width) : 1;
   const height = Number(item?.height) > 0 ? Number(item.height) : 1;
-  const rotation = Number(item?.rotations?.includes(Number(item.rotation))
-    ? item.rotation : 0);
+  const itemRotation = Number(item?.rotation);
+  const rotation = Number.isFinite(itemRotation) &&
+    Array.isArray(item?.rotations) && item.rotations.includes(itemRotation)
+    ? itemRotation : 0;
   const footprint = rotation % 180 === 90
     ? { width: height, height: width }
     : { width, height };
   const action = furnitureActionDefinition(item, actionId) || DEFAULT_ACTION;
-  const x = (Number(gridX) + footprint.width / 2) * cell;
+  const originX = Number(gridX);
+  const originY = Number(gridY);
+  const unit = Number(cell) > 0 ? Number(cell) : 48;
+  const x = (originX + footprint.width / 2) * unit;
   // Furniture sprites use their bottom edge as their world anchor.  Actors
   // sit/lie just below the visual pad, which keeps their feet/pivot stable.
-  const centerY = (Number(gridY) + footprint.height / 2) * cell;
+  const centerY = (originY + footprint.height / 2) * unit;
   // Front-facing props (the TV is the current example) must leave the actor
   // outside the prop footprint. This keeps the avatar standing in front of,
   // and looking toward, the screen instead of being snapped into the TV tile.
   const baseY = action.anchor === "front"
-    ? (Number(gridY) + footprint.height) * cell + 18
+    ? (originY + footprint.height) * unit + 18
     : centerY + (action.pose === "sit" ? 10 : 6);
   // Bitmap authors can place the interaction point on the actual cushion,
   // mattress, or water basin instead of forcing every piece through the
@@ -109,11 +129,15 @@ export function furnitureActionAnchor(item, gridX, gridY, cell = 48, actionId = 
 export function furnitureActionStandCandidates(item, gridX, gridY, cell = 48, actionId = "sit") {
   const width0 = Number(item?.width) > 0 ? Number(item.width) : 1;
   const height0 = Number(item?.height) > 0 ? Number(item.height) : 1;
-  const rotation = Number(item?.rotation) || 0;
+  const itemRotation = Number(item?.rotation);
+  const rotation = Number.isFinite(itemRotation) &&
+    Array.isArray(item?.rotations) && item.rotations.includes(itemRotation)
+    ? itemRotation : 0;
   const width = rotation % 180 === 90 ? height0 : width0;
   const height = rotation % 180 === 90 ? width0 : height0;
-  const x = Number(gridX) * cell, y = Number(gridY) * cell;
-  const w = width * cell, h = height * cell;
+  const unit = Number(cell) > 0 ? Number(cell) : 48;
+  const x = Number(gridX) * unit, y = Number(gridY) * unit;
+  const w = width * unit, h = height * unit;
   const cx = x + w / 2, cy = y + h / 2;
   const action = furnitureActionDefinition(item, actionId) || DEFAULT_ACTION;
   const candidates = [

@@ -198,7 +198,8 @@ window.JpoUIBuilder = {
           const name = ctx.catalog?.[item.furnitureId]?.name || item.furnitureId;
           return `<span class="home-item"><span>${this._escape(name)}</span>` +
                  `<button type="button" data-yard-move="${this._escape(item.id)}">Move</button>` +
-                 `<button type="button" data-return="${this._escape(item.id)}">Store</button></span>`;
+                 `<button type="button" data-return="${this._escape(item.id)}"${ctx.pendingReturns?.has(String(item.id)) ? ' disabled' : ''}>` +
+                 `${ctx.pendingReturns?.has(String(item.id)) ? 'Storing…' : 'Store'}</button></span>`;
         }).join('');
       }
       html += '</div>';
@@ -349,7 +350,8 @@ window.JpoUIBuilder = {
         html += this._thumbnail(def, item.furnitureId);
         html += `<span>${this._escape(name)}</span></span>`;
         html += `<span><button type="button" data-move="${this._escape(item.id)}">Move</button> `;
-        html += `<button type="button" data-return="${this._escape(item.id)}">Store</button></span>`;
+        html += `<button type="button" data-return="${this._escape(item.id)}"${ctx.pendingReturns?.has(String(item.id)) ? ' disabled' : ''}>` +
+          `${ctx.pendingReturns?.has(String(item.id)) ? 'Storing…' : 'Store'}</button></span>`;
         html += `</span>`;
       });
     });

@@ -71,6 +71,8 @@ async function purchase({
   assert.equal(result.refreshPending, true);
   assert.equal(committed.player.coins, 15000);
   assert(committed.queries.includes('COMMIT'));
+  assert(committed.queries.some(sql => sql.includes('layout_revision=layout_revision+1')),
+    'a committed purchase advances the full-home snapshot revision transactionally');
   assert(!committed.queries.includes('ROLLBACK'), 'do not roll back after successful commit');
   assert.equal(committed.events.filter(event => event.name === 'homePurchaseResult').length, 1);
 

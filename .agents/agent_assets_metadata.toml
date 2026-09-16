@@ -752,3 +752,17 @@ mtime_ms = 1789502722435
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/85178e13-be08-4aa1-b37a-a3c852807624/0bdd92d2-abe7-4484-993c-7111465e38e9"
 storage_version_token = "1789502791292443"
 content_type = "image/png"
+
+[[outputs]]
+id = "iYDNXWQWVLB29bPaiHC25"
+uri = "file://artifacts/jpo-huddle/tests/reports/furniture-interaction-report.md"
+type = "text"
+title = "Interior item-by-item audit"
+description = "All 36 catalog items and 39 fixed seats, supported actions, fixes, real-game verification, and coverage limits."
+logical_id = "db6c8ac6-2d9a-44ad-8c05-d3b7e4da7d71"
+content_hash = "sha256:070afab80f148cf908a994c42d3302f896aaabc38d26703dc410da8f654a4b1a"
+size = 5066
+mtime_ms = 1789566135930
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/db6c8ac6-2d9a-44ad-8c05-d3b7e4da7d71/c66f0287-1d50-4348-8cec-09603ffccb4a"
+storage_version_token = "1789566240197255"
+content_type = "text/markdown"

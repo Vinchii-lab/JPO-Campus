@@ -72,6 +72,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let selectedRotation = 0;
   let selectedZone = 'indoor';
   let editorOpen = false;
+  // Store is an instance operation, not a layout replacement. Keep a small
+  // client-side in-flight set so a double-click cannot submit the same stale
+  // row twice while the authoritative snapshot is on its way back.
+  const pendingReturnIds = new Set();
   let currentLocation = 'office';
   let panelsCollapsed = false;
   try { panelsCollapsed = localStorage.getItem('jpo-neighborhood-panels-collapsed') === 'true'; } catch (_) {}
@@ -101,13 +105,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let homePeopleLoaded = false;
   let homePeopleRequestId = 0;
   let activeHomePeopleRequestId = 0;
-  const pendingPurchasedItems = [];
   // A socket result can arrive while the prior map's cosmetic fade is still
   // pending. Keep one presentation generation and timer: an old completion
   // must never stop/restart the scene selected by a newer completion.
   let sceneTransitionGeneration = 0;
   let lastServerTransitionSequence = 0;
-  socket.on('disconnect', () => { lastServerTransitionSequence = 0; });
+  socket.on('disconnect', () => {
+    lastServerTransitionSequence = 0;
+    pendingReturnIds.clear();
+  });
   let sceneTransitionTimer = null;
   let sceneReadinessWait = null;
   const sceneCreateEvent = Phaser.Scenes?.Events?.CREATE || 'create';
@@ -297,21 +303,81 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     window._neighborhoodScene?._teardownPlacement?.();
     hidePlacementControls();
   };
-  const mergePurchasedItem = (state, item) => {
-    if (!state || !item?.id || !item.furnitureId) return false;
-    state.inventory = Array.isArray(state.inventory) ? state.inventory : [];
-    state.layout = Array.isArray(state.layout) ? state.layout : [];
-    state.yard = Array.isArray(state.yard) ? state.yard : [];
-    const exists = [...state.inventory, ...state.layout, ...state.yard]
-      .some((entry) => String(entry.id) === String(item.id));
-    if (exists) return false;
-    state.inventory.push({ id: item.id, furnitureId: item.furnitureId });
-    return true;
+  const normalizeFurnitureInstanceId = (value) =>
+    typeof value === 'string' ? value.trim() : '';
+  const reconcilePendingReturns = (state) => {
+    if (!state || typeof state !== 'object') return;
+    const placed = new Set([
+      ...(Array.isArray(state.layout) ? state.layout : []),
+      ...(Array.isArray(state.yard) ? state.yard : []),
+    ].map((item) => String(item?.id || '')));
+    const inventory = new Set((Array.isArray(state.inventory) ? state.inventory : [])
+      .map((item) => String(item?.id || '')));
+    for (const id of pendingReturnIds) {
+      // A successful store removes the layout row and leaves the owned
+      // instance in inventory. An older snapshot still containing the row
+      // must not unlock the button or be treated as a success.
+      if (!placed.has(id) && inventory.has(id)) pendingReturnIds.delete(id);
+    }
   };
-  const mergePendingPurchases = (state) => {
-    if (!state?.canEdit || state.ownerEmail !== globals()._playerEmail) return;
-    for (const item of pendingPurchasedItems) mergePurchasedItem(state, item);
-    pendingPurchasedItems.length = 0;
+  const requestStore = (value) => {
+    const instanceId = normalizeFurnitureInstanceId(value);
+    const zone = isHome() ? 'indoor' : isResidentialBlock() ? 'yard' : null;
+    const placed = zone === 'indoor' ? homeState?.layout : zone === 'yard' ? homeState?.yard : null;
+    const playerEmail = String(globals()._playerEmail || '').trim().toLowerCase();
+    if (!instanceId || !zone || !homeState?.canEdit ||
+        String(homeState.ownerEmail || '').trim().toLowerCase() !== playerEmail) {
+      toast('That furniture selection is no longer current.');
+      return;
+    }
+    if (!Array.isArray(placed) || !placed.some((item) => String(item?.id) === instanceId)) {
+      toast('That furniture is no longer placed here.');
+      return;
+    }
+    if (pendingReturnIds.has(instanceId)) return;
+    pendingReturnIds.add(instanceId);
+    teardownPlacement();
+    renderHome();
+    // Deliberately send only the immutable instance id and let the server
+    // delete that one owned row atomically. Never send a client-owned layout.
+    socket.emit('homeLayoutReturn', { instanceId });
+  };
+  // Every full home state carries the existing server layout_revision. Keep
+  // all ingress paths behind this one owner/revision gate: Store, purchase,
+  // construction, color, and transition responses can otherwise arrive after
+  // a newer Store snapshot and replace its inventory/layout arrays wholesale.
+  const applyHomeState = (state) => {
+    if (!state || typeof state !== 'object') return false;
+    const expectedOwner = isHome()
+      ? currentLocation.slice(5).trim().toLowerCase()
+      : String(globals()._playerEmail || '').trim().toLowerCase();
+    const snapshotOwner = String(state.ownerEmail || '').trim().toLowerCase();
+    if (expectedOwner && snapshotOwner !== expectedOwner) return false;
+
+    const incomingRevision = Number(state.revision);
+    const currentOwner = String(homeState?.ownerEmail || '').trim().toLowerCase();
+    const currentRevision = Number(homeState?.revision);
+    const hasIncomingRevision = Number.isSafeInteger(incomingRevision);
+    const hasCurrentRevision = Number.isSafeInteger(currentRevision);
+    // Equal revisions are not ordered: a delayed full snapshot with the same
+    // revision can still carry an older inventory/layout projection. Only a
+    // strictly newer revision may replace state for the same owner.
+    if (currentOwner && snapshotOwner && currentOwner === snapshotOwner) {
+      if (!hasIncomingRevision || (hasCurrentRevision && incomingRevision <= currentRevision)) return false;
+    } else if (hasCurrentRevision && !hasIncomingRevision) {
+      return false;
+    }
+    reconcilePendingReturns(state);
+    teardownPlacement();
+    if (state.catalog && typeof state.catalog === 'object') furnitureCatalog = state.catalog;
+    homeState = state;
+    if (state.canEdit && state.exteriorColor) {
+      ownExteriorColor = state.exteriorColor;
+      window._neighborhoodScene?.setOwnHomeColor(ownExteriorColor);
+    }
+    window._neighborhoodScene?.renderFurniture(state);
+    renderHome();
+    return true;
   };
   window.jpoSetConstructionLot = (lot) => {
     const ownerEmail = lot?.ownerEmail || null;
@@ -371,6 +437,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       constructionMarkup: constructionMarkup(),
       catalog: furnitureCatalog,
       selectedInstance: selectedInstance,
+      pendingReturns: pendingReturnIds,
       editorOpen: editorOpen,
       people: homePeople,
       peopleLoaded: homePeopleLoaded,
@@ -388,10 +455,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         renderHome();
       },
       onReturn: (id) => {
-        const instanceId = id || selectedInstance;
-        teardownPlacement();
-        socket.emit('homeLayoutReturn', { instanceId });
-        renderHome();
+        requestStore(id);
       },
       onAccessSet: (mode) => socket.emit('homeAccessSet', { mode }),
       onInvite: (email) => socket.emit('homeInvite', { email }),
@@ -470,12 +534,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     get scene() { return window._neighborhoodScene; },
     toast,
     setHomeState(state) {
-      homeState = state;
-      if (state?.canEdit && state.exteriorColor) {
-        ownExteriorColor = state.exteriorColor;
-        window._neighborhoodScene?.setOwnHomeColor(ownExteriorColor);
-      }
-      window._neighborhoodScene?.renderFurniture(state);
+      applyHomeState(state);
     },
     rerenderHome: renderHome,
   }));
@@ -525,17 +584,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     renderHome();
   });
   socket.on('homeSnapshot', (state) => {
-    if (!state || typeof state !== 'object') return;
-    teardownPlacement();
-    if (state.catalog && typeof state.catalog === 'object') furnitureCatalog = state.catalog;
-    homeState = state;
-    mergePendingPurchases(homeState);
-    if (state.canEdit && state.exteriorColor) {
-      ownExteriorColor = state.exteriorColor;
-      window._neighborhoodScene?.setOwnHomeColor(ownExteriorColor);
-    }
-    window._neighborhoodScene?.renderFurniture(state);
-    renderHome();
+    applyHomeState(state);
   });
   socket.on('homePeopleResult', (result) => {
     if (Number.isSafeInteger(result?.requestId) &&
@@ -552,33 +601,47 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   });
   socket.on('homePurchaseResult', (result) => {
     if (!result?.ok && ['distance', 'cashier', 'location'].includes(result?.code)) closeCashier();
-    teardownPlacement();
+    let refreshRequested = false;
     if (result?.home) {
-      homeState = result.home;
-      mergePurchasedItem(homeState, result.item);
-      mergePendingPurchases(homeState);
+      const applied = applyHomeState(result.home);
+      const represented = result.item && [
+        ...(Array.isArray(result.home.inventory) ? result.home.inventory : []),
+        ...(Array.isArray(result.home.layout) ? result.home.layout : []),
+        ...(Array.isArray(result.home.yard) ? result.home.yard : []),
+      ].some((entry) => String(entry?.id) === String(result.item.id));
+      if (result.ok && result.item && (!applied || !represented)) {
+        if (isHome() || isResidentialBlock()) {
+          socket.emit('homeSnapshotRequest');
+          refreshRequested = true;
+        }
+      }
     } else if (result?.ok && result.item) {
-      pendingPurchasedItems.push(result.item);
-      if (homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail) {
-        mergePurchasedItem(homeState, result.item);
-        pendingPurchasedItems.splice(
-          pendingPurchasedItems.findIndex((item) => String(item.id) === String(result.item.id)), 1,
-        );
+      // A purchase response without a full snapshot is not allowed to mutate
+      // the visible inventory optimistically. The server bumped revision in
+      // the purchase transaction; request that authoritative newer snapshot.
+      if (isHome() || isResidentialBlock()) {
+        socket.emit('homeSnapshotRequest');
+        refreshRequested = true;
       }
     }
+    teardownPlacement();
     if (result?.message && !result?.ok) toast(result.message);
     else if (result?.ok) {
       const name = furnitureCatalog[result.item?.furnitureId]?.name || 'Furniture';
       toast(name + ' purchased — added to your home inventory.');
-      if (result.refreshPending && (isHome() || isResidentialBlock())) {
+      if (result.refreshPending && !refreshRequested && (isHome() || isResidentialBlock())) {
         socket.emit('homeSnapshotRequest');
       }
     }
     if (isHome()) renderHome();
   });
   socket.on('homeConstructionResult', (result) => {
-    teardownPlacement();
-    if (result?.home) homeState = result.home;
+    if (result?.home) {
+      const applied = applyHomeState(result.home);
+      if (result.ok && !applied && (isHome() || isResidentialBlock())) {
+        socket.emit('homeSnapshotRequest');
+      }
+    } else teardownPlacement();
     if (result?.message) toast(result.message);
     if (isResidentialBlock()) renderHome();
   });
@@ -586,8 +649,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     // A mutation always ends its placement gesture. This prevents a stale
     // preview from being re-used after either a server rejection or a move.
     teardownPlacement();
+    const resultId = normalizeFurnitureInstanceId(result?.instanceId);
+    if (resultId) pendingReturnIds.delete(resultId);
     if (isHome() || isResidentialBlock()) renderHome();
     if (result?.message) toast(result.message);
+    if (result?.ok && result?.refreshPending && (isHome() || isResidentialBlock())) {
+      socket.emit('homeSnapshotRequest');
+    }
   });
   socket.on('homeAccessResult', (result) => {
     teardownPlacement();
@@ -702,6 +770,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.remotes = {};
       this.furniture = [];
       this.showroomFurniture = [];
+      // Keep showroom interaction records outside Phaser's DataManager. Phaser
+      // destroys/recreates display objects during scene transitions and a
+      // stale sprite can therefore lose the action metadata even while the
+      // authoritative seven-demo payload is still current.
+      this.showroomInteractions = new Map();
       this.cashierNpcs = [];
       this.nearbyCashier = null;
       this._lastCorrectionSeq = -1;
@@ -853,7 +926,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.nearbyCashier = null;
       this.showroomFurniture?.forEach((object) => object?.destroy?.());
       this.showroomFurniture = [];
-      this.showroomDemos = Array.isArray(data?.showroom) ? data.showroom : showroomDemos;
+      this.showroomInteractions?.clear?.();
+      const transitionDemos = Array.isArray(data?.showroom) ? data.showroom : null;
+      this.showroomDemos = transitionDemos?.length ? transitionDemos : showroomDemos;
       this.streetLotsVisual = null;
       this.localBubble = null;
       this.localCosmetic = this.localWings = this.localPet = null;
@@ -1929,33 +2004,92 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
     }
 
+    _normaliseShowroomDemo(demo) {
+      if (!demo?.instanceId || !demo?.furnitureId) return null;
+      const definition = furnitureCatalog[demo.furnitureId];
+      if (!definition) return null;
+      const catalogActions = Array.isArray(definition.actions)
+        ? definition.actions.map((action) => typeof action === 'string' ? action : action?.id)
+        : [];
+      // The server's action descriptors are preferred because they include
+      // authored radius/offset/facing values. A cached transition payload
+      // from before an interaction was added can still bind to the current
+      // catalog, but only for actions the catalog actually supports.
+      const supported = new Set(catalogActions);
+      const actionObjects = Array.isArray(demo.actions) && demo.actions.length
+        ? demo.actions.filter((action) => supported.has(typeof action === 'string' ? action : action?.id))
+        : [];
+      const actions = actionObjects.length
+        ? actionObjects
+        : catalogActions.filter(Boolean);
+      if (!actions.length) return { ...demo, definition, actions: [] };
+      const footprint = demo.footprint || definition.footprint || {
+        width: definition.width || 1, height: definition.height || 1,
+      };
+      const x = Number(demo.x), y = Number(demo.y);
+      const stand = Number.isFinite(Number(demo.stand?.x)) &&
+        Number.isFinite(Number(demo.stand?.y))
+        ? {
+          x: Number(demo.stand.x), y: Number(demo.stand.y),
+          dir: demo.stand.dir || 'down',
+        }
+        // This fallback is only for old cached showroom payloads. Current
+        // server demos always carry an explicit approach/exit point.
+        : Number.isFinite(x) && Number.isFinite(y)
+          ? { x, y: y + Number(footprint.height || 1) * 24 + 18, dir: 'up' }
+          : null;
+      return {
+        ...demo, definition, footprint, actions,
+        ...(stand ? { stand } : {}),
+      };
+    }
+
     _drawFurnitureShowroom() {
+      // A showroom refresh can arrive while a local or remote visitor is
+      // using a demo. Clear the old renderer target before destroying its
+      // sprite, then rebind the authoritative activity to the replacement
+      // object below instead of leaving the pose/effect attached to a dead
+      // display object.
+      this._clearActivityEffect(this);
+      Object.values(this.remotes || {}).forEach((entry) => this._clearActivityEffect(entry));
       this.showroomFurniture?.forEach((object) => {
         this.tweens.killTweensOf(object);
         object.destroy();
       });
       this.showroomFurniture = [];
+      this.showroomInteractions?.clear?.();
       this._hideLegacyFurnitureShopObjects();
-      for (const demo of this.showroomDemos || showroomDemos || []) {
-        const definition = furnitureCatalog[demo.furnitureId];
-        if (!definition || !demo?.instanceId) continue;
+      const source = this.showroomDemos?.length ? this.showroomDemos : showroomDemos;
+      for (const rawDemo of source || []) {
+        const demo = this._normaliseShowroomDemo(rawDemo);
+        const definition = demo?.definition;
+        if (!definition || !demo?.instanceId ||
+            !Number.isFinite(Number(demo.x)) || !Number.isFinite(Number(demo.y))) continue;
         const sprite = this._drawFurniture(definition, Number(demo.x), Number(demo.y), {
           depth: Number(demo.y), instanceId: demo.instanceId,
         });
         if (!sprite) continue;
-        const actions = Array.isArray(demo.actions) ? demo.actions : [];
+        const actions = demo.actions || [];
         sprite.setData('showroomDemo', demo);
         sprite.setData('showroomActions', actions);
         sprite.setData('actionRadius', Math.max(
           96, ...actions.map((action) => Number(action?.radius) || 0),
         ));
         sprite.setData('height', demo.footprint?.height || definition.height || 1);
+        // This record is the interaction source of truth. Sprite data remains
+        // useful for renderer tooling, but prompts must not depend on a
+        // display object's lifecycle or a transition cleanup race.
+        this.showroomInteractions?.set?.(String(demo.instanceId), {
+          sprite, demo, actions, definition, instanceId: String(demo.instanceId),
+        });
         this.showroomFurniture.push(sprite);
       }
+      this._rebindFurnitureActivities();
     }
 
     setFurnitureShowroomDemos(demos) {
       this.showroomDemos = Array.isArray(demos) ? demos : [];
+      if (this.location !== 'furniture-shop') return;
       if (this.location === 'furniture-shop' && this.player) this._drawFurnitureShowroom();
     }
 
@@ -2267,6 +2401,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         else if (Number.isFinite(this.activity.x)) this.player.setPosition(this.activity.x, this.activity.y);
         this.playerDir = payload.dir || this.activity.dir || this.playerDir || 'down';
         this.player.body?.reset(this.player.x, this.player.y);
+        this.player.body?.setVelocity?.(0, 0);
         this.player.body.enable = false;
       } else if (this.player.body) {
         // Stop packets carry the server's validated stand (which may be a
@@ -2298,7 +2433,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           this.player.x - interaction.x, this.player.y - interaction.y,
         );
         if (distance > radius || (best && distance >= best.distance)) continue;
-        best = { sprite, actions, distance, anchor: interaction };
+        best = {
+          sprite, actions, distance, anchor: interaction,
+          // Keep the request identity on the nearby interaction record. The
+          // sprite DataManager remains only a compatibility fallback because
+          // Phaser can replace a display object after the prompt is rendered.
+          instanceId: sprite.getData?.('instanceId'),
+        };
       }
       return best;
     }
@@ -2330,17 +2471,29 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _nearbyShowroomAction() {
-      if (!this.player || !this.showroomFurniture?.length) return null;
+      if (!this.player) return null;
       let best = null;
-      for (const sprite of this.showroomFurniture) {
-        const demo = sprite.getData('showroomDemo');
-        const actions = sprite.getData('showroomActions') || [];
+      const entries = this.showroomInteractions?.size
+        ? [...this.showroomInteractions.values()]
+        : (this.showroomFurniture || []).map((sprite) => ({
+          sprite, demo: sprite.getData('showroomDemo'),
+          actions: sprite.getData('showroomActions') || [],
+        }));
+      for (const entry of entries) {
+        const sprite = entry?.sprite;
+        if (!sprite || sprite.active === false) continue;
+        const demo = entry.demo || sprite.getData?.('showroomDemo');
+        const actions = entry.actions || sprite.getData?.('showroomActions') || [];
         const stand = demo?.stand;
         if (!demo?.instanceId || !stand || !actions.length) continue;
-        const radius = Number(sprite.getData('actionRadius')) || 96;
+        const radius = Number(sprite.getData?.('actionRadius')) ||
+          Math.max(96, ...actions.map((action) => Number(action?.radius) || 0));
         const distance = Math.hypot(this.player.x - Number(stand.x), this.player.y - Number(stand.y));
         if (distance > radius || (best && distance >= best.distance)) continue;
-        best = { sprite, demo, actions, distance };
+        best = {
+          sprite, demo, actions, distance, radius,
+          instanceId: entry.instanceId || demo.instanceId,
+        };
       }
       return best;
     }
@@ -2364,7 +2517,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (!nearby) return;
       const selectedAction = this.keyShift?.isDown && nearby.actions[1] ? nearby.actions[1] : nearby.actions[0];
       const action = typeof selectedAction === 'string' ? selectedAction : selectedAction?.id;
-      const instanceId = nearby.sprite.getData('instanceId');
+      // Stable interaction records own the UUID. A Phaser DataManager value
+      // is retained only for older home sprites and tooling compatibility;
+      // showroom prompts must still submit after a redraw replaced the sprite
+      // or cleared its metadata.
+      const instanceId = nearby.demo?.instanceId ||
+        nearby.instanceId || nearby.sprite?.getData?.('instanceId');
       if (!instanceId || !action) return;
       this._activityPending = true;
       if (this.location === 'furniture-shop') {
@@ -2593,9 +2751,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           },
           onReturn: () => {
             const instanceId = selectedInstance;
-            teardownPlacement();
-            socket.emit('homeLayoutReturn', { instanceId });
-            renderHome();
+            requestStore(instanceId);
           }
         });
       };
@@ -2779,6 +2935,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       if (!serverPlayer || !this.player || !Number.isFinite(serverPlayer.x) || !Number.isFinite(serverPlayer.y)) return;
       if (!this._isCurrentLocation(serverPlayer) ||
           !window.JpoFocusedMovement?.shouldApplyCorrection(serverPlayer, this.location, this._lastCorrectionSeq)) return;
+      // A movement correction can be delayed behind the reliable furniture
+      // result that established the local activity. Such a correction is
+      // necessarily stale while an action owns the avatar: the authoritative
+      // server exits an activity through furnitureActivity/InteractionResult,
+      // not by sending a correction whose payload omits activity. Applying the
+      // delayed correction would teleport the actor back to its old stand and
+      // clear the accepted pose (notably the showroom's lounge sofa).
+      if (this.activity && serverPlayer.reason && !serverPlayer.activity) return;
       if (Number.isSafeInteger(serverPlayer.seq)) this._lastCorrectionSeq = serverPlayer.seq;
       // currentPlayers is an authoritative snapshot (transition/ejection/reconnect).
       this.player.setPosition(serverPlayer.x, serverPlayer.y);
@@ -3203,7 +3367,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         const actionId = (action) => typeof action === 'string' ? action : action?.id;
         const actionLabel = (action) => typeof action === 'object' && action?.label
           ? action.label
-          : ({ sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower', bathe: 'Bathe', watch: 'Watch TV' })[actionId(action)] || 'Use';
+          : ({
+            sit: 'Sit', lie: 'Lie down', sleep: 'Sleep', shower: 'Shower',
+            bathe: 'Bathe', watch: 'Watch TV', toggle_water: 'Turn on water',
+          })[actionId(action)] || 'Use';
         const primary = actionLabel(actions[0]);
         const secondaryAction = actions[1];
         const secondary = secondaryAction
@@ -3260,10 +3427,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       }
       const parkTarget = this._parkSeatPending === 'stand' ? this._parkSeatExitTarget
         : this._parkSeatPending === 'sit' ? this._parkSeatSitTarget : null;
-      movement?.tick(delta, this.location, {
-        x: parkTarget?.x ?? this.player.x, y: parkTarget?.y ?? this.player.y,
-        dir: parkTarget?.dir || this.playerDir, anim,
-      });
+      // Furniture activity owns an authoritative server anchor. Do not send
+      // periodic playerMove packets while an interaction is pending or while
+      // seated/lying in a showroom or home:
+      // commercial collision blockers do not exclude a showroom demo body, so
+      // echoing the action anchor would produce a correction without
+      // `activity`, and correctLocal() would immediately clear the accepted
+      // local activity. Explicit E/movement exits still send their reliable
+      // stand packet through _leaveFurnitureActivity().
+      if (!this.activity && !this._activityPending) {
+        movement?.tick(delta, this.location, {
+          x: parkTarget?.x ?? this.player.x, y: parkTarget?.y ?? this.player.y,
+          dir: parkTarget?.dir || this.playerDir, anim,
+        });
+      }
     }
 
     shutdown() {
@@ -3295,6 +3472,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.nearbyCashier = null;
       this.showroomFurniture?.forEach((object) => object?.destroy?.());
       this.showroomFurniture = [];
+      this.showroomInteractions?.clear?.();
       this.streetLotsVisual = null;
       this._streetPortalVisuals = null;
       this.localBubble = null;
@@ -3365,11 +3543,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       homePeople = [];
       homePeopleLoaded = false;
       activeHomePeopleRequestId = ++homePeopleRequestId;
+      // A transition changes the owner context. Never carry the previous
+      // home's full inventory/layout into a new address while its snapshot is
+      // still in flight.
+      homeState = null;
+      pendingReturnIds.clear();
       if (typeof result.self?.homeColor === 'string' || typeof result.homeColor === 'string') {
         ownExteriorColor = result.self?.homeColor || result.homeColor;
       }
       if (isHome()) {
-        homeState = result.home || homeState;
+        if (result.home) applyHomeState(result.home);
         editorOpen = !!homeState?.canEdit;
         requestDirectory();
         renderHome();

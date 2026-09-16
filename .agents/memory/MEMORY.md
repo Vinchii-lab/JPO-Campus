@@ -31,3 +31,4 @@
 - [Movement synchronization](jpo-huddle-movement-sync.md) — don't buffer walking samples; map-scoped corrections, separate client/server ordering, and explicit reconnect scene synchronization.
 - [Preview runtime verification](jpo-preview-runtime-verification.md) — verify live loaded code, not retained errors; update cooldowns must retry independently of gameplay sockets.
 - [Furniture pose verification](jpo-furniture-pose-proof.md) — use canonical action anchors and real wearable metadata; passing depth order alone does not prove a correct pose.
+- [Home layout safety](jpo-home-layout-safety.md) — snapshot reads must not repair/delete placements; version inventory changes too, and reconcile collision state after committed Store.

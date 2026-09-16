@@ -3657,6 +3657,17 @@ function indexedHomeLayoutBlockers(layout) {
     { ...placed, furniture_instance_id: placed.id, grid_x: placed.gridX, grid_y: placed.gridY },
   )).filter(Boolean);
 }
+function cacheHomeLayoutSnapshot(ownerEmail, snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.layout)) return false;
+  homeLayoutCollisionCache.set(ownerEmail, indexedHomeLayoutBlockers(snapshot.layout));
+  return true;
+}
+function removeHomeLayoutCacheInstance(ownerEmail, instanceId) {
+  const cached = homeLayoutCollisionCache.get(ownerEmail);
+  if (!cached) return;
+  homeLayoutCollisionCache.set(ownerEmail, cached.filter((block) =>
+    String(block.instanceId) !== String(instanceId)));
+}
 function homeBlockersFor(location) {
   return location?.kind === "home" ? (homeLayoutCollisionCache.get(location.ownerEmail) || []) : [];
 }
@@ -3681,7 +3692,7 @@ function filterPlayersForLocation(snapshot, locationId) {
 async function emitHomeSnapshotToOccupants(ownerEmail) {
   const locationId = `home:${ownerEmail}`;
   const ownerSnapshot = await homeSnapshot(pool, ownerEmail, ownerEmail);
-  homeLayoutCollisionCache.set(ownerEmail, indexedHomeLayoutBlockers(ownerSnapshot.layout));
+  cacheHomeLayoutSnapshot(ownerEmail, ownerSnapshot);
   for (const [id, viewer] of Object.entries(players)) {
     if (locationOf(viewer) !== locationId) continue;
     io.to(id).emit("homeSnapshot", await homeSnapshot(pool, ownerEmail, viewer.email));
@@ -9770,7 +9781,7 @@ io.on("connection", (socket) => {
           return false;
         }
         home = access.snapshot;
-        homeLayoutCollisionCache.set(target.ownerEmail, indexedHomeLayoutBlockers(home.layout));
+        cacheHomeLayoutSnapshot(target.ownerEmail, home);
       }
     } catch (err) {
       console.error("home access failed:", err);
@@ -10164,9 +10175,17 @@ io.on("connection", (socket) => {
       // No other home's snapshot is ever disclosed while on the shared street.
       const ownerEmail = parsed.id === "neighborhood" ? p.email : parsed.ownerEmail;
       const snapshot = await withHomeOperation(ownerEmail, async () => {
-        if (parsed.id === "neighborhood") return homeSnapshot(pool, ownerEmail, p.email);
+        const load = async () => {
+          const next = await homeSnapshot(pool, ownerEmail, p.email);
+          // A Store can commit before its broadcast read completes. Rebuild
+          // the movement blocker cache on every explicit refresh, while still
+          // holding the same per-home FIFO used by layout mutations.
+          cacheHomeLayoutSnapshot(ownerEmail, next);
+          return next;
+        };
+        if (parsed.id === "neighborhood") return load();
         const access = await homeAccess(pool, ownerEmail, p.email);
-        return access.ok ? homeSnapshot(pool, ownerEmail, p.email) : null;
+        return access.ok ? load() : null;
       });
       if (players[socket.id] === p && locationOf(p) === parsed.id && snapshot) socket.emit("homeSnapshot", snapshot);
     }
@@ -10306,7 +10325,8 @@ io.on("connection", (socket) => {
           return;
         }
         await client.query(
-          `UPDATE jpo_homes SET ${next[1]}=true, construction_updated_at=now(), updated_at=now() WHERE owner_email=$1`,
+          `UPDATE jpo_homes SET ${next[1]}=true, construction_updated_at=now(),
+             layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`,
           [p.email],
         );
         await client.query("COMMIT");
@@ -10412,6 +10432,14 @@ io.on("connection", (socket) => {
         `INSERT INTO jpo_home_furniture (owner_email, furniture_id) VALUES ($1,$2) RETURNING id`,
         [p.email, furnitureId],
       );
+      // Inventory is part of the full home snapshot. Advance the existing
+      // layout revision in the same transaction so a purchase snapshot cannot
+      // tie with, and be mistaken for, a stale Store/layout snapshot.
+      await client.query(
+        `UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now()
+         WHERE owner_email=$1`,
+        [p.email],
+      );
       await client.query("COMMIT");
       p.coins = debit.rows[0].coins;
       socket.emit("coinUpdate", { coins: p.coins });
@@ -10513,56 +10541,105 @@ io.on("connection", (socket) => {
 
   socket.on("homeLayoutReturn", async (payload) => {
     const p = players[socket.id], parsed = parseLocation(locationOf(p));
-    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId : "";
+    const instanceId = typeof payload?.instanceId === "string" ? payload.instanceId.trim() : "";
+    const instanceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const reject = (code, message) => socket.emit("homeActionResult", {
+      ok: false, code, instanceId: instanceId || null, message,
+    });
     if (p?.email && isHuddleTestIdentity(p.email)) {
-      socket.emit("homeActionResult", { ok: false, message: "Huddle test accounts do not have neighborhood homes." });
+      reject("test_account", "Huddle test accounts do not have neighborhood homes.");
       return;
     }
-    if (!p?.email || !((parsed?.kind === "home" && parsed.ownerEmail === p.email) ||
-      parsed?.id === "neighborhood") || !instanceId) return;
+    const ownerEmail = String(p?.email || "").trim().toLowerCase();
+    const placementZone = parsed?.kind === "home" && parsed.ownerEmail === ownerEmail
+      ? "indoor"
+      : parsed?.id === "neighborhood" ? "yard" : null;
+    if (!p?.email || !placementZone) {
+      reject("forbidden", "Only the owner can store furniture from this location.");
+      return;
+    }
+    if (!instanceIdPattern.test(instanceId)) {
+      reject("invalid", "That furniture selection is invalid.");
+      return;
+    }
     if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
-      socket.emit("homeActionResult", { ok: false, message: "Someone is using that furniture." });
+      reject("occupied", "Someone is using that furniture.");
       return;
     }
     try {
-      await withHomeOperation(p.email, async () => {
-      const client = await pool.connect();
-      try {
-      await client.query("BEGIN");
-      await ensureHome(client, p.email);
-      if (players[socket.id] !== p || locationOf(p) !== parsed.id) {
-        throw new Error("That layout request is no longer current.");
-      }
-      // Match placement's per-home row lock.  Without it a return racing a
-      // placement can publish revisions/snapshots in the wrong order.
-      await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [p.email]);
-       if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
-         throw new Error("Someone is using that furniture.");
-       }
-      const changed = await client.query(
-        `DELETE FROM jpo_home_layout_items l USING jpo_home_furniture f
-          WHERE l.furniture_instance_id=$1 AND f.id=l.furniture_instance_id AND f.owner_email=$2
-            AND ($3 <> 'neighborhood' OR l.placement_zone='yard')
-            AND ($3 <> 'home' OR l.placement_zone='indoor')
-          RETURNING l.furniture_instance_id`,
-        [instanceId, p.email, parsed?.kind || "home"],
-      );
-      if (!changed.rows[0]) throw new Error("That item is not placed in your home.");
-      await client.query(`UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now() WHERE owner_email=$1`, [p.email]);
-      await client.query("COMMIT");
-      await emitHomeSnapshotToOccupants(p.email);
-      socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
-      invalidateStreetHomes();
-      await refreshStreetHomes();
-      io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
-      socket.emit("homeActionResult", { ok: true, message: "Returned to inventory." });
-      } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw err;
-      } finally { client.release(); }
+      await withHomeOperation(ownerEmail, async () => {
+        const client = await pool.connect();
+        let committed = false;
+        try {
+          await client.query("BEGIN");
+          await ensureHome(client, ownerEmail);
+          if (players[socket.id] !== p || locationOf(p) !== parsed.id) {
+            throw Object.assign(new Error("That layout request is no longer current."), { code: "stale" });
+          }
+          // Match placement's per-home row lock. Without it, a return racing a
+          // placement could publish snapshots/revisions in the wrong order.
+          await client.query(`SELECT owner_email FROM jpo_homes WHERE owner_email=$1 FOR UPDATE`, [ownerEmail]);
+          if (parsed?.kind === "home" && furnitureOccupied(parsed.id, instanceId)) {
+            throw Object.assign(new Error("Someone is using that furniture."), { code: "occupied" });
+          }
+          // This is deliberately one targeted DELETE. The owned furniture row
+          // is not deleted: its missing layout row is the atomic inventory
+          // representation, so duplicate furniture ids remain independent.
+          const changed = await client.query(
+            `DELETE FROM jpo_home_layout_items l USING jpo_home_furniture f
+              WHERE l.furniture_instance_id=$1::uuid
+                AND l.home_owner_email=$2 AND f.id=l.furniture_instance_id
+                AND f.owner_email=$2 AND l.placement_zone=$3
+              RETURNING l.furniture_instance_id`,
+            [instanceId, ownerEmail, placementZone],
+          );
+          if (!changed.rows[0]) {
+            throw Object.assign(new Error("That item is no longer placed here."), { code: "not_placed" });
+          }
+          await client.query(
+            `UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now()
+             WHERE owner_email=$1`,
+            [ownerEmail],
+          );
+          await client.query("COMMIT");
+          committed = true;
+          // Do not leave an exact stale blocker active while the post-commit
+          // snapshot/read or street-cache refresh is in flight. A later
+          // homeSnapshotRequest rebuilds all blockers while holding the same
+          // home operation FIFO.
+          removeHomeLayoutCacheInstance(ownerEmail, instanceId);
+        } catch (err) {
+          if (!committed) await client.query("ROLLBACK").catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+        // The layout mutation is final after COMMIT. A failed snapshot/cache
+        // refresh must not turn a successful Store into a retryable error.
+        try {
+          await emitHomeSnapshotToOccupants(ownerEmail);
+          // Owners editing their yard are in Willow Walk, not the home room,
+          // so they are not included in the occupant fan-out above.
+          if (parsed?.id === "neighborhood") {
+            socket.emit("homeSnapshot", await homeSnapshot(pool, ownerEmail, ownerEmail));
+          }
+          invalidateStreetHomes();
+          await refreshStreetHomes();
+          io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
+        } catch (refreshError) {
+          console.error("home store committed; snapshot refresh failed:", refreshError);
+          socket.emit("homeActionResult", {
+            ok: true, instanceId, zone: placementZone, refreshPending: true,
+            message: "Returned to inventory.",
+          });
+          return;
+        }
+        socket.emit("homeActionResult", {
+          ok: true, instanceId, zone: placementZone, message: "Returned to inventory.",
+        });
       });
     } catch (err) {
-      socket.emit("homeActionResult", { ok: false, message: err.message || "Could not return that item." });
+      reject(err.code || "unavailable", err.message || "Could not return that item.");
     }
   });
 
@@ -10576,7 +10653,11 @@ io.on("connection", (socket) => {
     try {
       await withHomeOperation(p.email, async () => {
         await ensureHome(pool, p.email);
-        await pool.query(`UPDATE jpo_homes SET access_mode=$2, updated_at=now() WHERE owner_email=$1`, [p.email, mode]);
+        await pool.query(
+          `UPDATE jpo_homes SET access_mode=$2, layout_revision=layout_revision+1,
+             updated_at=now() WHERE owner_email=$1`,
+          [p.email, mode],
+        );
         socket.emit("homeAccessResult", { ok: true, mode });
         // Closing a home immediately removes visitors who no longer qualify.
         for (const [id, visitor] of Object.entries(players)) {
@@ -10625,7 +10706,8 @@ io.on("connection", (socket) => {
       await withHomeOperation(p.email, async () => {
         await ensureHome(pool, p.email);
         await pool.query(
-          `UPDATE jpo_homes SET exterior_color=$2, updated_at=now() WHERE owner_email=$1`,
+          `UPDATE jpo_homes SET exterior_color=$2, layout_revision=layout_revision+1,
+             updated_at=now() WHERE owner_email=$1`,
           [p.email, color],
         );
         // Snapshots are generated after the authoritative write and delivered
@@ -10660,6 +10742,11 @@ io.on("connection", (socket) => {
         await ensureHome(pool, p.email);
         await pool.query(`INSERT INTO jpo_home_invitations (owner_email, invitee_email) VALUES ($1,$2)
                           ON CONFLICT (owner_email, invitee_email) DO UPDATE SET active=true`, [p.email, email]);
+        await pool.query(
+          `UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now()
+           WHERE owner_email=$1`,
+          [p.email],
+        );
       });
       socket.emit("homeInviteResult", { ok: true, email });
     } catch (err) { socket.emit("homeInviteResult", { ok: false, message: "Could not save invitation." }); }
@@ -10674,6 +10761,11 @@ io.on("connection", (socket) => {
     try {
       await withHomeOperation(p.email, async () => {
         await pool.query(`DELETE FROM jpo_home_invitations WHERE owner_email=$1 AND invitee_email=$2`, [p.email, email]);
+        await pool.query(
+          `UPDATE jpo_homes SET layout_revision=layout_revision+1, updated_at=now()
+           WHERE owner_email=$1`,
+          [p.email],
+        );
         socket.emit("homeInviteResult", { ok: true, email, revoked: true });
         // A revoked invite ejects an already-present invite-only visitor.
         const home = await ensureHome(pool, p.email);

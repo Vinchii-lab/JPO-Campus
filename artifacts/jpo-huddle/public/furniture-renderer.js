@@ -321,7 +321,19 @@
       width: definition.width || 1, height: definition.height || 1,
     });
     object.setData?.("anchor", anchor);
-    object.setData?.("actions", Array.isArray(definition.actions) ? definition.actions : []);
+    const actions = Array.isArray(definition.actions) ? definition.actions : [];
+    object.setData?.("actions", actions);
+    object.setData?.("actionRadius", Number(definition.interaction?.radius) || 86);
+    object.setData?.("rotation", Number.isFinite(rotation) ? rotation : 0);
+    // Keep the catalog contract attached to the rendered object for activity
+    // effects and diagnostic tooling. Interaction admission still comes from
+    // the authoritative server, while this metadata lets every presentation
+    // path resolve the same action IDs/pose without guessing from asset names.
+    object.setData?.("interaction", {
+      anchor,
+      actions: actions.map((action) => typeof action === "string" ? action : action?.id).filter(Boolean),
+      orientation: definition.interaction?.orientation || null,
+    });
     object.setData?.("instanceId", options.instanceId == null ? null : String(options.instanceId));
     object.setData?.("floorAnchor", anchorY);
     object.setData?.("depth", depth);
