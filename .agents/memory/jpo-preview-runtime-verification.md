@@ -38,3 +38,9 @@ Discard Phaser return values inside browser-evaluation mutations; return only sm
 **Why:** Returning `scene.start(...)` implicitly from an arrow expression repeatedly disconnected the testing notebook without a page error. Using a braced callback with `return true` completed the same room transitions successfully. Scene managers are large cyclic object graphs, not useful test results.
 
 **How to apply:** Use `data => { game.scene.start('NeighborhoodScene', data); return true; }`, then inspect readiness/location in a separate evaluation returning a small plain object. Do not diagnose a test transport disconnect alone as an app runtime crash.
+
+Verify HUD controls with pointer hit tests, not just viewport bounds.
+
+**Why:** An inventory control was fully in view but covered by its own item popup on desktop and by the home editor on touch screens. A bounding-box-only assertion incorrectly treated it as usable.
+
+**How to apply:** Check the real element at each control's center while popups and existing panels are open. Verify touch viewport and canonical home hydration before interpreting a disabled placement action as an ownership bug.

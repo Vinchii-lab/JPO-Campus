@@ -94,6 +94,13 @@ reconciled collision state after committed removals.
 
 ## Coverage limits
 
+Additional automated checks in `tests/neighborhood/remaining-furniture-actions.mjs`
+cover all three sink water toggles, the rain shower, both televisions, both bed
+sleep actions, both sofa lie actions, and ottoman seating. These check actor-radius
+collisions, continuous approach paths, TV interaction rejection through a
+divider, and animation/effect start, stop, and reset. They exercise production
+geometry and renderer methods, not a live browser visit to every item.
+
 - No catalog row currently allows `90°`, `180°`, or `270°`; therefore there is
   no quarter-turn art contract to validate yet.
 - All 36 catalog rows and 39 fixed seats received geometry/metadata checks.

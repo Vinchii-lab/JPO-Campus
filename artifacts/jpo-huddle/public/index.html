@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="neighborhood.css?v=__BUILD_STAMP_TOKEN__">
+  <link rel="stylesheet" href="inventory-hotbar.css?v=__BUILD_STAMP_TOKEN__">
   <script>
     // Preserve the actual message/location when the preview reports an
     // ErrorEvent without an Error object (for example, a library string throw).
@@ -4011,6 +4012,7 @@
   <script src="furniture-renderer.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood-ui.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="inventory-hotbar.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script>
     const socket = io();
 
@@ -21084,6 +21086,27 @@
         _playerChar, _playerName, _playerEmail, _playerHairIdx, _playerSkinIdx,
         _playerShirtIdx, _playerPantsIdx, _equippedCosmetic, _equippedWings,
         _equippedSlots, _equippedPet, _equippedPetAcc, _bakedWearIds, _myPetXp, _petStageFor, _rosterList
+      }));
+    }
+    if (window.initInventoryHotbar) {
+      window.initInventoryHotbar(socket, () => ({
+        _playerEmail,
+        _ownedItems,
+        _playerItems,
+        _equippedCosmetic,
+        _equippedWings,
+        _equippedSlots,
+        _equippedPet,
+        _equippedPetAcc,
+        COSMETICS,
+        PETS,
+        PET_ACCESSORIES,
+        USABLES,
+        WEAR_SLOT,
+        equipItem,
+        equipPet,
+        equipPetAcc,
+        useItem
       }));
     }
     window._phaserGame = new Phaser.Game({

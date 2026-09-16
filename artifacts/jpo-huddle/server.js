@@ -74,7 +74,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "neighborhood.mjs", "movement-protocol.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -10160,6 +10160,50 @@ io.on("connection", (socket) => {
     socket.emit("furnitureDemoInteractionResult", {
       ok: true, phase: "start", activity, x: p.x, y: p.y, dir: p.dir,
     });
+  });
+
+  // The personal inventory is available outside a home, without disclosing the
+  // current host's belongings or creating/repairing any home rows on a read.
+  socket.on("playerFurnitureInventoryRequest", async (payload) => {
+    const p = players[socket.id];
+    const requestId = Number.isSafeInteger(payload?.requestId) ? payload.requestId : null;
+    const fail = (message) => socket.emit("playerFurnitureInventoryResult", { ok: false, requestId, message });
+    if (!p?.email) return fail("Sign in to load your inventory.");
+    if (socket._personalFurnitureLoading) return fail("Inventory is loading. Please try again.");
+    socket._personalFurnitureLoading = true;
+    try {
+      // One SQL snapshot keeps the revision and rows consistent even if a
+      // purchase or Store commits during this request.
+      const { rows } = await pool.query(
+        `SELECT COALESCE((SELECT layout_revision FROM jpo_homes WHERE owner_email=$1), 0) AS revision,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', f.id, 'furnitureId', f.furniture_id,
+            'zone', CASE WHEN l.furniture_instance_id IS NULL THEN 'stored'
+                         WHEN l.placement_zone='yard' THEN 'yard' ELSE 'indoor' END
+          ) ORDER BY f.acquired_at, f.id)
+          FROM jpo_home_furniture f
+          LEFT JOIN jpo_home_layout_items l ON l.furniture_instance_id=f.id
+          WHERE f.owner_email=$1), '[]'::json) AS items`,
+        [p.email],
+      );
+      if (players[socket.id] !== p) return;
+      const inventory = [], layout = [], yard = [];
+      for (const item of rows[0]?.items || []) {
+        if (!FURNITURE_CATALOG[item.furnitureId]) continue;
+        const view = { id: item.id, furnitureId: item.furnitureId };
+        (item.zone === "stored" ? inventory : item.zone === "yard" ? yard : layout).push(view);
+      }
+      socket.emit("playerFurnitureInventoryResult", {
+        ok: true, requestId, ownerEmail: p.email,
+        revision: Number(rows[0]?.revision || 0),
+        catalog: FURNITURE_CATALOG, inventory, layout, yard,
+      });
+    } catch (err) {
+      console.error("personal furniture inventory failed:", err);
+      if (players[socket.id] === p) fail("Could not load your furniture. Please try again.");
+    } finally {
+      socket._personalFurnitureLoading = false;
+    }
   });
 
   socket.on("homeSnapshotRequest", async () => {

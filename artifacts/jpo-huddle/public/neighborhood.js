@@ -72,6 +72,33 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let selectedRotation = 0;
   let selectedZone = 'indoor';
   let editorOpen = false;
+  // Bridge for bottom inventory hotbar
+  window.JpoNeighborhood = window.JpoNeighborhood || {};
+  window.JpoNeighborhood.canPlaceFurniture = () => {
+    const email = typeof globals === 'function' ? globals()._playerEmail : (window.globals ? window.globals()._playerEmail : null);
+    if (!email || !homeState?.canEdit) return false;
+    if (String(homeState.ownerEmail).trim().toLowerCase() !== String(email).trim().toLowerCase()) return false;
+    return currentLocation === 'neighborhood' || currentLocation === 'home:' + email;
+  };
+  window.JpoNeighborhood.placeFurniture = (id) => {
+    if (!window.JpoNeighborhood.canPlaceFurniture()) {
+      toast("You can only place furniture in your own home or yard.");
+      return;
+    }
+    const inv = homeState?.inventory || [];
+    if (!inv.some(i => String(i.id) === String(id))) {
+      toast("That item is no longer in your unplaced inventory.");
+      return;
+    }
+    teardownPlacement();
+    selectedInstance = id;
+    selectedRotation = 0;
+    selectedZone = currentLocation === 'neighborhood' ? 'yard' : 'indoor';
+    editorOpen = true;
+    toast('Click a valid spot to place.');
+    if (typeof renderHome === 'function') renderHome();
+  };
+
   // Store is an instance operation, not a layout replacement. Keep a small
   // client-side in-flight set so a double-click cannot submit the same stale
   // row twice while the authoritative snapshot is on its way back.
