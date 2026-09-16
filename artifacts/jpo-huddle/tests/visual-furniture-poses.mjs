@@ -37,10 +37,34 @@ const output = resolve(
   outputIndex >= 0 && args[outputIndex + 1] ? args[outputIndex + 1] : DEFAULT_OUTPUT,
 );
 const resetOutput = output.replace(/\.png$/i, "-reset.png");
+const chairOffsetIndex = args.indexOf("--chair-offset");
+const chairOffset = chairOffsetIndex >= 0 ? Number(args[chairOffsetIndex + 1]) : null;
+if (chairOffsetIndex >= 0 && !Number.isFinite(chairOffset)) {
+  throw new Error("--chair-offset must be a finite world-pixel offset");
+}
 
 const fixtureIds = ["plush_bed", "lounge_sofa", "oak_chair", "bathtub"];
 const fixtureCatalog = Object.fromEntries(
-  fixtureIds.map((id) => [id, FURNITURE_CATALOG[id]]),
+  fixtureIds.map((id) => {
+    const definition = FURNITURE_CATALOG[id];
+    // Comparison-only override for chair pose calibration. It deliberately
+    // preserves the real art, renderer, pose method, and source-row-21
+    // occluder while making the evaluated seat anchor explicit in the image.
+    if (id !== "oak_chair" || chairOffset == null) return [id, definition];
+    return [id, {
+      ...definition,
+      actionInteractions: {
+        ...definition.actionInteractions,
+        sit: {
+          ...definition.actionInteractions?.sit,
+          actorOffset: {
+            ...definition.actionInteractions?.sit?.actorOffset,
+            y: chairOffset,
+          },
+        },
+      },
+    }];
+  }),
 );
 const fixturePlacements = [
   { id: "fixture-bed", furnitureId: "plush_bed", gridX: 2, gridY: 3, action: "lie", label: "BED / LIE" },

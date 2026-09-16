@@ -78,6 +78,34 @@ export async function load(url, context, nextLoad) {
     '    x: qaSpawn?.x ?? officeSpawn.x, y: qaSpawn?.y ?? officeSpawn.y, dir: qaSpawn?.dir || officeSpawn.dir, anim: "idle",',
   );
 
+  // A normal restore intentionally sends a compact transition packet because
+  // the previous client session has already loaded its map catalog. The first
+  // QA owner restore is deliberately a cold direct Huddle Home entry, though,
+  // so it needs the same real catalog/showroom payload that a portal
+  // transition supplies. Without this narrow addition the client hides the
+  // legacy shop props before it can render replacement catalog chairs.
+  const resumeTransitionMarker = `  socket.emit("locationTransitionResult", {
+    ok: true, reason: "resume", location: state.locationId,
+    spawn: { x: state.x, y: state.y, dir: state.dir },
+    map: locationInfo(state.locationId), self: movementPayload(socket.id, state),
+    players: locationPlayers(socket.id),
+  });`;
+  if (!source.includes(resumeTransitionMarker)) {
+    throw new Error("real-game loader could not find restore transition marker");
+  }
+  source = source.replace(resumeTransitionMarker, `  socket.emit("locationTransitionResult", {
+    ok: true, reason: "resume", location: state.locationId,
+    spawn: { x: state.x, y: state.y, dir: state.dir },
+    map: locationInfo(state.locationId), self: movementPayload(socket.id, state),
+    players: locationPlayers(socket.id),
+    // This test-only seam applies only to its generated owner/guest accounts.
+    // It preserves production's compact restore packets for every other user.
+    catalog: (state.email === ${ownerLiteral} || state.email === ${guestLiteral}) &&
+      state.locationId === "furniture-shop" ? FURNITURE_CATALOG : undefined,
+    showroom: (state.email === ${ownerLiteral} || state.email === ${guestLiteral}) &&
+      state.locationId === "furniture-shop" ? furnitureShowroomDemos() : undefined,
+  });`);
+
   // Test-only canonical home bootstrap. A second owner restore can overlap
   // the production disconnect grace window from the showroom page; preserve
   // the loader's authored home spawn instead of restoring that old showroom

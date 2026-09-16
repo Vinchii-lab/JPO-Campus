@@ -887,17 +887,26 @@ export const FURNITURE_CATALOG = Object.freeze({
     // A fresh immutable URL is deliberate: the prior oak_chair.png points at
     // a firewood rack and is cached by production clients for 24 hours.
     path: "/assets/neighborhood/furniture/gold_armchair.png", frameWidth: 16, frameHeight: 32,
-    asset: "oak_chair", actions: ["sit"], interaction: { facing: "down" }, color: "#b98743",
+    asset: "oak_chair", actions: ["sit"], interaction: { facing: "down", radius: 96 }, color: "#b98743",
     actionInteractions: {
-      // Use the shared sit pivot; the cushion must remain behind the actor.
-      sit: { actorOffset: { x: 0, y: -26 } },
+      // The 32px source is a two-cell-tall silhouette on a one-cell saved
+      // footprint. Its front cushion begins at source row 21, above the
+      // physical floor row. Put the seated sprite's centre one source row
+      // higher than the former generic pivot: its full face and shirt/torso
+      // remain above the cushion while its folded legs are genuinely behind it.
+      // This is 24 world pixels (eight authored source pixels) above the
+      // prior -34 setting; the visual-pose comparison proves -54 still lets
+      // the cushion cross the lower face/neck, while -58 clears it.
+      sit: { actorOffset: { x: 0, y: -58 } },
     },
     activityPose: {
       sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
     },
-    // Source rows 19–31 are the real front cushion/legs, so they occlude
-    // only the lower sitter rather than putting the entire avatar behind it.
-    occluder: { default: { fromPx: 28, depthBias: 0.01 } },
+    // Source rows 21–31 are the armchair's front rail, cushion, and legs.
+    // Cropping at row 28 redrew only the feet, leaving a full standing body
+    // in front of the cushion. This lower layer deliberately covers the
+    // folded legs while preserving the sitter's torso and head.
+    occluder: { default: { fromPx: 21, depthBias: 0.01 } },
   }),
   fern: furniture({
     id: "fern", name: "Potted fern", price: 5000, category: "Living",

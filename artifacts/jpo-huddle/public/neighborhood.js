@@ -802,6 +802,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       // stale sprite can therefore lose the action metadata even while the
       // authoritative seven-demo payload is still current.
       this.showroomInteractions = new Map();
+      this._showroomFurnitureLoadPending = false;
       this.cashierNpcs = [];
       this.nearbyCashier = null;
       this._lastCorrectionSeq = -1;
@@ -954,6 +955,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.showroomFurniture?.forEach((object) => object?.destroy?.());
       this.showroomFurniture = [];
       this.showroomInteractions?.clear?.();
+      this._showroomFurnitureLoadPending = false;
       const transitionDemos = Array.isArray(data?.showroom) ? data.showroom : null;
       this.showroomDemos = transitionDemos?.length ? transitionDemos : showroomDemos;
       this.streetLotsVisual = null;
@@ -2078,6 +2080,42 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _drawFurnitureShowroom() {
+      const source = this.showroomDemos?.length ? this.showroomDemos : showroomDemos;
+      // The first location after approval can be Huddle Home. At that point
+      // Phaser has already completed NeighborhoodScene.preload before the
+      // server transition supplied its catalog, so a direct showroom entry
+      // previously created missing-texture display objects (and hid the
+      // legacy chairs) instead of real demos. Load only the catalog art this
+      // active showroom needs, then redraw through the normal renderer once
+      // Phaser has it. Home and later showroom entries already have these
+      // keys and continue synchronously below.
+      const renderer = window.HomeFurnitureRenderer;
+      const missingDefinitions = Object.fromEntries((source || []).flatMap((demo) => {
+        const definition = furnitureCatalog[demo?.furnitureId];
+        const key = renderer?.textureKey?.(definition);
+        return definition && key && !this.textures?.exists?.(key)
+          ? [[definition.id, definition]] : [];
+      }));
+      const missingKeys = Object.keys(missingDefinitions);
+      if (missingKeys.length) {
+        if (!this._showroomFurnitureLoadPending) {
+          this._showroomFurnitureLoadPending = true;
+          const queued = renderer?.preload?.(this, missingDefinitions) || [];
+          const redraw = () => {
+            this._showroomFurnitureLoadPending = false;
+            if (this.scene?.isActive?.() && this.location === 'furniture-shop') {
+              this._drawFurnitureShowroom();
+            }
+          };
+          if (queued.length) {
+            this.load.once(Phaser.Loader.Events.COMPLETE, redraw);
+            if (!this.load.isLoading?.()) this.load.start();
+          } else {
+            redraw();
+          }
+        }
+        return;
+      }
       // A showroom refresh can arrive while a local or remote visitor is
       // using a demo. Clear the old renderer target before destroying its
       // sprite, then rebind the authoritative activity to the replacement
@@ -2092,7 +2130,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.showroomFurniture = [];
       this.showroomInteractions?.clear?.();
       this._hideLegacyFurnitureShopObjects();
-      const source = this.showroomDemos?.length ? this.showroomDemos : showroomDemos;
       for (const rawDemo of source || []) {
         const demo = this._normaliseShowroomDemo(rawDemo);
         const definition = demo?.definition;

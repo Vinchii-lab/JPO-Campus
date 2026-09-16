@@ -3626,6 +3626,14 @@ const FURNITURE_SHOWROOM_DEMO_LAYOUT = Object.freeze([
   Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 490, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-sink", furnitureId: "bathroom_sink_tap", x: 760, y: 480, stand: { x: 760, y: 540, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-tv", furnitureId: "television", x: 500, y: 140, stand: { x: 500, y: 220, dir: "up" } }),
+  // These replace the four removed legacy `native_oak_chair` props at their
+  // original showroom floor anchors. They are real catalog instances, so the
+  // same sit anchor, down-facing seated sheet, and front-cushion occlusion
+  // used in homes are also exercised in Huddle Home.
+  Object.freeze({ instanceId: "showroom-oak-chair-1", furnitureId: "oak_chair", x: 200, y: 520, stand: { x: 200, y: 560, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-2", furnitureId: "oak_chair", x: 360, y: 520, stand: { x: 360, y: 560, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-3", furnitureId: "oak_chair", x: 600, y: 520, stand: { x: 600, y: 560, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-4", furnitureId: "oak_chair", x: 760, y: 520, stand: { x: 760, y: 560, dir: "down" } }),
 ]);
 
 function furnitureShowroomDemos() {

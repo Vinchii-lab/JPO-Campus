@@ -40,6 +40,11 @@
  *   REAL_GAME_QA=1 REAL_GAME_HOME_COFFEE_TABLE_ONLY=1 \
  *     node tests/neighborhood/real-game-furniture.mjs
  *
+ * Focused live gold-armchair poses only (home + Huddle Home, with an
+ * observing second session and before/seated/after close-ups):
+ *   REAL_GAME_QA=1 REAL_GAME_HOME_CHAIRS_ONLY=1 \
+ *     node tests/neighborhood/real-game-furniture.mjs
+ *
  * The QA opt-in is required. DATABASE_URL is read by pg/server.js but never
  * printed. This test is intentionally bounded to four minutes by default;
  * it is not a long browser journey.
@@ -70,6 +75,7 @@ const ARTIFACT_ROOT = resolve(HERE, "../..");
 const SERVER_FILE = join(ARTIFACT_ROOT, "server.js");
 const LOADER_FILE = join(HERE, "real-game-furniture-loader.mjs");
 const COFFEE_TABLE_FOCUS_ONLY = process.env.REAL_GAME_HOME_COFFEE_TABLE_ONLY === "1";
+const CHAIR_FOCUS_ONLY = process.env.REAL_GAME_HOME_CHAIRS_ONLY === "1";
 const QA_LAYOUT_FOR_FOCUS = [
   { furnitureId: "oak_chair", gridX: 13, gridY: 14, instanceId: "qa-chair-a" },
   { furnitureId: "oak_chair", gridX: 16, gridY: 14, instanceId: "qa-chair-b" },
@@ -320,12 +326,16 @@ async function startLocalServer() {
   const port = await reservePort();
   const loaderOption = `--experimental-loader=${LOADER_FILE}`;
   const nodeOptions = [process.env.NODE_OPTIONS, loaderOption].filter(Boolean).join(" ");
-  const focusFurniture = process.env.REAL_GAME_HOME_BATH_ONLY === "1"
+  const focusFurniture = CHAIR_FOCUS_ONLY
+    ? "oak_chair"
+    : process.env.REAL_GAME_HOME_BATH_ONLY === "1"
     ? "bathtub"
     : process.env.REAL_GAME_HOME_BED_ONLY === "1"
       ? "plush_bed"
       : null;
-  const focusAction = focusFurniture === "bathtub" ? "bathe" : "lie";
+  const focusAction = focusFurniture === "oak_chair"
+    ? "sit"
+    : focusFurniture === "bathtub" ? "bathe" : "lie";
   // coffee_table has no action by design. Start north of its collision edge;
   // the focused test walks into that edge using the real client input path.
   const focusSpawn = COFFEE_TABLE_FOCUS_ONLY
@@ -624,6 +634,117 @@ async function screenshot(page, name) {
   await page.screenshot({ path: output });
   console.log(`  screenshot: ${output}`);
   return output;
+}
+
+async function screenshotChairCloseup(page, name, instanceId) {
+  const output = join(OUTPUT_DIR, `${name}.png`);
+  const target = await page.evaluate((wantedInstanceId) => {
+    const scene = window._neighborhoodScene;
+    const chair = [...(scene?.furniture || []), ...(scene?.showroomFurniture || [])]
+      .find((sprite) => String(sprite.getData?.("instanceId") || "") === wantedInstanceId);
+    const canvas = scene?.game?.canvas;
+    const camera = scene?.cameras?.main;
+    const rect = canvas?.getBoundingClientRect?.();
+    if (!chair || !camera || !rect) return null;
+    // Camera.worldView and zoom are the production camera's own world→canvas
+    // contract. Derive the Puppeteer crop from them instead of assuming the
+    // avatar happens to be centered on a particular viewport.
+    return {
+      x: Number(rect.left) + (Number(chair.x) - Number(camera.worldView.x)) * Number(camera.zoom),
+      y: Number(rect.top) + (Number(chair.y) - Number(camera.worldView.y)) * Number(camera.zoom),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  }, String(instanceId));
+  if (!target) throw new Error(`cannot capture close-up: chair ${instanceId} is not rendered`);
+  const width = Math.min(360, Number(target.viewportWidth));
+  const height = Math.min(360, Number(target.viewportHeight));
+  await page.screenshot({
+    path: output,
+    clip: {
+      x: Math.max(0, Math.min(Number(target.viewportWidth) - width, target.x - width / 2)),
+      y: Math.max(0, Math.min(Number(target.viewportHeight) - height, target.y - height / 2)),
+      width,
+      height,
+    },
+  });
+  console.log(`  chair close-up: ${output}`);
+  return output;
+}
+
+async function chairPresentation(page, instanceId) {
+  return page.evaluate((wantedInstanceId) => {
+    const scene = window._neighborhoodScene;
+    const chair = [...(scene?.furniture || []), ...(scene?.showroomFurniture || [])]
+      .find((sprite) => String(sprite.getData?.("instanceId") || "") === wantedInstanceId);
+    const remote = Object.values(scene?.remotes || {}).find((entry) =>
+      String(entry?.activity?.instanceId || "") === wantedInstanceId);
+    const local = String(scene?.activity?.instanceId || "") === wantedInstanceId;
+    const entry = local ? {
+      sprite: scene?.player, activity: scene?.activity, dir: scene?.playerDir,
+      playerTexKey: scene?.playerTexKey,
+    } : remote;
+    const actor = entry?.sprite;
+    const front = chair?.getData?.("occluderParts")?.[0];
+    const anchor = chair && scene?._furnitureActionAnchor?.(chair, "sit");
+    const occluder = chair?.getData?.("occluderConfig") || null;
+    const sourceFrom = Number(occluder?.fromPx);
+    const sourceHeight = Number(chair?.frame?.height);
+    const frontTop = Number.isFinite(sourceFrom) && sourceHeight > sourceFrom
+      ? Number(chair.y) - (sourceHeight - sourceFrom) * Math.abs(Number(chair.scaleY) || 1)
+      : null;
+    return {
+      role: local ? "local" : remote ? "remote" : null,
+      activity: entry?.activity ? {
+        instanceId: entry.activity.instanceId,
+        furnitureId: entry.activity.furnitureId,
+        action: entry.activity.action,
+      } : null,
+      actor: actor ? {
+        x: Number(actor.x), y: Number(actor.y), depth: Number(actor.depth),
+        angle: Number(actor.angle), scaleX: Number(actor.scaleX), scaleY: Number(actor.scaleY),
+        texture: actor.texture?.key || null,
+        animation: actor.anims?.currentAnim?.key || null,
+        frame: actor.frame?.name ?? actor.frame?.index ?? null,
+      } : null,
+      chair: chair ? {
+        x: Number(chair.x), y: Number(chair.y), depth: Number(chair.depth),
+        floorAnchor: Number(chair.getData?.("floorAnchor")),
+        frame: { width: Number(chair.frame?.width), height: Number(chair.frame?.height) },
+        occluder,
+        frontDepth: Number(front?.depth),
+        frontTop,
+      } : null,
+      anchor: anchor ? { x: Number(anchor.x), y: Number(anchor.y) } : null,
+      expectedAnimation: entry?.playerTexKey || entry?.texture
+        ? `sit_${entry.playerTexKey || entry.texture}_down` : null,
+    };
+  }, String(instanceId));
+}
+
+function assertSeatedChairPresentation(report, label) {
+  console.log(`  ${label} chair presentation: ${JSON.stringify(report)}`);
+  requireOk(report.role === "local" || report.role === "remote",
+    `${label} has a live seated actor`);
+  requireOk(report.activity?.furnitureId === "oak_chair" && report.activity?.action === "sit",
+    `${label} retains the gold-armchair sit activity`);
+  requireOk(report.actor?.animation === report.expectedAnimation,
+    `${label} uses the authored down-facing seated animation`);
+  requireOk(/^pl_sit_down_/.test(String(report.actor?.texture || "")),
+    `${label} renders the authored down-facing sit3 texture, not a standing sheet`);
+  requireOk(report.anchor &&
+    Math.abs(report.actor.x - report.anchor.x) < 0.01 &&
+    Math.abs(report.actor.y - report.anchor.y) < 0.01,
+  `${label} remains pinned to the authoritative chair anchor`);
+  requireOk(report.actor?.angle === 0 && report.actor?.scaleX === 3 && report.actor?.scaleY === 3,
+    `${label} keeps the upright seated pose without scale/angle drift`);
+  requireOk(report.chair?.occluder?.fromPx === 21 && report.chair?.frame?.height === 32,
+    `${label} uses the real source-row-21 armchair front cushion`);
+  requireOk(report.actor?.depth > report.chair?.depth &&
+    report.actor?.depth < report.chair?.frontDepth,
+  `${label} is between the chair back and front cushion`);
+  requireOk(report.actor?.y < report.chair?.frontTop,
+    `${label} keeps the actor centre above the front cushion`);
 }
 
 async function captureFatalEvidence(error) {
@@ -2091,6 +2212,95 @@ async function homeInteractionsOnlyPass(baseUrl) {
   await homeFurniturePass({ expectedPlaced: 4, requireStoreState: false, useGuest: false });
 }
 
+async function chairOnlyPass(baseUrl) {
+  const showroomChairId = "showroom-oak-chair-1";
+  stage("focused Huddle Home gold-armchair bootstrap");
+  ownerPage.__realGameBaseUrl = baseUrl;
+  await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
+  await installEventCapture(ownerPage);
+  await waitForLocation(ownerPage, "furniture-shop");
+  await ownerPage.waitForFunction(
+    (wantedId) => (window._neighborhoodScene?.showroomFurniture || []).some((sprite) =>
+      String(sprite.getData?.("instanceId") || "") === wantedId),
+    { timeout: boundedTimeout(20_000) },
+    showroomChairId,
+  );
+  const showroomChairs = await ownerPage.evaluate(() => (window._neighborhoodScene?.showroomFurniture || [])
+    .filter((sprite) => sprite.getData?.("furnitureId") === "oak_chair")
+    .map((sprite) => String(sprite.getData?.("instanceId") || "")));
+  requireOk(showroomChairs.length === 4,
+    "Huddle Home replaces all four legacy gold chairs with catalog demos");
+  // The real furniture-shop collision body stops the actor at the chair's
+  // visible front edge (about 32px before this authored stand), which is
+  // still inside both the client prompt and server's 96px action radius.
+  await moveTo(ownerPage, 200, 560, "focused showroom chair approach", 48);
+  await screenshotChairCloseup(ownerPage, "showroom-gold-chair-before", showroomChairId);
+  await pressFurnitureAction(ownerPage, "sit");
+  assertSeatedChairPresentation(
+    await chairPresentation(ownerPage, showroomChairId),
+    "local showroom",
+  );
+  await screenshotChairCloseup(ownerPage, "showroom-gold-chair-seated", showroomChairId);
+  await exitFurnitureAction(ownerPage);
+  const showroomAfter = await chairPresentation(ownerPage, showroomChairId);
+  requireOk(showroomAfter.activity === null,
+    "showroom E Stand clears the local chair activity");
+  await screenshotChairCloseup(ownerPage, "showroom-gold-chair-after", showroomChairId);
+  await walkAwayFromFurniture(ownerPage, "ArrowRight", "focused showroom chair exit");
+
+  // The first exact-owner restore intentionally starts in the showroom. A new
+  // owner session is the existing harness's canonical real-home entry seam;
+  // use a second browser context so the observer never shares local pose state.
+  await ownerPage.close();
+  ownerContext = await browser.createIncognitoBrowserContext();
+  ownerPage = await createPage(ownerContext, "owner-chair-focus");
+  ownerPage.__realGameBaseUrl = baseUrl;
+  await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
+  await installEventCapture(ownerPage);
+  const ownerSnapshot = await assertRenderedHomeCatalog(ownerPage, "focused chair home");
+  const homeChair = ownerSnapshot.layout.find((item) => item.furnitureId === "oak_chair");
+  requireOk(homeChair?.id, "focused home contains a real gold-armchair UUID");
+
+  stage("focused home gold-armchair observer bootstrap");
+  await registerThroughUi(guestPage, GUEST_EMAIL, "QA Visitor");
+  await installEventCapture(guestPage);
+  await assertRenderedHomeCatalog(guestPage, "focused chair observer");
+  await walkToHomeAction(ownerPage, "oak_chair", "sit", "focused home chair approach",
+    homeChair.id, { tight: true });
+  await screenshotChairCloseup(ownerPage, "home-gold-chair-before", homeChair.id);
+  await pressFurnitureAction(ownerPage, "sit");
+  assertSeatedChairPresentation(
+    await chairPresentation(ownerPage, homeChair.id),
+    "local home",
+  );
+  await guestPage.waitForFunction(
+    (wantedId) => Object.values(window._neighborhoodScene?.remotes || {}).some((entry) =>
+      String(entry?.activity?.instanceId || "") === wantedId),
+    { timeout: boundedTimeout(15_000) },
+    String(homeChair.id),
+  );
+  assertSeatedChairPresentation(
+    await chairPresentation(guestPage, homeChair.id),
+    "second-session home observer",
+  );
+  await screenshotChairCloseup(ownerPage, "home-gold-chair-seated-local", homeChair.id);
+  await screenshotChairCloseup(guestPage, "home-gold-chair-seated-observer", homeChair.id);
+  await exitFurnitureAction(ownerPage);
+  const homeAfter = await chairPresentation(ownerPage, homeChair.id);
+  requireOk(homeAfter.activity === null && homeAfter.role === null,
+    "home E Stand clears the gold-armchair activity before walking");
+  await screenshotChairCloseup(ownerPage, "home-gold-chair-after", homeChair.id);
+  await walkAwayFromFurniture(ownerPage, "ArrowRight", "focused home chair exit");
+
+  const browserErrors = [
+    ...(ownerPage.__realGameErrors || []),
+    ...(guestPage.__realGameErrors || []),
+  ];
+  requireOk(browserErrors.length === 0,
+    `focused chair pages have no browser/console errors${
+      browserErrors.length ? ` (${browserErrors.join(" ; ")})` : ""}`);
+}
+
 async function homeBedBathOnlyPass(baseUrl) {
   stage("owner home bootstrap for focused bed/bath interactions");
   ownerPage.__realGameBaseUrl = baseUrl;
@@ -2515,6 +2725,10 @@ async function run() {
   }
   if (COFFEE_TABLE_FOCUS_ONLY) {
     await coffeeTableCollisionOnlyPass(baseUrl);
+    return;
+  }
+  if (CHAIR_FOCUS_ONLY) {
+    await chairOnlyPass(baseUrl);
     return;
   }
   if (process.env.REAL_GAME_HOME_BED_BATH_ONLY === "1" ||

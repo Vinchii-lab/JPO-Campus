@@ -113,15 +113,19 @@ const chair = FURNITURE_CATALOG.oak_chair;
 assert.equal(validPlacement(chair, 13, 5, 0, []), true,
   "a clear home cell accepts a sit-capable chair");
 const chairAnchor = furnitureActionAnchor(chair, 13, 5, HOME_GRID.cell, "sit");
-assert.deepEqual(chairAnchor, { x: 648, y: 248, dir: "down" },
-  "chair sit anchor uses the authored seat pad offset");
+assert.deepEqual(chairAnchor, { x: 648, y: 216, dir: "down" },
+  "chair sit anchor keeps the full face and torso above the armchair cushion");
+assert.equal(furnitureActionDefinition(chair, "sit").radius, 96,
+  "chair admission includes the showroom's authored approach stand");
+assert.deepEqual(chair.occluder?.default, { fromPx: 21, depthBias: 0.01 },
+  "chair front layer starts at the actual cushion rail, not only its feet");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, []), true,
   "server path check accepts an action anchor when its own blocker is excluded");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
   x: 13 * HOME_GRID.cell, y: 5 * HOME_GRID.cell,
   width: HOME_GRID.cell, height: HOME_GRID.cell,
-}]), false,
-  "server path check rejects the same anchor when the target blocker is retained");
+}]), true,
+  "raised chair anchor sits above the saved one-cell blocker instead of inside it");
 assert.ok(furnitureActionStandCandidates(chair, 13, 5).some((point) =>
   validLocationMove(home, point.x, point.y, [])),
   "at least one authoritative exit stand is walkable");
@@ -203,6 +207,9 @@ assert.match(serverSource, /furnitureShowroomRequest/,
   "furniture shop exposes server-provided real catalog demo placements");
 assert.match(serverSource, /furnitureDemoInteract/,
   "showroom pieces have a server-authoritative interaction path");
+assert.match(serverSource,
+  /showroom-oak-chair-1[\s\S]{0,120}furnitureId: "oak_chair"[\s\S]{0,900}showroom-oak-chair-4/,
+  "Huddle Home exposes all four former gold-chair floor anchors as real catalog demos");
 assert.match(serverSource, /showroom-bath[\s\S]{0,180}bathtub/,
   "the showroom demonstrates the real bath entry rather than only listing it for sale");
 assert.match(serverSource, /const showroomLocation = parseLocation\(locationId\)[\s\S]{0,420}validLocationMove\(showroomLocation, demoAnchor\.x, demoAnchor\.y\)[\s\S]{0,240}furniturePathClear\(showroomLocation, p, demoAnchor/,

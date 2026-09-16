@@ -9,6 +9,12 @@ Verify furniture activities using the shared action-anchor calculation and actua
 
 **How to apply:** Render real furniture frames and avatar sheets through production pose methods. Check mattress/pillow alignment, seat-pad placement, visible head above the bath rim, and wearable attachment. Verify reset of angle, scale, effects, and depth for local and remote actors after leaving.
 
+Align a sitter's visible hips with the cushion, not the sprite pivot. Require the full face and torso to remain visible above the chair front.
+
+**Why:** Moving the front mask could hide the standing-looking legs while also covering the lower face and entire torso. A successful Sit event, correct animation, and correct depth all passed despite that visibly wrong pose.
+
+**How to apply:** Compare bounded seat-height alternatives using the real avatar before adjusting the front mask, then inspect live local and observer close-ups. Do not accept a head-only silhouette as a successful seated pose.
+
 An isolated pose render is not proof that live furniture interactions work.
 
 **Why:** Pose screenshots passed while the regular scene update could overwrite poses, legacy invisible showroom blockers remained, and the live nearby-action detector could return no target at a valid authored stand.
