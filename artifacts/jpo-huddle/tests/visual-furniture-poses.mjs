@@ -55,10 +55,9 @@ const fixtureIds = ["plush_bed", "lounge_sofa", "oak_chair", "bathtub"];
 const fixtureCatalog = Object.fromEntries(
   fixtureIds.map((id) => {
     const definition = FURNITURE_CATALOG[id];
-    // Comparison-only override for chair pose calibration. It deliberately
-    // preserves the real art, renderer, pose method, and source-row-21
-    // occluder while making the evaluated native scale and seat anchor
-    // explicit in the image.
+    // Comparison-only override for HQ stool pose calibration. It deliberately
+    // preserves the real art, renderer, and pose method while making the
+    // evaluated native scale and exact seat anchor explicit in the image.
     if (id !== "oak_chair" || (chairOffset == null && chairScale == null)) return [id, definition];
     return [id, {
       ...definition,
@@ -81,7 +80,7 @@ const fixtureCatalog = Object.fromEntries(
 const fixturePlacements = [
   { id: "fixture-bed", furnitureId: "plush_bed", gridX: 2, gridY: 3, action: "lie", label: "BED / LIE" },
   { id: "fixture-sofa", furnitureId: "lounge_sofa", gridX: 8, gridY: 4, action: "sit", label: "SOFA / SIT" },
-  { id: "fixture-chair", furnitureId: "oak_chair", gridX: 13, gridY: 4, action: "sit", label: "CHAIR / SIT" },
+  { id: "fixture-chair", furnitureId: "oak_chair", gridX: 13, gridY: 4, action: "sit", label: "HQ STOOL / SIT" },
   { id: "fixture-bath", furnitureId: "bathtub", gridX: 17, gridY: 4, action: "bathe", label: "BATH / BATHE" },
 ].map((placement) => ({
   ...placement,
@@ -446,10 +445,14 @@ async function main() {
       const scene = window.__fixtureScene;
       const active = scene.__fixtureActive;
       const activeChecks = active.map((item) => {
-        if (!(item.occluderCount > 0)) throw new Error(
+        const expectsFrontOccluder = item.furnitureId !== 'oak_chair';
+        if (expectsFrontOccluder && !(item.occluderCount > 0)) throw new Error(
           `${item.furnitureId} did not create its explicit front occluder`,
         );
-        if (!(item.actorDepth < item.frontDepth)) throw new Error(
+        if (!expectsFrontOccluder && item.occluderCount !== 0) throw new Error(
+          'HQ gold stool incorrectly created an armchair-style front occluder',
+        );
+        if (expectsFrontOccluder && !(item.actorDepth < item.frontDepth)) throw new Error(
           `${item.furnitureId} actor is not between the furniture base and front row`,
         );
         if (!item.effectActive) throw new Error(

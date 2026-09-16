@@ -808,3 +808,17 @@ mtime_ms = 1789590450475
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/d5cec036-0bb3-43a4-8451-61b3b8f2d65c/b29eaf02-66b4-4dda-87d3-0eaac44ed9c1"
 storage_version_token = "1789590519147231"
 content_type = "image/png"
+
+[[outputs]]
+id = "ycaoRA0J-OyLag3n9Nb5K"
+uri = "file://artifacts/jpo-huddle/tests/evidence/hq-stool-final/placed-chair-reload-interactive-seated.png"
+type = "image"
+title = "Actual HQ stool reused in the home"
+description = "Verified gameplay using the original HQ sprite, original scale, and matching seated position."
+logical_id = "67ac95a2-690d-491a-a4a7-a65fabe97ebc"
+content_hash = "sha256:445e9fac29ae6b81c9a3f4f328621a64d1c1088987ac65eaa495bef4f2430b6b"
+size = 11552
+mtime_ms = 1789591886239
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/67ac95a2-690d-491a-a4a7-a65fabe97ebc/db4c8698-7a15-434e-abe8-fd6f83760efe"
+storage_version_token = "1789591991721885"
+content_type = "image/png"

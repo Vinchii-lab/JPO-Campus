@@ -42,6 +42,7 @@ const DEFAULT_ACTION = Object.freeze({
   facing: "down",
   radius: 86,
 });
+const ACTION_FACINGS = new Set(["up", "down", "left", "right", "approach"]);
 
 function actionId(value) {
   return typeof value === "string" ? value : value?.id;
@@ -83,6 +84,18 @@ export function furnitureActionAnim(action) {
   return FURNITURE_ACTIONS[actionId(action)]?.anim || null;
 }
 
+// Catalog actions are trusted project data, but this seam also prevents a
+// malformed facing from becoming an invalid public player direction. `approach`
+// deliberately resolves only when the authoritative server supplies the
+// player's current cardinal direction; geometry-only callers retain `down`.
+export function furnitureActionFacing(action, approachDirection = "down") {
+  const configured = typeof action?.facing === "string" ? action.facing : "down";
+  if (!ACTION_FACINGS.has(configured)) return "down";
+  if (configured !== "approach") return configured;
+  return ACTION_FACINGS.has(approachDirection) && approachDirection !== "approach"
+    ? approachDirection : "down";
+}
+
 export function furnitureActionAnchor(item, gridX, gridY, cell = 48, actionId = "sit") {
   const width = Number(item?.width) > 0 ? Number(item.width) : 1;
   const height = Number(item?.height) > 0 ? Number(item.height) : 1;
@@ -122,7 +135,7 @@ export function furnitureActionAnchor(item, gridX, gridY, cell = 48, actionId = 
   return {
     x: x + xOffset,
     y: baseY + yOffset,
-    dir: action.facing || "down",
+    dir: furnitureActionFacing(action),
   };
 }
 

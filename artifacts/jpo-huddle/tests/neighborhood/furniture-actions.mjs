@@ -18,6 +18,7 @@ import {
 import {
   furnitureActionAnchor,
   furnitureActionDefinition,
+  furnitureActionFacing,
   furnitureActionPathClear,
   furnitureActionStandCandidates,
   furnitureActionWithinRadius,
@@ -205,12 +206,18 @@ const chair = FURNITURE_CATALOG.oak_chair;
 assert.equal(validPlacement(chair, 13, 5, 0, []), true,
   "a clear home cell accepts a sit-capable chair");
 const chairAnchor = furnitureActionAnchor(chair, 13, 5, HOME_GRID.cell, "sit");
-assert.deepEqual(chairAnchor, { x: 648, y: 227, dir: "down" },
-  "chair sit anchor aligns 3× avatar hips to the 2× armchair pad");
+assert.deepEqual(chairAnchor, { x: 648, y: 237, dir: "down" },
+  "HQ stool home anchor equals the HQ GID 2231 tile center minus BODY_DY");
+assert.equal(furnitureActionDefinition(chair, "sit").facing, "approach",
+  "HQ stool has no intrinsic front and retains the approach direction");
+assert.equal(furnitureActionFacing(furnitureActionDefinition(chair, "sit"), "left"), "left",
+  "server validates and forwards a cardinal approach direction for the HQ stool");
+assert.equal(furnitureActionFacing({ facing: "invalid" }, "left"), "down",
+  "malformed catalog direction falls back to a safe cardinal default");
 assert.equal(furnitureActionDefinition(chair, "sit").radius, 96,
   "chair admission includes the showroom's authored approach stand");
-assert.deepEqual(chair.occluder?.default, { fromPx: 21, depthBias: 0.01 },
-  "chair front layer starts at the actual cushion rail, not only its feet");
+assert.equal(chair.occluder, undefined,
+  "low HQ stool has no invented armchair front-rail occluder");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, []), true,
   "server path check accepts an action anchor when its own blocker is excluded");
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
@@ -230,7 +237,7 @@ const chairBesidePlumTable = {
 const chairSideStands = furnitureActionStandCandidates(chair, 13, 5, HOME_GRID.cell, "sit")
   .filter((point) => validLocationMove(home, point.x, point.y, [chairBesidePlumTable]));
 assert.ok(chairSideStands.length > 0,
-  "a gold armchair beside a plum low table retains a collision-valid approach");
+  "an HQ gold stool beside a plum low table retains a collision-valid approach");
 for (const approach of chairSideStands.slice(0, 2)) {
   assert.equal(furnitureActionWithinRadius(approach, chairAnchor, 96), true,
     "each clear neighboring-table approach is inside the real Sit radius");

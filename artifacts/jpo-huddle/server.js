@@ -53,6 +53,7 @@ import {
   furnitureActionDefinition,
   furnitureActionDefinitions,
   furnitureActionAnchor,
+  furnitureActionFacing,
   furnitureActionStandCandidates,
   actionEffectKind,
   furnitureIsOccupied,
@@ -3635,8 +3636,8 @@ const FURNITURE_SHOWROOM_DEMO_LAYOUT = Object.freeze([
   Object.freeze({ instanceId: "showroom-tv", furnitureId: "television", x: 500, y: 140, stand: { x: 500, y: 220, dir: "up" } }),
   // These replace the four removed legacy `native_oak_chair` props at their
   // original showroom floor anchors. They are real catalog instances, so the
-  // same sit anchor, down-facing seated sheet, and front-cushion occlusion
-  // used in homes are also exercised in Huddle Home.
+  // same HQ stool anchor and approach-facing seated sheet used in homes are
+  // also exercised in Huddle Home.
   Object.freeze({ instanceId: "showroom-oak-chair-1", furnitureId: "oak_chair", x: 200, y: 520, stand: { x: 200, y: 544, dir: "down" } }),
   Object.freeze({ instanceId: "showroom-oak-chair-2", furnitureId: "oak_chair", x: 360, y: 520, stand: { x: 360, y: 544, dir: "down" } }),
   Object.freeze({ instanceId: "showroom-oak-chair-3", furnitureId: "oak_chair", x: 600, y: 520, stand: { x: 600, y: 544, dir: "down" } }),
@@ -3651,8 +3652,8 @@ function furnitureShowroomDemos() {
       ...demo,
       // Keep the showroom approach/exit point derived from the active catalog
       // action rather than preserving a pixel nudge from an earlier sprite
-      // scale. In particular, the 2x gold armchair's authored sit pad changed
-      // while its saved one-cell footprint did not.
+      // scale. In particular, the HQ gold stool's authoritative seat point is
+      // art-relative while its saved one-cell footprint remains unchanged.
       stand: furnitureShowroomStand(demo, definition),
       footprint: { ...(definition.footprint || { width: definition.width, height: definition.height }) },
       category: definition.category,
@@ -10130,7 +10131,9 @@ io.on("connection", (socket) => {
         };
         p.x = anchor.x;
         p.y = anchor.y;
-        p.dir = action.facing || "down";
+        // HQ's round stool has no intrinsic front: preserve the cardinal
+        // direction from which this authoritative player approached it.
+        p.dir = furnitureActionFacing(action, p.dir);
         p.anim = action.anim;
         p.activity = activity;
         return { ok: true, activity };
@@ -10272,7 +10275,7 @@ io.on("connection", (socket) => {
     };
     p.x = demoAnchor.x;
     p.y = demoAnchor.y;
-    p.dir = action.facing || demo.stand.dir || "down";
+    p.dir = furnitureActionFacing(action, p.dir || demo.stand.dir);
     p.anim = action.anim;
     p.activity = activity;
     emitToLocation(locationId, "furnitureActivity", furnitureActivityPayload(socket.id, "start", activity, p));

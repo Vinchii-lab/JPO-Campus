@@ -12,7 +12,7 @@ stand-to-anchor path.
 
 | Item | Supported action(s) |
 | --- | --- |
-| Gold armchair | Sit |
+| HQ gold stool | Sit |
 | Cream lounge sofa | Sit, lie |
 | Ivory reading sofa | Sit, lie |
 | Porcelain kitchen sink | Toggle water |

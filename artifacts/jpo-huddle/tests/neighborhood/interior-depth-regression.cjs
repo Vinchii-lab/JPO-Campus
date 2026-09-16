@@ -45,8 +45,8 @@ function display(key, x = 0, y = 0) {
   };
 }
 
-// The dedicated renderer must preserve the supplied floor anchor and split a
-// seat's front row without changing the base sprite's persisted footprint.
+// The dedicated renderer must preserve the supplied floor anchor for the
+// low HQ stool without inventing the former armchair foreground rail.
 const rendererContext = {
   console,
   window: {
@@ -78,25 +78,14 @@ const rendererScene = {
 const chair = renderer.draw(rendererScene, {
   id: 'oak_chair',
   actions: ['sit'],
-  occluder: { default: { fromPx: 19, depthBias: 0.01 } },
-  frames: { frameWidth: 16, frameHeight: 32, frameCount: 1, initialFrame: 0 },
+  frames: { frameWidth: 16, frameHeight: 16, frameCount: 1, initialFrame: 0 },
 }, 240, 288, { depth: 288 });
-assert.equal(chair.getData('floorAnchor'), 288, 'chair retains its contact anchor');
-assert.equal(chair.depth, 288, 'chair base sorts at the contact anchor');
+assert.equal(chair.getData('floorAnchor'), 288, 'HQ stool retains its contact anchor');
+assert.equal(chair.depth, 288, 'HQ stool base sorts at the contact anchor');
 const chairFront = chair.getData('occluderParts')?.[0];
-assert.ok(chairFront, 'seat creates a lower/front occluder layer');
-assert.equal(chairFront.crop.y, 19, 'occluder starts in the lower source rows');
-assert.equal(chairFront.crop.height, 13, 'occluder preserves the lower source rows');
-assert.equal(chairFront.depth, 288.01, 'occluder gets only a tiny front bias');
-
-// A sitter is rendered between the chair's back/base and its lower/front row.
-// This is the important actor-vs-chair check: putting the whole seated actor
-// behind the chair would permanently hide the pose.
-const seatedDepth = 288.005;
-assert(chair.depth < seatedDepth && seatedDepth < chairFront.depth,
-  'a seated actor depth fits between the chair base and front occluder');
+assert.equal(chairFront, undefined,
+  'HQ stool has no high back or front rail to occlude an anatomically seated avatar');
 chair.destroy();
-assert.equal(chairFront.destroyed, true, 'destroying furniture cleans up its occluder');
 
 // Exercise the real JpoInteriors implementation directly. Its static surface,
 // wall strip, authored furniture, and door all carry explicit layer metadata.

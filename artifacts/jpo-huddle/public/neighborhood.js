@@ -1276,7 +1276,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _activityDepthAnchor(entry, fallback) {
       const furniture = entry?._activityFurnitureSprite;
-      if (!furniture || !furniture.getData?.('occluderParts')?.length) return finiteDepth(fallback);
+      if (!furniture || (!furniture.getData?.('occluderParts')?.length &&
+        !entry?._activityFurnitureDef?.interaction?.actorAboveSurface)) return finiteDepth(fallback);
       return finiteDepth(
         furniture.getData?.('floorAnchor'),
         finiteDepth(furniture.depth, fallback),
@@ -1284,7 +1285,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _activityDepthBias(entry) {
-      return entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length
+      return (entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length ||
+        entry?._activityFurnitureDef?.interaction?.actorAboveSurface)
         ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 0;
     }
 
@@ -3234,8 +3236,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
     _positionPresentation(entry, x, y, dir) {
       const depthAnchor = this._activityDepthAnchor(entry, y);
-      const depthBias = entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length
-        ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 1;
+      const depthBias = this._activityDepthBias(entry) || 1;
       const actor = entry?.sprite || (entry === this ? this.player : null);
       const action = entry?.activity?.action;
       const reclining = action === 'lie' || action === 'sleep';

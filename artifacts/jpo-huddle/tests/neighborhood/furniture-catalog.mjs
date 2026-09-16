@@ -55,6 +55,16 @@ for (const item of catalog) {
 }
 
 assert.equal(FURNITURE_CATALOG.oak_chair.id, "oak_chair");
+assert.equal(FURNITURE_CATALOG.oak_chair.name, "HQ gold stool",
+  "persisted oak_chair identity presents the exact HQ stool");
+assert.equal(FURNITURE_CATALOG.oak_chair.path, "/assets/neighborhood/furniture/hq_gold_stool.png",
+  "persisted oak_chair identity uses the fresh HQ GID 2231 crop");
+assert.deepEqual(
+  [FURNITURE_CATALOG.oak_chair.frames.frameWidth, FURNITURE_CATALOG.oak_chair.frames.frameHeight,
+    FURNITURE_CATALOG.oak_chair.scale],
+  [16, 16, 3],
+  "HQ stool preserves its native 16px tile at the HQ 3× scale",
+);
 assert.equal(FURNITURE_CATALOG.blue_sofa.id, "blue_sofa");
 assert.equal(FURNITURE_CATALOG.bed.id, "bed");
 assert.equal(FURNITURE_CATALOG.bathtub.id, "bathtub");

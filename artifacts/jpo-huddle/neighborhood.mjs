@@ -883,32 +883,22 @@ const furniture = ({
 export const FURNITURE_CATALOG = Object.freeze({
   // Living — supplied individual silhouettes (not recoloured substitutes).
   oak_chair: furniture({
-    id: "oak_chair", name: "Gold armchair", price: 5000, category: "Living",
-    // A fresh immutable URL is deliberate: the prior oak_chair.png points at
-    // a firewood rack and is cached by production clients for 24 hours.
-    // This is a 16×32 portrait prop, not a two-tile throne. At integer 2× its
-    // 16×26 opaque silhouette presents as 32×52px beside the avatar's 3×
-    // 16×23 opaque body (48×69px), while its saved floor occupancy remains
-    // the authored single 48px cell.
-    path: "/assets/neighborhood/furniture/gold_armchair.png", frameWidth: 16, frameHeight: 32, scale: 2,
-    asset: "oak_chair", actions: ["sit"], interaction: { facing: "down", radius: 96 }, color: "#b98743",
+    // Keep the persisted `oak_chair` identity and one-cell ownership contract;
+    // only its presentation is replaced by the exact HQ GID 2231 stool crop.
+    id: "oak_chair", name: "HQ gold stool", price: 5000, category: "Living",
+    // JPO_HQ.tmj → Interiors_free_16x16.png → GID 2231 (local tile 214):
+    // x=96,y=208,w=16,h=16. At HQ's native 3× this is exactly one 48px
+    // world tile beside the standard 3× avatar—no arbitrary rescaling.
+    path: "/assets/neighborhood/furniture/hq_gold_stool.png", frameWidth: 16, frameHeight: 16, scale: 3,
+    asset: "oak_chair", actions: ["sit"], interaction: { facing: "approach", radius: 96, actorAboveSurface: true }, color: "#dcae58",
     actionInteractions: {
-      // The 32px source is a two-cell-tall silhouette on a one-cell saved
-      // footprint. At 2×, the source-row-21 front rail is 22px above the
-      // floor (rather than 33px at 3×). Keep the standard 3× avatar, moving
-      // its centre down by that 11px rail-height difference so its hips meet
-      // the smaller pad: the face and torso stay above the rail and only the
-      // knees/feet pass behind it.
-      sit: { actorOffset: { x: 0, y: -47 } },
+      // A one-cell home's normal sit base is gridY*48+34. The HQ seat's
+      // sprite origin is gridY*48+24-BODY_DY (BODY_DY=27), i.e. gridY*48-3.
+      // -37 makes both routes land on that identical anatomical point.
+      sit: { actorOffset: { x: 0, y: -37 } },
     },
-    activityPose: {
-      sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
-    },
-    // Source rows 21–31 are the armchair's front rail, cushion, and legs.
-    // Cropping at row 28 redrew only the feet, leaving a full standing body
-    // in front of the cushion. This lower layer deliberately covers the
-    // folded legs while preserving the sitter's torso and head.
-    occluder: { default: { fromPx: 21, depthBias: 0.01 } },
+    // GID 2231 is a low, round stool. It has no high back or front rail, so
+    // an armchair-style foreground occluder would incorrectly cover the pose.
   }),
   fern: furniture({
     id: "fern", name: "Potted fern", price: 5000, category: "Living",

@@ -40,7 +40,7 @@
  *   REAL_GAME_QA=1 REAL_GAME_HOME_COFFEE_TABLE_ONLY=1 \
  *     node tests/neighborhood/real-game-furniture.mjs
  *
- * Focused live gold-armchair poses only (home + Huddle Home, with an
+ * Focused live HQ-gold-stool poses only (home + Huddle Home, with an
  * observing second session and before/seated/after close-ups):
  *   REAL_GAME_QA=1 REAL_GAME_HOME_CHAIRS_ONLY=1 \
  *     node tests/neighborhood/real-game-furniture.mjs
@@ -717,12 +717,8 @@ async function chairPresentation(page, instanceId) {
     const actor = entry?.sprite;
     const front = chair?.getData?.("occluderParts")?.[0];
     const anchor = chair && scene?._furnitureActionAnchor?.(chair, "sit");
-    const occluder = chair?.getData?.("occluderConfig") || null;
-    const sourceFrom = Number(occluder?.fromPx);
-    const sourceHeight = Number(chair?.frame?.height);
-    const frontTop = Number.isFinite(sourceFrom) && sourceHeight > sourceFrom
-      ? Number(chair.y) - (sourceHeight - sourceFrom) * Math.abs(Number(chair.scaleY) || 1)
-      : null;
+    const facing = ["up", "down", "left", "right"].includes(entry?.dir) ? entry.dir : "down";
+    const sitFacing = { left: "right", right: "right", up: "up", down: "down" }[facing];
     return {
       role: local ? "local" : remote ? "remote" : null,
       activity: entry?.activity ? {
@@ -741,13 +737,14 @@ async function chairPresentation(page, instanceId) {
         x: Number(chair.x), y: Number(chair.y), depth: Number(chair.depth),
         floorAnchor: Number(chair.getData?.("floorAnchor")),
         frame: { width: Number(chair.frame?.width), height: Number(chair.frame?.height) },
-        occluder,
-        frontDepth: Number(front?.depth),
-        frontTop,
+        occluder: chair?.getData?.("occluderConfig") || null,
+        frontDepth: front ? Number(front.depth) : null,
       } : null,
       anchor: anchor ? { x: Number(anchor.x), y: Number(anchor.y) } : null,
+      facing,
       expectedAnimation: entry?.playerTexKey || entry?.texture
-        ? `sit_${entry.playerTexKey || entry.texture}_down` : null,
+        ? `sit_${entry.playerTexKey || entry.texture}_${sitFacing}` : null,
+      expectedTexturePrefix: `pl_sit_${sitFacing}_`,
     };
   }, String(instanceId));
 }
@@ -757,24 +754,24 @@ function assertSeatedChairPresentation(report, label) {
   requireOk(report.role === "local" || report.role === "remote",
     `${label} has a live seated actor`);
   requireOk(report.activity?.furnitureId === "oak_chair" && report.activity?.action === "sit",
-    `${label} retains the gold-armchair sit activity`);
+    `${label} retains the HQ-gold-stool sit activity`);
   requireOk(report.actor?.animation === report.expectedAnimation,
-    `${label} uses the authored down-facing seated animation`);
-  requireOk(/^pl_sit_down_/.test(String(report.actor?.texture || "")),
-    `${label} renders the authored down-facing sit3 texture, not a standing sheet`);
+    `${label} uses the authored approach-facing seated animation`);
+  requireOk(String(report.actor?.texture || "").startsWith(report.expectedTexturePrefix),
+    `${label} renders the authored directional seated texture, not a standing sheet`);
   requireOk(report.anchor &&
     Math.abs(report.actor.x - report.anchor.x) < 0.01 &&
     Math.abs(report.actor.y - report.anchor.y) < 0.01,
   `${label} remains pinned to the authoritative chair anchor`);
   requireOk(report.actor?.angle === 0 && report.actor?.scaleX === 3 && report.actor?.scaleY === 3,
     `${label} keeps the upright seated pose without scale/angle drift`);
-  requireOk(report.chair?.occluder?.fromPx === 21 && report.chair?.frame?.height === 32,
-    `${label} uses the real source-row-21 armchair front cushion`);
-  requireOk(report.actor?.depth > report.chair?.depth &&
-    report.actor?.depth < report.chair?.frontDepth,
-  `${label} is between the chair back and front cushion`);
-  requireOk(report.actor?.y < report.chair?.frontTop,
-    `${label} keeps the actor centre above the front cushion`);
+  requireOk(report.chair?.frame?.width === 16 && report.chair?.frame?.height === 16 &&
+    report.chair?.occluder === null && report.chair?.frontDepth === null,
+  `${label} uses the native low HQ stool without an invented armchair front rail`);
+  requireOk(report.actor.depth > report.chair.depth,
+    `${label} draws the sitter above the stool surface, not behind its cushion`);
+  requireOk(Math.abs(report.anchor.y - (report.chair.y - 51)) < 0.01,
+    `${label} keeps the HQ seat point at floor bottom minus 51px (tile center minus BODY_DY)`);
 }
 
 async function captureFatalEvidence(error) {
@@ -2366,7 +2363,7 @@ async function homeInteractionsOnlyPass(baseUrl) {
 
 async function chairOnlyPass(baseUrl) {
   const showroomChairId = "showroom-oak-chair-1";
-  stage("focused Huddle Home gold-armchair bootstrap");
+  stage("focused Huddle Home HQ-gold-stool bootstrap");
   ownerPage.__realGameBaseUrl = baseUrl;
   await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
   await installEventCapture(ownerPage);
@@ -2411,9 +2408,9 @@ async function chairOnlyPass(baseUrl) {
   await installEventCapture(ownerPage);
   const ownerSnapshot = await assertRenderedHomeCatalog(ownerPage, "focused chair home");
   const homeChair = ownerSnapshot.layout.find((item) => item.furnitureId === "oak_chair");
-  requireOk(homeChair?.id, "focused home contains a real gold-armchair UUID");
+  requireOk(homeChair?.id, "focused home contains a real HQ-gold-stool UUID");
 
-  stage("focused home gold-armchair observer bootstrap");
+  stage("focused home HQ-gold-stool observer bootstrap");
   await registerThroughUi(guestPage, GUEST_EMAIL, "QA Visitor");
   await installEventCapture(guestPage);
   await assertRenderedHomeCatalog(guestPage, "focused chair observer");
@@ -2440,7 +2437,7 @@ async function chairOnlyPass(baseUrl) {
   await exitFurnitureAction(ownerPage);
   const homeAfter = await chairPresentation(ownerPage, homeChair.id);
   requireOk(homeAfter.activity === null && homeAfter.role === null,
-    "home E Stand clears the gold-armchair activity before walking");
+    "home E Stand clears the HQ-gold-stool activity before walking");
   await screenshotChairCloseup(ownerPage, "home-gold-chair-after", homeChair.id);
   await walkAwayFromFurniture(ownerPage, "ArrowRight", "focused home chair exit");
 
@@ -2482,7 +2479,7 @@ async function placedChairBesidePlumTablePass(baseUrl) {
   requireOk(before.inventory.length === 1 &&
     String(before.inventory[0]?.id) === hotbarStoredFurnitureId &&
     before.inventory[0]?.furnitureId === "oak_chair",
-  "generated owner starts with the exact owned stored Gold armchair");
+    "generated owner starts with the exact owned stored HQ gold stool");
   await ownerPage.waitForFunction(
     () => (window._neighborhoodScene?.furniture || []).length === 1,
     { timeout: boundedTimeout(15_000) },
@@ -2805,7 +2802,7 @@ async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
           .replace(/\s+/g, " ").trim(),
       })));
     const requiredProducts = [
-      ["oak_chair", /gold armchair/i], ["fern", /fern/i],
+      ["oak_chair", /HQ gold stool/i], ["fern", /fern/i],
       ["reading_lamp", /reading lamp/i], ["coffee_table", /coffee table/i],
       ["blue_sofa", /blue sofa/i], ["bookcase", /bookcase/i],
     ];
@@ -2815,7 +2812,7 @@ async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
     "cashier E opens every real Huddle Home for-sale product, including retained display decor");
     await ownerPage.evaluate(() => {
       const button = document.querySelector('#shop-panel [data-buy="oak_chair"]');
-      if (!button) throw new Error("Huddle Home Gold armchair purchase button missing");
+      if (!button) throw new Error("Huddle Home HQ gold stool purchase button missing");
       button.click();
     });
     await ownerPage.waitForFunction(
@@ -2824,7 +2821,7 @@ async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
         entry.payload?.item?.furnitureId === "oak_chair"),
       { timeout: boundedTimeout(15_000) },
     );
-    await screenshot(ownerPage, "showroom-cashier-gold-armchair-purchased");
+    await screenshot(ownerPage, "showroom-cashier-hq-gold-stool-purchased");
     return;
   }
 
@@ -2994,7 +2991,7 @@ async function verifyHydratedHome(page) {
   requireOk(rendered.furniture.length === snapshot.layout.length &&
     rendered.furniture.every((item) => item.instanceId && item.furnitureId),
   "normal home portal entry renders one real furniture sprite per placed snapshot row");
-  for (const expected of ["Gold armchair", "Walnut daybed", "Claw-foot bath"]) {
+  for (const expected of ["HQ gold stool", "Walnut daybed", "Claw-foot bath"]) {
     requireOk(rendered.rows.some((row) => row.includes(expected)),
       `normal home portal entry hydrates the real furniture name: ${expected}`);
   }
@@ -3087,7 +3084,7 @@ async function plazaInvalidGhostProofPass() {
   const snapshot = await requestHomeSnapshot(ownerPage);
   const stored = snapshot.inventory?.find((item) => item.furnitureId === "oak_chair");
   requireOk(stored?.id && stored?.furnitureId,
-    "Plaza QA has the exact cashier-purchased Gold armchair for a real placement preview");
+    "Plaza QA has the exact cashier-purchased HQ gold stool for a real placement preview");
   if (!stored?.id || !stored?.furnitureId) return;
   await openInventoryHotbar(ownerPage, "Plaza QA returned furniture");
   await selectHotbarItem(ownerPage, "furniture", stored.furnitureId, "furniture",

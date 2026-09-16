@@ -6,6 +6,10 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 
 Willow Walk, Huddle Plaza, and neighborhood interiors use a neighborhood-only inventory. Do not merge HQ pets, cosmetics, or consumables into that view. This is an intentional product boundary: players should see items relevant to those maps, not their entire HQ collection. Preserve ownership and the existing HQ inventory when filtering the neighborhood view.
 
+## Neighborhood furniture sources
+
+Prefer the actual, working HQ furniture assets and their avatar-relative scale and seating setup over independently resized substitutes. This addresses repeated mismatches in appearance and proportions. Preserve existing owned-item IDs and placement footprints; introduce larger HQ equivalents as separate items rather than expanding furniture already placed in homes.
+
 ## Run & Operate
 
 - `pnpm --filter @workspace/jpo-huddle run dev` — run the JPO Huddle game server (`node server.js`)
