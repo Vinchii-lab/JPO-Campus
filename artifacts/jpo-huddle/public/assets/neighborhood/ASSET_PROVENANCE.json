@@ -3,10 +3,11 @@
   "pixelPolicy": "Furniture and interior tiles render at integer 3x scale with nearest filtering. Furniture art is bottom-center anchored; floor occupancy retains the original catalog contract and is independent of decorative art height.",
   "assets": [
     {
-      "destination": "furniture/oak_chair.png",
+      "destination": "furniture/gold_armchair.png",
       "catalogId": "oak_chair",
-      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow_Singles/2_LivingRoom_Black_Shadow_Singles_16x16/Living_Room_Black_Shadow_Singles_117.png",
-      "sourcePixels": "individual PNG (uncropped)",
+      "zipMember": "1_Interiors/16x16/Theme_Sorter_Black_Shadow/1_Generic_Black_Shadow_16x16.png",
+      "sourcePixels": "crop x=32,y=176,w=16,h=32",
+      "sourceSheetSize": "256x1248",
       "nativeImageSize": "16x32",
       "renderScale": 3,
       "floorOccupancyCells": "1x1"

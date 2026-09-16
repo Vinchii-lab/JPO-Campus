@@ -884,15 +884,20 @@ export const FURNITURE_CATALOG = Object.freeze({
   // Living — supplied individual silhouettes (not recoloured substitutes).
   oak_chair: furniture({
     id: "oak_chair", name: "Gold armchair", price: 5000, category: "Living",
-    path: "/assets/neighborhood/furniture/oak_chair.png", frameWidth: 16, frameHeight: 32,
+    // A fresh immutable URL is deliberate: the prior oak_chair.png points at
+    // a firewood rack and is cached by production clients for 24 hours.
+    path: "/assets/neighborhood/furniture/gold_armchair.png", frameWidth: 16, frameHeight: 32,
     asset: "oak_chair", actions: ["sit"], interaction: { facing: "down" }, color: "#b98743",
     actionInteractions: {
+      // Use the shared sit pivot; the cushion must remain behind the actor.
       sit: { actorOffset: { x: 0, y: -26 } },
     },
     activityPose: {
       sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },
     },
-    occluder: { default: { fromPx: 19, depthBias: 0.01 } },
+    // Source rows 19–31 are the real front cushion/legs, so they occlude
+    // only the lower sitter rather than putting the entire avatar behind it.
+    occluder: { default: { fromPx: 28, depthBias: 0.01 } },
   }),
   fern: furniture({
     id: "fern", name: "Potted fern", price: 5000, category: "Living",

@@ -29,7 +29,7 @@ Direct-start test players still need the catalog supplied by normal room entry.
 
 Match the exact source artwork before diagnosing an interaction or occlusion complaint.
 
-**Why:** The purple-and-gold low table was mistaken for a similarly styled ottoman. The screenshot showed walking behind a decorative object, not a failed seated animation.
+**Why:** The purple-and-gold low table was mistaken for a similarly styled ottoman, and a firewood rack had been assigned a chair name and Sit action. Passing action tests did not establish that the image was actually seating.
 
 **How to apply:** Compare source silhouettes, trim bounds, and details against the screenshot; confirm whether that catalog item even has actions before adjusting poses.
 

@@ -780,3 +780,17 @@ mtime_ms = 1789571750505
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/98ec7151-9b74-4b7c-aaf3-d887fbef1e90/9e474c3f-24cd-40d9-bf94-6505107ec797"
 storage_version_token = "1789571786882168"
 content_type = "image/png"
+
+[[outputs]]
+id = "hSOM2CMf4sQyjPys2BkvZ"
+uri = "file://artifacts/jpo-huddle/tests/evidence/interior-verified/gold-chair-live.png"
+type = "image"
+title = "Corrected Gold chair — empty and seated"
+description = "Actual gameplay capture using the genuine chair from the supplied 16x16 tileset, not the firewood-rack image."
+logical_id = "8bd7cc81-481c-4015-80be-06d46d0bf283"
+content_hash = "sha256:f2f4972475c2d2443f556bccc4d7a1a0f8b613a12ddb2574033b255ecceebdec"
+size = 14123
+mtime_ms = 1789577761685
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/8bd7cc81-481c-4015-80be-06d46d0bf283/118033f1-d6a2-433d-b93f-b903e51055f8"
+storage_version_token = "1789577809815345"
+content_type = "image/png"
