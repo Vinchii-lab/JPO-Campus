@@ -56,6 +56,12 @@ assert.match(sceneSource, /shutdown\(\) \{[\s\S]{0,520}teardownPlacement\(\);/,
   "scene shutdown tears down placement");
 assert.match(uiSource, /if \(!ctx\.active\) \{[\s\S]{0,100}container\.hidden = true;[\s\S]{0,100}container\.innerHTML = '';/,
   "inactive placement controls remove stale actionable markup");
+assert.match(sceneSource, /_beginPlacement = \(\) => \{[\s\S]{0,400}this\._showPlacementControls\(\);/,
+  "starting a placement shows persistent finish/cancel controls before a map click");
+assert.match(sceneSource, /if \(this\.ghost\.getData\?\.\('blocked'\) === true\) \{[\s\S]{0,180}return;/,
+  "an invalid placement click remains movable rather than locking an unusable preview");
+assert.match(uiSource, /ghost-placement-status[\s\S]{0,240}placementMessage/,
+  "placement controls explain whether to select, confirm, or cancel");
 assert.match(sceneSource, /socket\.on\('furnitureShowroom',[\s\S]{0,520}setFurnitureShowroomDemos/,
   "furniture-shop consumes the server showroom projection");
 assert.match(sceneSource, /socket\.emit\('furnitureDemoInteract', \{ phase: 'start', instanceId, action \}\)/,

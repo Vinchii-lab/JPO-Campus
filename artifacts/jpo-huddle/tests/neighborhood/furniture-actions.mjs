@@ -221,6 +221,23 @@ assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
 assert.ok(furnitureActionStandCandidates(chair, 13, 5).some((point) =>
   validLocationMove(home, point.x, point.y, [])),
   "at least one authoritative exit stand is walkable");
+const chairBesidePlumTable = {
+  x: 14 * HOME_GRID.cell,
+  y: 5 * HOME_GRID.cell - 27,
+  width: 2 * HOME_GRID.cell,
+  height: HOME_GRID.cell,
+};
+const chairSideStands = furnitureActionStandCandidates(chair, 13, 5, HOME_GRID.cell, "sit")
+  .filter((point) => validLocationMove(home, point.x, point.y, [chairBesidePlumTable]));
+assert.ok(chairSideStands.length > 0,
+  "a gold armchair beside a plum low table retains a collision-valid approach");
+for (const approach of chairSideStands.slice(0, 2)) {
+  assert.equal(furnitureActionWithinRadius(approach, chairAnchor, 96), true,
+    "each clear neighboring-table approach is inside the real Sit radius");
+  assert.equal(furnitureActionPathClear(approach, chairAnchor, (x, y) =>
+    validLocationMove(home, x, y, [chairBesidePlumTable])),
+  true, "each clear neighboring-table approach has a continuous Sit path");
+}
 
 const bathAnchor = furnitureActionAnchor(FURNITURE_CATALOG.bathtub, 17, 4, HOME_GRID.cell, "bathe");
 assert.deepEqual(bathAnchor, { x: 864, y: 152, dir: "down" },
@@ -277,6 +294,8 @@ assert.match(serverSource, /furnitureIsOccupied\(players, locationId, instanceId
   "server occupancy is room- and instance-scoped");
 assert.match(serverSource, /validLocationMove\(parsed,\s*anchor\.x,\s*anchor\.y,\s*otherBlocks\)/,
   "server validates the action anchor against every other blocker");
+assert.match(serverSource, /placedFurnitureBlock\(\s*FURNITURE_CATALOG\[entry\.furnitureId\], entry, true,/,
+  "server interaction admission uses movement-offset blockers for neighboring furniture");
 assert.match(serverSource, /furniturePathClear\(parsed, p, anchor, otherBlocks\)/,
   "server validates a continuous path from the player to the action anchor");
 assert.match(serverSource, /activeFurniturePlacementConflict\(parsed\.id, instanceId, proposedBlock\)/,

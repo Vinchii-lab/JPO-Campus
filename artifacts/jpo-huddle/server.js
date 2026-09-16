@@ -10079,8 +10079,13 @@ io.on("connection", (socket) => {
           grid_x: entry.gridX,
           grid_y: entry.gridY,
         }));
+        // Action admission uses the same actor-foot collision rectangles as
+        // movement. Decorative art such as the plum low table can intentionally
+        // shift its blocker away from transparent sprite padding; using the
+        // unshifted placement rectangle here made a nearby chair's apparent
+        // reachable route disagree with ordinary walking.
         const blocks = blockRows.map((entry) => placedFurnitureBlock(
-          FURNITURE_CATALOG[entry.furnitureId], entry,
+          FURNITURE_CATALOG[entry.furnitureId], entry, true,
         )).filter(Boolean);
         const targetBlock = blocks.find((block) => block.instanceId === instanceId);
         const otherBlocks = targetBlock ? blocks.filter((block) => block !== targetBlock) : blocks;

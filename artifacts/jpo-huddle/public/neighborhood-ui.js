@@ -603,6 +603,7 @@ window.JpoUIBuilder = {
         <button id="ghost-cancel">Cancel</button>
         ${ctx.canReturn ? '<button id="ghost-return">Store</button>' : ''}
       </div>
+      <small id="ghost-placement-status" style="display:block; color:#fff4dc; text-align:center; text-shadow:1px 1px #111;">${this._escape(ctx.placementMessage || 'Click a floor tile, then Confirm or Cancel.')}</small>
     `;
     container.querySelector('#ghost-rotate')?.addEventListener('click', () => ctx.onRotate?.());
     container.querySelector('#ghost-confirm')?.addEventListener('click', () => ctx.onConfirm?.());

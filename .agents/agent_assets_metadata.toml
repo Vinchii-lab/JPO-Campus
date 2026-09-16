@@ -794,3 +794,17 @@ mtime_ms = 1789577761685
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/8bd7cc81-481c-4015-80be-06d46d0bf283/118033f1-d6a2-433d-b93f-b903e51055f8"
 storage_version_token = "1789577809815345"
 content_type = "image/png"
+
+[[outputs]]
+id = "i5tDkDWTpMF6EzQkeFlEy"
+uri = "file://artifacts/jpo-huddle/tests/evidence/placed-chair-plum-table-verified/placed-chair-reload-interactive-seated.png"
+type = "image"
+title = "Chair beside the table — verified in gameplay"
+description = "After confirming placement and reloading: no green outline, and the chair responds to E Sit and E Stand."
+logical_id = "d5cec036-0bb3-43a4-8451-61b3b8f2d65c"
+content_hash = "sha256:bdd4517940db421e3903428095a1002b6115098337aec35e8e3a8adc5b29c685"
+size = 11237
+mtime_ms = 1789590450475
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/d5cec036-0bb3-43a4-8451-61b3b8f2d65c/b29eaf02-66b4-4dda-87d3-0eaac44ed9c1"
+storage_version_token = "1789590519147231"
+content_type = "image/png"

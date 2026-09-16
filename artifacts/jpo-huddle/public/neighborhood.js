@@ -7,7 +7,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   ui.id = 'neighborhood-ui';
   // This is a location plaque, deliberately not a travel menu.
   ui.innerHTML = '<div id="neighborhood-nav"><span id="neighborhood-title">JPO HQ</span><button id="neighborhood-panel-toggle" type="button" aria-controls="home-panel shop-panel" hidden>Hide panel</button></div>' +
-    '<div id="home-panel" hidden></div><div id="placement-controls" style="position:fixed; bottom:var(--neighborhood-hud-bottom, 60px); left:50%; transform:translateX(-50%); z-index:300;" hidden></div>';
+    '<div id="home-panel" hidden></div><div id="placement-controls" style="position:fixed; bottom:var(--neighborhood-hud-bottom, 60px); left:50%; transform:translateX(-50%); z-index:300; pointer-events:auto;" hidden></div>';
   document.body.appendChild(ui);
 
   const title = ui.querySelector('#neighborhood-title');
@@ -97,6 +97,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     editorOpen = true;
     toast('Click a valid spot to place.');
     if (typeof renderHome === 'function') renderHome();
+    // A selected inventory item is a placement gesture, not a placed object.
+    // Keep a visible Cancel/instructions surface up before the first map click;
+    // otherwise a green hover preview can look like permanent furniture with no
+    // way to finish or abandon it when the editor panel is collapsed.
+    window._neighborhoodScene?._beginPlacement?.();
   };
 
   // Store is an instance operation, not a layout replacement. Keep a small
@@ -484,6 +489,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         editorOpen = true;
         toast('Click a valid spot to place.');
         renderHome();
+        window._neighborhoodScene?._beginPlacement?.();
       },
       onReturn: (id) => {
         requestStore(id);
@@ -2809,10 +2815,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!container) return;
         const usingYard = atStreet && selectedZone === 'yard';
         const isAlreadyPlaced = homeState.layout?.some(i => i.id === selectedInstance) || homeState.yard?.some(i => i.id === selectedInstance);
-        const valid = !!this.ghost && this.ghost.getData?.('blocked') !== true;
+        // Confirmation is deliberately unavailable while the outline is only
+        // following the pointer. A preview is not a placement until a floor
+        // click locks a grid cell, so it must always retain an explicit Cancel
+        // path rather than masquerading as normal furniture.
+        const locked = this._placementLocked === true;
+        const valid = locked && !!this.ghost && this.ghost.getData?.('blocked') !== true;
+        const placementMessage = !locked
+          ? 'Move over the floor, then click a spot to select it.'
+          : valid
+            ? 'Spot selected. Confirm to place it, or Cancel to keep it in inventory.'
+            : 'That spot is blocked. Move to an open floor tile or Cancel.';
         window.JpoUIBuilder.renderPlacementControls(container, {
           active: true,
           isValid: valid,
+          placementMessage,
           canReturn: isAlreadyPlaced,
           onRotate: () => {
             const item = [...(homeState.inventory || []), ...(homeState.layout || []), ...(homeState.yard || [])]
@@ -2858,10 +2875,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!valid) {
           const note = document.createElement('small');
           note.id = 'ghost-invalid-note';
-          note.textContent = 'Cannot place here: blocked or outside the room.';
+          note.textContent = locked
+            ? 'Cannot place here: blocked or outside the room.'
+            : 'No location selected yet.';
           note.style.cssText = 'display:block; margin-top:6px; color:#ffb3a7; text-align:center;';
           container.firstElementChild?.appendChild(note);
         }
+      };
+
+      this._beginPlacement = () => {
+        if (!selectedInstance) return;
+        this._placementLocked = false;
+        // Do not manufacture a furniture sprite at (0, 0) before the player
+        // has actually pointed at the map. The first pointer move draws the
+        // preview; the persistent controls explain exactly what it represents.
+        this._showPlacementControls();
       };
 
       this._placementMoveHandler = (pointer) => {
@@ -2873,8 +2901,15 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (this._placementLocked) return;
         const usingYard = atStreet && selectedZone === 'yard';
         if (!(atHome || usingYard) || !homeState?.canEdit || !selectedInstance || !this.ghost) return;
-        this._placementLocked = true;
         this._updateGhostPosition(pointer);
+        // An invalid click remains a movable preview. Locking it previously
+        // stranded the player with a "Cannot place here" outline until they
+        // discovered Cancel and reselected the furniture.
+        if (this.ghost.getData?.('blocked') === true) {
+          this._showPlacementControls();
+          return;
+        }
+        this._placementLocked = true;
 
         // Lock the authored-color preview at the selected grid point.
         if (this.ghost) {

@@ -50,3 +50,9 @@ Synchronized collision coordinates do not prove that the visible body stays outs
 **Why:** Client and server agreed on the player's pivot while the visible feet overlapped the table. Correcting movement exposed a second error: front-side actors still sorted behind the table until draw depth used the same coordinate convention.
 
 **How to apply:** Verify real walking from both north and south, comparing body bounds and visible alpha bounds as well as server positions. Keep physical floor/placement anchors separate from movement and sorting offsets. Cover indoor and yard paths and revalidate saved positions after changing blockers.
+
+Interaction path checks must use the same neighboring-object blockers as walking, including art-alignment offsets.
+
+**Why:** Walking beside a low table was valid, but trying to sit in the adjacent chair could be rejected because interaction admission still used the table's unshifted placement rectangle.
+
+**How to apply:** Test furniture actions beside another object with a movement offset, not only isolated furniture. Keep inventory placement footprints distinct from the physical blockers used for both walking and action admission.

@@ -45,6 +45,10 @@
  *   REAL_GAME_QA=1 REAL_GAME_HOME_CHAIRS_ONLY=1 \
  *     node tests/neighborhood/real-game-furniture.mjs
  *
+ * Focused placed-chair beside Plum low-table proof (no shop/bed/bath journey):
+ *   REAL_GAME_QA=1 REAL_GAME_HOME_PLACED_CHAIR_QA=1 \
+ *     node tests/neighborhood/real-game-furniture.mjs
+ *
  * Focused Plaza proof (real Huddle Home collision/demo/shop flow followed by
  * an authored-color invalid placement preview; screenshots stay in
  * tests/evidence unless REAL_GAME_OUTPUT_DIR is set):
@@ -82,6 +86,7 @@ const SERVER_FILE = join(ARTIFACT_ROOT, "server.js");
 const LOADER_FILE = join(HERE, "real-game-furniture-loader.mjs");
 const COFFEE_TABLE_FOCUS_ONLY = process.env.REAL_GAME_HOME_COFFEE_TABLE_ONLY === "1";
 const CHAIR_FOCUS_ONLY = process.env.REAL_GAME_HOME_CHAIRS_ONLY === "1";
+const PLACED_CHAIR_QA = process.env.REAL_GAME_HOME_PLACED_CHAIR_QA === "1";
 const PLAZA_QA_ENABLED = process.env.REAL_GAME_PLAZA_QA === "1";
 const QA_LAYOUT_FOR_FOCUS = [
   { furnitureId: "oak_chair", gridX: 13, gridY: 14, instanceId: "qa-chair-a" },
@@ -265,10 +270,12 @@ async function seedExactFixture() {
   await db.query(
     `INSERT INTO jpo_players
        (email, first_name, last_name, name, nickname, character, approved, department, coins)
-     VALUES
-       ($1, 'QA', 'Furniture', 'QA Furniture', 'QA Furniture', 'amelia', true, 'QA', 500000),
-       ($2, 'QA', 'Visitor', 'QA Visitor', 'QA Visitor', 'adam', true, 'QA', 100000)`,
-    [OWNER_EMAIL, GUEST_EMAIL],
+     VALUES ($1, 'QA', 'Furniture', 'QA Furniture', 'QA Furniture', 'amelia', true, 'QA', 500000)${
+       PLACED_CHAIR_QA
+         ? ""
+         : ", ($2, 'QA', 'Visitor', 'QA Visitor', 'QA Visitor', 'adam', true, 'QA', 100000)"
+     }`,
+    PLACED_CHAIR_QA ? [OWNER_EMAIL] : [OWNER_EMAIL, GUEST_EMAIL],
   );
   if (HOTBAR_QA_ENABLED) {
     // Seed only the generated QA identities. Cosmetics/items are the same
@@ -295,9 +302,15 @@ async function seedExactFixture() {
     [OWNER_EMAIL],
   );
 
-  // The collision-only focus is a single authentic decorative catalog row.
-  // The normal interaction fixture remains the original four-item layout.
-  const fixtures = COFFEE_TABLE_FOCUS_ONLY
+  // The placed-chair focus starts with only the authentic Plum low table
+  // positioned immediately east of the deliberate chair target. The chair is
+  // stored (not pre-placed), so its lifecycle is proven through the actual
+  // hotbar → hover → click → Confirm UI path below.
+  // The collision-only focus is a single authentic decorative catalog row; the
+  // normal interaction fixture remains the original four-item layout.
+  const fixtures = PLACED_CHAIR_QA
+    ? [["coffee_table", 15, 10]]
+    : COFFEE_TABLE_FOCUS_ONLY
     ? [["coffee_table", 14, 10]]
     : [
       ["oak_chair", 13, 14],
@@ -318,7 +331,7 @@ async function seedExactFixture() {
       [result.rows[0].id, OWNER_EMAIL, gridX, gridY],
     );
   }
-  if (HOTBAR_QA_ENABLED) {
+  if (HOTBAR_QA_ENABLED || PLACED_CHAIR_QA) {
     const stored = await db.query(
       `INSERT INTO jpo_home_furniture (owner_email, furniture_id)
        VALUES ($1, 'oak_chair') RETURNING id`,
@@ -345,7 +358,12 @@ async function startLocalServer() {
     : focusFurniture === "bathtub" ? "bathe" : "lie";
   // coffee_table has no action by design. Start north of its collision edge;
   // the focused test walks into that edge using the real client input path.
-  const focusSpawn = COFFEE_TABLE_FOCUS_ONLY
+  const focusSpawn = PLACED_CHAIR_QA
+    // South of the eventual chair target (14,10), clear of the adjacent
+    // table's shared movement blocker. The loader applies this exact home
+    // phase on every QA resume rather than relying on restore count.
+    ? { x: 696, y: 620, dir: "up" }
+    : COFFEE_TABLE_FOCUS_ONLY
     ? { x: 720, y: 430, dir: "down" }
     : focusFurniture ? authoredFocusSpawn(focusFurniture, focusAction) : null;
   serverProcess = spawn(process.execPath, [SERVER_FILE], {
@@ -358,7 +376,8 @@ async function startLocalServer() {
       // This explicit focused-session phase prevents an automatic Socket.IO
       // resume from consuming a positional "second restore" before the first
       // showroom scene has rendered.
-      REAL_GAME_QA_OWNER_PHASE: PLAZA_QA_ENABLED ? "showroom" : "",
+       REAL_GAME_QA_OWNER_PHASE: PLAZA_QA_ENABLED ? "showroom" :
+         PLACED_CHAIR_QA ? "home" : "",
       REAL_GAME_QA_HOME_SPAWN: focusSpawn ? JSON.stringify(focusSpawn) : "",
       NODE_OPTIONS: nodeOptions,
     },
@@ -1268,6 +1287,93 @@ async function clickPlacementSpot(page, label) {
     `${label} existing placement UI exposes enabled Confirm`);
 }
 
+async function canvasPointForWorld(page, worldX, worldY, label) {
+  const point = await page.evaluate(({ x: targetX, y: targetY }) => {
+    const scene = window._neighborhoodScene;
+    const canvas = scene?.game?.canvas || document.querySelector("canvas");
+    const camera = scene?.cameras?.main;
+    if (!canvas || !camera?.worldView) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + ((targetX - camera.worldView.x) / camera.worldView.width) * rect.width,
+      y: rect.top + ((targetY - camera.worldView.y) / camera.worldView.height) * rect.height,
+    };
+  }, { x: worldX, y: worldY });
+  requireOk(point && Number.isFinite(point.x) && Number.isFinite(point.y),
+    `${label} computes a live canvas point for (${worldX}, ${worldY})`);
+  return point;
+}
+
+async function assertPlacementMode(page, {
+  label, selected = false, expectedStatus, expectedBlocked = false,
+} = {}) {
+  const state = await page.evaluate(() => {
+    const scene = window._neighborhoodScene;
+    const controls = document.querySelector("#placement-controls");
+    const cancel = document.querySelector("#placement-controls #ghost-cancel");
+    const confirm = document.querySelector("#placement-controls #ghost-confirm");
+    const status = document.querySelector("#ghost-placement-status");
+    const rect = cancel?.getBoundingClientRect();
+    const hit = rect && document.elementFromPoint(
+      rect.left + rect.width / 2, rect.top + rect.height / 2,
+    );
+    return {
+      visible: !!controls && !controls.hidden,
+      ghost: !!scene?.ghost,
+      blocked: scene?.ghost?.getData?.("blocked") === true,
+      confirmDisabled: confirm?.disabled === true,
+      status: status?.textContent || "",
+      cancelAccessible: !!cancel && !!hit && (hit === cancel || cancel.contains(hit)),
+    };
+  });
+  requireOk(state.visible && state.cancelAccessible,
+    `${label} exposes visible, pointer-accessible placement Cancel controls`);
+  requireOk(state.ghost && state.blocked === expectedBlocked,
+    `${label} ghost reports expected placement validity: ${JSON.stringify(state)}`);
+  requireOk(state.confirmDisabled === !selected,
+    `${label} Confirm is ${selected ? "enabled only after" : "disabled before"} a valid cell click`);
+  if (expectedStatus) requireOk(state.status.includes(expectedStatus),
+    `${label} explains placement state (${JSON.stringify(state.status)})`);
+  return state;
+}
+
+async function assertPlacementIsOff(page, label) {
+  const state = await page.evaluate(() => {
+    const scene = window._neighborhoodScene;
+    const controls = document.querySelector("#placement-controls");
+    return {
+      controlsHidden: !controls || controls.hidden,
+      ghost: !!scene?.ghost,
+      footprint: !!scene?.ghostFootprint,
+      marker: !!scene?.ghostPlacementMarker,
+    };
+  });
+  requireOk(state.controlsHidden && !state.ghost && !state.footprint && !state.marker,
+    `${label} has no active placement mode, preview, or green/cyan footprint: ${JSON.stringify(state)}`);
+}
+
+async function requireChairSitPrompt(page, instanceId, label) {
+  await page.waitForFunction(
+    (wanted) => {
+      const scene = window._neighborhoodScene;
+      const nearby = scene?._nearbyInteractiveAction?.();
+      return String(nearby?.instanceId || "") === wanted &&
+        (nearby?.actions || []).some((entry) =>
+          (typeof entry === "string" ? entry : entry?.id) === "sit") &&
+        scene?.interactHint?.visible === true &&
+        /\[E\]\s+Sit/.test(String(scene.interactHint.text || ""));
+    },
+    { timeout: boundedTimeout(10_000) },
+    String(instanceId),
+  );
+  const prompt = await page.evaluate(() => ({
+    text: window._neighborhoodScene?.interactHint?.text || "",
+    visible: window._neighborhoodScene?.interactHint?.visible === true,
+  }));
+  requireOk(prompt.visible && /\[E\]\s+Sit/.test(prompt.text),
+    `${label} displays the real [E] Sit prompt`);
+}
+
 async function proveInvalidPlacementPreview(page, label) {
   // This is a real pointer event on the solid private-wing divider, not a
   // scene mutation. It proves the client keeps the original sprite pixels,
@@ -1916,6 +2022,9 @@ async function pressFurnitureAction(page, action, { shift = false } = {}) {
 }
 
 async function exitFurnitureAction(page) {
+  const responsesBefore = await page.evaluate(() => (window.__realGameEvents || [])
+    .filter((entry) => entry.event === "furnitureDemoInteractionResult" ||
+      entry.event === "furnitureInteractionResult").length);
   await page.keyboard.down("e");
   await sleep(100);
   await page.keyboard.up("e");
@@ -1924,14 +2033,27 @@ async function exitFurnitureAction(page) {
     { timeout: boundedTimeout(15_000) },
   );
   // The production client clears its pose optimistically while the reliable
-  // Socket.IO exit is in flight. Give the real server response a bounded
-  // turn, then retain it in diagnostics for any subsequent movement issue.
-  await sleep(200);
+  // Socket.IO exit is in flight. Do not accept that local clear as proof: wait
+  // for the real server-owned stop acknowledgement before allowing a route to
+  // reuse the chair.
+  await page.waitForFunction(
+    (minimum) => (window.__realGameEvents || [])
+      .filter((entry) => entry.event === "furnitureDemoInteractionResult" ||
+        entry.event === "furnitureInteractionResult")
+      .slice(minimum)
+      .some((entry) => entry.payload?.ok === true && entry.payload?.phase === "stop"),
+    { timeout: boundedTimeout(15_000) },
+    responsesBefore,
+  );
   const responses = await page.evaluate(() => (window.__realGameEvents || [])
     .filter((entry) => entry.event === "furnitureDemoInteractionResult" ||
       entry.event === "furnitureInteractionResult")
     .slice(-3));
-  console.log(`  E exit server response: ${JSON.stringify(responses.at(-1) || null)}`);
+  const accepted = [...responses].reverse().find((entry) =>
+    entry.payload?.ok === true && entry.payload?.phase === "stop");
+  requireOk(accepted, "server accepts E Stand");
+  console.log(`  E exit server response: ${JSON.stringify(accepted || null)}`);
+  return accepted;
 }
 
 async function walkAwayFromFurniture(page, key, label) {
@@ -2328,6 +2450,208 @@ async function chairOnlyPass(baseUrl) {
   ];
   requireOk(browserErrors.length === 0,
     `focused chair pages have no browser/console errors${
+      browserErrors.length ? ` (${browserErrors.join(" ; ")})` : ""}`);
+}
+
+async function placedChairBesidePlumTablePass(baseUrl) {
+  const targetCell = { gridX: 14, gridY: 10 };
+  const targetWorld = {
+    x: targetCell.gridX * HOME_GRID.cell + HOME_GRID.cell / 2,
+    y: targetCell.gridY * HOME_GRID.cell + HOME_GRID.cell / 2,
+  };
+  const southApproach = { x: 696, y: 546 };
+  const westApproach = { x: 654, y: 504 };
+
+  stage("placed-chair QA explicit home bootstrap");
+  ownerPage.__realGameBaseUrl = baseUrl;
+  // The focused loader phase is explicitly "home", including automatic
+  // Socket.IO resumes. This pass must never rely on the normal first-showroom,
+  // second-home restore count.
+  await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
+  await installEventCapture(ownerPage);
+  await waitForLocation(ownerPage, `home:${OWNER_EMAIL}`);
+  await ownerPage.waitForFunction(
+    () => window._neighborhoodScene?._neighborhoodReady &&
+      document.querySelector("#inventory-toggle-btn"),
+    { timeout: boundedTimeout(30_000) },
+  );
+  const before = await requestHomeSnapshot(ownerPage);
+  requireOk(before.layout.length === 1 && before.layout[0]?.furnitureId === "coffee_table" &&
+    before.layout[0]?.gridX === 15 && before.layout[0]?.gridY === 10,
+  "generated owner starts with exactly one placed Plum low table east of the chair target");
+  requireOk(before.inventory.length === 1 &&
+    String(before.inventory[0]?.id) === hotbarStoredFurnitureId &&
+    before.inventory[0]?.furnitureId === "oak_chair",
+  "generated owner starts with the exact owned stored Gold armchair");
+  await ownerPage.waitForFunction(
+    () => (window._neighborhoodScene?.furniture || []).length === 1,
+    { timeout: boundedTimeout(15_000) },
+  );
+  await screenshot(ownerPage, "placed-chair-plum-table-initial");
+
+  stage("placed-chair real hotbar Place hover click Confirm");
+  const inventory = await openInventoryHotbar(ownerPage, "placed-chair owner");
+  requireOk(inventory.inventory.some((item) => String(item.id) === hotbarStoredFurnitureId),
+    "real owner hotbar receives the stored target-chair UUID");
+  await selectHotbarItem(ownerPage, "furniture", "oak_chair", "furniture",
+    "placed-chair target");
+  // This is the actual production hotbar button and its DOM event handler, not
+  // the JpoNeighborhood bridge or a direct socket/layout mutation.
+  await ownerPage.click('.hotbar-action-btn[data-action="place"]');
+  await ownerPage.waitForSelector("#placement-controls:not([hidden]) #ghost-cancel", {
+    timeout: boundedTimeout(10_000),
+  });
+  const preHover = await ownerPage.evaluate(() => ({
+    controlsVisible: !document.querySelector("#placement-controls")?.hidden,
+    status: document.querySelector("#ghost-placement-status")?.textContent || "",
+    confirmDisabled: document.querySelector("#ghost-confirm")?.disabled === true,
+    ghost: !!window._neighborhoodScene?.ghost,
+  }));
+  requireOk(preHover.controlsVisible && preHover.confirmDisabled && !preHover.ghost &&
+    preHover.status.includes("Move over the floor"),
+  `hotbar Place immediately explains the preview and Cancel path before hover: ${JSON.stringify(preHover)}`);
+  // The production home editor lives above the right side of the canvas. Hide
+  // it through the real panel toggle before aiming at a world tile, exactly as
+  // an owner would, so this remains a real Phaser pointer path.
+  await hideNeighborhoodOverlay(ownerPage);
+
+  const targetPoint = await canvasPointForWorld(ownerPage, targetWorld.x, targetWorld.y,
+    "placed-chair target hover");
+  await ownerPage.mouse.move(targetPoint.x, targetPoint.y);
+  await ownerPage.waitForFunction(
+    () => !!window._neighborhoodScene?.ghost,
+    { timeout: boundedTimeout(10_000) },
+  );
+  await assertPlacementMode(ownerPage, {
+    label: "hovering adjacent chair cell",
+    selected: false,
+    expectedStatus: "Move over the floor",
+  });
+  await screenshot(ownerPage, "placed-chair-hover-controls-visible");
+
+  await ownerPage.mouse.click(targetPoint.x, targetPoint.y);
+  await ownerPage.waitForSelector("#placement-controls:not([hidden]) #ghost-confirm:not([disabled])", {
+    timeout: boundedTimeout(10_000),
+  });
+  await assertPlacementMode(ownerPage, {
+    label: "clicked valid adjacent chair cell",
+    selected: true,
+    expectedStatus: "Spot selected",
+  });
+  await screenshot(ownerPage, "placed-chair-selected-before-confirm");
+  const placeResults = await importantEventCount(ownerPage, "homeActionResult");
+  await ownerPage.click("#placement-controls #ghost-confirm");
+  await waitForImportantEvent(ownerPage, "homeActionResult", placeResults,
+    "placed-chair Confirm");
+  const placed = await requestHomeSnapshot(ownerPage);
+  const placedChair = placed.layout.find((item) => String(item.id) === hotbarStoredFurnitureId);
+  requireOk(placedChair?.furnitureId === "oak_chair" &&
+    placedChair.gridX === targetCell.gridX && placedChair.gridY === targetCell.gridY &&
+    placed.layout.some((item) => item.furnitureId === "coffee_table"),
+  "Confirm persists the exact chair directly west of the Plum low table");
+  requireOk(!placed.inventory.some((item) => String(item.id) === hotbarStoredFurnitureId),
+    "confirmed chair leaves stored inventory");
+  await ownerPage.waitForFunction(
+    (id) => (window._neighborhoodScene?.furniture || []).some((sprite) =>
+      String(sprite.getData?.("instanceId") || "") === id),
+    { timeout: boundedTimeout(15_000) },
+    hotbarStoredFurnitureId,
+  );
+  await assertPlacementIsOff(ownerPage, "confirmed chair");
+  await screenshot(ownerPage, "placed-chair-confirmed-outline-gone");
+
+  stage("placed-chair adjacent-table south E Sit and Stand");
+  await moveTo(ownerPage, southApproach.x, southApproach.y, "chair south approach", 12);
+  await requireChairSitPrompt(ownerPage, hotbarStoredFurnitureId,
+    "south of chair beside Plum table");
+  await screenshot(ownerPage, "placed-chair-south-sit-prompt");
+  await pressFurnitureAction(ownerPage, "sit");
+  assertSeatedChairPresentation(
+    await chairPresentation(ownerPage, hotbarStoredFurnitureId),
+    "south approach chair",
+  );
+  await screenshotChairCloseup(ownerPage, "placed-chair-south-seated", hotbarStoredFurnitureId);
+  await exitFurnitureAction(ownerPage);
+  requireOk((await sceneState(ownerPage)).activity === null,
+    "south approach E Stand clears the server-owned chair activity");
+  await screenshot(ownerPage, "placed-chair-south-after-stand");
+
+  stage("placed-chair adjacent-table clear west E Sit and Stand");
+  // Keyboard polling can overshoot one movement tick on each axis. The
+  // following prompt and server-acknowledged Sit still enforce real reachability.
+  await moveTo(ownerPage, westApproach.x, westApproach.y, "chair clear west approach", 28);
+  await requireChairSitPrompt(ownerPage, hotbarStoredFurnitureId,
+    "west of chair beside Plum table");
+  await screenshot(ownerPage, "placed-chair-west-sit-prompt");
+  await pressFurnitureAction(ownerPage, "sit");
+  assertSeatedChairPresentation(
+    await chairPresentation(ownerPage, hotbarStoredFurnitureId),
+    "west approach chair",
+  );
+  await exitFurnitureAction(ownerPage);
+  requireOk((await sceneState(ownerPage)).activity === null,
+    "west approach E Stand clears the server-owned chair activity");
+  await screenshot(ownerPage, "placed-chair-west-after-stand");
+
+  stage("placed-chair Move Cancel preserves layout without outline");
+  await showNeighborhoodOverlay(ownerPage);
+  await openHomeEditorForHotbar(ownerPage);
+  await ownerPage.waitForSelector(`#home-panel [data-move="${hotbarStoredFurnitureId}"]`, {
+    timeout: boundedTimeout(10_000),
+  });
+  await ownerPage.click(`#home-panel [data-move="${hotbarStoredFurnitureId}"]`);
+  await ownerPage.waitForSelector("#placement-controls:not([hidden]) #ghost-cancel", {
+    timeout: boundedTimeout(10_000),
+  });
+  const movePoint = await canvasPointForWorld(ownerPage, 13 * HOME_GRID.cell + 24,
+    10 * HOME_GRID.cell + 24, "Move preview");
+  await ownerPage.mouse.move(movePoint.x, movePoint.y);
+  await ownerPage.waitForFunction(() => !!window._neighborhoodScene?.ghost, {
+    timeout: boundedTimeout(10_000),
+  });
+  await assertPlacementMode(ownerPage, {
+    label: "Move hover",
+    selected: false,
+    expectedStatus: "Move over the floor",
+  });
+  await screenshot(ownerPage, "placed-chair-move-hover-before-cancel");
+  await ownerPage.click("#placement-controls #ghost-cancel");
+  await assertPlacementIsOff(ownerPage, "Move Cancel");
+  const canceled = await requestHomeSnapshot(ownerPage);
+  const canceledChair = canceled.layout.find((item) => String(item.id) === hotbarStoredFurnitureId);
+  requireOk(canceledChair?.gridX === targetCell.gridX && canceledChair?.gridY === targetCell.gridY &&
+    canceled.layout.filter((item) => item.furnitureId === "coffee_table").length === 1,
+  "Move Cancel leaves the exact chair and adjacent Plum table layout unchanged");
+  await screenshot(ownerPage, "placed-chair-move-cancel-outline-gone");
+
+  stage("placed-chair explicit-home reload remains interactive");
+  await reloadOwnerHome(ownerPage, "placed-chair after Move Cancel");
+  const reloaded = await requestHomeSnapshot(ownerPage);
+  requireOk(reloaded.layout.some((item) => String(item.id) === hotbarStoredFurnitureId &&
+    item.gridX === targetCell.gridX && item.gridY === targetCell.gridY),
+  "explicit-home reload preserves the confirmed chair coordinates");
+  await ownerPage.waitForFunction(
+    (id) => (window._neighborhoodScene?.furniture || []).some((sprite) =>
+      String(sprite.getData?.("instanceId") || "") === id),
+    { timeout: boundedTimeout(15_000) },
+    hotbarStoredFurnitureId,
+  );
+  await assertPlacementIsOff(ownerPage, "reloaded confirmed chair");
+  await moveTo(ownerPage, southApproach.x, southApproach.y, "reloaded chair south approach", 12);
+  await requireChairSitPrompt(ownerPage, hotbarStoredFurnitureId,
+    "reloaded chair south approach");
+  await pressFurnitureAction(ownerPage, "sit");
+  assertSeatedChairPresentation(
+    await chairPresentation(ownerPage, hotbarStoredFurnitureId),
+    "reloaded chair",
+  );
+  await screenshotChairCloseup(ownerPage, "placed-chair-reload-interactive-seated",
+    hotbarStoredFurnitureId);
+  await exitFurnitureAction(ownerPage);
+
+  const browserErrors = ownerPage.__realGameErrors || [];
+  requireOk(browserErrors.length === 0,
+    `placed-chair focused page has no browser/page errors${
       browserErrors.length ? ` (${browserErrors.join(" ; ")})` : ""}`);
 }
 
@@ -2836,6 +3160,10 @@ async function run() {
     } else {
       await inventoryHotbarPass(baseUrl);
     }
+    return;
+  }
+  if (PLACED_CHAIR_QA) {
+    await placedChairBesidePlumTablePass(baseUrl);
     return;
   }
   if (COFFEE_TABLE_FOCUS_ONLY) {
