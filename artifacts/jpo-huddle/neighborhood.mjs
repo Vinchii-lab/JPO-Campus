@@ -975,7 +975,7 @@ export const FURNITURE_CATALOG = Object.freeze({
     frameHeight: 32, color: "#9a623f",
   }),
   living_lamp: furniture({
-    id: "living_lamp", name: "Brass arc lamp", price: 12000, category: "Living",
+    id: "living_lamp", name: "Coral floor lamp", price: 12000, category: "Living",
     path: "/assets/neighborhood/commercial/shop_lamp.png", frameWidth: 16,
     frameHeight: 48, color: "#d7a34c",
   }),
@@ -1073,7 +1073,7 @@ export const FURNITURE_CATALOG = Object.freeze({
     frameWidth: 16, frameHeight: 32, color: "#8f6245",
   }),
   bedroom_lamp: furniture({
-    id: "bedroom_lamp", name: "Bedside lamp", price: 8000, category: "Bedroom",
+    id: "bedroom_lamp", name: "Bedroom floor lamp", price: 8000, category: "Bedroom",
     path: "/assets/neighborhood/commercial/shop_lamp.png", frameWidth: 16,
     frameHeight: 48, color: "#d7a34c",
   }),
