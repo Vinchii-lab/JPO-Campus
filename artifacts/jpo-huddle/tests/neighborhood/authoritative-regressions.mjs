@@ -52,6 +52,33 @@ assert(!populatedStreet.blockers.some((block) =>
   "west-end HQ portal must not overlap a residence facade",
 );
 
+const coffeeYardStreet = streetDefinition([{
+  ownerEmail: "coffee-yard@example.com", lotIndex: 1,
+  construction: { wallsBuilt: true, complete: true },
+  yard: [{ furnitureId: "coffee_table", gridX: 1, gridY: 1, rotation: 0 }],
+}]);
+const coffeeYardLot = coffeeYardStreet.lots[0];
+const coffeeYardBlock = coffeeYardStreet.blockers.find((block) =>
+  block.furnitureId === "coffee_table");
+const coffeeYardOriginY = coffeeYardLot.northSide
+  ? coffeeYardLot.bottom - 330 : coffeeYardLot.bottom - 66;
+assert.deepEqual(coffeeYardBlock, {
+  x: coffeeYardLot.x - 96 + 48,
+  y: coffeeYardOriginY + 48 - 27,
+  width: 96, height: 48, furnitureId: "coffee_table",
+}, "yard coffee-table movement block uses the same -27px actor-foot offset as indoors");
+const preFixNorthEdge = {
+  x: coffeeYardBlock.x + coffeeYardBlock.width / 2,
+  // Old y is the unshifted rect top minus foot radius. It is inside the new
+  // blocker, so reconnect normalization must recover it to the lot return point.
+  y: coffeeYardBlock.y + 27 - ACTOR_FOOT_RADIUS,
+};
+assert.equal(validStreetWorldMove(coffeeYardStreet, preFixNorthEdge.x, preFixNorthEdge.y), false,
+  "an old yard north-edge coordinate is rejected after the movement offset changes");
+assert(validStreetWorldMove(
+  coffeeYardStreet, coffeeYardLot.returnSpawn.x, coffeeYardLot.returnSpawn.y,
+), "existing neighborhood reconnect fallback remains clear for displaced yard actors");
+
 // Every sparse lot slot must return to the street-facing side of its own
 // facade. In particular, south-lane return points must not land in the wide
 // residence blocker (the old bottom - 122 formula did exactly that).

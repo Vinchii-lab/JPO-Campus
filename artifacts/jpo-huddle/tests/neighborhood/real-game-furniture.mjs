@@ -36,6 +36,10 @@
  *   REAL_GAME_TIMEOUT_MS=240000 REAL_GAME_OUTPUT_DIR=/tmp/jpo-furniture \
  *     REAL_GAME_QA=1 node tests/neighborhood/real-game-furniture.mjs
  *
+ * Focused decorative coffee-table collision/depth evidence:
+ *   REAL_GAME_QA=1 REAL_GAME_HOME_COFFEE_TABLE_ONLY=1 \
+ *     node tests/neighborhood/real-game-furniture.mjs
+ *
  * The QA opt-in is required. DATABASE_URL is read by pg/server.js but never
  * printed. This test is intentionally bounded to four minutes by default;
  * it is not a long browser journey.
@@ -65,6 +69,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_ROOT = resolve(HERE, "../..");
 const SERVER_FILE = join(ARTIFACT_ROOT, "server.js");
 const LOADER_FILE = join(HERE, "real-game-furniture-loader.mjs");
+const COFFEE_TABLE_FOCUS_ONLY = process.env.REAL_GAME_HOME_COFFEE_TABLE_ONLY === "1";
 const QA_LAYOUT_FOR_FOCUS = [
   { furnitureId: "oak_chair", gridX: 13, gridY: 14, instanceId: "qa-chair-a" },
   { furnitureId: "oak_chair", gridX: 16, gridY: 14, instanceId: "qa-chair-b" },
@@ -277,14 +282,16 @@ async function seedExactFixture() {
     [OWNER_EMAIL],
   );
 
-  // Keep the layout intentionally multi-item: two same-type chairs plus a bed
-  // and a bath. Positions leave all four authored action paths traversable.
-  const fixtures = [
-    ["oak_chair", 13, 14],
-    ["oak_chair", 16, 14],
-    ["plush_bed", 2, 2],
-    ["bathtub", 2, 12],
-  ];
+  // The collision-only focus is a single authentic decorative catalog row.
+  // The normal interaction fixture remains the original four-item layout.
+  const fixtures = COFFEE_TABLE_FOCUS_ONLY
+    ? [["coffee_table", 14, 10]]
+    : [
+      ["oak_chair", 13, 14],
+      ["oak_chair", 16, 14],
+      ["plush_bed", 2, 2],
+      ["bathtub", 2, 12],
+    ];
   for (const [furnitureId, gridX, gridY] of fixtures) {
     const result = await db.query(
       `INSERT INTO jpo_home_furniture (owner_email, furniture_id)
@@ -319,7 +326,11 @@ async function startLocalServer() {
       ? "plush_bed"
       : null;
   const focusAction = focusFurniture === "bathtub" ? "bathe" : "lie";
-  const focusSpawn = focusFurniture ? authoredFocusSpawn(focusFurniture, focusAction) : null;
+  // coffee_table has no action by design. Start north of its collision edge;
+  // the focused test walks into that edge using the real client input path.
+  const focusSpawn = COFFEE_TABLE_FOCUS_ONLY
+    ? { x: 720, y: 430, dir: "down" }
+    : focusFurniture ? authoredFocusSpawn(focusFurniture, focusAction) : null;
   serverProcess = spawn(process.execPath, [SERVER_FILE], {
     cwd: ARTIFACT_ROOT,
     env: {
@@ -1935,6 +1946,119 @@ async function assertRenderedHomeCatalog(page, label) {
   return snapshot;
 }
 
+async function coffeeTableCollisionOnlyPass(baseUrl) {
+  stage("owner home bootstrap for focused decorative coffee-table evidence");
+  ownerPage.__realGameBaseUrl = baseUrl;
+  // Match the existing loader seam: the first exact-owner restore verifies the
+  // real showroom, and a clean second context receives the seeded QA home.
+  await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
+  await waitForLocation(ownerPage, "furniture-shop");
+  await ownerPage.close();
+  ownerContext = await browser.createIncognitoBrowserContext();
+  ownerPage = await createPage(ownerContext, "owner-coffee-table-collision");
+  ownerPage.__realGameBaseUrl = baseUrl;
+  await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
+  await installEventCapture(ownerPage);
+  await waitForLocation(ownerPage, `home:${OWNER_EMAIL}`);
+  const snapshot = await requestHomeSnapshot(ownerPage);
+  requireOk(snapshot.layout.length === 1 &&
+    snapshot.layout[0].furnitureId === "coffee_table",
+  "focused fixture contains only the authentic Plum low table row");
+  await ownerPage.waitForFunction(
+    () => (window._neighborhoodScene?.furniture || []).length === 1,
+    { timeout: boundedTimeout(20_000) },
+  );
+
+  const inspect = () => ownerPage.evaluate(() => {
+    const scene = window._neighborhoodScene;
+    const table = (scene?.furniture || []).find((sprite) =>
+      sprite.getData("furnitureId") === "coffee_table");
+    const block = scene?._furnitureBlocks?.getChildren?.()[0];
+    const player = scene?.player;
+    return {
+      location: scene?.location || null,
+      activity: scene?.activity || null,
+      player: player ? { x: player.x, y: player.y, depth: player.depth } : null,
+      table: table ? {
+        x: table.x, y: table.y, depth: table.depth,
+        origin: { x: table.originX, y: table.originY },
+        movementBlockerOffset: table.getData("furnitureDefinition")?.movementBlockerOffset || null,
+        depthOffset: table.getData("furnitureDefinition")?.depthOffset ?? null,
+        floorAnchor: table.getData("floorAnchor") ?? null,
+        texture: table.texture?.key || null,
+        frame: { width: table.frame?.width, height: table.frame?.height },
+      } : null,
+      block: block?.body ? {
+        x: block.body.x, y: block.body.y,
+        width: block.body.width, height: block.body.height,
+      } : null,
+      prompt: scene?.interactHint ? {
+        visible: scene.interactHint.visible,
+        text: scene.interactHint.text,
+      } : null,
+    };
+  });
+
+  const before = await inspect();
+  requireOk(before.location === `home:${OWNER_EMAIL}`, "coffee-table evidence is in the generated QA home");
+  requireOk(before.activity === null, "decorative coffee table has no active furniture pose");
+  requireOk(before.table?.texture?.includes("coffee_table") &&
+    before.table?.frame?.width === 32 && before.table?.frame?.height === 32,
+  "rendered table uses the real 32×32 coffee_table catalog art");
+  requireOk(before.prompt?.visible === false,
+    "decorative coffee table shows no E interaction or E Stand prompt");
+  await screenshot(ownerPage, "coffee-table-before-collision");
+
+  // Walk down from a known north position with a real held movement key. This
+  // cannot teleport an actor and must stop at the same 16px foot-radius
+  // boundary that the server accepts for the furniture footprint.
+  await ownerPage.keyboard.down("ArrowDown");
+  await sleep(1_000);
+  await ownerPage.keyboard.up("ArrowDown");
+  await sleep(250);
+  const edge = await inspect();
+  requireOk(edge.activity === null && edge.prompt?.visible === false,
+    "walking into the decorative table never starts an activity or Stand prompt");
+  requireOk(edge.player?.y > before.player?.y,
+    "real downward movement reaches the coffee-table north collision edge");
+  // The coffee table's movement rect is y=453..501, shifted only to account
+  // for the measured +27px local foot-body centre. The server foot radius is
+  // 16, so the north accepted centre is <=437.
+  requireOk(edge.player?.y <= 437.6,
+    `actor did not enter coffee-table footprint (north edge y=${edge.player?.y})`);
+  requireOk(edge.player?.depth < edge.table?.depth,
+    "north-edge actor is depth-sorted behind the low table");
+  requireOk(edge.table?.y === 528 && edge.table?.floorAnchor === 528 &&
+    edge.table?.depth === 501 && edge.table?.depthOffset === -27,
+  "coffee-table keeps its physical/art floor at 528 while y-sorting at 501");
+  requireOk(edge.table?.origin?.x === 0.5 && edge.table?.origin?.y === 26 / 32,
+    "real renderer reports the alpha-aligned coffee-table origin metadata");
+  requireOk(edge.table?.movementBlockerOffset?.x === 0 &&
+    edge.table?.movementBlockerOffset?.y === -27,
+  "real home catalog carries the coffee-table movement-blocker offset");
+  await screenshot(ownerPage, "coffee-table-north-collision-edge");
+
+  // Reach the south edge through an actual route around the table's open east
+  // side. No position is assigned in-page: each leg is a held production
+  // movement key. The extra clearance absorbs a final keyboard movement tick.
+  await moveTo(ownerPage, 840, 437, "coffee-table route east", 80);
+  await moveTo(ownerPage, 840, 620, "coffee-table route south", 80);
+  await moveTo(ownerPage, 720, 620, "coffee-table south approach", 80);
+  await ownerPage.keyboard.down("ArrowUp");
+  await sleep(1_000);
+  await ownerPage.keyboard.up("ArrowUp");
+  await sleep(250);
+  const southEdge = await inspect();
+  console.log(`  coffee-table south-edge geometry: ${JSON.stringify(southEdge)}`);
+  requireOk(southEdge.activity === null && southEdge.prompt?.visible === false,
+    "south approach preserves the table's decorative non-interactive state");
+  requireOk(southEdge.player?.y >= 516.4 && southEdge.player?.y <= 517.6,
+    `actor reaches coffee-table south movement edge: ${JSON.stringify(southEdge)}`);
+  requireOk(southEdge.player?.depth > southEdge.table?.depth,
+    "south-edge actor is depth-sorted in front of the low table");
+  await screenshot(ownerPage, "coffee-table-south-collision-edge");
+}
+
 async function homeInteractionsOnlyPass(baseUrl) {
   stage("owner home bootstrap for furniture interactions");
   ownerPage.__realGameBaseUrl = baseUrl;
@@ -2387,6 +2511,10 @@ async function run() {
     } else {
       await inventoryHotbarPass(baseUrl);
     }
+    return;
+  }
+  if (COFFEE_TABLE_FOCUS_ONLY) {
+    await coffeeTableCollisionOnlyPass(baseUrl);
     return;
   }
   if (process.env.REAL_GAME_HOME_BED_BATH_ONLY === "1" ||

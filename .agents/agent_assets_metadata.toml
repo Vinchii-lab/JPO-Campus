@@ -766,3 +766,17 @@ mtime_ms = 1789566135930
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/db6c8ac6-2d9a-44ad-8c05-d3b7e4da7d71/c66f0287-1d50-4348-8cec-09603ffccb4a"
 storage_version_token = "1789566240197255"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "T8xEIRq56whwgoo36OODy"
+uri = "file://artifacts/jpo-huddle/tests/evidence/interior-verified/coffee-table-before-after.png"
+type = "image"
+title = "Plum low table — actual before and after"
+description = "Real gameplay captures: before, corrected rear approach, and corrected front approach. Tested with a temporary QA character."
+logical_id = "98ec7151-9b74-4b7c-aaf3-d887fbef1e90"
+content_hash = "sha256:abbc21d43c2d5887a97f7f14f03e81ca407d8a0d957e0c759bf1b3a7939b3c6d"
+size = 51244
+mtime_ms = 1789571750505
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/98ec7151-9b74-4b7c-aaf3-d887fbef1e90/9e474c3f-24cd-40d9-bf94-6505107ec797"
+storage_version_token = "1789571786882168"
+content_type = "image/png"

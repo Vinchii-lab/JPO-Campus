@@ -1952,8 +1952,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           if (!def) return [];
           const footprint = this._footprint(def, placed.rotation);
           const originY = visual.lot.northSide ? visual.lot.bottom - 330 : visual.lot.bottom - 66;
+          const movementBlockerOffset = def.movementBlockerOffset || {};
+          const movementOffsetX = Number.isFinite(Number(movementBlockerOffset.x))
+            ? Number(movementBlockerOffset.x) : 0;
+          const movementOffsetY = Number.isFinite(Number(movementBlockerOffset.y))
+            ? Number(movementBlockerOffset.y) : 0;
           return [{
-            x: visual.lot.x - 96 + placed.gridX * 48, y: originY + placed.gridY * 48,
+            x: visual.lot.x - 96 + placed.gridX * 48 + movementOffsetX,
+            y: originY + placed.gridY * 48 + movementOffsetY,
             width: footprint.width * 48, height: footprint.height * 48, furnitureId: placed.furnitureId,
           }];
         }));
@@ -2716,7 +2722,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!this.ghost || ghostFurnitureId !== def.id) {
           this.ghost?.destroy?.();
           this.ghost = this._drawFurniture(def, ghostX, ghostY, {
-            rotation: selectedRotation, depth: 25, occluder: false, instanceId: 'placement-preview',
+            rotation: selectedRotation, depth: 25, applyDepthOffset: false,
+            occluder: false, instanceId: 'placement-preview',
           });
           this.ghost?.setAlpha?.(0.6);
         } else {
@@ -2914,8 +2921,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
            this._animateFurnitureObject(sprite, def.id, item.gridX * 90 + item.gridY * 130);
            this.furniture.push(sprite);
         }
+        const movementBlockerOffset = def.movementBlockerOffset || {};
+        const movementOffsetX = Number.isFinite(Number(movementBlockerOffset.x))
+          ? Number(movementBlockerOffset.x) : 0;
+        const movementOffsetY = Number.isFinite(Number(movementBlockerOffset.y))
+          ? Number(movementBlockerOffset.y) : 0;
         this._addBlock(this._furnitureBlocks, {
-          x: item.gridX * 48, y: item.gridY * 48, width: footprint.width * 48, height: footprint.height * 48,
+          x: item.gridX * 48 + movementOffsetX, y: item.gridY * 48 + movementOffsetY,
+          width: footprint.width * 48, height: footprint.height * 48,
         });
       }
       this._rebindFurnitureActivities();

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { inflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -42,6 +43,106 @@ vm.runInNewContext(rendererSource, rendererContext, {
 });
 const renderer = rendererContext.HomeFurnitureRenderer;
 assert.ok(renderer, "furniture renderer installs its shared contract");
+
+function opaquePngBounds(file) {
+  const bytes = fs.readFileSync(file);
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a",
+    "source art is a PNG");
+  let offset = 8;
+  let header = null;
+  let palette = null;
+  let transparency = null;
+  const compressed = [];
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    offset += 12 + length;
+    if (type === "IHDR") header = {
+      width: data.readUInt32BE(0), height: data.readUInt32BE(4),
+      bitDepth: data[8], colorType: data[9], interlace: data[12],
+    };
+    else if (type === "PLTE") palette = data;
+    else if (type === "tRNS") transparency = data;
+    else if (type === "IDAT") compressed.push(data);
+    else if (type === "IEND") break;
+  }
+  assert.deepEqual(
+    { width: header?.width, height: header?.height, bitDepth: header?.bitDepth,
+      colorType: header?.colorType, interlace: header?.interlace },
+    { width: 32, height: 32, bitDepth: 8, colorType: 3, interlace: 0 },
+    "coffee-table source remains the authentic non-interlaced indexed 32×32 PNG",
+  );
+  assert.ok(palette?.length && transparency?.length, "coffee-table source retains palette alpha");
+  const raw = inflateSync(Buffer.concat(compressed));
+  const rows = [];
+  let cursor = 0;
+  let prior = new Uint8Array(header.width);
+  for (let y = 0; y < header.height; y += 1) {
+    const filter = raw[cursor++];
+    const row = Uint8Array.from(raw.subarray(cursor, cursor + header.width));
+    cursor += header.width;
+    for (let x = 0; x < row.length; x += 1) {
+      const left = x ? row[x - 1] : 0;
+      const above = prior[x];
+      const upperLeft = x ? prior[x - 1] : 0;
+      if (filter === 1) row[x] = (row[x] + left) & 0xff;
+      else if (filter === 2) row[x] = (row[x] + above) & 0xff;
+      else if (filter === 3) row[x] = (row[x] + Math.floor((left + above) / 2)) & 0xff;
+      else if (filter === 4) {
+        const p = left + above - upperLeft;
+        const pa = Math.abs(p - left), pb = Math.abs(p - above), pc = Math.abs(p - upperLeft);
+        row[x] = (row[x] + (pa <= pb && pa <= pc ? left : pb <= pc ? above : upperLeft)) & 0xff;
+      } else assert.equal(filter, 0, "coffee-table PNG has a supported scanline filter");
+    }
+    rows.push(row);
+    prior = row;
+  }
+  let minX = header.width, minY = header.height, maxX = -1, maxY = -1;
+  rows.forEach((row, y) => row.forEach((index, x) => {
+    if ((transparency[index] ?? 255) === 0) return;
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }));
+  return { minX, minY, maxX, maxY, width: header.width, height: header.height };
+}
+
+const coffeeTable = FURNITURE_CATALOG.coffee_table;
+const coffeeTableArt = opaquePngBounds(path.join(
+  here, "../../public/assets/neighborhood/furniture/coffee_table.png",
+));
+assert.deepEqual(coffeeTableArt, {
+  minX: 1, minY: 8, maxX: 30, maxY: 25, width: 32, height: 32,
+}, "Plum low table alpha bounds expose its six transparent bottom padding rows");
+assert.deepEqual(coffeeTable.origin, { x: 0.5, y: 26 / 32 },
+  "Plum low table anchors immediately below its last opaque source-art row");
+assert.equal(coffeeTable.origin.y * coffeeTableArt.height, coffeeTableArt.maxY + 1,
+  "Plum low table's visual floor aligns to actual alpha, not transparent padding");
+assert.equal(coffeeTable.depthOffset, -27,
+  "Plum low table separates its visual floor anchor from its y-sort depth");
+assert.deepEqual(furnitureFootprint(coffeeTable, 0), { width: 2, height: 1 },
+  "Plum low table preserves its existing 2×1 collision/layout footprint");
+assert.deepEqual(coffeeTable.movementBlockerOffset, { x: 0, y: -27 },
+  "Plum low table shifts only its movement blocker to the actor-foot coordinate system");
+assert.deepEqual(layoutBlockers([{
+  furnitureId: "coffee_table", gridX: 14, gridY: 10, rotation: 0,
+}])[0], {
+  x: 672, y: 453, width: 96, height: 48, furnitureId: "coffee_table",
+}, "Plum low table movement rectangle aligns its visual table top at y=453..501");
+for (const [furnitureId, gridX, gridY] of [
+  ["oak_chair", 13, 14],
+  ["blue_sofa", 14, 8],
+]) {
+  const definition = FURNITURE_CATALOG[furnitureId];
+  const footprint = furnitureFootprint(definition, 0);
+  assert.equal(definition.movementBlockerOffset, undefined,
+    `${furnitureId} retains its existing movement-blocker policy`);
+  assert.deepEqual(layoutBlockers([{ furnitureId, gridX, gridY, rotation: 0 }])[0], {
+    x: gridX * HOME_GRID.cell, y: gridY * HOME_GRID.cell,
+    width: footprint.width * HOME_GRID.cell, height: footprint.height * HOME_GRID.cell,
+    furnitureId,
+  }, `${furnitureId} movement rectangle remains its unshifted footprint`);
+}
 
 const remainingActions = Object.freeze({
   kitchen_sink: ["toggle_water"],
@@ -231,6 +332,26 @@ function makeScene() {
     },
   };
   return { scene, animations };
+}
+
+{
+  const { scene } = makeScene();
+  const object = renderer.draw(scene, coffeeTable, 720, 528, {
+    instanceId: "coffee-table-alpha-floor",
+  });
+  assert.equal(object.originX, 0.5, "renderer preserves coffee-table horizontal origin");
+  assert.equal(object.originY, 26 / 32,
+    "renderer honors coffee-table alpha-aligned vertical origin");
+  assert.equal(object.y, 528, "renderer keeps the persisted coffee-table floor coordinate");
+  assert.equal(object.getData("floorAnchor"), 528,
+    "renderer preserves coffee-table physical floor anchor despite depth adjustment");
+  assert.equal(object.depth, 501,
+    "renderer applies coffee-table depth offset without moving its source art");
+  const ghost = renderer.draw(scene, coffeeTable, 720, 528, {
+    instanceId: "coffee-table-placement-preview", depth: 25, applyDepthOffset: false,
+  });
+  assert.equal(ghost.depth, 25,
+    "explicit placement-preview depth bypasses coffee-table y-sort offset");
 }
 
 const animatedIds = [

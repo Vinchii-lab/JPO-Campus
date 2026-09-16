@@ -294,9 +294,12 @@ export function streetDefinition(entries = []) {
     const footprint = furnitureFootprint(item, placed.rotation);
     const originX = lot.x - 96;
     const originY = lot.northSide ? lot.bottom - 330 : lot.bottom - 66;
+    const movementOffset = item.movementBlockerOffset || {};
+    const offsetX = Number.isFinite(Number(movementOffset.x)) ? Number(movementOffset.x) : 0;
+    const offsetY = Number.isFinite(Number(movementOffset.y)) ? Number(movementOffset.y) : 0;
     return [{
-      x: originX + placed.gridX * YARD_GRID.cell,
-      y: originY + placed.gridY * YARD_GRID.cell,
+      x: originX + placed.gridX * YARD_GRID.cell + offsetX,
+      y: originY + placed.gridY * YARD_GRID.cell + offsetY,
       width: footprint.width * YARD_GRID.cell,
       height: footprint.height * YARD_GRID.cell,
       furnitureId: placed.furnitureId,
@@ -862,7 +865,7 @@ const furniture = ({
   id, name, price, category, path, width = 1, height = 1,
   frameWidth = 16, frameHeight = 16, frameCount = 1, frameRate = 0,
   initialFrame = 0, scale = 3, rotations = [0], actions = [], interaction, actionInteractions,
-  activityPose, occluder, asset = id, anchor = "bottom-center", color = "#8d6e52",
+  activityPose, occluder, origin, movementBlockerOffset, depthOffset, asset = id, anchor = "bottom-center", color = "#8d6e52",
 }) => ({
   id, name, price, category, path, publicPath: path, assetPath: path, asset, scale, rotations,
   width, height, footprint: { width, height }, anchor, color,
@@ -872,6 +875,9 @@ const furniture = ({
   ...(actionInteractions ? { actionInteractions } : {}),
   ...(activityPose ? { activityPose } : {}),
   ...(occluder ? { occluder } : {}),
+  ...(origin ? { origin } : {}),
+  ...(movementBlockerOffset ? { movementBlockerOffset } : {}),
+  ...(depthOffset !== undefined ? { depthOffset } : {}),
 });
 
 export const FURNITURE_CATALOG = Object.freeze({
@@ -901,7 +907,14 @@ export const FURNITURE_CATALOG = Object.freeze({
   coffee_table: furniture({
     id: "coffee_table", name: "Plum low table", price: 12000, category: "Living",
     path: "/assets/neighborhood/furniture/coffee_table.png", width: 2, frameWidth: 32,
-    frameHeight: 32, color: "#74637e",
+    // Six transparent bottom rows are padding, not part of the table's floor.
+    // Align its visible feet to the existing floor/collision anchor.
+    frameHeight: 32, origin: { x: 0.5, y: 26 / 32 },
+    // Arcade collision is anchored at the actor's feet, 27px below player.y.
+    // Keep its visual tabletop outside that body without changing placement.
+    // Draw sorting must use the same player-pivot coordinates as movement;
+    // otherwise a player at the south edge still sorts behind the table.
+    movementBlockerOffset: { x: 0, y: -27 }, depthOffset: -27, color: "#74637e",
   }),
   blue_sofa: furniture({
     id: "blue_sofa", name: "Cream lounge sofa", price: 18000, category: "Living",
@@ -1368,7 +1381,10 @@ export function layoutBlockers(layout) {
     const item = FURNITURE_CATALOG[placed.furnitureId];
     if (!item) return [];
     const footprint = furnitureFootprint(item, placed.rotation);
-    return [{ x: placed.gridX * HOME_GRID.cell, y: placed.gridY * HOME_GRID.cell,
+    const movementOffset = item.movementBlockerOffset || {};
+    const offsetX = Number.isFinite(Number(movementOffset.x)) ? Number(movementOffset.x) : 0;
+    const offsetY = Number.isFinite(Number(movementOffset.y)) ? Number(movementOffset.y) : 0;
+    return [{ x: placed.gridX * HOME_GRID.cell + offsetX, y: placed.gridY * HOME_GRID.cell + offsetY,
       width: footprint.width * HOME_GRID.cell, height: footprint.height * HOME_GRID.cell, furnitureId: placed.furnitureId }];
   });
 }

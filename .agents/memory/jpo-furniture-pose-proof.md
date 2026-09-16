@@ -26,3 +26,15 @@ Direct-start test players still need the catalog supplied by normal room entry.
 **Why:** A test-only home spawn showed correct database placements but raw item IDs and no rendered furniture. That was incomplete bootstrap hydration, not evidence that the furniture itself could not be used.
 
 **How to apply:** Assert real rendered furniture count, action data, textures, and readable catalog names before testing proximity or poses. Follow the normal entry protocol rather than injecting replacement drawing data.
+
+Match the exact source artwork before diagnosing an interaction or occlusion complaint.
+
+**Why:** The purple-and-gold low table was mistaken for a similarly styled ottoman. The screenshot showed walking behind a decorative object, not a failed seated animation.
+
+**How to apply:** Compare source silhouettes, trim bounds, and details against the screenshot; confirm whether that catalog item even has actions before adjusting poses.
+
+Synchronized collision coordinates do not prove that the visible body stays outside furniture.
+
+**Why:** Client and server agreed on the player's pivot while the visible feet overlapped the table. Correcting movement exposed a second error: front-side actors still sorted behind the table until draw depth used the same coordinate convention.
+
+**How to apply:** Verify real walking from both north and south, comparing body bounds and visible alpha bounds as well as server positions. Keep physical floor/placement anchors separate from movement and sorting offsets. Cover indoor and yard paths and revalidate saved positions after changing blockers.

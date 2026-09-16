@@ -307,12 +307,13 @@
       : (Number.isFinite(Number(definition.scale)) ? Number(definition.scale) : DEFAULT_SCALE);
     const rotation = Number(options.rotation ?? 0);
     const anchor = options.anchor || definition.anchor || "bottom-center";
-    const origin = options.origin || (anchor === "center" ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 });
+    const origin = options.origin || definition.origin || (anchor === "center" ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 1 });
     object.setOrigin?.(origin.x, origin.y);
     object.setScale?.(scale);
     if (Number.isFinite(rotation)) object.setAngle?.(rotation);
     const anchorY = floorAnchor(definition, x, y, options);
-    const depth = finite(options.depth, anchorY);
+    const depth = finite(options.depth, anchorY) +
+      (options.applyDepthOffset === false ? 0 : finite(definition.depthOffset, 0));
     object.setDepth?.(depth);
     object.setData?.("furnitureId", definition.id);
     object.setData?.("furnitureDefinition", definition);

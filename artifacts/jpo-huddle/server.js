@@ -3655,6 +3655,7 @@ function indexedHomeLayoutBlockers(layout) {
   return (layout || []).map((placed) => placedFurnitureBlock(
     FURNITURE_CATALOG[placed.furnitureId],
     { ...placed, furniture_instance_id: placed.id, grid_x: placed.gridX, grid_y: placed.gridY },
+    true,
   )).filter(Boolean);
 }
 function cacheHomeLayoutSnapshot(ownerEmail, snapshot) {
@@ -3699,15 +3700,18 @@ async function emitHomeSnapshotToOccupants(ownerEmail) {
   }
 }
 
-function placedFurnitureBlock(item, row) {
+function placedFurnitureBlock(item, row, forMovement = false) {
   if (!item || !row) return null;
   const rotation = item.rotations?.includes(Number(row.rotation)) ? Number(row.rotation) : 0;
   const quarter = rotation % 180;
   const width = quarter === 90 ? item.height : item.width;
   const height = quarter === 90 ? item.width : item.height;
+  const movementOffset = forMovement ? item.movementBlockerOffset || {} : {};
+  const offsetX = Number.isFinite(Number(movementOffset.x)) ? Number(movementOffset.x) : 0;
+  const offsetY = Number.isFinite(Number(movementOffset.y)) ? Number(movementOffset.y) : 0;
   return {
-    x: Number(row.grid_x ?? row.gridX) * HOME_GRID.cell,
-    y: Number(row.grid_y ?? row.gridY) * HOME_GRID.cell,
+    x: Number(row.grid_x ?? row.gridX) * HOME_GRID.cell + offsetX,
+    y: Number(row.grid_y ?? row.gridY) * HOME_GRID.cell + offsetY,
     width: width * HOME_GRID.cell,
     height: height * HOME_GRID.cell,
     furnitureId: item.id,
