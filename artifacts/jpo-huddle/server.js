@@ -61,6 +61,7 @@ import {
   furnitureActivityConflictsWithBlock,
 } from "./furniture-actions.mjs";
 import { inspectMovementEnvelope } from "./movement-protocol.mjs";
+import commercialLayouts from "./public/commercial-layouts.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -74,7 +75,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3543,14 +3544,18 @@ function locationInfo(locationId) {
   const key = parsed.kind === "home" ? "home" : parsed.id;
   const geometry = parsed.id === "furniture-shop"
     ? {
-      // The old commercial prop blockers are paired with the legacy showroom
-      // art that _drawFurnitureShowroom removes. Keeping those stale rectangles
-      // made real sofa/TV activity anchors collide with invisible furniture.
+      // The shared commercial geometry intentionally excludes legacy sale
+      // placeholder blockers. Replace them with the retained authored fixture
+      // bodies and real catalog-demo bodies sent below; this is the exact
+      // physical set used by server movement as well as client Arcade.
       ...LOCATION_GEOMETRY[key],
-      blockers: (LOCATION_GEOMETRY[key]?.blockers || []).filter((block) =>
-        block.x === 0 || block.y === 0 ||
-        Number(block.x) + Number(block.width) === Number(base.bounds?.width) ||
-        Number(block.y) + Number(block.height) === Number(base.bounds?.height)),
+      blockers: [
+        ...(LOCATION_GEOMETRY[key]?.blockers || []).filter((block) =>
+          block.x === 0 || block.y === 0 ||
+          Number(block.x) + Number(block.width) === Number(base.bounds?.width) ||
+          Number(block.y) + Number(block.height) === Number(base.bounds?.height)),
+        ...furnitureShowroomBlockers(),
+      ],
     }
     : LOCATION_GEOMETRY[key];
   return {
@@ -3623,17 +3628,19 @@ const FURNITURE_SHOWROOM_DEMO_LAYOUT = Object.freeze([
   Object.freeze({ instanceId: "showroom-lounge-sofa", furnitureId: "lounge_sofa", x: 340, y: 320, stand: { x: 340, y: 340, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-bed", furnitureId: "plush_bed", x: 760, y: 320, stand: { x: 760, y: 352, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-counter", furnitureId: "kitchen_counter", x: 440, y: 480, stand: { x: 440, y: 540, dir: "up" } }),
-  Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 490, dir: "up" } }),
+  // The south display-chair body leaves no 16px-foot clearance at y=496;
+  // the bath's authored top approach is the real reachable stand instead.
+  Object.freeze({ instanceId: "showroom-bath", furnitureId: "bathtub", x: 620, y: 480, stand: { x: 620, y: 414, dir: "down" } }),
   Object.freeze({ instanceId: "showroom-sink", furnitureId: "bathroom_sink_tap", x: 760, y: 480, stand: { x: 760, y: 540, dir: "up" } }),
   Object.freeze({ instanceId: "showroom-tv", furnitureId: "television", x: 500, y: 140, stand: { x: 500, y: 220, dir: "up" } }),
   // These replace the four removed legacy `native_oak_chair` props at their
   // original showroom floor anchors. They are real catalog instances, so the
   // same sit anchor, down-facing seated sheet, and front-cushion occlusion
   // used in homes are also exercised in Huddle Home.
-  Object.freeze({ instanceId: "showroom-oak-chair-1", furnitureId: "oak_chair", x: 200, y: 520, stand: { x: 200, y: 560, dir: "down" } }),
-  Object.freeze({ instanceId: "showroom-oak-chair-2", furnitureId: "oak_chair", x: 360, y: 520, stand: { x: 360, y: 560, dir: "down" } }),
-  Object.freeze({ instanceId: "showroom-oak-chair-3", furnitureId: "oak_chair", x: 600, y: 520, stand: { x: 600, y: 560, dir: "down" } }),
-  Object.freeze({ instanceId: "showroom-oak-chair-4", furnitureId: "oak_chair", x: 760, y: 520, stand: { x: 760, y: 560, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-1", furnitureId: "oak_chair", x: 200, y: 520, stand: { x: 200, y: 544, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-2", furnitureId: "oak_chair", x: 360, y: 520, stand: { x: 360, y: 544, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-3", furnitureId: "oak_chair", x: 600, y: 520, stand: { x: 600, y: 544, dir: "down" } }),
+  Object.freeze({ instanceId: "showroom-oak-chair-4", furnitureId: "oak_chair", x: 760, y: 520, stand: { x: 760, y: 544, dir: "down" } }),
 ]);
 
 function furnitureShowroomDemos() {
@@ -3642,21 +3649,117 @@ function furnitureShowroomDemos() {
     if (!definition) return [];
     return [{
       ...demo,
+      // Keep the showroom approach/exit point derived from the active catalog
+      // action rather than preserving a pixel nudge from an earlier sprite
+      // scale. In particular, the 2x gold armchair's authored sit pad changed
+      // while its saved one-cell footprint did not.
+      stand: furnitureShowroomStand(demo, definition),
       footprint: { ...(definition.footprint || { width: definition.width, height: definition.height }) },
       category: definition.category,
       name: definition.name,
-      actions: furnitureActionDefinitions(definition).map((action) => ({
-        id: action.id, label: action.label, effect: action.effect || actionEffectKind(action.id),
-        anchor: action.anchor, facing: action.facing, radius: action.radius,
-        actorOffset: action.actorOffset || null,
-        toggle: action.toggle === true,
-      })),
+      actions: furnitureActionDefinitions(definition).map((action) =>
+        furnitureShowroomActionPayload(demo, definition, action)),
     }];
   });
 }
 
 function furnitureShowroomDemo(instanceId) {
   return FURNITURE_SHOWROOM_DEMO_LAYOUT.find((demo) => demo.instanceId === instanceId) || null;
+}
+// Bookcases and floor decor remain authored showroom fixtures when the old
+// sale placeholders are replaced with catalog-rendered demos. Keep their
+// physical bodies in the design manifest so they cannot silently become
+// server/client-only scenery.
+const FURNITURE_SHOWROOM_FIXTURE_BLOCKERS = Object.freeze(
+  (commercialLayouts?.rooms?.["furniture-shop"]?.fixtureBlockers || [])
+    .filter((block) => Number.isFinite(Number(block?.x)) &&
+      Number.isFinite(Number(block?.y)) &&
+      Number(block?.width) > 0 && Number(block?.height) > 0)
+    .map((block) => Object.freeze({
+      x: Number(block.x), y: Number(block.y),
+      width: Number(block.width), height: Number(block.height),
+      fixture: true,
+    })),
+);
+function furnitureShowroomDemoBlock(demo) {
+  const definition = FURNITURE_CATALOG[demo?.furnitureId];
+  if (!definition || !Number.isFinite(Number(demo?.x)) || !Number.isFinite(Number(demo?.y))) return null;
+  const width = Number(definition.width) || 1;
+  const height = Number(definition.height) || 1;
+  return placedFurnitureBlock(definition, {
+    furniture_instance_id: demo.instanceId,
+    gridX: (Number(demo.x) - width * HOME_GRID.cell / 2) / HOME_GRID.cell,
+    gridY: (Number(demo.y) - height * HOME_GRID.cell) / HOME_GRID.cell,
+  }, true);
+}
+function furnitureShowroomBlockers() {
+  return [
+    ...FURNITURE_SHOWROOM_FIXTURE_BLOCKERS,
+    ...FURNITURE_SHOWROOM_DEMO_LAYOUT.map(furnitureShowroomDemoBlock)
+      .filter(Boolean)
+      .map((block) => ({ ...block, showroom: true })),
+  ];
+}
+function furnitureShowroomBlockersFor(location) {
+  return location?.id === "furniture-shop" ? furnitureShowroomBlockers() : [];
+}
+function furnitureShowroomGrid(demo, definition) {
+  const width = Number(definition?.width) || 1;
+  const height = Number(definition?.height) || 1;
+  return {
+    gridX: (Number(demo.x) - width * HOME_GRID.cell / 2) / HOME_GRID.cell,
+    gridY: (Number(demo.y) - height * HOME_GRID.cell) / HOME_GRID.cell,
+  };
+}
+function furnitureShowroomActionAnchor(demo, definition, action) {
+  const { gridX, gridY } = furnitureShowroomGrid(demo, definition);
+  const base = furnitureActionAnchor(definition, gridX, gridY, HOME_GRID.cell, action.id);
+  const location = parseLocation("furniture-shop");
+  const blockers = furnitureShowroomBlockers().filter((block) =>
+    String(block.instanceId || "") !== String(demo.instanceId));
+  if (validLocationMove(location, base.x, base.y, blockers)) return base;
+  // A few legacy floor anchors visually overlap by a handful of pixels. Keep
+  // the action on the same catalog art, but derive the nearest clear actor
+  // point instead of admitting a snap into a neighbouring physical display.
+  // The client receives this derived offset in the action descriptor below.
+  for (let distance = 2; distance <= 64; distance += 2) {
+    for (const [dx, dy] of [[0, -distance], [0, distance], [-distance, 0], [distance, 0]]) {
+      const candidate = { ...base, x: base.x + dx, y: base.y + dy };
+      if (validLocationMove(location, candidate.x, candidate.y, blockers)) return candidate;
+    }
+  }
+  return base;
+}
+function furnitureShowroomActionPayload(demo, definition, action) {
+  const { gridX, gridY } = furnitureShowroomGrid(demo, definition);
+  const base = furnitureActionAnchor(definition, gridX, gridY, HOME_GRID.cell, action.id);
+  const anchor = furnitureShowroomActionAnchor(demo, definition, action);
+  const originalOffset = action.actorOffset || {};
+  return {
+    id: action.id, label: action.label, effect: action.effect || actionEffectKind(action.id),
+    anchor: action.anchor, facing: action.facing, radius: action.radius,
+    actorOffset: {
+      x: (Number(originalOffset.x) || 0) + anchor.x - base.x,
+      y: (Number(originalOffset.y) || 0) + anchor.y - base.y,
+    },
+    toggle: action.toggle === true,
+  };
+}
+function furnitureShowroomStand(demo, definition) {
+  const action = furnitureActionDefinitions(definition)[0];
+  if (!action) return demo.stand || null;
+  const { gridX, gridY } = furnitureShowroomGrid(demo, definition);
+  const location = parseLocation("furniture-shop");
+  const ownId = String(demo.instanceId);
+  const blockers = furnitureShowroomBlockers().filter((block) =>
+    String(block.instanceId || "") !== ownId);
+  const anchor = furnitureShowroomActionAnchor(demo, definition, action);
+  return furnitureActionStandCandidates(definition, gridX, gridY, HOME_GRID.cell, action.id)
+    .find((candidate) =>
+      validLocationMove(location, candidate.x, candidate.y, blockers) &&
+      furnitureActionWithinRadius(candidate, anchor, action.radius) &&
+      furniturePathClear(location, candidate, anchor, blockers)) ||
+    demo.stand || null;
 }
 const homeLayoutCollisionCache = new Map();
 function indexedHomeLayoutBlockers(layout) {
@@ -3679,6 +3782,11 @@ function removeHomeLayoutCacheInstance(ownerEmail, instanceId) {
 }
 function homeBlockersFor(location) {
   return location?.kind === "home" ? (homeLayoutCollisionCache.get(location.ownerEmail) || []) : [];
+}
+function locationFurnitureBlockers(location) {
+  return location?.kind === "home"
+    ? homeBlockersFor(location)
+    : furnitureShowroomBlockersFor(location);
 }
 // All permission-changing operations on a home share one FIFO.  PostgreSQL
 // transactions still protect durable rows, while this closes the asynchronous
@@ -3758,9 +3866,7 @@ function safeFurnitureStand(player, activity, locationId) {
       (location?.kind !== "home" && location?.id !== "furniture-shop")) return null;
   const isHome = location.kind === "home";
   const targetId = String(activity.instanceId);
-  const allBlockers = isHome
-    ? [...homeBlockersFor(location)]
-    : [];
+  const allBlockers = [...locationFurnitureBlockers(location)];
   if (isHome && !allBlockers.some((block) => block.instanceId === targetId) && activity.targetBlock) {
     allBlockers.push(activity.targetBlock);
   }
@@ -10127,12 +10233,7 @@ io.on("connection", (socket) => {
     // that becomes the authoritative activity coordinate. The authored stand
     // remains the client affordance/exit point, but a valid stand can be
     // farther than the action radius for an art-relative bath or bed offset.
-    const demoAnchor = furnitureActionAnchor(
-      definition,
-      (demo.x - definition.width * HOME_GRID.cell / 2) / HOME_GRID.cell,
-      (demo.y - definition.height * HOME_GRID.cell) / HOME_GRID.cell,
-      HOME_GRID.cell, action.id,
-    );
+    const demoAnchor = furnitureShowroomActionAnchor(demo, definition, action);
     if (!furnitureActionWithinRadius(p, demoAnchor, action.radius || 96)) {
       socket.emit("furnitureDemoInteractionResult", {
         ok: false, code: "distance", message: `Walk closer to ${definition.name.toLowerCase()}.`,
@@ -10147,9 +10248,12 @@ io.on("connection", (socket) => {
     // checking only the authored approach point allowed an actor to be
     // accepted through a display wall and left remote clients at a blocked
     // coordinate.
+    const showroomBlockers = furnitureShowroomBlockersFor(showroomLocation);
+    const otherShowroomBlockers = showroomBlockers.filter((block) =>
+      String(block.instanceId || "") !== instanceId);
     if (!showroomLocation ||
-        !validLocationMove(showroomLocation, demoAnchor.x, demoAnchor.y) ||
-        !furniturePathClear(showroomLocation, p, demoAnchor, [])) {
+        !validLocationMove(showroomLocation, demoAnchor.x, demoAnchor.y, otherShowroomBlockers) ||
+        !furniturePathClear(showroomLocation, p, demoAnchor, otherShowroomBlockers)) {
       socket.emit("furnitureDemoInteractionResult", {
         ok: false, code: "blocked", message: "You cannot reach that showroom demo from here.",
       });
@@ -10902,11 +11006,11 @@ io.on("connection", (socket) => {
     // outside the drawn world — silently dropped like every other rejection
     // (the client clamps at the border for UX; this is the anti-cheat half).
     const location = parseLocation(locationOf(me));
-    const blockers = homeBlockersFor(location);
+    const blockers = locationFurnitureBlockers(location);
     // Sitting is a server-checked furniture interaction in homes. A forged
     // `anim:"sit"` in a plaza, shop, or empty floor is discarded; the chair
     // itself is temporarily excluded from collision only for that sit snap.
-    const activeBlock = location?.kind === "home" && me.activity &&
+    const activeBlock = (location?.kind === "home" || location?.id === "furniture-shop") && me.activity &&
       blockers.find((b) => b.instanceId === String(me.activity.instanceId));
     const chair = location?.kind === "home" && blockers.find((b) => b.furnitureId === "oak_chair" &&
       Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2)) <= 52);

@@ -1,0 +1,21 @@
+{
+  "fixtureOnly": true,
+  "ownerEmail": "inventory-scope-fixture@justpressone.test",
+  "checkedServerPayloads": [
+    "approved.location/locationId",
+    "locationTransitionResult.location",
+    "currentPlayers[socket.id].id/location"
+  ],
+  "screenshots": [
+    "/home/runner/workspace/artifacts/jpo-huddle/tests/evidence/inventory-scope-willow-fixture.png",
+    "/home/runner/workspace/artifacts/jpo-huddle/tests/evidence/inventory-scope-plaza-fixture.png"
+  ],
+  "assertions": [
+    "HQ renders wearable, pet, usable, and grouped furniture.",
+    "Willow Walk shows only Furniture tab/item after HQ selection.",
+    "Huddle Plaza shows only Furniture tab/item.",
+    "Reconnect/reopen replays actual server payload order and retains Plaza furniture scope.",
+    "Returning HQ exposes the unchanged fixture collection.",
+    "Late hotbar initialization adopts _jpoAuthoritativeLocation without missing the current map."
+  ]
+}

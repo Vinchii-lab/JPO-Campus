@@ -15,6 +15,12 @@ Align a sitter's visible hips with the cushion, not the sprite pivot. Require th
 
 **How to apply:** Compare bounded seat-height alternatives using the real avatar before adjusting the front mask, then inspect live local and observer close-ups. Do not accept a head-only silhouette as a successful seated pose.
 
+Judge furniture size beside a standing avatar using visible silhouettes, not matching texture scale factors.
+
+**Why:** Both sprites used the same native-pixel scale, but the chair's taller opaque source silhouette still made it disproportionately large. Equal scale factors did not establish appropriate proportions.
+
+**How to apply:** Compare empty, seated, and standing views at the real map zoom. Prefer integer sprite scaling and preserve saved placement footprints when changing decorative art size; recheck the sit anchor against the resized cushion.
+
 An isolated pose render is not proof that live furniture interactions work.
 
 **Why:** Pose screenshots passed while the regular scene update could overwrite poses, legacy invisible showroom blockers remained, and the live nearby-action detector could return no target at a valid authored stand.

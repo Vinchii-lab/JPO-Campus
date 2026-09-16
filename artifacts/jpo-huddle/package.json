@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "loadtest": "node loadtest/loadtest.mjs"
+    "loadtest": "node loadtest/loadtest.mjs",
+    "test:inventory-scope": "node --test tests/inventory-scope.test.mjs",
+    "test:inventory-dom": "node tests/neighborhood/inventory-scope-dom.mjs"
   },
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.1",

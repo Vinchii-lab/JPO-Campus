@@ -104,6 +104,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   // row twice while the authoritative snapshot is on its way back.
   const pendingReturnIds = new Set();
   let currentLocation = 'office';
+  // The inventory hotbar can initialize after a map payload during a
+  // reconnect. Expose this read-only location context rather than duplicating
+  // scene-key inference or mutating global inventory state.
+  window.JpoNeighborhood.getCurrentLocation = () => currentLocation;
   let panelsCollapsed = false;
   try { panelsCollapsed = localStorage.getItem('jpo-neighborhood-panels-collapsed') === 'true'; } catch (_) {}
   const panelToggle = ui.querySelector('#neighborhood-panel-toggle');
@@ -964,6 +968,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this.localCosmeticDef = this.localWingsDef = null;
       this.localSlotObjs = {};
       this.ghost = null;
+       this.ghostFootprint = null;
+       this.ghostPlacementMarker = null;
       this.portalCues = [];
       this.player = null;
       this.localNameTag = null;
@@ -1038,7 +1044,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._yardBlocks = this.physics.add.staticGroup();
       this._furnitureBlocks = this.physics.add.staticGroup();
       (this.info.geometry?.blockers || []).forEach((block) =>
-        this._addBlock(block.furnitureId ? this._yardBlocks : this._geometryBlocks, block));
+        this._addBlock(block.furnitureId && !block.showroom ? this._yardBlocks : this._geometryBlocks, block));
       this.physics.add.collider(this.player, this._geometryBlocks);
       this.physics.add.collider(this.player, this._yardBlocks);
       this.physics.add.collider(this.player, this._furnitureBlocks);
@@ -2026,10 +2032,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _hideLegacyFurnitureShopObjects() {
+      // The catalog demos below replace only the former sale placeholders.
+      // Bookcases, mirrors, plants, and lamps are authored showroom fixtures,
+      // not products that happen to share an old commercial texture key.
       const legacyKeys = new Set([
-        'furn_bookcase', 'decor_mirror', 'native_fern', 'native_reading_lamp',
-        'floor_lamp', 'native_blue_sofa', 'furn_armchair', 'furn_table',
-        'furn_bed', 'furn_tv', 'native_oak_chair',
+        'native_blue_sofa', 'furn_armchair', 'furn_table', 'furn_bed',
+        'furn_tv', 'native_oak_chair',
       ]);
       for (const object of [...(this.children?.list || [])]) {
         if (legacyKeys.has(object?.texture?.key)) {
@@ -2140,6 +2148,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         });
         if (!sprite) continue;
         const actions = demo.actions || [];
+        // Keep the exact catalog metadata on the rendered demo. Besides
+        // renderer tooling, this lets the proximity anchor below use the
+        // same bottom-centred footprint/action offsets as the server.
+        sprite.setData('instanceId', String(demo.instanceId));
+        sprite.setData('furnitureId', definition.id);
+        sprite.setData('height', demo.footprint?.height || definition.height || 1);
+        sprite.setData('anchor', definition.interaction?.anchor || 'center');
+        sprite.setData('rotation', 0);
         sprite.setData('showroomDemo', demo);
         sprite.setData('showroomActions', actions);
         sprite.setData('actionRadius', Math.max(
@@ -2554,14 +2570,20 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (!sprite || sprite.active === false) continue;
         const demo = entry.demo || sprite.getData?.('showroomDemo');
         const actions = entry.actions || sprite.getData?.('showroomActions') || [];
-        const stand = demo?.stand;
-        if (!demo?.instanceId || !stand || !actions.length) continue;
-        const radius = Number(sprite.getData?.('actionRadius')) ||
-          Math.max(96, ...actions.map((action) => Number(action?.radius) || 0));
-        const distance = Math.hypot(this.player.x - Number(stand.x), this.player.y - Number(stand.y));
+        if (!demo?.instanceId || !actions.length) continue;
+        // Do not use the approach/exit stand as an interaction target. A bath,
+        // chair, or bed can legitimately have a stand farther from its
+        // catalog action pad than its action radius. Mirroring the selected
+        // catalog anchor makes an [E] prompt an admission the server will
+        // accept, including Shift's second action.
+        const selectedAction = this.keyShift?.isDown && actions[1] ? actions[1] : actions[0];
+        const interaction = this._furnitureActionAnchor(sprite, selectedAction);
+        const radius = Number(interaction?.radius) ||
+          Number(sprite.getData?.('actionRadius')) || 86;
+        const distance = Math.hypot(this.player.x - Number(interaction.x), this.player.y - Number(interaction.y));
         if (distance > radius || (best && distance >= best.distance)) continue;
         best = {
-          sprite, demo, actions, distance, radius,
+          sprite, demo, actions, distance, radius, anchor: interaction,
           instanceId: entry.instanceId || demo.instanceId,
         };
       }
@@ -2769,8 +2791,16 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         }
         if (this.ghost) {
           this.ghost.setData?.('blocked', blocked);
-          if (blocked) this.ghost.setTint?.(0xff5555);
-          else this.ghost.clearTint?.();
+          // A preview is the real authored product art, never a red-tinted
+          // substitute. Validity is expressed by the tile outline and the
+          // explicit locked-placement message below; collision validation
+          // remains unchanged and the confirm button stays disabled.
+          this.ghost.clearTint?.();
+          this._drawGhostFootprint(
+            (usingYard ? yardOrigin.x : 0) + gridX * 48,
+            (usingYard ? yardOrigin.y : 0) + gridY * 48,
+            footprint.width * 48, footprint.height * 48, blocked,
+          );
         }
       };
 
@@ -2825,6 +2855,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
             requestStore(instanceId);
           }
         });
+        if (!valid) {
+          const note = document.createElement('small');
+          note.id = 'ghost-invalid-note';
+          note.textContent = 'Cannot place here: blocked or outside the room.';
+          note.style.cssText = 'display:block; margin-top:6px; color:#ffb3a7; text-align:center;';
+          container.firstElementChild?.appendChild(note);
+        }
       };
 
       this._placementMoveHandler = (pointer) => {
@@ -2839,7 +2876,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this._placementLocked = true;
         this._updateGhostPosition(pointer);
 
-        // Preserve red/green placement preview but lock position
+        // Lock the authored-color preview at the selected grid point.
         if (this.ghost) {
            if (this.ghost.setAlpha) this.ghost.setAlpha(0.9);
         }
@@ -2854,6 +2891,28 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _clearGhost() {
       if (this.ghost) this.ghost.destroy();
       this.ghost = null;
+      this.ghostFootprint?.destroy?.();
+      this.ghostFootprint = null;
+      this.ghostPlacementMarker?.destroy?.();
+      this.ghostPlacementMarker = null;
+    }
+
+    _drawGhostFootprint(x, y, width, height, blocked) {
+      if (!this.ghostFootprint) this.ghostFootprint = this.add.graphics().setDepth(2998);
+      const color = blocked ? 0xff8a76 : 0x86d9bf;
+      this.ghostFootprint.clear();
+      this.ghostFootprint.lineStyle(2, color, 0.95);
+      this.ghostFootprint.strokeRect(x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2));
+      if (!this.ghostPlacementMarker) {
+        this.ghostPlacementMarker = this.add.text(0, 0, '', {
+          fontFamily: 'monospace', fontSize: '11px', color: '#fff4dc',
+          backgroundColor: '#6f2924', padding: { x: 4, y: 2 },
+        }).setOrigin(0.5, 1).setDepth(2999);
+      }
+      this.ghostPlacementMarker
+        .setPosition(x + width / 2, y - 4)
+        .setText('Cannot place here')
+        .setVisible(blocked);
     }
 
     clearPlacementPreview() {

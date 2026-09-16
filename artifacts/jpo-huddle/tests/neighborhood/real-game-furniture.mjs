@@ -45,6 +45,12 @@
  *   REAL_GAME_QA=1 REAL_GAME_HOME_CHAIRS_ONLY=1 \
  *     node tests/neighborhood/real-game-furniture.mjs
  *
+ * Focused Plaza proof (real Huddle Home collision/demo/shop flow followed by
+ * an authored-color invalid placement preview; screenshots stay in
+ * tests/evidence unless REAL_GAME_OUTPUT_DIR is set):
+ *   REAL_GAME_QA=1 REAL_GAME_PLAZA_QA=1 \
+ *     node tests/neighborhood/real-game-furniture.mjs
+ *
  * The QA opt-in is required. DATABASE_URL is read by pg/server.js but never
  * printed. This test is intentionally bounded to four minutes by default;
  * it is not a long browser journey.
@@ -76,6 +82,7 @@ const SERVER_FILE = join(ARTIFACT_ROOT, "server.js");
 const LOADER_FILE = join(HERE, "real-game-furniture-loader.mjs");
 const COFFEE_TABLE_FOCUS_ONLY = process.env.REAL_GAME_HOME_COFFEE_TABLE_ONLY === "1";
 const CHAIR_FOCUS_ONLY = process.env.REAL_GAME_HOME_CHAIRS_ONLY === "1";
+const PLAZA_QA_ENABLED = process.env.REAL_GAME_PLAZA_QA === "1";
 const QA_LAYOUT_FOR_FOCUS = [
   { furnitureId: "oak_chair", gridX: 13, gridY: 14, instanceId: "qa-chair-a" },
   { furnitureId: "oak_chair", gridX: 16, gridY: 14, instanceId: "qa-chair-b" },
@@ -348,6 +355,10 @@ async function startLocalServer() {
       PORT: String(port),
       REAL_GAME_QA_OWNER_EMAIL: OWNER_EMAIL,
       REAL_GAME_QA_GUEST_EMAIL: GUEST_EMAIL,
+      // This explicit focused-session phase prevents an automatic Socket.IO
+      // resume from consuming a positional "second restore" before the first
+      // showroom scene has rendered.
+      REAL_GAME_QA_OWNER_PHASE: PLAZA_QA_ENABLED ? "showroom" : "",
       REAL_GAME_QA_HOME_SPAWN: focusSpawn ? JSON.stringify(focusSpawn) : "",
       NODE_OPTIONS: nodeOptions,
     },
@@ -1020,6 +1031,20 @@ async function showroomDiagnostics(page, requiredAction = null) {
       location: scene?.location || null,
       demoCount: demos.length,
       spriteCount: sprites.length,
+      showroomBlockers: (scene?.info?.geometry?.blockers || [])
+        .filter((block) => block?.showroom === true)
+        .map((block) => ({
+          instanceId: block.instanceId || null,
+          furnitureId: block.furnitureId || null,
+          x: Number(block.x), y: Number(block.y),
+          width: Number(block.width), height: Number(block.height),
+        })),
+      fixtureBlockers: (scene?.info?.geometry?.blockers || [])
+        .filter((block) => block?.fixture === true)
+        .map((block) => ({
+          x: Number(block.x), y: Number(block.y),
+          width: Number(block.width), height: Number(block.height),
+        })),
       stableShowroomInteractions: demos.map((demo) => ({
         instanceId: demo.instanceId || null,
         furnitureId: demo.furnitureId || null,
@@ -1241,6 +1266,46 @@ async function clickPlacementSpot(page, label) {
   });
   requireOk(await page.$("#placement-controls:not([hidden]) #ghost-confirm"),
     `${label} existing placement UI exposes enabled Confirm`);
+}
+
+async function proveInvalidPlacementPreview(page, label) {
+  // This is a real pointer event on the solid private-wing divider, not a
+  // scene mutation. It proves the client keeps the original sprite pixels,
+  // shows a readable blocked marker, and still refuses confirmation.
+  const point = await page.evaluate(() => {
+    const scene = window._neighborhoodScene;
+    const canvas = scene?.game?.canvas || document.querySelector("canvas");
+    const camera = scene?.cameras?.main;
+    if (!canvas || !camera?.worldView) return null;
+    const rect = canvas.getBoundingClientRect();
+    const worldX = 10 * 48 + 24, worldY = 10 * 48 + 24;
+    return {
+      x: rect.left + ((worldX - camera.worldView.x) / camera.worldView.width) * rect.width,
+      y: rect.top + ((worldY - camera.worldView.y) / camera.worldView.height) * rect.height,
+    };
+  });
+  requireOk(point && Number.isFinite(point.x) && Number.isFinite(point.y),
+    `${label} computes a live blocked placement canvas point`);
+  await page.mouse.click(point.x, point.y);
+  await page.waitForSelector("#placement-controls:not([hidden]) #ghost-confirm[disabled]", {
+    timeout: boundedTimeout(10_000),
+  });
+  const proof = await page.evaluate(() => {
+    const scene = window._neighborhoodScene;
+    const ghost = scene?.ghost;
+    return {
+      blocked: ghost?.getData?.("blocked") === true,
+      tinted: ghost?.isTinted === true,
+      marker: scene?.ghostPlacementMarker?.text || "",
+      note: document.querySelector("#ghost-invalid-note")?.textContent || "",
+      confirmDisabled: document.querySelector("#placement-controls #ghost-confirm")?.disabled === true,
+    };
+  });
+  requireOk(proof.blocked && !proof.tinted && proof.marker === "Cannot place here" &&
+    proof.note.includes("Cannot place here") && proof.confirmDisabled,
+  `${label} invalid ghost keeps authored color, labels the block, and denies Place: ${JSON.stringify(proof)}`);
+  await screenshot(page, "invalid-placement-authored-color-blocked");
+  await page.click("#placement-controls #ghost-cancel");
 }
 
 async function openHomeEditorForHotbar(page) {
@@ -1492,29 +1557,13 @@ async function inventoryHotbarUiOnlyPass(baseUrl) {
   requireOk(desktopInventory.inventory.some((item) =>
     String(item.id) === hotbarStoredFurnitureId),
   "UI-only desktop inventory contains the seeded stored furniture UUID");
-  await selectHotbarItem(ownerPage, "usables", HOTBAR_USABLE_ID, "usable", "UI-only consumable");
-  const beforeUseCount = await ownerPage.$eval(
-    `.hotbar-item[data-id="${HOTBAR_USABLE_ID}"] .hotbar-item-count`,
-    (node) => Number(node.textContent),
-  );
-  const itemEventsBefore = await importantEventCount(ownerPage, "itemsUpdate");
-  await ownerPage.$eval(
-    ".hotbar-action-btn[data-action=\"use\"]", (element) => element.click(),
-  );
-  const itemEvent = await waitForImportantEvent(
-    ownerPage, "itemsUpdate", itemEventsBefore, "UI-only consumable use",
-  );
-  const afterUseCount = Number(itemEvent.payload?.items?.[HOTBAR_USABLE_ID]);
-  requireOk(beforeUseCount === 2 && afterUseCount === 1,
-    `UI-only consumable Use acknowledges 2 → 1 (${beforeUseCount} → ${afterUseCount})`);
-  const badgeUpdated = await ownerPage.waitForFunction(
-    (id) => Number(document.querySelector(
-      `.hotbar-item[data-id="${id}"][data-type="usable"] .hotbar-item-count`,
-    )?.textContent) === 1,
-    { timeout: boundedTimeout(5_000) },
-    HOTBAR_USABLE_ID,
-  ).then(() => true).catch(() => false);
-  ok(badgeUpdated, "UI-only consumable badge visibly shows count 1");
+  requireOk(await ownerPage.$('.hotbar-cat-btn[data-cat="wearables"]') === null &&
+    await ownerPage.$('.hotbar-cat-btn[data-cat="pets"]') === null &&
+    await ownerPage.$('.hotbar-cat-btn[data-cat="usables"]') === null,
+  "UI-only home inventory hides HQ-only wearable, pet, and usable tabs");
+  requireOk(await ownerPage.$(`.hotbar-item[data-id="${HOTBAR_COSMETIC_ID}"]`) === null &&
+    await ownerPage.$(`.hotbar-item[data-id="${HOTBAR_USABLE_ID}"]`) === null,
+  "UI-only home inventory hides HQ-owned cosmetic and consumable items");
   await assertInventoryToggleHit(ownerPage, "desktop");
 
   priorOwnerErrors.push(...(ownerPage.__realGameErrors || []));
@@ -1620,6 +1669,15 @@ async function inventoryHotbarPass(baseUrl) {
   // Hide it through its real panel toggle so the subsequent real pointer
   // placement is not intercepted by an empty UI surface.
   await hideNeighborhoodOverlay(ownerPage);
+  await proveInvalidPlacementPreview(ownerPage, "hotbar Place");
+  // Select the same authenticated inventory row again after the blocked
+  // preview's real Cancel action, then complete the separate valid journey.
+  await openInventoryHotbar(ownerPage, "owner retry after blocked preview");
+  await selectHotbarItem(ownerPage, "furniture", "oak_chair", "furniture", "blocked-preview retry");
+  await ownerPage.$eval(
+    ".hotbar-action-btn[data-action=\"place\"]", (element) => element.click(),
+  );
+  await hideNeighborhoodOverlay(ownerPage);
   await clickPlacementSpot(ownerPage, "hotbar Place");
   const placeEventsBefore = await importantEventCount(ownerPage, "homeActionResult");
   await ownerPage.click("#placement-controls #ghost-confirm");
@@ -1667,45 +1725,17 @@ async function inventoryHotbarPass(baseUrl) {
   requireOk(storedReload.inventory.some((item) => String(item.id) === hotbarStoredFurnitureId),
     "reloaded owner home preserves exact stored UUID after Store");
 
-  stage("inventory hotbar cosmetic equip and consumable use");
+  stage("inventory hotbar neighborhood collection isolation");
   const cosmeticInventory = await openInventoryHotbar(ownerPage, "owner after Store");
   requireOk(cosmeticInventory.ownerEmail === OWNER_EMAIL,
     "post-Store inventory still uses the owner identity");
-  await selectHotbarItem(ownerPage, "wearables", HOTBAR_COSMETIC_ID, "wearable", "cosmetic");
-  const equipEventsBefore = await importantEventCount(ownerPage, "equipUpdate");
-  await ownerPage.click(".hotbar-action-btn[data-action=\"equip\"]");
-  const equipEvent = await waitForImportantEvent(
-    ownerPage, "equipUpdate", equipEventsBefore, "cosmetic equip",
-  );
-  requireOk(equipEvent.payload?.equipped === HOTBAR_COSMETIC_ID,
-    "owned cosmetic equip receives the server-authoritative acknowledgement");
-
-  await ownerPage.click("#inventory-toggle-btn");
-  await openInventoryHotbar(ownerPage, "owner for consumable");
-  await selectHotbarItem(ownerPage, "usables", HOTBAR_USABLE_ID, "usable", "consumable");
-  const beforeUseCount = await ownerPage.$eval(
-    `.hotbar-item[data-id="${HOTBAR_USABLE_ID}"] .hotbar-item-count`,
-    (node) => Number(node.textContent),
-  );
-  const itemEventsBefore = await importantEventCount(ownerPage, "itemsUpdate");
-  await ownerPage.click(".hotbar-action-btn[data-action=\"use\"]");
-  const itemEvent = await waitForImportantEvent(
-    ownerPage, "itemsUpdate", itemEventsBefore, "consumable use",
-  );
-  const afterUseCount = Number(itemEvent.payload?.items?.[HOTBAR_USABLE_ID]);
-  requireOk(afterUseCount === beforeUseCount - 1,
-    `one consumable Use decrements server count (${beforeUseCount} → ${afterUseCount})`);
-  const uiCountUpdated = await ownerPage.waitForFunction(
-    ({ id, expected }) => {
-      const node = document.querySelector(
-        `.hotbar-item[data-id="${id}"][data-type="usable"] .hotbar-item-count`,
-      );
-      return Number(node?.textContent) === expected;
-    },
-    { timeout: boundedTimeout(5_000) },
-    { id: HOTBAR_USABLE_ID, expected: afterUseCount },
-  ).then(() => true).catch(() => false);
-  ok(uiCountUpdated, "hotbar Use refreshes the visible consumable count");
+  requireOk(await ownerPage.$('.hotbar-cat-btn[data-cat="wearables"]') === null &&
+    await ownerPage.$('.hotbar-cat-btn[data-cat="pets"]') === null &&
+    await ownerPage.$('.hotbar-cat-btn[data-cat="usables"]') === null,
+  "home inventory hides HQ-only category tabs after Store");
+  requireOk(await ownerPage.$(`.hotbar-item[data-id="${HOTBAR_COSMETIC_ID}"]`) === null &&
+    await ownerPage.$(`.hotbar-item[data-id="${HOTBAR_USABLE_ID}"]`) === null,
+  "home inventory never displays HQ-owned cosmetic or consumable items");
 
   stage("inventory hotbar mobile viewport and emote accessibility");
   await ownerPage.setViewport(HOTBAR_VIEWPORT);
@@ -2354,7 +2384,7 @@ async function homeBedBathOnlyPass(baseUrl) {
   }
 }
 
-async function showroomAndStorePass(baseUrl) {
+async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
   stage("owner showroom flow");
   ownerPage.__realGameBaseUrl = baseUrl;
   await registerThroughUi(ownerPage, OWNER_EMAIL, "QA Furniture");
@@ -2381,6 +2411,13 @@ async function showroomAndStorePass(baseUrl) {
   requireOk(firstDiagnostics.demoCount >= 7, "full showroom demo catalog is delivered");
   requireOk(firstDiagnostics.spriteCount === firstDiagnostics.demoCount,
     "every showroom catalog demo has a rendered sprite");
+  requireOk(firstDiagnostics.showroomBlockers.length === firstDiagnostics.demoCount &&
+    firstDiagnostics.showroomBlockers.every((block) =>
+      block.instanceId && block.furnitureId && block.width > 0 && block.height > 0),
+  "every visible showroom catalog demo has a server-supplied physical collision body");
+  requireOk(firstDiagnostics.fixtureBlockers.length >= 8 &&
+    firstDiagnostics.fixtureBlockers.every((block) => block.width > 0 && block.height > 0),
+  "retained bookcase, plant, and lamp display fixtures also have physical collision bodies");
   requireOk(firstDiagnostics.sprites.every((sprite) =>
     sprite.instanceId && sprite.furnitureId && Array.isArray(sprite.actions) && sprite.texture,
   ), "every showroom sprite carries instance/action/texture data");
@@ -2405,14 +2442,67 @@ async function showroomAndStorePass(baseUrl) {
   }
 
   // Exercise one showroom's real keyboard action before opening the cashier.
-  // The authored stand is adjacent to the sofa blocker; the client collider
-  // correctly stops just outside it (around 298,306), still inside the real
-  // showroom action radius.
-  await moveTo(ownerPage, 300, 300, "showroom sofa", 100);
+  // The target point is the physical sofa's south edge, never a coordinate
+  // inside its body. The held-key route must stop at that edge while remaining
+  // inside the lounge sofa's catalog action radius.
+  // Phaser's 18px movement tick can cross the requested x probe by one tick;
+  // keep the assertion on the measured y collision edge, not a false exact-x
+  // requirement that would mask the same physical result.
+  await moveTo(ownerPage, 340, 337, "showroom sofa south collision edge", 24);
+  const southCollision = await sceneState(ownerPage);
+  requireOk(southCollision.y >= 336 && southCollision.y <= 338,
+    `real client movement stops at the lounge sofa south edge (${Math.round(southCollision.y)})`);
   await requireNearbyShowroomAction(ownerPage, "sit");
   await pressFurnitureAction(ownerPage, "sit");
   await screenshot(ownerPage, "showroom-sofa-sit");
   await exitFurnitureAction(ownerPage);
+  // Exit returns to the dynamically derived north-side stand. Attempting to
+  // walk down must remain outside the same solid display body, proving Arcade
+  // collision from the opposite side with real held-key input.
+  await ownerPage.keyboard.down("ArrowDown");
+  await sleep(450);
+  await ownerPage.keyboard.up("ArrowDown");
+  const northCollision = await sceneState(ownerPage);
+  requireOk(northCollision.y >= 254 && northCollision.y <= 256,
+    `real client movement stops at the lounge sofa north edge (${Math.round(northCollision.y)})`);
+  await screenshot(ownerPage, "showroom-lounge-sofa-two-sided-collision");
+  if (plazaOnly) {
+    stage("showroom cashier E and real catalog purchase");
+    await moveTo(ownerPage, 480, 340, "showroom cashier", 12);
+    await ownerPage.waitForFunction(
+      () => !!window._neighborhoodScene?.nearbyCashier?.id,
+      { timeout: boundedTimeout(10_000) },
+    );
+    await pagePressAndOpenCashier(ownerPage);
+    const shopProducts = await ownerPage.evaluate(() =>
+      [...document.querySelectorAll("#shop-panel [data-buy]")].map((button) => ({
+        furnitureId: button.dataset.buy || null,
+        text: String(button.closest(".home-item")?.textContent || "")
+          .replace(/\s+/g, " ").trim(),
+      })));
+    const requiredProducts = [
+      ["oak_chair", /gold armchair/i], ["fern", /fern/i],
+      ["reading_lamp", /reading lamp/i], ["coffee_table", /coffee table/i],
+      ["blue_sofa", /blue sofa/i], ["bookcase", /bookcase/i],
+    ];
+    requireOk(requiredProducts.every(([furnitureId, name]) =>
+      shopProducts.some((product) => product.furnitureId === furnitureId &&
+        name.test(product.text))),
+    "cashier E opens every real Huddle Home for-sale product, including retained display decor");
+    await ownerPage.evaluate(() => {
+      const button = document.querySelector('#shop-panel [data-buy="oak_chair"]');
+      if (!button) throw new Error("Huddle Home Gold armchair purchase button missing");
+      button.click();
+    });
+    await ownerPage.waitForFunction(
+      () => (window.__realGameEvents || []).some((entry) =>
+        entry.event === "homePurchaseResult" && entry.payload?.ok === true &&
+        entry.payload?.item?.furnitureId === "oak_chair"),
+      { timeout: boundedTimeout(15_000) },
+    );
+    await screenshot(ownerPage, "showroom-cashier-gold-armchair-purchased");
+    return;
+  }
 
   // The Home side panel's Store button is a targeted return-to-inventory
   // operation, not a cashier purchase. Its exact UUID assertions run after
@@ -2665,6 +2755,26 @@ async function homeStoreReturnPass() {
   await screenshot(ownerPage, "home-store-return-reloaded");
 }
 
+async function plazaInvalidGhostProofPass() {
+  stage("Plaza QA invalid authored-color placement proof");
+  // Return through normal map portals; no synthetic location change and no
+  // Home Store mutation is needed to obtain the newly cashier-purchased item.
+  await enterOwnerHomeThroughRealPortals(ownerPage);
+  const snapshot = await requestHomeSnapshot(ownerPage);
+  const stored = snapshot.inventory?.find((item) => item.furnitureId === "oak_chair");
+  requireOk(stored?.id && stored?.furnitureId,
+    "Plaza QA has the exact cashier-purchased Gold armchair for a real placement preview");
+  if (!stored?.id || !stored?.furnitureId) return;
+  await openInventoryHotbar(ownerPage, "Plaza QA returned furniture");
+  await selectHotbarItem(ownerPage, "furniture", stored.furnitureId, "furniture",
+    "Plaza QA returned furniture");
+  await ownerPage.$eval(
+    ".hotbar-action-btn[data-action=\"place\"]", (element) => element.click(),
+  );
+  await hideNeighborhoodOverlay(ownerPage);
+  await proveInvalidPlacementPreview(ownerPage, "Plaza QA");
+}
+
 async function pagePressAndOpenCashier(page) {
   await page.keyboard.press("e");
   await page.waitForSelector("#shop-panel", { timeout: boundedTimeout(10_000) });
@@ -2713,6 +2823,11 @@ async function run() {
   ownerPage.__realGameBaseUrl = baseUrl;
   guestPage.__realGameBaseUrl = baseUrl;
 
+  if (PLAZA_QA_ENABLED) {
+    await showroomAndStorePass(baseUrl, { plazaOnly: true });
+    await plazaInvalidGhostProofPass();
+    return;
+  }
   if (HOTBAR_QA_ENABLED) {
     if (HOTBAR_MOBILE_ONLY_QA) {
       await inventoryHotbarMobileOnlyPass(baseUrl);

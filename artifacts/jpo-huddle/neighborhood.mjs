@@ -886,18 +886,20 @@ export const FURNITURE_CATALOG = Object.freeze({
     id: "oak_chair", name: "Gold armchair", price: 5000, category: "Living",
     // A fresh immutable URL is deliberate: the prior oak_chair.png points at
     // a firewood rack and is cached by production clients for 24 hours.
-    path: "/assets/neighborhood/furniture/gold_armchair.png", frameWidth: 16, frameHeight: 32,
+    // This is a 16×32 portrait prop, not a two-tile throne. At integer 2× its
+    // 16×26 opaque silhouette presents as 32×52px beside the avatar's 3×
+    // 16×23 opaque body (48×69px), while its saved floor occupancy remains
+    // the authored single 48px cell.
+    path: "/assets/neighborhood/furniture/gold_armchair.png", frameWidth: 16, frameHeight: 32, scale: 2,
     asset: "oak_chair", actions: ["sit"], interaction: { facing: "down", radius: 96 }, color: "#b98743",
     actionInteractions: {
       // The 32px source is a two-cell-tall silhouette on a one-cell saved
-      // footprint. Its front cushion begins at source row 21, above the
-      // physical floor row. Put the seated sprite's centre one source row
-      // higher than the former generic pivot: its full face and shirt/torso
-      // remain above the cushion while its folded legs are genuinely behind it.
-      // This is 24 world pixels (eight authored source pixels) above the
-      // prior -34 setting; the visual-pose comparison proves -54 still lets
-      // the cushion cross the lower face/neck, while -58 clears it.
-      sit: { actorOffset: { x: 0, y: -58 } },
+      // footprint. At 2×, the source-row-21 front rail is 22px above the
+      // floor (rather than 33px at 3×). Keep the standard 3× avatar, moving
+      // its centre down by that 11px rail-height difference so its hips meet
+      // the smaller pad: the face and torso stay above the rail and only the
+      // knees/feet pass behind it.
+      sit: { actorOffset: { x: 0, y: -47 } },
     },
     activityPose: {
       sit: { angle: 0, scale: 3, wearableOffset: { x: 0, y: -10 } },

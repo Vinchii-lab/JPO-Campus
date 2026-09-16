@@ -546,24 +546,27 @@
         { "asset": "native_oak_chair", "x": 600, "y": 520, "depth": 520, "scale": 3 },
         { "asset": "native_oak_chair", "x": 760, "y": 520, "depth": 520, "scale": 3 }
       ],
+      "fixtureBlockers": [
+        { "x": 96, "y": 116, "width": 48, "height": 24 },
+        { "x": 256, "y": 116, "width": 48, "height": 24 },
+        { "x": 656, "y": 116, "width": 48, "height": 24 },
+        { "x": 816, "y": 116, "width": 48, "height": 24 },
+        { "x": 96, "y": 276, "width": 48, "height": 24 },
+        { "x": 816, "y": 276, "width": 48, "height": 24 },
+        { "x": 104, "y": 316, "width": 32, "height": 24 },
+        { "x": 824, "y": 316, "width": 32, "height": 24 }
+      ],
       "blockers": [
         { "x": 96, "y": 116, "width": 48, "height": 24 },
         { "x": 256, "y": 116, "width": 48, "height": 24 },
         { "x": 656, "y": 116, "width": 48, "height": 24 },
         { "x": 816, "y": 116, "width": 48, "height": 24 },
-        { "x": 156, "y": 296, "width": 40, "height": 20 },
-        { "x": 236, "y": 296, "width": 40, "height": 20 },
-        { "x": 316, "y": 296, "width": 40, "height": 20 },
-        { "x": 736, "y": 296, "width": 48, "height": 24 },
-        { "x": 256, "y": 396, "width": 48, "height": 24 },
-        { "x": 676, "y": 396, "width": 48, "height": 24 }
+        { "x": 96, "y": 276, "width": 48, "height": 24 },
+        { "x": 816, "y": 276, "width": 48, "height": 24 },
+        { "x": 104, "y": 316, "width": 32, "height": 24 },
+        { "x": 824, "y": 316, "width": 32, "height": 24 }
       ],
-      "seats": [
-        { "id": "f-sofa", "x": 200, "y": 520, "dir": "down", "stands": [{ "x": 200, "y": 560, "dir": "down" }] },
-        { "id": "f-bed", "x": 600, "y": 520, "dir": "left", "stands": [{ "x": 600, "y": 560, "dir": "left" }] },
-        { "id": "f-chair-1", "x": 360, "y": 520, "dir": "down", "stands": [{ "x": 360, "y": 560, "dir": "down" }] },
-        { "id": "f-chair-2", "x": 760, "y": 520, "dir": "down", "stands": [{ "x": 760, "y": 560, "dir": "down" }] }
-      ]
+      "seats": []
     },
     "garden-shop": {
       "label": "Garden Shop",

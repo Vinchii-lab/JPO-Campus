@@ -32,6 +32,11 @@ export async function load(url, context, nextLoad) {
 
   const ownerLiteral = JSON.stringify(owner);
   const guestLiteral = JSON.stringify(guest);
+  const ownerPhase = String(process.env.REAL_GAME_QA_OWNER_PHASE || "").trim();
+  if (ownerPhase && !["showroom", "home"].includes(ownerPhase)) {
+    throw new Error("real-game loader received invalid REAL_GAME_QA_OWNER_PHASE");
+  }
+  const ownerPhaseLiteral = JSON.stringify(ownerPhase);
   const homeSpawn = String(process.env.REAL_GAME_QA_HOME_SPAWN || "").trim();
   let homeSpawnLiteral = "null";
   if (homeSpawn) {
@@ -50,16 +55,26 @@ export async function load(url, context, nextLoad) {
   const qaHomeSpawn = ${homeSpawnLiteral};
   let qaSpawn = null;
   if (row.email === qaOwnerEmail) {
-    // rowToPlayerState is called once per authenticated restore. The first
-    // owner restore is the showroom pass; a fresh registration/reload then
-    // gets the real seeded home. No other row is affected.
-    const restoreNumber = (globalThis.__realGameQaOwnerRestores =
-      (globalThis.__realGameQaOwnerRestores || 0) + 1);
-    qaSpawn = restoreNumber === 1
-      ? { locationId: "furniture-shop", x: 480, y: 576, dir: "up" }
-      : { locationId: "home:" + qaOwnerEmail,
+    // Focused runs name their session phase explicitly. A resume/reconnect can
+    // invoke rowToPlayerState more than once before Phaser has built a scene,
+    // so function-call count is not a session boundary. The legacy focused
+    // modes retain their two-restore behavior until they opt into a phase.
+    const qaOwnerPhase = ${ownerPhaseLiteral};
+    if (qaOwnerPhase === "showroom") {
+      qaSpawn = { locationId: "furniture-shop", x: 480, y: 576, dir: "up" };
+    } else if (qaOwnerPhase === "home") {
+      qaSpawn = { locationId: "home:" + qaOwnerEmail,
         x: qaHomeSpawn?.x ?? 576, y: qaHomeSpawn?.y ?? 720,
         dir: qaHomeSpawn?.dir || "down" };
+    } else {
+      const restoreNumber = (globalThis.__realGameQaOwnerRestores =
+        (globalThis.__realGameQaOwnerRestores || 0) + 1);
+      qaSpawn = restoreNumber === 1
+        ? { locationId: "furniture-shop", x: 480, y: 576, dir: "up" }
+        : { locationId: "home:" + qaOwnerEmail,
+          x: qaHomeSpawn?.x ?? 576, y: qaHomeSpawn?.y ?? 720,
+          dir: qaHomeSpawn?.dir || "down" };
+    }
   } else if (row.email === qaGuestEmail) {
     qaSpawn = { locationId: "home:" + qaOwnerEmail,
       x: qaHomeSpawn?.x ?? 576, y: qaHomeSpawn?.y ?? 720,

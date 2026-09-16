@@ -2,6 +2,10 @@
 
 A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne team: people walk around as pixel avatars, chat, earn coins, buy cosmetics, and read the announcement board. All game state is durable in Postgres.
 
+## Inventory boundaries
+
+Willow Walk, Huddle Plaza, and neighborhood interiors use a neighborhood-only inventory. Do not merge HQ pets, cosmetics, or consumables into that view. This is an intentional product boundary: players should see items relevant to those maps, not their entire HQ collection. Preserve ownership and the existing HQ inventory when filtering the neighborhood view.
+
 ## Run & Operate
 
 - `pnpm --filter @workspace/jpo-huddle run dev` — run the JPO Huddle game server (`node server.js`)

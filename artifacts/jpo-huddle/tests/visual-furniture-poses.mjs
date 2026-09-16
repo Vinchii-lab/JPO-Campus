@@ -30,6 +30,9 @@ const PUBLIC = join(ROOT, "public");
 const ROOM_FURNITURE = resolve(ROOT, "../api-server/spritesheets");
 const DEFAULT_OUTPUT = "/tmp/jpo-huddle-furniture-poses.png";
 const VIEWPORT = { width: 1024, height: 576, deviceScaleFactor: 1 };
+const PHASER_CDN_URL = "https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js";
+const PHASER_FIXTURE_PATH = "/_fixture/phaser-3.80.1.min.js";
+let phaserSource = null;
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf("--output");
@@ -42,6 +45,11 @@ const chairOffset = chairOffsetIndex >= 0 ? Number(args[chairOffsetIndex + 1]) :
 if (chairOffsetIndex >= 0 && !Number.isFinite(chairOffset)) {
   throw new Error("--chair-offset must be a finite world-pixel offset");
 }
+const chairScaleIndex = args.indexOf("--chair-scale");
+const chairScale = chairScaleIndex >= 0 ? Number(args[chairScaleIndex + 1]) : null;
+if (chairScaleIndex >= 0 && (!Number.isInteger(chairScale) || chairScale <= 0)) {
+  throw new Error("--chair-scale must be a positive integer");
+}
 
 const fixtureIds = ["plush_bed", "lounge_sofa", "oak_chair", "bathtub"];
 const fixtureCatalog = Object.fromEntries(
@@ -49,18 +57,22 @@ const fixtureCatalog = Object.fromEntries(
     const definition = FURNITURE_CATALOG[id];
     // Comparison-only override for chair pose calibration. It deliberately
     // preserves the real art, renderer, pose method, and source-row-21
-    // occluder while making the evaluated seat anchor explicit in the image.
-    if (id !== "oak_chair" || chairOffset == null) return [id, definition];
+    // occluder while making the evaluated native scale and seat anchor
+    // explicit in the image.
+    if (id !== "oak_chair" || (chairOffset == null && chairScale == null)) return [id, definition];
     return [id, {
       ...definition,
+      ...(chairScale == null ? {} : { scale: chairScale }),
       actionInteractions: {
         ...definition.actionInteractions,
         sit: {
           ...definition.actionInteractions?.sit,
-          actorOffset: {
-            ...definition.actionInteractions?.sit?.actorOffset,
-            y: chairOffset,
-          },
+          ...(chairOffset == null ? {} : {
+            actorOffset: {
+              ...definition.actionInteractions?.sit?.actorOffset,
+              y: chairOffset,
+            },
+          }),
         },
       },
     }];
@@ -150,7 +162,7 @@ function fixtureHtml() {
 </head>
 <body>
   <div id="game"></div>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="${PHASER_FIXTURE_PATH}"></script>
   <script src="/house-colors.js"></script>
   <script src="/neighborhood-interiors.js"></script>
   <script src="/plaza-exteriors.js"></script>
@@ -368,6 +380,19 @@ async function sendFile(response, filePath) {
 
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url || "/", "http://127.0.0.1").pathname;
+  if (pathname === PHASER_FIXTURE_PATH) {
+    if (!phaserSource) {
+      response.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Fixture Phaser source is unavailable");
+      return;
+    }
+    response.writeHead(200, {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    response.end(phaserSource);
+    return;
+  }
   if (pathname === "/" || pathname === "/fixture.html") {
     response.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
@@ -386,6 +411,14 @@ const server = createServer(async (request, response) => {
 });
 
 async function main() {
+  // Chromium in the fixture sandbox cannot always reach the public CDN even
+  // when the test runner can. Fetch the immutable script once in Node and
+  // serve it from the same local origin as the production renderer.
+  const phaserResponse = await fetch(PHASER_CDN_URL);
+  if (!phaserResponse.ok) {
+    throw new Error(`Could not fetch Phaser fixture source (${phaserResponse.status})`);
+  }
+  phaserSource = await phaserResponse.text();
   await new Promise((resolveServer) => server.listen(0, "127.0.0.1", resolveServer));
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}/fixture.html`;

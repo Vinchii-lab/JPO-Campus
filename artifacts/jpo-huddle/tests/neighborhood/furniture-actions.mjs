@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   FURNITURE_CATALOG,
   HOME_GRID,
+  LOCATION_GEOMETRY,
   homeAccess,
   parseLocation,
   validLocationMove,
@@ -23,6 +24,7 @@ import {
   furnitureActivityConflictsWithBlock,
   furnitureIsOccupied,
 } from "../../furniture-actions.mjs";
+import commercialLayouts from "../../public/commercial-layouts.json" with { type: "json" };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const clientSource = fs.readFileSync(path.join(here, "../../public/neighborhood.js"), "utf8");
@@ -66,6 +68,96 @@ assert.equal(FURNITURE_CATALOG.bed.rotations.length, 1);
 assert.equal(FURNITURE_CATALOG.bed.interaction.orientation, "lengthwise",
   "portrait bed metadata keeps sleep lengthwise");
 assert.equal(FURNITURE_CATALOG.bed.asset, "bedroom_bed");
+
+// Huddle Home is a catalog showroom, not a collection of static park-seat
+// aliases. Rebuild its intentionally small, server-authored collision fixture
+// here with the same bottom-centred catalog footprint math used by server.js.
+// This is bounded QA: one representative demo proves blocked walking from both
+// sides; every real action demo proves its displayed stand can open its own
+// catalog action while all other displays remain solid.
+const showroomLocation = parseLocation("furniture-shop");
+const showroomFixtureBlocks = commercialLayouts.rooms["furniture-shop"].fixtureBlockers;
+assert.equal(LOCATION_GEOMETRY["furniture-shop"].seats.length, 0,
+  "removed placeholder chairs cannot expose unrelated static Sit targets");
+assert.ok(Array.isArray(showroomFixtureBlocks) && showroomFixtureBlocks.length > 0,
+  "retained Huddle Home decor fixtures have authored physical bodies");
+const showroomDemos = [
+  ["showroom-blue-sofa", "blue_sofa", 180, 320, "sit"],
+  ["showroom-lounge-sofa", "lounge_sofa", 340, 320, "sit"],
+  ["showroom-bed", "plush_bed", 760, 320, "lie"],
+  ["showroom-counter", "kitchen_counter", 440, 480, null],
+  ["showroom-bath", "bathtub", 620, 480, "shower"],
+  ["showroom-sink", "bathroom_sink_tap", 760, 480, "toggle_water"],
+  ["showroom-tv", "television", 500, 140, "watch"],
+  ["showroom-oak-chair-1", "oak_chair", 200, 520, "sit"],
+  ["showroom-oak-chair-2", "oak_chair", 360, 520, "sit"],
+  ["showroom-oak-chair-3", "oak_chair", 600, 520, "sit"],
+  ["showroom-oak-chair-4", "oak_chair", 760, 520, "sit"],
+].map(([instanceId, furnitureId, x, y, action]) => {
+  const definition = FURNITURE_CATALOG[furnitureId];
+  return {
+    instanceId, furnitureId, x, y, action, definition,
+    block: {
+      x: x - Number(definition.width || 1) * HOME_GRID.cell / 2,
+      y: y - Number(definition.height || 1) * HOME_GRID.cell,
+      width: Number(definition.width || 1) * HOME_GRID.cell,
+      height: Number(definition.height || 1) * HOME_GRID.cell,
+      instanceId,
+    },
+  };
+});
+const showroomBlocks = [...showroomFixtureBlocks, ...showroomDemos.map((demo) => demo.block)];
+function showroomActionAnchor(demo, action) {
+  const gridX = demo.block.x / HOME_GRID.cell;
+  const gridY = demo.block.y / HOME_GRID.cell;
+  const base = furnitureActionAnchor(demo.definition, gridX, gridY, HOME_GRID.cell, demo.action);
+  const otherBlocks = showroomBlocks.filter((block) => block.instanceId !== demo.instanceId);
+  if (validLocationMove(showroomLocation, base.x, base.y, otherBlocks)) return base;
+  for (let distance = 2; distance <= 64; distance += 2) {
+    for (const [dx, dy] of [[0, -distance], [0, distance], [-distance, 0], [distance, 0]]) {
+      const candidate = { ...base, x: base.x + dx, y: base.y + dy };
+      if (validLocationMove(showroomLocation, candidate.x, candidate.y, otherBlocks)) return candidate;
+    }
+  }
+  return base;
+}
+for (const demo of showroomDemos.filter((entry) => entry.action)) {
+  const action = furnitureActionDefinition(demo.definition, demo.action);
+  const gridX = demo.block.x / HOME_GRID.cell;
+  const gridY = demo.block.y / HOME_GRID.cell;
+  const anchor = showroomActionAnchor(demo, action);
+  const otherBlocks = showroomBlocks.filter((block) => block.instanceId !== demo.instanceId);
+  demo.stand = furnitureActionStandCandidates(
+    demo.definition, gridX, gridY, HOME_GRID.cell, demo.action,
+  ).find((candidate) =>
+    validLocationMove(showroomLocation, candidate.x, candidate.y, otherBlocks) &&
+    furnitureActionWithinRadius(candidate, anchor, action.radius) &&
+    furnitureActionPathClear(candidate, anchor, (x, y) =>
+      validLocationMove(showroomLocation, x, y, otherBlocks)));
+  assert.ok(demo.stand,
+    `${demo.instanceId} derives a collision-valid approach from its current catalog action anchor`);
+}
+const sofaDemo = showroomDemos[0];
+const sofaCenterX = sofaDemo.block.x + sofaDemo.block.width / 2;
+assert.equal(validLocationMove(showroomLocation, sofaCenterX, sofaDemo.block.y - 17, showroomBlocks), true,
+  "showroom sofa has a walkable north approach");
+assert.equal(validLocationMove(showroomLocation, sofaCenterX, sofaDemo.block.y - 15, showroomBlocks), false,
+  "walking into the showroom sofa is blocked from its north side");
+assert.equal(validLocationMove(showroomLocation, sofaCenterX, sofaDemo.block.y + sofaDemo.block.height + 17, showroomBlocks), true,
+  "showroom sofa has a walkable south approach");
+assert.equal(validLocationMove(showroomLocation, sofaCenterX, sofaDemo.block.y + sofaDemo.block.height + 15, showroomBlocks), false,
+  "walking into the showroom sofa is blocked from its south side");
+for (const demo of showroomDemos.filter((entry) => entry.action)) {
+  const action = furnitureActionDefinition(demo.definition, demo.action);
+  const gridX = demo.block.x / HOME_GRID.cell;
+  const gridY = demo.block.y / HOME_GRID.cell;
+  const anchor = showroomActionAnchor(demo, action);
+  const otherBlocks = showroomBlocks.filter((block) => block.instanceId !== demo.instanceId);
+  assert.equal(validLocationMove(showroomLocation, demo.stand.x, demo.stand.y, otherBlocks), true,
+    `${demo.instanceId} has a collision-valid displayed stand`);
+  assert.equal(furnitureActionWithinRadius(demo.stand, anchor, action.radius), true,
+    `${demo.instanceId} stand opens its real ${demo.action} catalog action`);
+}
 
 const sofa = furnitureActionAnchor(FURNITURE_CATALOG.blue_sofa, 4, 4, HOME_GRID.cell, "sit");
 assert.deepEqual(sofa, { x: 240, y: 192, dir: "down" },
@@ -113,8 +205,8 @@ const chair = FURNITURE_CATALOG.oak_chair;
 assert.equal(validPlacement(chair, 13, 5, 0, []), true,
   "a clear home cell accepts a sit-capable chair");
 const chairAnchor = furnitureActionAnchor(chair, 13, 5, HOME_GRID.cell, "sit");
-assert.deepEqual(chairAnchor, { x: 648, y: 216, dir: "down" },
-  "chair sit anchor keeps the full face and torso above the armchair cushion");
+assert.deepEqual(chairAnchor, { x: 648, y: 227, dir: "down" },
+  "chair sit anchor aligns 3× avatar hips to the 2× armchair pad");
 assert.equal(furnitureActionDefinition(chair, "sit").radius, 96,
   "chair admission includes the showroom's authored approach stand");
 assert.deepEqual(chair.occluder?.default, { fromPx: 21, depthBias: 0.01 },
@@ -124,8 +216,8 @@ assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, []), true,
 assert.equal(validLocationMove(home, chairAnchor.x, chairAnchor.y, [{
   x: 13 * HOME_GRID.cell, y: 5 * HOME_GRID.cell,
   width: HOME_GRID.cell, height: HOME_GRID.cell,
-}]), true,
-  "raised chair anchor sits above the saved one-cell blocker instead of inside it");
+}]), false,
+  "anatomical chair anchor is reserved by its own saved one-cell blocker");
 assert.ok(furnitureActionStandCandidates(chair, 13, 5).some((point) =>
   validLocationMove(home, point.x, point.y, [])),
   "at least one authoritative exit stand is walkable");
@@ -212,8 +304,14 @@ assert.match(serverSource,
   "Huddle Home exposes all four former gold-chair floor anchors as real catalog demos");
 assert.match(serverSource, /showroom-bath[\s\S]{0,180}bathtub/,
   "the showroom demonstrates the real bath entry rather than only listing it for sale");
-assert.match(serverSource, /const showroomLocation = parseLocation\(locationId\)[\s\S]{0,420}validLocationMove\(showroomLocation, demoAnchor\.x, demoAnchor\.y\)[\s\S]{0,240}furniturePathClear\(showroomLocation, p, demoAnchor/,
+assert.match(serverSource, /const showroomLocation = parseLocation\(locationId\)[\s\S]{0,900}validLocationMove\(showroomLocation, demoAnchor\.x, demoAnchor\.y,[\s\S]{0,240}furniturePathClear\(showroomLocation, p, demoAnchor/,
   "showroom admission validates the catalog anchor and continuous path");
+assert.match(serverSource, /function furnitureShowroomDemoBlock\(demo\)[\s\S]{0,700}function furnitureShowroomBlockers\(\)[\s\S]{0,350}showroom: true/,
+  "each real showroom catalog demo contributes one shared physical blocker");
+assert.match(serverSource, /const blockers = locationFurnitureBlockers\(location\)/,
+  "ordinary server movement uses real showroom demo blockers, not only home furniture");
+assert.match(serverSource, /const otherShowroomBlockers = showroomBlockers\.filter[\s\S]{0,350}validLocationMove\(showroomLocation, demoAnchor\.x, demoAnchor\.y, otherShowroomBlockers\)[\s\S]{0,180}furniturePathClear\(showroomLocation, p, demoAnchor, otherShowroomBlockers\)/,
+  "a showroom action excludes only its own body while rejecting paths through other displays");
 assert.match(serverSource, /if \(moveToStand\) \{[\s\S]{0,180}safeFurnitureStand\(player, activity, locationId\)/,
   "every authoritative activity exit, including showroom exits, resolves a safe stand");
 assert.match(serverSource, /furnitureDemoInteractionResult", \{\s*ok: true, phase: "stop", instanceId: activity\.instanceId, action: activity\.action,[\s\S]{0,120}x: p\.x, y: p\.y, dir: p\.dir/,
@@ -237,5 +335,13 @@ assert.match(clientSource, /if \(Number\.isFinite\(payload\.x\) && Number\.isFin
   "local stop packets apply the server-authoritative stand after optimistic exit");
 assert.match(clientSource, /_requestFurnitureAction\(\) \{[\s\S]{0,300}const cashier = this\.nearbyCashier \|\| this\._nearbyCashier\(\)[\s\S]{0,180}this\._interactCashier\(\)/,
   "cashier priority remains enforced even for direct furniture-action calls");
+assert.match(clientSource, /const interaction = this\._furnitureActionAnchor\(sprite, selectedAction\)[\s\S]{0,900}anchor: interaction/,
+  "showroom E prompts use the selected catalog action anchor rather than a mismatched stand point");
+assert.doesNotMatch(clientSource, /setTint\?\.\(0xff5555\)/,
+  "an invalid placement preview never recolours the authored furniture art red");
+assert.match(clientSource, /this\.ghost\.clearTint\?\.\(\)[\s\S]{0,450}_drawGhostFootprint\(/,
+  "both valid and invalid previews restore original product art before drawing a validity outline");
+assert.match(clientSource, /isValid: valid,[\s\S]{0,3000}Cannot place here: blocked or outside the room\./,
+  "invalid placement remains explicitly explained and its confirmation stays disabled");
 
 console.log("PASS: furniture actions, anchors, occupancy, paths, access, and render metadata");

@@ -14,7 +14,8 @@
   let lastRevision = -1;
   let refreshQueued = false;
   let requestTimeout = null;
-  let selectedCategory = 'all'; // 'all', 'wearables', 'pets', 'usables', 'furniture'
+  let selectedCategory = 'all'; // HQ: all/wearables/pets/usables/furniture; neighborhood: furniture
+  let currentLocation = 'office';
 
   const CATEGORIES = [
     { id: 'all', icon: '🎒', label: 'All' },
@@ -23,6 +24,33 @@
     { id: 'usables', icon: '🍕', label: 'Usables' },
     { id: 'furniture', icon: '🛋️', label: 'Furniture' }
   ];
+
+  const categoryById = Object.freeze(Object.fromEntries(CATEGORIES.map(category => [category.id, category])));
+  const inventoryScope = () => window.JpoInventoryScope?.scopeForLocation?.(currentLocation) || 'hq';
+  const visibleCategories = () => {
+    const ids = window.JpoInventoryScope?.categoriesForScope?.(inventoryScope()) || CATEGORIES.map(category => category.id);
+    return ids.map(id => categoryById[id]).filter(Boolean);
+  };
+  const normalizeSelectedCategory = () => {
+    const fallback = visibleCategories()[0]?.id || 'furniture';
+    selectedCategory = window.JpoInventoryScope?.normalizeCategory?.(selectedCategory, inventoryScope()) || fallback;
+  };
+  const setLocation = (location) => {
+    if (typeof location !== 'string' || !location.trim()) return;
+    const nextLocation = location.trim();
+    const previousScope = inventoryScope();
+    currentLocation = nextLocation;
+    // A category that exists only at HQ must never survive navigation into
+    // Willow Walk, Huddle Plaza, a home, or its yard.
+    const nextScope = inventoryScope();
+    const previousCategory = selectedCategory;
+    // Returning to HQ restores the established complete-collection entry
+    // point. Staying in HQ preserves a deliberate tab choice.
+    if (previousScope !== nextScope && nextScope === 'hq') selectedCategory = 'all';
+    else normalizeSelectedCategory();
+    if (previousScope !== nextScope || previousCategory !== selectedCategory) selectedItem = null;
+    if (isOpen) render();
+  };
 
   let selectedItem = null;
 
@@ -52,6 +80,7 @@
 
   function render() {
     if (!hotbarEl) return;
+    normalizeSelectedCategory();
     toggleBtn.setAttribute('aria-expanded', String(isOpen));
     
     if (!isOpen) {
@@ -82,76 +111,81 @@
     // Collect all items
     let items = [];
     
-    // Wearables
-    COSMETICS.forEach(c => {
-      if (_ownedItems.includes(c.id)) {
-        let isEquipped = (_equippedCosmetic === c.id || _equippedWings === c.id || Object.values(_equippedSlots || {}).includes(c.id));
-        items.push({
-          type: 'wearable',
-          cat: 'wearables',
-          id: c.id,
-          name: c.name,
-          emoji: c.emoji,
-          htmlIcon: `<div class="hotbar-item-icon">${c.emoji}</div>`,
-          isEquipped,
-          desc: c.desc,
-          raw: c
-        });
-      }
-    });
-    
-    // Pets
-    PETS.forEach(p => {
-      if (_ownedItems.includes(p.id)) {
-        items.push({
-          type: 'pet',
-          cat: 'pets',
-          id: p.id,
-          name: p.name,
-          emoji: p.emoji,
-          htmlIcon: `<div class="hotbar-item-icon">${p.emoji}</div>`,
-          isEquipped: _equippedPet === p.id,
-          desc: p.desc,
-          raw: p
-        });
-      }
-    });
-    
-    // Pet Accessories
-    PET_ACCESSORIES.forEach(a => {
-      if (_ownedItems.includes(a.id)) {
-        items.push({
-          type: 'petacc',
-          cat: 'pets',
-          id: a.id,
-          name: a.name,
-          emoji: a.emoji,
-          htmlIcon: `<div class="hotbar-item-icon">${a.emoji}</div>`,
-          isEquipped: _equippedPetAcc === a.id,
-          desc: a.desc,
-          raw: a
-        });
-      }
-    });
-    
-    // Usables
-    USABLES.forEach(u => {
-      const count = _playerItems[u.id] || 0;
-      if (count > 0) {
-        items.push({
-          type: 'usable',
-          cat: 'usables',
-          id: u.id,
-          name: u.name,
-          emoji: u.emoji,
-          htmlIcon: `<div class="hotbar-item-icon">${u.emoji}</div>`,
-          count: count,
-          verb: u.verb,
-          desc: u.desc,
-          raw: u
-        });
-      }
-    });
+    // HQ owns the character collection. Neighborhood maps intentionally show
+    // only durable home furniture, so pets/cosmetics/food/emotes cannot leak
+    // into the Willow Walk, Plaza, home, or yard inventory surface.
+    if (inventoryScope() === 'hq') {
+      // Wearables
+      COSMETICS.forEach(c => {
+        if (_ownedItems.includes(c.id)) {
+          let isEquipped = (_equippedCosmetic === c.id || _equippedWings === c.id || Object.values(_equippedSlots || {}).includes(c.id));
+          items.push({
+            type: 'wearable',
+            cat: 'wearables',
+            id: c.id,
+            name: c.name,
+            emoji: c.emoji,
+            htmlIcon: `<div class="hotbar-item-icon">${c.emoji}</div>`,
+            isEquipped,
+            desc: c.desc,
+            raw: c
+          });
+        }
+      });
+
+      // Pets
+      PETS.forEach(p => {
+        if (_ownedItems.includes(p.id)) {
+          items.push({
+            type: 'pet',
+            cat: 'pets',
+            id: p.id,
+            name: p.name,
+            emoji: p.emoji,
+            htmlIcon: `<div class="hotbar-item-icon">${p.emoji}</div>`,
+            isEquipped: _equippedPet === p.id,
+            desc: p.desc,
+            raw: p
+          });
+        }
+      });
+
+      // Pet Accessories
+      PET_ACCESSORIES.forEach(a => {
+        if (_ownedItems.includes(a.id)) {
+          items.push({
+            type: 'petacc',
+            cat: 'pets',
+            id: a.id,
+            name: a.name,
+            emoji: a.emoji,
+            htmlIcon: `<div class="hotbar-item-icon">${a.emoji}</div>`,
+            isEquipped: _equippedPetAcc === a.id,
+            desc: a.desc,
+            raw: a
+          });
+        }
+      });
+
+      // Usables
+      USABLES.forEach(u => {
+        const count = _playerItems[u.id] || 0;
+        if (count > 0) {
+          items.push({
+            type: 'usable',
+            cat: 'usables',
+            id: u.id,
+            name: u.name,
+            emoji: u.emoji,
+            htmlIcon: `<div class="hotbar-item-icon">${u.emoji}</div>`,
+            count: count,
+            verb: u.verb,
+            desc: u.desc,
+            raw: u
+          });
+        }
+      });
+    }
     
     // Furniture (unplaced only)
     if (furnitureInventory.length > 0) {
@@ -187,7 +221,7 @@
     }
     
     let html = `<div class="hotbar-categories">`;
-    CATEGORIES.forEach(c => {
+    visibleCategories().forEach(c => {
       html += `<button type="button" class="hotbar-cat-btn ${selectedCategory === c.id ? 'active' : ''}" data-cat="${c.id}" title="${c.label}">${c.icon}</button>`;
     });
     html += `</div>`;
@@ -433,6 +467,13 @@
     hotbarEl.appendChild(toggleBtn);
     hotbarEl.appendChild(contentEl);
     document.body.appendChild(hotbarEl);
+
+    // The map scene can already have received its authoritative snapshot if
+    // this UI initializes late (for example after a reconnect/build handoff).
+    // Prefer that server-derived marker, then the live neighborhood controller;
+    // socket listeners below still keep it current after initialization.
+    setLocation(window._jpoAuthoritativeLocation ||
+      window.JpoNeighborhood?.getCurrentLocation?.());
     
     // Prevent canvas from stealing clicks
     hotbarEl.addEventListener('pointerdown', (e) => {
@@ -513,6 +554,17 @@
     });
     socket.on('homePurchaseResult', (result) => {
       if (result?.ok && isOpen) fetchFurniture();
+    });
+    // Location comes from server-confirmed lifecycle payloads. Do not infer it
+    // from a still-alive Phaser scene: the shared NeighborhoodScene can remain
+    // active for a frame while office/home/plaza transitions settle.
+    socket.on('approved', (result) => setLocation(result?.location || result?.locationId));
+    socket.on('locationTransitionResult', (result) => {
+      if (result?.ok) setLocation(result.location);
+    });
+    socket.on('currentPlayers', (players) => {
+      const own = players?.[socket.id];
+      setLocation(own?.locationId || own?.location);
     });
     
     const resetAndFetch = () => {
