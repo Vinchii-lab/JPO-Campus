@@ -45,6 +45,14 @@ Match the exact source artwork before diagnosing an interaction or occlusion com
 
 **How to apply:** Compare source silhouettes, trim bounds, and details against the screenshot; confirm whether that catalog item even has actions before adjusting poses.
 
+Museum “Singles” can be fragments of a larger exhibit, not standalone objects.
+Inspect the full selected image before assigning a specimen name or adding it
+to a gallery. Prefer verified complete composites or assemble matching parts.
+
+**Why:** Cropped triceratops heads were mistaken for separate skull, ammonite,
+and raptor exhibits; valid PNGs and clear paths did not catch the false labels
+or visibly cut-off art.
+
 Synchronized collision coordinates do not prove that the visible body stays outside furniture.
 
 **Why:** Client and server agreed on the player's pivot while the visible feet overlapped the table. Correcting movement exposed a second error: front-side actors still sorted behind the table until draw depth used the same coordinate convention.

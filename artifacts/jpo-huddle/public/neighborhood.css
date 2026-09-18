@@ -46,6 +46,13 @@
 #neighborhood-panel-toggle { pointer-events: auto; white-space: nowrap; }
 #neighborhood-ui.panels-collapsed #home-panel,
 #neighborhood-ui.panels-collapsed #shop-panel { display: none !important; }
+/* Inventory is the single surface for selecting stored furniture. Keep the
+   location plaque visible, but do not stack its larger contextual panel over
+   an open inventory. Cashier conversations are active tasks and temporarily
+   take priority over the inventory HUD. */
+#neighborhood-ui.inventory-open #home-panel { display: none !important; }
+#neighborhood-ui.inventory-open #neighborhood-panel-toggle { display: none; }
+#neighborhood-ui.cashier-active ~ #inventory-hotbar { visibility: hidden; }
 #neighborhood-panel-toggle:focus-visible { outline: 2px solid #f5ce64; outline-offset: 2px; }
 
 #neighborhood-nav button, #home-panel button, #shop-panel button {

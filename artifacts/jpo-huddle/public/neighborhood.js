@@ -117,6 +117,24 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   let panelsCollapsed = false;
   try { panelsCollapsed = localStorage.getItem('jpo-neighborhood-panels-collapsed') === 'true'; } catch (_) {}
   const panelToggle = ui.querySelector('#neighborhood-panel-toggle');
+  let inventoryPanelObserver = null;
+  const syncInventoryPanelState = () => {
+    const hotbar = document.getElementById('inventory-hotbar');
+    ui.classList.toggle('inventory-open', !!hotbar?.classList.contains('open'));
+    if (hotbar && !inventoryPanelObserver) {
+      inventoryPanelObserver = new MutationObserver(syncInventoryPanelState);
+      inventoryPanelObserver.observe(hotbar, {
+        attributes: true, attributeFilter: ['class'],
+      });
+    }
+  };
+  const inventoryMountObserver = new MutationObserver(() => {
+    syncInventoryPanelState();
+    if (inventoryPanelObserver) inventoryMountObserver.disconnect();
+  });
+  inventoryMountObserver.observe(document.body, { childList: true, subtree: true });
+  syncInventoryPanelState();
+  if (inventoryPanelObserver) inventoryMountObserver.disconnect();
   function syncPanelControls() {
     ui.classList.toggle('panels-collapsed', panelsCollapsed);
     panelToggle.hidden = !(currentLocation === 'neighborhood' || currentLocation.startsWith('home:'));
@@ -505,6 +523,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
 
   function renderShop() {
     syncPanelControls();
+    ui.classList.toggle('cashier-active', !!(cashierOpen && activeCashier));
     let panel = document.getElementById('shop-panel');
     if (!panel && (typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['diner', 'bakery', 'sushi'].includes(currentLocation)))) {
       panel = document.createElement('div');

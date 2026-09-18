@@ -13998,6 +13998,8 @@ io.on("connection", (socket) => {
       if (plazaGymActivities.has(socket.id)) { stopPlazaGym(socket.id, "stop"); return; }
       const startedAt = Date.now();
       const activity = { id: socket.id, object, kind: station.kind, x: p.x, y: p.y,
+        poseX: station.poseAnchor?.x ?? p.x, poseY: station.poseAnchor?.y ?? p.y,
+        poseDepth: station.poseDepth ?? null, dir: station.kind === "run" ? "up" : (p.dir || "down"),
         startedAt, endsAt: startedAt + GYM_DURATION_MS, state: "start" };
       plazaGymActivities.set(socket.id, activity);
       emitToLocation("cafe", "plazaGymActivity", activity);

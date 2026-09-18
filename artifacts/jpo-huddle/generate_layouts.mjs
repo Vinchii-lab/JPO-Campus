@@ -1,6 +1,7 @@
 import { applyGymLayout } from './gym-layout.mjs';
 import { applyFoodVenueLayouts } from './food-venue-layouts.mjs';
 import { applyDecorSushiLayouts } from './decor-sushi-layouts.mjs';
+import { applyMuseumLayout } from './museum-layout.mjs';
 import fs from 'fs';
 import path from 'path';
 
@@ -358,6 +359,7 @@ manifest.rooms["garden-shop"] = {
 applyGymLayout(manifest);
 applyFoodVenueLayouts(manifest);
 applyDecorSushiLayouts(manifest);
+applyMuseumLayout(manifest);
 
 
 // Validate unique IDs and asset existences

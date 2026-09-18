@@ -7,6 +7,7 @@
   let socket;
   let currentScene;
   const activities = new Map();
+  const presentations = new Map();
   const labelStyle = { fontFamily: 'monospace', fontSize: '12px', color: '#d5f4f0',
     backgroundColor: '#18353b', padding: { x: 8, y: 5 } };
 
@@ -24,9 +25,124 @@
 
   function apply(activity) {
     if (!currentScene || currentScene.location !== 'cafe') return;
-    if (activity.state === 'stop') activities.delete(activity.id);
+    if (activity.state === 'stop') {
+      activities.delete(activity.id);
+      clearPresentation(activity.id);
+    }
     else activities.set(activity.id, activity);
     refreshEquipment();
+  }
+
+  function actorEntry(scene, id) {
+    if (id === socket?.id) return {
+      actor: scene.player,
+      nameTag: scene.localNameTag,
+      cosmetic: scene.localCosmetic,
+      cosmeticDef: scene.localCosmeticDef,
+      wings: scene.localWings,
+      wingsDef: scene.localWingsDef,
+      slotObjs: scene.localSlotObjs,
+      pet: scene.localPet,
+      bubble: scene.localBubble,
+      dir: scene.playerDir || 'down',
+    };
+    const remote = scene.remotes?.[id];
+    return remote ? {
+      actor: remote.sprite, nameTag: remote.nameTag,
+      cosmetic: remote.cosmetic, cosmeticDef: remote.cosmeticDef,
+      wings: remote.wings, wingsDef: remote.wingsDef,
+      slotObjs: remote.slotObjs, pet: remote.pet, bubble: remote.chatBubble,
+      dir: remote.lastDir || 'down',
+    } : null;
+  }
+
+  function positionWearables(scene, entry, x, y, dir, depth) {
+    for (const [object, def] of [
+      [entry.cosmetic, entry.cosmeticDef], [entry.wings, entry.wingsDef],
+      ...Object.values(entry.slotObjs || {}).map(slot => [slot?.obj, slot?.def]),
+    ]) {
+      if (!object) continue;
+      if (def) scene._placeWearable(object, def, x, y, dir);
+      else object.setPosition(x, y - 68);
+      object.setDepth(depth + 1);
+    }
+  }
+
+  function clearPresentation(id) {
+    const presentation = presentations.get(id);
+    if (!presentation) return;
+    presentations.delete(id);
+    presentation.runner.destroy();
+    const entry = actorEntry(presentation.scene, id);
+    if (!entry?.actor) return;
+    entry.actor.setVisible(presentation.actorVisible);
+    const x = entry.actor.x, y = entry.actor.y, dir = entry.dir;
+    entry.nameTag?.setPosition(x, y - 40);
+    positionWearables(presentation.scene, entry, x, y, dir, y);
+    if (entry.pet) {
+      entry.pet.setPosition(x - 38, y + 10);
+      if (entry.pet._animSet?.idle) entry.pet.setTexture(entry.pet._animSet.idle);
+      presentation.scene._setActorDepth?.(entry.pet, entry.pet.y, -1);
+      presentation.scene._placePetAcc?.(entry.pet);
+    }
+    entry.bubble?.setPosition(x, y - 85);
+  }
+
+  function clearAllPresentations() {
+    for (const id of [...presentations.keys()]) clearPresentation(id);
+  }
+
+  function runningAnimation(scene, textureKey) {
+    // This is the renderer's established convention (OfficeScene
+    // _createDirAnims and NeighborhoodScene's local/remote walking branches),
+    // applied to the real palette/baked-wearable texture.
+    scene._createDirAnims?.(textureKey);
+    const key = `walk_${textureKey}_up`;
+    return scene.anims.exists(key) ? key : null;
+  }
+
+  function updateRunPresentation(scene, id, activity) {
+    const entry = actorEntry(scene, id);
+    if (!entry?.actor || !Number.isFinite(activity.poseX) || !Number.isFinite(activity.poseY)) {
+      clearPresentation(id);
+      return;
+    }
+    let presentation = presentations.get(id);
+    const textureKey = id === socket.id
+      ? (scene.playerTexKey || entry.actor.texture.key)
+      : (scene.remotes[id]?.texture || entry.actor.texture.key);
+    if (!presentation) {
+      const runner = scene.add.sprite(activity.poseX, activity.poseY, textureKey)
+        .setScale(3).setOrigin(entry.actor.originX, entry.actor.originY);
+      presentation = {
+        scene, runner, actorVisible: entry.actor.visible,
+        firstFrame: null, changedFrame: false,
+      };
+      presentations.set(id, presentation);
+      entry.actor.setVisible(false);
+    }
+    const runner = presentation.runner;
+    if (runner.texture.key !== textureKey) runner.setTexture(textureKey);
+    const key = runningAnimation(scene, textureKey);
+    if (key && (runner.anims.currentAnim?.key !== key || !runner.anims.isPlaying)) runner.play(key);
+    runner.setPosition(activity.poseX, activity.poseY).setFlipX(false)
+      .setDepth(Number.isFinite(activity.poseDepth) ? activity.poseDepth : activity.poseY);
+    const frame = runner.frame?.name ?? runner.frame?.index;
+    if (presentation.firstFrame == null) presentation.firstFrame = frame;
+    else if (frame !== presentation.firstFrame) presentation.changedFrame = true;
+
+    const depth = Number.isFinite(activity.poseDepth) ? activity.poseDepth : activity.poseY;
+    entry.nameTag?.setPosition(activity.poseX, activity.poseY - 52).setDepth(depth + 2);
+    positionWearables(scene, entry, activity.poseX, activity.poseY, 'up', depth);
+    if (entry.pet) {
+      // Exercise pose from the pet memory: park beside the owner rather than
+      // running through the machine, and carry its accessory with it.
+      entry.pet.setPosition(activity.poseX + 52, activity.poseY + 42).setDepth(depth + 1);
+      if (entry.pet._animSet?.sit) entry.pet.setTexture(entry.pet._animSet.sit);
+      scene._placePetAcc?.(entry.pet);
+      entry.pet._acc?.setDepth(depth + 2);
+    }
+    entry.bubble?.setPosition(activity.poseX, activity.poseY - 92);
   }
   function refreshEquipment() {
     const scene = currentScene;
@@ -93,6 +209,7 @@
     socket?.emit('interact', { object: 'plaza-gym:sync' });
     scene.events.once('shutdown', () => {
       socket?.emit('interact', { object: 'plaza-gym:stop' });
+      clearAllPresentations();
       scene.gymEquipment = null;
       scene.gymActorEffects?.clear();
       if (currentScene === scene) { currentScene = null; activities.clear(); }
@@ -104,6 +221,7 @@
       socket = connection;
       socket.on('plazaGymActivity', apply);
       socket.on('plazaGymSnapshot', list => {
+        clearAllPresentations();
         activities.clear();
         if (Array.isArray(list)) list.forEach(apply);
         refreshEquipment();
@@ -129,7 +247,11 @@
       if (scene !== currentScene || !scene.player) return;
       let changed = false;
       for (const [id, activity] of activities) {
-        if (Date.now() >= activity.endsAt) { activities.delete(id); changed = true; }
+        if (Date.now() >= activity.endsAt) {
+          activities.delete(id);
+          clearPresentation(id);
+          changed = true;
+        }
       }
       if (changed) refreshEquipment();
       const own = activities.get(socket.id);
@@ -142,26 +264,9 @@
         if (!activities.has(id)) { effect.destroy(); scene.gymActorEffects.delete(id); }
       }
       for (const [id, activity] of activities) {
-        const actor = id === socket.id ? scene.player : scene.remotes[id]?.sprite;
-        if (!actor) continue;
-        let effect = scene.gymActorEffects.get(id);
-        if (!effect) {
-          effect = scene.add.text(actor.x, actor.y - 64, activity.kind === 'run' ? '🏃' : '🥊',
-            { fontSize: '20px' }).setOrigin(0.5).setDepth(2600);
-          scene.gymActorEffects.set(id, effect);
-        }
-        effect.setPosition(actor.x, actor.y - 64 + Math.sin(Date.now() / 120) * 3);
-        // Keep running avatars animated without moving/teleporting their bodies.
         if (activity.kind === 'run') {
-          const key = 'walk_' + actor.texture.key + '_up';
-          const animation = scene.anims.get(key);
-          if (animation?.frames?.length) {
-            const frame = animation.frames[Math.floor((Date.now() - activity.startedAt) *
-              animation.frameRate / 1000) % animation.frames.length];
-            actor.anims.stop();
-            actor.setFrame(frame.textureFrame);
-          }
-        }
+          updateRunPresentation(scene, id, activity);
+        } else clearPresentation(id);
       }
     },
   };

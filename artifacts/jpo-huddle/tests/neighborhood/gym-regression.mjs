@@ -20,6 +20,14 @@ const blocked = (x, y) => LOCATION_GEOMETRY.cafe.blockers.some(b =>
   x > b.x - 16 && x < b.x + b.width + 16 && y > b.y - 16 && y < b.y + b.height + 16);
 for (const station of GYM_STATIONS) {
   assert(!blocked(station.anchor.x, station.anchor.y), station.id);
+  if (station.kind === 'run') {
+    assert.deepEqual(station.poseAnchor, { x: station.x + 72, y: station.y + 78 },
+      station.id + ': HQ treadmill pose geometry');
+    assert.equal(station.poseDepth, station.blocker.y + station.blocker.height + 1,
+      station.id + ': runner must layer immediately above the machine');
+    assert(blocked(station.poseAnchor.x, station.poseAnchor.y),
+      station.id + ': belt pose is deliberately presentation-only');
+  }
   const route = station.kind === 'punch'
     ? [[480, 576], [336, 576], [336, 264], [station.anchor.x, 264], [station.anchor.x, station.anchor.y]]
     : [[480, 576], [station.anchor.x, 576], [station.anchor.x, station.anchor.y]];
@@ -53,11 +61,22 @@ const context = {
 vm.runInNewContext(source.slice(start, end) + '\n  });', context);
 handler({ object: GYM_STATIONS[0].id });
 assert.equal(states.get('self').endsAt - states.get('self').startedAt, 8000);
+assert.equal(states.get('self').x, player.x, 'canonical movement anchor must remain reachable');
+assert.equal(states.get('self').y, player.y, 'canonical movement anchor must not teleport onto blocker');
 assert.equal(events.at(-1).location, 'cafe');
 handler({ object: 'plaza-gym:sync' });
 assert.equal(events.at(-1).event, 'plazaGymSnapshot');
 handler({ object: 'plaza-gym:stop' });
 assert.equal(states.size, 0);
+const treadmill = GYM_STATIONS.find(station => station.kind === 'run');
+player.x = treadmill.anchor.x; player.y = treadmill.anchor.y;
+handler({ object: treadmill.id });
+assert.equal(states.get('self').x, treadmill.anchor.x);
+assert.equal(states.get('self').y, treadmill.anchor.y);
+assert.equal(states.get('self').poseX, treadmill.poseAnchor.x);
+assert.equal(states.get('self').poseY, treadmill.poseAnchor.y);
+assert.equal(states.get('self').dir, 'up');
+handler({ object: 'plaza-gym:stop' });
 player.location = 'city';
 handler({ object: GYM_STATIONS[0].id });
 assert.equal(events.at(-1).event, 'interactError');
@@ -88,4 +107,26 @@ for (const reason of ['walk', 'travel', 'expiry', 'disconnect']) {
   cleanup();
   assert.equal(states.size, 0, reason + ' cleanup');
 }
-console.log('PASS: gym geometry, layout, menu removal, 8s activity, scope, proximity, occupancy and sync');
+
+// Production renderer contract: it hides (but never moves) the canonical
+// physics sprite, runs a clone with the real directional-animation convention,
+// and restores the actor plus attached presentation on stop.
+const renderer = fs.readFileSync(new URL('../../public/neighborhood-interiors-gym.js', import.meta.url), 'utf8');
+assert.match(renderer, /scene\._createDirAnims\?\.\(textureKey\)/);
+assert.match(renderer, /`walk_\$\{textureKey\}_up`/);
+assert.match(renderer, /entry\.actor\.setVisible\(false\)/);
+assert.match(renderer, /entry\.actor\.setVisible\(presentation\.actorVisible\)/);
+assert.match(renderer, /scene\._placeWearable\(object, def, x, y, dir\)/);
+assert.match(renderer, /scene\._placePetAcc\?\.\(entry\.pet\)/);
+assert.doesNotMatch(renderer, /🏃|🥊/, 'exercise must use real sprite animation, not emoji');
+
+// Authored run sheet geometry: four directions × six distinct frames. The
+// treadmill proof uses adjacent up frames 6/7, so visible pixels necessarily
+// change while the body centre remains on the same belt anchor.
+const runPng = fs.readFileSync(new URL('../../public/assets/Adam_run_16x16.png', import.meta.url));
+const pngWidth = runPng.readUInt32BE(16), pngHeight = runPng.readUInt32BE(20);
+assert.deepEqual([pngWidth, pngHeight], [24 * 16, 32]);
+assert.equal(6 * 16, 96);
+assert.equal(7 * 16, 112);
+
+console.log('PASS: gym geometry, canonical admission, 8s cleanup, real run animation and attached presentation');

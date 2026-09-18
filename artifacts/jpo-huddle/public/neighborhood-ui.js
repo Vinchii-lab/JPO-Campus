@@ -181,23 +181,12 @@ window.JpoUIBuilder = {
     if (ctx.constructionMarkup) html += ctx.constructionMarkup;
     
     if (ctx.homeState?.canEdit) {
-      html += '<div class="home-section"><small>Your fenced yard</small>';
-      
-      const inventory = ctx.homeState.inventory || [];
-      if (inventory.length) {
-        html += inventory.map(item => {
-          const name = ctx.catalog?.[item.furnitureId]?.name || item.furnitureId;
-          return `<span class="home-item ${ctx.selectedInstance === item.id ? 'selected' : ''}">` +
-                 `<span>${this._escape(name)}</span>` +
-                 `<button type="button" data-yard-select="${this._escape(item.id)}">Place outside</button></span>`;
-        }).join('');
-      } else {
-        html += '<small>No unplaced furniture.</small>';
-      }
-      
+      html += '<details class="home-section yard-editor-controls"><summary>Manage your fenced yard</summary>';
+      html += '<small class="home-panel-note">Use Inventory to place stored furniture outside.</small>';
+
       const yard = ctx.homeState.yard || [];
       if (yard.length) {
-        html += '<small>Yard items</small>';
+        html += '<small>Placed yard items</small>';
         html += yard.map(item => {
           const name = ctx.catalog?.[item.furnitureId]?.name || item.furnitureId;
           return `<span class="home-item"><span>${this._escape(name)}</span>` +
@@ -205,8 +194,10 @@ window.JpoUIBuilder = {
                  `<button type="button" data-return="${this._escape(item.id)}"${ctx.pendingReturns?.has(String(item.id)) ? ' disabled' : ''}>` +
                  `${ctx.pendingReturns?.has(String(item.id)) ? 'Storing…' : 'Store'}</button></span>`;
         }).join('');
+      } else {
+        html += '<small>No furniture placed in the yard.</small>';
       }
-      html += '</div>';
+      html += '</details>';
     }
     
     html += '<small class="home-panel-note">Walk to a lit front door to visit.</small>';
@@ -309,9 +300,8 @@ window.JpoUIBuilder = {
   _buildCategorizedInventory: function(ctx) {
     const categories = ['Kitchen', 'Living', 'Bedroom', 'Bathroom', 'Miscellaneous'];
     const itemsByCat = {};
-    categories.forEach(c => itemsByCat[c] = { inventory: [], layout: [] });
+    categories.forEach(c => itemsByCat[c] = []);
 
-    const inv = ctx.homeState.inventory || [];
     const layout = ctx.homeState.layout || [];
 
     const getCat = (fId) => {
@@ -322,28 +312,14 @@ window.JpoUIBuilder = {
       return 'Miscellaneous';
     };
 
-    inv.forEach(i => itemsByCat[getCat(i.furnitureId)].inventory.push(i));
-    layout.forEach(i => itemsByCat[getCat(i.furnitureId)].layout.push(i));
+    layout.forEach(i => itemsByCat[getCat(i.furnitureId)].push(i));
 
-    let html = '';
+    let html = '<small class="home-panel-note">Place stored furniture from Inventory. Manage furniture already in this room here.</small>';
     categories.forEach(cat => {
-      const catInv = itemsByCat[cat].inventory;
-      const catLay = itemsByCat[cat].layout;
-      if (catInv.length === 0 && catLay.length === 0) return;
+      const catLay = itemsByCat[cat];
+      if (catLay.length === 0) return;
 
-      html += `<small style="margin-top:10px; color:#f5ce64;">${cat} (${catLay.length} placed, ${catInv.length} stored)</small>`;
-      
-      catInv.forEach(item => {
-        const def = ctx.catalog?.[item.furnitureId];
-        const name = def?.name || item.furnitureId;
-        const sel = ctx.selectedInstance === item.id ? 'selected' : '';
-        html += `<span class="home-item ${sel}" style="display:flex; justify-content:space-between;">`;
-        html += `<span style="display:flex; align-items:center; gap:8px;">`;
-        html += this._thumbnail(def, item.furnitureId);
-        html += `<span>${this._escape(name)}</span></span>`;
-        html += `<button type="button" data-select="${this._escape(item.id)}">Place</button>`;
-        html += `</span>`;
-      });
+      html += `<small style="margin-top:10px; color:#f5ce64;">${cat} (${catLay.length} placed)</small>`;
       
       catLay.forEach(item => {
         const def = ctx.catalog?.[item.furnitureId];
@@ -360,7 +336,7 @@ window.JpoUIBuilder = {
       });
     });
 
-    if (!html) html = '<small>No furniture owned yet.</small>';
+    if (!layout.length) html += '<small>No furniture placed in this room.</small>';
     return html;
   },
 

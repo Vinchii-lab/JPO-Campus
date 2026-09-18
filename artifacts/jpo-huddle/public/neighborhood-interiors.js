@@ -107,6 +107,13 @@ window.JpoInteriors = {
         .setData('layerRole', 'interior-portal');
     }
 
+    for (const label of room.labels || []) {
+      scene.add.text(label.x, label.y, label.text, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#f5ebd5',
+        backgroundColor: '#292d30dd', padding: { x: 5, y: 3 }, align: 'center',
+      }).setOrigin(0.5, 0).setDepth(-1).setData('layerRole', 'exhibit-label');
+    }
+
     if (room.label && scene._sign) {
       scene.add.text(480, locationId === 'museum' ? 614 : 48, room.label.toUpperCase(), {
         fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
