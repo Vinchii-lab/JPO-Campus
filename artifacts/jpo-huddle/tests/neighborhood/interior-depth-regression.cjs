@@ -9,6 +9,9 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
 const publicRoot = path.join(root, 'public');
 
+(async () => {
+const { FURNITURE_CATALOG } = await import(path.join(root, 'neighborhood.mjs'));
+
 function display(key, x = 0, y = 0) {
   const data = new Map();
   const listeners = new Map();
@@ -75,17 +78,15 @@ const rendererScene = {
   },
   anims: { exists() { return false; } },
 };
-const chair = renderer.draw(rendererScene, {
-  id: 'oak_chair',
-  actions: ['sit'],
-  frames: { frameWidth: 16, frameHeight: 16, frameCount: 1, initialFrame: 0 },
-}, 240, 288, { depth: 288 });
+const chairDefinition = FURNITURE_CATALOG.oak_chair;
+assert.equal(chairDefinition.interaction?.actorAboveSurface, true,
+  'HQ stool catalog marks its seated actor above the occluder-free surface');
+const chair = renderer.draw(rendererScene, chairDefinition, 240, 288, { depth: 288 });
 assert.equal(chair.getData('floorAnchor'), 288, 'HQ stool retains its contact anchor');
 assert.equal(chair.depth, 288, 'HQ stool base sorts at the contact anchor');
 const chairFront = chair.getData('occluderParts')?.[0];
 assert.equal(chairFront, undefined,
   'HQ stool has no high back or front rail to occlude an anatomically seated avatar');
-chair.destroy();
 
 // Exercise the real JpoInteriors implementation directly. Its static surface,
 // wall strip, authored furniture, and door all carry explicit layer metadata.
@@ -176,11 +177,7 @@ const layerContext = {
     BACKGROUND: -10000, WALL_BACK: -9000, SEATED_ACTOR_BIAS: 0.005, FRONT_BIAS: 0.01,
   },
   window: {
-    HomeFurnitureRenderer: {
-      splitOccluder(_scene, object) {
-        object.setData('split', true);
-      },
-    },
+    HomeFurnitureRenderer: renderer,
   },
 };
 const LayerScene = vm.runInNewContext(
@@ -192,6 +189,18 @@ const normalizedSurface = display('commercial-surface:cafe:current');
 const normalizedWall = display('commercial-wall-native');
 const normalizedChair = display('chair_asset', 48, 80);
 layerScene.children = { list: [normalizedSurface, normalizedWall, normalizedChair] };
+layerScene.textures = {
+  get() {
+    return { getSourceImage() { return { width: 16, height: 16 }; } };
+  },
+};
+layerScene.add = {
+  image(x, y, key) {
+    const object = display(key, x, y);
+    layerScene.children.list.push(object);
+    return object;
+  },
+};
 layerScene.cache = {
   json: {
     get() {
@@ -210,7 +219,8 @@ assert.equal(normalizedSurface.depth, -10000, 'normalization keeps the floor bac
 assert.equal(normalizedWall.depth, -9000, 'normalization keeps the wall backdrop low');
 assert.equal(normalizedChair.depth, 80, 'normalization uses authored furniture depth');
 assert.equal(normalizedChair.getData('floorAnchor'), 80, 'normalization publishes floor anchor metadata');
-assert.equal(normalizedChair.getData('split'), true, 'normalization requests authored seat occlusion');
+assert.equal(normalizedChair.getData('occluderParts').length, 1,
+  'normalization creates the authored seat occluder through the real renderer');
 
 const actor = display('run_adam', 240, 274);
 layerScene._setActorDepth(actor, actor.y);
@@ -219,6 +229,7 @@ assert.equal(actor.getData('floorAnchor'), 274, 'actor publishes its foot anchor
 const activityEntry = {
   sprite: actor,
   _activityFurnitureSprite: chair,
+  _activityFurnitureDef: chairDefinition,
 };
 assert.equal(layerScene._activityDepthAnchor(activityEntry, actor.y), 288,
   'active furniture supplies the seated actor contact anchor');
@@ -226,8 +237,21 @@ const activeActorDepth = layerScene._floorDepth(
   layerScene._activityDepthAnchor(activityEntry, actor.y),
   layerScene._activityDepthBias(activityEntry),
 );
-assert(chair.depth < activeActorDepth && activeActorDepth < chairFront.depth,
-  'activity bias prevents a split chair from hiding the sitter');
+assert(actor.depth < chair.depth && chair.depth < activeActorDepth,
+  'the HQ stool remains in front of a neighboring actor but below its own seated actor');
+const normalizedChairFront = normalizedChair.getData('occluderParts')[0];
+assert(normalizedChair.depth < normalizedChairFront.depth,
+  'other authored furniture retains a foreground occluder above its base');
+const occludedActivityEntry = {
+  sprite: actor,
+  _activityFurnitureSprite: normalizedChair,
+};
+const occludedActorDepth = layerScene._floorDepth(
+  layerScene._activityDepthAnchor(occludedActivityEntry, actor.y),
+  layerScene._activityDepthBias(occludedActivityEntry),
+);
+assert(normalizedChair.depth < occludedActorDepth && occludedActorDepth < normalizedChairFront.depth,
+  'other furniture occluders still cover their seated actor between base and front');
 const television = display('television', 240, 288);
 television.setData('floorAnchor', 288);
 const nonOccludingEntry = { sprite: actor, _activityFurnitureSprite: television };
@@ -241,4 +265,9 @@ assert.match(neighborhoodSource, /this\._clearActivityEffect\(remote\);[\s\S]{0,
 assert.match(neighborhoodSource, /_positionPresentation\(entry, x, y, dir\) \{[\s\S]{0,260}activityDepthAnchor/,
   'wearables follow the active furniture depth anchor');
 
+chair.destroy();
 console.log('PASS: interior depth bands, floor anchors, seated occluder ordering, and cleanup');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

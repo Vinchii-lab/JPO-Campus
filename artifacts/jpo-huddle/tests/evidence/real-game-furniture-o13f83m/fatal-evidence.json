@@ -1,0 +1,3604 @@
+{
+  "stage": "showroom cashier E and real catalog purchase",
+  "message": "showroom cashier east-side approach y: Waiting failed: 5000ms exceeded; state={\"location\":\"furniture-shop\",\"x\":571,\"y\":536.5,\"activity\":null,\"furniture\":[]}",
+  "stack": "Error: showroom cashier east-side approach y: Waiting failed: 5000ms exceeded; state={\"location\":\"furniture-shop\",\"x\":571,\"y\":536.5,\"activity\":null,\"furniture\":[]}\n    at holdUntil (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:857:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async moveAxis (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:879:3)\n    at async moveTo (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:898:5)\n    at async showroomAndStorePass (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:2799:5)\n    at async run (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:3155:5)\n    at async withTimeout (file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:190:12)\n    at async file:///home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture.mjs:3225:3",
+  "startedAt": "2026-09-18T18:17:32.145Z",
+  "serverOutputTail": "(node:3931) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:\n--import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"/home/runner/workspace/artifacts/jpo-huddle/tests/neighborhood/real-game-furniture-loader.mjs\", pathToFileURL(\"./\"));'\n(Use `node --trace-warnings ...` to show where the warning was created)\nJPO Huddle server running on port 33811\nSocket connected: kXJfvzQgsnWmb9wXAAAB\nvoice-ice: STUN-only fallback (accounts lookup 401)\nPassword set (claimed legacy account): <qa-furniture-o13f83m@justpressone.com>\nRestored: QA Furniture Furniture <qa-furniture-o13f83m@justpressone.com>\n",
+  "lastFurniturePoseDiagnostics": null,
+  "pages": [
+    {
+      "label": "owner",
+      "state": {
+        "url": "http://127.0.0.1:33811/",
+        "readyState": "complete",
+        "bodyClass": "playing",
+        "bodyText": "[T] chat · [Tab] DM · [C] log\n💬\n🚪\n?\n👋\n1\n❤️\n2\n😂\n3\n🎉\n4\n👍\n5\n🔥\n6\n😢\n7\n😮\n8\n⚔️\n🌙\n500010\nShop\n🎙️\n[F8] settings\nHuddle Home\n🎒\nInventory\n🤝 your buddy",
+        "cards": [],
+        "playing": true,
+        "scene": {
+          "location": "furniture-shop",
+          "hasPlayer": true,
+          "x": 571,
+          "y": 536.5
+        },
+        "gameScene": true,
+        "socketConnected": true,
+        "lastEvents": [
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5448,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5459,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5470,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5481,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5492,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5496,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5507,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5518,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5529,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          },
+          {
+            "event": "npcMoved",
+            "payload": {
+              "x": 5540,
+              "y": 1773,
+              "dir": "right",
+              "anim": "walk"
+            }
+          }
+        ],
+        "importantEvents": [
+          {
+            "event": "locationTransitionResult",
+            "payload": {
+              "ok": true,
+              "location": "city",
+              "reason": null,
+              "transitionSequence": 1,
+              "spawn": {
+                "x": 480,
+                "y": 424,
+                "dir": "down"
+              },
+              "map": {
+                "id": "city",
+                "label": "Huddle Plaza",
+                "spawn": {
+                  "x": 144,
+                  "y": 960,
+                  "dir": "right"
+                },
+                "bounds": {
+                  "width": 3600,
+                  "height": 1920
+                },
+                "kind": "city",
+                "actorFootRadius": 16,
+                "geometry": {
+                  "blockers": [
+                    {
+                      "x": 368,
+                      "y": 160,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 368,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 516,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 1248,
+                      "y": 160,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 1248,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 1396,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 2128,
+                      "y": 160,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 2128,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 2276,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 3008,
+                      "y": 160,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 3008,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 3156,
+                      "y": 282,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 368,
+                      "y": 1120,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 368,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 516,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 1248,
+                      "y": 1120,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 1248,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 1396,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 2128,
+                      "y": 1120,
+                      "width": 224,
+                      "height": 122
+                    },
+                    {
+                      "x": 2128,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 2276,
+                      "y": 1242,
+                      "width": 76,
+                      "height": 100
+                    },
+                    {
+                      "x": 3000,
+                      "y": 1120,
+                      "width": 240,
+                      "height": 250
+                    },
+                    {
+                      "x": 3000,
+                      "y": 1370,
+                      "width": 72,
+                      "height": 100
+                    },
+                    {
+                      "x": 3168,
+                      "y": 1370,
+                      "width": 72,
+                      "height": 100
+                    }
+                  ],
+                  "doors": [
+                    {
+                      "destination": "furniture-shop",
+                      "x": 444,
+                      "y": 282,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Huddle Home"
+                    },
+                    {
+                      "destination": "garden-shop",
+                      "x": 1324,
+                      "y": 282,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Willow & Green"
+                    },
+                    {
+                      "destination": "decor-shop",
+                      "x": 2204,
+                      "y": 282,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Plaza Decor"
+                    },
+                    {
+                      "destination": "cafe",
+                      "x": 3084,
+                      "y": 282,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Cafe"
+                    },
+                    {
+                      "destination": "diner",
+                      "x": 444,
+                      "y": 1242,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Diner"
+                    },
+                    {
+                      "destination": "bakery",
+                      "x": 1324,
+                      "y": 1242,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Sweet Crust Bakery"
+                    },
+                    {
+                      "destination": "sushi",
+                      "x": 2204,
+                      "y": 1242,
+                      "width": 72,
+                      "height": 100,
+                      "label": "Sakura Sushi"
+                    },
+                    {
+                      "destination": "museum",
+                      "x": 3072,
+                      "y": 1370,
+                      "width": 96,
+                      "height": 100,
+                      "label": "Huddle Museum",
+                      "spawn": {
+                        "x": 480,
+                        "y": 576,
+                        "dir": "up"
+                      }
+                    }
+                  ],
+                  "seats": [
+                    {
+                      "id": "plaza-bench-northwest",
+                      "x": 720,
+                      "y": 640,
+                      "dir": "down",
+                      "stands": [
+                        {
+                          "x": 720,
+                          "y": 704,
+                          "dir": "down"
+                        },
+                        {
+                          "x": 656,
+                          "y": 640,
+                          "dir": "down"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-north",
+                      "x": 1520,
+                      "y": 640,
+                      "dir": "down",
+                      "stands": [
+                        {
+                          "x": 1520,
+                          "y": 704,
+                          "dir": "down"
+                        },
+                        {
+                          "x": 1456,
+                          "y": 640,
+                          "dir": "down"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-south",
+                      "x": 2320,
+                      "y": 640,
+                      "dir": "down",
+                      "stands": [
+                        {
+                          "x": 2320,
+                          "y": 704,
+                          "dir": "down"
+                        },
+                        {
+                          "x": 2256,
+                          "y": 640,
+                          "dir": "down"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-northeast",
+                      "x": 3120,
+                      "y": 640,
+                      "dir": "down",
+                      "stands": [
+                        {
+                          "x": 3120,
+                          "y": 704,
+                          "dir": "down"
+                        },
+                        {
+                          "x": 3056,
+                          "y": 640,
+                          "dir": "down"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-southwest",
+                      "x": 720,
+                      "y": 896,
+                      "dir": "up",
+                      "stands": [
+                        {
+                          "x": 720,
+                          "y": 832,
+                          "dir": "up"
+                        },
+                        {
+                          "x": 656,
+                          "y": 896,
+                          "dir": "up"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-south-center",
+                      "x": 1520,
+                      "y": 896,
+                      "dir": "up",
+                      "stands": [
+                        {
+                          "x": 1520,
+                          "y": 832,
+                          "dir": "up"
+                        },
+                        {
+                          "x": 1456,
+                          "y": 896,
+                          "dir": "up"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-east",
+                      "x": 2320,
+                      "y": 896,
+                      "dir": "up",
+                      "stands": [
+                        {
+                          "x": 2320,
+                          "y": 832,
+                          "dir": "up"
+                        },
+                        {
+                          "x": 2256,
+                          "y": 896,
+                          "dir": "up"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "plaza-bench-southeast",
+                      "x": 3120,
+                      "y": 896,
+                      "dir": "up",
+                      "stands": [
+                        {
+                          "x": 3120,
+                          "y": 832,
+                          "dir": "up"
+                        },
+                        {
+                          "x": 3056,
+                          "y": 896,
+                          "dir": "up"
+                        }
+                      ]
+                    }
+                  ],
+                  "commercialExteriors": {
+                    "gatheringSquare": {
+                      "x": 192,
+                      "y": 448,
+                      "width": 3216,
+                      "height": 640
+                    },
+                    "venues": [
+                      {
+                        "id": "furniture-shop",
+                        "label": "Huddle Home",
+                        "footprint": {
+                          "x": 368,
+                          "y": 160,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 444,
+                          "y": 282,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 480,
+                          "y": 424,
+                          "dir": "down"
+                        },
+                        "blockers": [
+                          {
+                            "x": 368,
+                            "y": 160,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 368,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 516,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "garden-shop",
+                        "label": "Willow & Green",
+                        "footprint": {
+                          "x": 1248,
+                          "y": 160,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 1324,
+                          "y": 282,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 1360,
+                          "y": 424,
+                          "dir": "down"
+                        },
+                        "blockers": [
+                          {
+                            "x": 1248,
+                            "y": 160,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 1248,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 1396,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "decor-shop",
+                        "label": "Plaza Decor",
+                        "footprint": {
+                          "x": 2128,
+                          "y": 160,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 2204,
+                          "y": 282,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 2240,
+                          "y": 424,
+                          "dir": "down"
+                        },
+                        "blockers": [
+                          {
+                            "x": 2128,
+                            "y": 160,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 2128,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 2276,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "cafe",
+                        "label": "Cafe",
+                        "footprint": {
+                          "x": 3008,
+                          "y": 160,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 3084,
+                          "y": 282,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 3120,
+                          "y": 424,
+                          "dir": "down"
+                        },
+                        "blockers": [
+                          {
+                            "x": 3008,
+                            "y": 160,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 3008,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 3156,
+                            "y": 282,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "diner",
+                        "label": "Diner",
+                        "footprint": {
+                          "x": 368,
+                          "y": 1120,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 444,
+                          "y": 1242,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 480,
+                          "y": 1384,
+                          "dir": "up"
+                        },
+                        "blockers": [
+                          {
+                            "x": 368,
+                            "y": 1120,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 368,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 516,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "bakery",
+                        "label": "Sweet Crust Bakery",
+                        "footprint": {
+                          "x": 1248,
+                          "y": 1120,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 1324,
+                          "y": 1242,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 1360,
+                          "y": 1384,
+                          "dir": "up"
+                        },
+                        "blockers": [
+                          {
+                            "x": 1248,
+                            "y": 1120,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 1248,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 1396,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "sushi",
+                        "label": "Sakura Sushi",
+                        "footprint": {
+                          "x": 2128,
+                          "y": 1120,
+                          "width": 224,
+                          "height": 222
+                        },
+                        "door": {
+                          "x": 2204,
+                          "y": 1242,
+                          "width": 72,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 2240,
+                          "y": 1384,
+                          "dir": "up"
+                        },
+                        "blockers": [
+                          {
+                            "x": 2128,
+                            "y": 1120,
+                            "width": 224,
+                            "height": 122
+                          },
+                          {
+                            "x": 2128,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          },
+                          {
+                            "x": 2276,
+                            "y": 1242,
+                            "width": 76,
+                            "height": 100
+                          }
+                        ]
+                      },
+                      {
+                        "id": "museum",
+                        "label": "Huddle Museum",
+                        "footprint": {
+                          "x": 3000,
+                          "y": 1120,
+                          "width": 240,
+                          "height": 350
+                        },
+                        "door": {
+                          "x": 3072,
+                          "y": 1370,
+                          "width": 96,
+                          "height": 100
+                        },
+                        "citySpawn": {
+                          "x": 3120,
+                          "y": 1512,
+                          "dir": "up"
+                        },
+                        "museumSpawn": {
+                          "x": 480,
+                          "y": 576,
+                          "dir": "up"
+                        },
+                        "blockers": [
+                          {
+                            "x": 3000,
+                            "y": 1120,
+                            "width": 240,
+                            "height": 250
+                          },
+                          {
+                            "x": 3000,
+                            "y": 1370,
+                            "width": 72,
+                            "height": 100
+                          },
+                          {
+                            "x": 3168,
+                            "y": 1370,
+                            "width": 72,
+                            "height": 100
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "cashiers": [],
+                "portals": [
+                  {
+                    "destination": "neighborhood",
+                    "x": 0,
+                    "y": 888,
+                    "width": 96,
+                    "height": 144,
+                    "spawn": {
+                      "x": 1248,
+                      "y": 504,
+                      "dir": "left"
+                    }
+                  },
+                  {
+                    "destination": "furniture-shop",
+                    "x": 444,
+                    "y": 282,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "garden-shop",
+                    "x": 1324,
+                    "y": 282,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "decor-shop",
+                    "x": 2204,
+                    "y": 282,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "cafe",
+                    "x": 3084,
+                    "y": 282,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "diner",
+                    "x": 444,
+                    "y": 1242,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "bakery",
+                    "x": 1324,
+                    "y": 1242,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "sushi",
+                    "x": 2204,
+                    "y": 1242,
+                    "width": 72,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  },
+                  {
+                    "destination": "museum",
+                    "x": 3072,
+                    "y": 1370,
+                    "width": 96,
+                    "height": 100,
+                    "spawn": {
+                      "x": 480,
+                      "y": 576,
+                      "dir": "up"
+                    }
+                  }
+                ]
+              },
+              "self": {
+                "id": "kXJfvzQgsnWmb9wXAAAB",
+                "locationId": "city",
+                "x": 480,
+                "y": 424,
+                "dir": "down",
+                "anim": "idle",
+                "name": "QA Furniture",
+                "fullName": "QA Furniture Furniture",
+                "email": "qa-furniture-o13f83m@justpressone.com",
+                "character": "adam",
+                "hairIdx": 0,
+                "skinIdx": 0,
+                "shirtIdx": 0,
+                "pantsIdx": 0,
+                "coins": 500010,
+                "cosmetics": [],
+                "equipped": "",
+                "wings": "",
+                "slots": {
+                  "top": "",
+                  "bottom": "",
+                  "neckwear": "",
+                  "held": "",
+                  "feet": ""
+                },
+                "pet": "",
+                "petAcc": "",
+                "petXp": {},
+                "petNames": {},
+                "petBuilds": {},
+                "items": {},
+                "avatarChanges": 0,
+                "earnUntil": 0,
+                "isAnnouncer": false,
+                "department": "QA",
+                "wins": {},
+                "hobby": "",
+                "createdAt": 1789755452185,
+                "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                "homeColor": "teal",
+                "location": "city",
+                "seq": 4
+              },
+              "players": {
+                "kXJfvzQgsnWmb9wXAAAB": {
+                  "id": "kXJfvzQgsnWmb9wXAAAB",
+                  "locationId": "city",
+                  "x": 480,
+                  "y": 424,
+                  "dir": "down",
+                  "anim": "idle",
+                  "name": "QA Furniture",
+                  "fullName": "QA Furniture Furniture",
+                  "email": "qa-furniture-o13f83m@justpressone.com",
+                  "character": "adam",
+                  "hairIdx": 0,
+                  "skinIdx": 0,
+                  "shirtIdx": 0,
+                  "pantsIdx": 0,
+                  "coins": 500010,
+                  "cosmetics": [],
+                  "equipped": "",
+                  "wings": "",
+                  "slots": {
+                    "top": "",
+                    "bottom": "",
+                    "neckwear": "",
+                    "held": "",
+                    "feet": ""
+                  },
+                  "pet": "",
+                  "petAcc": "",
+                  "petXp": {},
+                  "petNames": {},
+                  "petBuilds": {},
+                  "items": {},
+                  "avatarChanges": 0,
+                  "earnUntil": 0,
+                  "isAnnouncer": false,
+                  "department": "QA",
+                  "wins": {},
+                  "hobby": "",
+                  "createdAt": 1789755452185,
+                  "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                  "location": "city",
+                  "seq": 4
+                }
+              },
+              "home": null,
+              "homeColor": "teal"
+            }
+          },
+          {
+            "event": "currentPlayers",
+            "payload": {
+              "kXJfvzQgsnWmb9wXAAAB": {
+                "id": "kXJfvzQgsnWmb9wXAAAB",
+                "locationId": "city",
+                "x": 480,
+                "y": 424,
+                "dir": "down",
+                "anim": "idle",
+                "name": "QA Furniture",
+                "fullName": "QA Furniture Furniture",
+                "email": "qa-furniture-o13f83m@justpressone.com",
+                "character": "adam",
+                "hairIdx": 0,
+                "skinIdx": 0,
+                "shirtIdx": 0,
+                "pantsIdx": 0,
+                "coins": 500010,
+                "cosmetics": [],
+                "equipped": "",
+                "wings": "",
+                "slots": {
+                  "top": "",
+                  "bottom": "",
+                  "neckwear": "",
+                  "held": "",
+                  "feet": ""
+                },
+                "pet": "",
+                "petAcc": "",
+                "petXp": {},
+                "petNames": {},
+                "petBuilds": {},
+                "items": {},
+                "avatarChanges": 0,
+                "earnUntil": 0,
+                "isAnnouncer": false,
+                "department": "QA",
+                "wins": {},
+                "hobby": "",
+                "createdAt": 1789755452185,
+                "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                "location": "city",
+                "seq": 0
+              }
+            }
+          },
+          {
+            "event": "locationTransitionResult",
+            "payload": {
+              "ok": true,
+              "location": "furniture-shop",
+              "reason": null,
+              "transitionSequence": 2,
+              "spawn": {
+                "x": 480,
+                "y": 576,
+                "dir": "up"
+              },
+              "map": {
+                "id": "furniture-shop",
+                "label": "Huddle Home",
+                "spawn": {
+                  "x": 480,
+                  "y": 576,
+                  "dir": "up"
+                },
+                "bounds": {
+                  "width": 960,
+                  "height": 720
+                },
+                "kind": "furniture-shop",
+                "actorFootRadius": 16,
+                "geometry": {
+                  "blockers": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 960,
+                      "height": 48
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 48,
+                      "height": 720
+                    },
+                    {
+                      "x": 912,
+                      "y": 0,
+                      "width": 48,
+                      "height": 720
+                    },
+                    {
+                      "x": 0,
+                      "y": 672,
+                      "width": 408,
+                      "height": 48
+                    },
+                    {
+                      "x": 552,
+                      "y": 672,
+                      "width": 408,
+                      "height": 48
+                    },
+                    {
+                      "x": 96,
+                      "y": 116,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 256,
+                      "y": 116,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 656,
+                      "y": 116,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 816,
+                      "y": 116,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 96,
+                      "y": 276,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 816,
+                      "y": 276,
+                      "width": 48,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 104,
+                      "y": 316,
+                      "width": 32,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 824,
+                      "y": 316,
+                      "width": 32,
+                      "height": 24,
+                      "fixture": true
+                    },
+                    {
+                      "x": 132,
+                      "y": 272,
+                      "width": 96,
+                      "height": 48,
+                      "furnitureId": "blue_sofa",
+                      "instanceId": "showroom-blue-sofa",
+                      "showroom": true
+                    },
+                    {
+                      "x": 292,
+                      "y": 272,
+                      "width": 96,
+                      "height": 48,
+                      "furnitureId": "lounge_sofa",
+                      "instanceId": "showroom-lounge-sofa",
+                      "showroom": true
+                    },
+                    {
+                      "x": 688,
+                      "y": 224,
+                      "width": 144,
+                      "height": 96,
+                      "furnitureId": "plush_bed",
+                      "instanceId": "showroom-bed",
+                      "showroom": true
+                    },
+                    {
+                      "x": 392,
+                      "y": 432,
+                      "width": 96,
+                      "height": 48,
+                      "furnitureId": "kitchen_counter",
+                      "instanceId": "showroom-counter",
+                      "showroom": true
+                    },
+                    {
+                      "x": 572,
+                      "y": 432,
+                      "width": 96,
+                      "height": 48,
+                      "furnitureId": "bathtub",
+                      "instanceId": "showroom-bath",
+                      "showroom": true
+                    },
+                    {
+                      "x": 712,
+                      "y": 432,
+                      "width": 96,
+                      "height": 48,
+                      "furnitureId": "bathroom_sink_tap",
+                      "instanceId": "showroom-sink",
+                      "showroom": true
+                    },
+                    {
+                      "x": 476,
+                      "y": 92,
+                      "width": 48,
+                      "height": 48,
+                      "furnitureId": "television",
+                      "instanceId": "showroom-tv",
+                      "showroom": true
+                    },
+                    {
+                      "x": 176,
+                      "y": 472,
+                      "width": 48,
+                      "height": 48,
+                      "furnitureId": "oak_chair",
+                      "instanceId": "showroom-oak-chair-1",
+                      "showroom": true
+                    },
+                    {
+                      "x": 336,
+                      "y": 472,
+                      "width": 48,
+                      "height": 48,
+                      "furnitureId": "oak_chair",
+                      "instanceId": "showroom-oak-chair-2",
+                      "showroom": true
+                    },
+                    {
+                      "x": 576,
+                      "y": 472,
+                      "width": 48,
+                      "height": 48,
+                      "furnitureId": "oak_chair",
+                      "instanceId": "showroom-oak-chair-3",
+                      "showroom": true
+                    },
+                    {
+                      "x": 736,
+                      "y": 472,
+                      "width": 48,
+                      "height": 48,
+                      "furnitureId": "oak_chair",
+                      "instanceId": "showroom-oak-chair-4",
+                      "showroom": true
+                    }
+                  ],
+                  "doors": [
+                    {
+                      "destination": "city",
+                      "x": 408,
+                      "y": 648,
+                      "width": 144,
+                      "height": 72,
+                      "label": "Plaza exit"
+                    }
+                  ],
+                  "seats": [],
+                  "commercialLayout": {
+                    "label": "Furniture Shop",
+                    "width": 960,
+                    "height": 720,
+                    "floor": {
+                      "asset": "floor_wood",
+                      "scale": 1
+                    },
+                    "objects": [
+                      {
+                        "asset": "furn_bookcase",
+                        "x": 120,
+                        "y": 140,
+                        "depth": 140,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_bookcase",
+                        "x": 280,
+                        "y": 140,
+                        "depth": 140,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_bookcase",
+                        "x": 680,
+                        "y": 140,
+                        "depth": 140,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_bookcase",
+                        "x": 840,
+                        "y": 140,
+                        "depth": 140,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "decor_mirror",
+                        "x": 240,
+                        "y": 120,
+                        "depth": -4,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "decor_mirror",
+                        "x": 720,
+                        "y": 120,
+                        "depth": -4,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "native_fern",
+                        "x": 120,
+                        "y": 300,
+                        "depth": 300,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "native_fern",
+                        "x": 840,
+                        "y": 300,
+                        "depth": 300,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "native_reading_lamp",
+                        "x": 120,
+                        "y": 340,
+                        "depth": 340,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "floor_lamp",
+                        "x": 840,
+                        "y": 340,
+                        "depth": 340,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "native_blue_sofa",
+                        "x": 180,
+                        "y": 320,
+                        "depth": 320,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "furn_armchair",
+                        "x": 260,
+                        "y": 320,
+                        "depth": 320,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_armchair",
+                        "x": 340,
+                        "y": 320,
+                        "depth": 320,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_table",
+                        "x": 280,
+                        "y": 420,
+                        "depth": 420,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_table",
+                        "x": 700,
+                        "y": 420,
+                        "depth": 420,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_bed",
+                        "x": 760,
+                        "y": 320,
+                        "depth": 320,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "furn_tv",
+                        "x": 500,
+                        "y": 140,
+                        "depth": 140,
+                        "scale": 1
+                      },
+                      {
+                        "asset": "native_oak_chair",
+                        "x": 200,
+                        "y": 520,
+                        "depth": 520,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "native_oak_chair",
+                        "x": 360,
+                        "y": 520,
+                        "depth": 520,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "native_oak_chair",
+                        "x": 600,
+                        "y": 520,
+                        "depth": 520,
+                        "scale": 3
+                      },
+                      {
+                        "asset": "native_oak_chair",
+                        "x": 760,
+                        "y": 520,
+                        "depth": 520,
+                        "scale": 3
+                      }
+                    ],
+                    "fixtureBlockers": [
+                      {
+                        "x": 96,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 256,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 656,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 816,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 96,
+                        "y": 276,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 816,
+                        "y": 276,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 104,
+                        "y": 316,
+                        "width": 32,
+                        "height": 24
+                      },
+                      {
+                        "x": 824,
+                        "y": 316,
+                        "width": 32,
+                        "height": 24
+                      }
+                    ],
+                    "blockers": [
+                      {
+                        "x": 96,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 256,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 656,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 816,
+                        "y": 116,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 96,
+                        "y": 276,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 816,
+                        "y": 276,
+                        "width": 48,
+                        "height": 24
+                      },
+                      {
+                        "x": 104,
+                        "y": 316,
+                        "width": 32,
+                        "height": 24
+                      },
+                      {
+                        "x": 824,
+                        "y": 316,
+                        "width": 32,
+                        "height": 24
+                      }
+                    ],
+                    "seats": []
+                  }
+                },
+                "cashiers": [
+                  {
+                    "id": "cashier:furniture-shop",
+                    "location": "furniture-shop",
+                    "name": "Mara",
+                    "character": "amelia",
+                    "x": 480,
+                    "y": 340,
+                    "radius": 116,
+                    "greeting": "Welcome to Huddle Home! Take a look around.",
+                    "info": "Furniture for making your home feel like yours.",
+                    "kind": "furniture"
+                  }
+                ],
+                "portals": [
+                  {
+                    "destination": "city",
+                    "x": 408,
+                    "y": 648,
+                    "width": 144,
+                    "height": 72,
+                    "spawn": {
+                      "x": 480,
+                      "y": 424,
+                      "dir": "down"
+                    }
+                  }
+                ]
+              },
+              "self": {
+                "id": "kXJfvzQgsnWmb9wXAAAB",
+                "locationId": "furniture-shop",
+                "x": 480,
+                "y": 576,
+                "dir": "up",
+                "anim": "idle",
+                "name": "QA Furniture",
+                "fullName": "QA Furniture Furniture",
+                "email": "qa-furniture-o13f83m@justpressone.com",
+                "character": "adam",
+                "hairIdx": 0,
+                "skinIdx": 0,
+                "shirtIdx": 0,
+                "pantsIdx": 0,
+                "coins": 500010,
+                "cosmetics": [],
+                "equipped": "",
+                "wings": "",
+                "slots": {
+                  "top": "",
+                  "bottom": "",
+                  "neckwear": "",
+                  "held": "",
+                  "feet": ""
+                },
+                "pet": "",
+                "petAcc": "",
+                "petXp": {},
+                "petNames": {},
+                "petBuilds": {},
+                "items": {},
+                "avatarChanges": 0,
+                "earnUntil": 0,
+                "isAnnouncer": false,
+                "department": "QA",
+                "wins": {},
+                "hobby": "",
+                "createdAt": 1789755452185,
+                "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                "homeColor": "teal",
+                "location": "furniture-shop",
+                "seq": 19
+              },
+              "players": {
+                "kXJfvzQgsnWmb9wXAAAB": {
+                  "id": "kXJfvzQgsnWmb9wXAAAB",
+                  "locationId": "furniture-shop",
+                  "x": 480,
+                  "y": 576,
+                  "dir": "up",
+                  "anim": "idle",
+                  "name": "QA Furniture",
+                  "fullName": "QA Furniture Furniture",
+                  "email": "qa-furniture-o13f83m@justpressone.com",
+                  "character": "adam",
+                  "hairIdx": 0,
+                  "skinIdx": 0,
+                  "shirtIdx": 0,
+                  "pantsIdx": 0,
+                  "coins": 500010,
+                  "cosmetics": [],
+                  "equipped": "",
+                  "wings": "",
+                  "slots": {
+                    "top": "",
+                    "bottom": "",
+                    "neckwear": "",
+                    "held": "",
+                    "feet": ""
+                  },
+                  "pet": "",
+                  "petAcc": "",
+                  "petXp": {},
+                  "petNames": {},
+                  "petBuilds": {},
+                  "items": {},
+                  "avatarChanges": 0,
+                  "earnUntil": 0,
+                  "isAnnouncer": false,
+                  "department": "QA",
+                  "wins": {},
+                  "hobby": "",
+                  "createdAt": 1789755452185,
+                  "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                  "location": "furniture-shop",
+                  "seq": 19
+                }
+              },
+              "home": null,
+              "homeColor": "teal",
+              "catalog": {
+                "oak_chair": {
+                  "id": "oak_chair",
+                  "name": "HQ gold stool",
+                  "price": 5000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/hq_gold_stool.png",
+                  "publicPath": "/assets/neighborhood/furniture/hq_gold_stool.png",
+                  "assetPath": "/assets/neighborhood/furniture/hq_gold_stool.png",
+                  "asset": "oak_chair",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#dcae58",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 16,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "sit"
+                  ],
+                  "interaction": {
+                    "facing": "approach",
+                    "radius": 96,
+                    "actorAboveSurface": true
+                  },
+                  "actionInteractions": {
+                    "sit": {
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -37
+                      }
+                    }
+                  }
+                },
+                "fern": {
+                  "id": "fern",
+                  "name": "Potted fern",
+                  "price": 5000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/fern.png",
+                  "publicPath": "/assets/neighborhood/furniture/fern.png",
+                  "assetPath": "/assets/neighborhood/furniture/fern.png",
+                  "asset": "fern",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#4f9253",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "reading_lamp": {
+                  "id": "reading_lamp",
+                  "name": "Coral floor lamp",
+                  "price": 8000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/reading_lamp.png",
+                  "publicPath": "/assets/neighborhood/furniture/reading_lamp.png",
+                  "assetPath": "/assets/neighborhood/furniture/reading_lamp.png",
+                  "asset": "reading_lamp",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#d7634b",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "coffee_table": {
+                  "id": "coffee_table",
+                  "name": "Plum low table",
+                  "price": 12000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/coffee_table.png",
+                  "publicPath": "/assets/neighborhood/furniture/coffee_table.png",
+                  "assetPath": "/assets/neighborhood/furniture/coffee_table.png",
+                  "asset": "coffee_table",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#74637e",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "origin": {
+                    "x": 0.5,
+                    "y": 0.8125
+                  },
+                  "movementBlockerOffset": {
+                    "x": 0,
+                    "y": -27
+                  },
+                  "depthOffset": -27
+                },
+                "blue_sofa": {
+                  "id": "blue_sofa",
+                  "name": "Cream lounge sofa",
+                  "price": 18000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/blue_sofa_full.png",
+                  "publicPath": "/assets/neighborhood/furniture/blue_sofa_full.png",
+                  "assetPath": "/assets/neighborhood/furniture/blue_sofa_full.png",
+                  "asset": "blue_sofa",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#e4c8a1",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "sit",
+                    "lie"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 96
+                  },
+                  "actionInteractions": {
+                    "sit": {
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -34
+                      }
+                    }
+                  },
+                  "activityPose": {
+                    "sit": {
+                      "angle": 0,
+                      "scale": 3,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -10
+                      }
+                    },
+                    "lie": {
+                      "angle": -90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": -30,
+                        "y": 0
+                      }
+                    },
+                    "sleep": {
+                      "angle": -90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": -30,
+                        "y": 0
+                      }
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 24,
+                      "depthBias": 0.01
+                    },
+                    "actions": {
+                      "sit": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      },
+                      "lie": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      }
+                    }
+                  }
+                },
+                "bookcase": {
+                  "id": "bookcase",
+                  "name": "Gold bookcase",
+                  "price": 18000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/bookcase.png",
+                  "publicPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "assetPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "asset": "bookcase",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 2,
+                  "footprint": {
+                    "width": 1,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#a87542",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "lounge_sofa": {
+                  "id": "lounge_sofa",
+                  "name": "Ivory reading sofa",
+                  "price": 25000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/lounge_sofa.png",
+                  "publicPath": "/assets/neighborhood/furniture/lounge_sofa.png",
+                  "assetPath": "/assets/neighborhood/furniture/lounge_sofa.png",
+                  "asset": "lounge_sofa",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#f2e0c8",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "sit",
+                    "lie"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 96
+                  },
+                  "actionInteractions": {
+                    "sit": {
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -34
+                      }
+                    }
+                  },
+                  "activityPose": {
+                    "sit": {
+                      "angle": 0,
+                      "scale": 3,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -10
+                      }
+                    },
+                    "lie": {
+                      "angle": -90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": -30,
+                        "y": 0
+                      }
+                    },
+                    "sleep": {
+                      "angle": -90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": -30,
+                        "y": 0
+                      }
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 24,
+                      "depthBias": 0.01
+                    },
+                    "actions": {
+                      "sit": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      },
+                      "lie": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      }
+                    }
+                  }
+                },
+                "living_shelf": {
+                  "id": "living_shelf",
+                  "name": "Tall bookcase",
+                  "price": 18000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/furniture/bookcase.png",
+                  "publicPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "assetPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "asset": "living_shelf",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 2,
+                  "footprint": {
+                    "width": 1,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#9a623f",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "living_lamp": {
+                  "id": "living_lamp",
+                  "name": "Coral floor lamp",
+                  "price": 12000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "asset": "living_lamp",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#d7a34c",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "living_mirror": {
+                  "id": "living_mirror",
+                  "name": "Tall wall mirror",
+                  "price": 18000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "asset": "living_mirror",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8eabc0",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "kitchen_counter": {
+                  "id": "kitchen_counter",
+                  "name": "Oak kitchen counter",
+                  "price": 12000,
+                  "category": "Kitchen",
+                  "path": "/assets/neighborhood/furniture/kitchen_counter_full.png",
+                  "publicPath": "/assets/neighborhood/furniture/kitchen_counter_full.png",
+                  "assetPath": "/assets/neighborhood/furniture/kitchen_counter_full.png",
+                  "asset": "kitchen_counter",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8d6e52",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "kitchen_fridge": {
+                  "id": "kitchen_fridge",
+                  "name": "Grey refrigerator",
+                  "price": 25000,
+                  "category": "Kitchen",
+                  "path": "/assets/room-furniture/animated_fridge_grey.png",
+                  "publicPath": "/assets/room-furniture/animated_fridge_grey.png",
+                  "assetPath": "/assets/room-furniture/animated_fridge_grey.png",
+                  "asset": "kitchen_fridge",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8bb8c5",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 48,
+                    "frameCount": 6,
+                    "frameRate": 2,
+                    "initialFrame": 0,
+                    "loop": true
+                  }
+                },
+                "kitchen_sink": {
+                  "id": "kitchen_sink",
+                  "name": "Porcelain kitchen sink",
+                  "price": 18000,
+                  "category": "Kitchen",
+                  "path": "/assets/room-furniture/animated_kitchen_sink_1.png",
+                  "publicPath": "/assets/room-furniture/animated_kitchen_sink_1.png",
+                  "assetPath": "/assets/room-furniture/animated_kitchen_sink_1.png",
+                  "asset": "kitchen_sink",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#b9d7dc",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 16,
+                    "frameCount": 3,
+                    "frameRate": 8,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "toggle_water"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 88
+                  }
+                },
+                "kitchen_stove": {
+                  "id": "kitchen_stove",
+                  "name": "Kitchen range",
+                  "price": 25000,
+                  "category": "Kitchen",
+                  "path": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "publicPath": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "assetPath": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "asset": "kitchen_stove",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8d6e52",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 6,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": true
+                  }
+                },
+                "kitchen_oven": {
+                  "id": "kitchen_oven",
+                  "name": "Open-door oven",
+                  "price": 35000,
+                  "category": "Kitchen",
+                  "path": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "publicPath": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "assetPath": "/assets/room-furniture/animated_kitchen_oven.png",
+                  "asset": "kitchen_oven",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#b6774c",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 6,
+                    "frameRate": 0,
+                    "initialFrame": 3,
+                    "loop": true
+                  }
+                },
+                "coffee_machine": {
+                  "id": "coffee_machine",
+                  "name": "Front-load washer",
+                  "price": 12000,
+                  "category": "Bathroom",
+                  "path": "/assets/neighborhood/commercial/cafe_coffee_machine.png",
+                  "publicPath": "/assets/neighborhood/commercial/cafe_coffee_machine.png",
+                  "assetPath": "/assets/neighborhood/commercial/cafe_coffee_machine.png",
+                  "asset": "coffee_machine",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#77818f",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "chef_fridge": {
+                  "id": "chef_fridge",
+                  "name": "Chef's steel fridge",
+                  "price": 50000,
+                  "category": "Kitchen",
+                  "path": "/assets/room-furniture/animated_fridge_grey.png",
+                  "publicPath": "/assets/room-furniture/animated_fridge_grey.png",
+                  "assetPath": "/assets/room-furniture/animated_fridge_grey.png",
+                  "asset": "chef_fridge",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#a6adb8",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 48,
+                    "frameCount": 6,
+                    "frameRate": 2,
+                    "initialFrame": 0,
+                    "loop": true
+                  }
+                },
+                "bed": {
+                  "id": "bed",
+                  "name": "Bedroom bed",
+                  "price": 35000,
+                  "category": "Bedroom",
+                  "path": "/assets/neighborhood/interiors/bedroom_bed.png",
+                  "publicPath": "/assets/neighborhood/interiors/bedroom_bed.png",
+                  "assetPath": "/assets/neighborhood/interiors/bedroom_bed.png",
+                  "asset": "bedroom_bed",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 3,
+                  "footprint": {
+                    "width": 1,
+                    "height": 3
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#9d6d65",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "lie",
+                    "sleep"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 104,
+                    "orientation": "lengthwise"
+                  },
+                  "activityPose": {
+                    "lie": {
+                      "angle": 0,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -42
+                      }
+                    },
+                    "sleep": {
+                      "angle": 0,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -42
+                      }
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 31,
+                      "depthBias": 0.01
+                    },
+                    "actions": {
+                      "lie": {
+                        "fromPx": 31,
+                        "depthBias": 0.01
+                      },
+                      "sleep": {
+                        "fromPx": 31,
+                        "depthBias": 0.01
+                      }
+                    }
+                  }
+                },
+                "plush_bed": {
+                  "id": "plush_bed",
+                  "name": "Walnut daybed",
+                  "price": 50000,
+                  "category": "Bedroom",
+                  "path": "/assets/neighborhood/commercial/furn_bed.png",
+                  "publicPath": "/assets/neighborhood/commercial/furn_bed.png",
+                  "assetPath": "/assets/neighborhood/commercial/furn_bed.png",
+                  "asset": "plush_bed",
+                  "scale": 1,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 3,
+                  "height": 2,
+                  "footprint": {
+                    "width": 3,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8697b5",
+                  "frames": {
+                    "frameWidth": 144,
+                    "frameHeight": 144,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "lie",
+                    "sleep"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 104,
+                    "actorOffset": {
+                      "x": 40,
+                      "y": -20
+                    }
+                  },
+                  "activityPose": {
+                    "lie": {
+                      "angle": 90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": 15,
+                        "y": 0
+                      }
+                    },
+                    "sleep": {
+                      "angle": 90,
+                      "scale": 2.7,
+                      "wearableOffset": {
+                        "x": 15,
+                        "y": 0
+                      }
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 108,
+                      "depthBias": 0.01
+                    },
+                    "actions": {
+                      "lie": {
+                        "fromPx": 108,
+                        "depthBias": 0.01
+                      },
+                      "sleep": {
+                        "fromPx": 108,
+                        "depthBias": 0.01
+                      }
+                    }
+                  }
+                },
+                "bedroom_shelf": {
+                  "id": "bedroom_shelf",
+                  "name": "Gold bedroom bookcase",
+                  "price": 18000,
+                  "category": "Bedroom",
+                  "path": "/assets/neighborhood/furniture/bookcase.png",
+                  "publicPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "assetPath": "/assets/neighborhood/furniture/bookcase.png",
+                  "asset": "bedroom_shelf",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 2,
+                  "footprint": {
+                    "width": 1,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8f6245",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "bedroom_lamp": {
+                  "id": "bedroom_lamp",
+                  "name": "Bedroom floor lamp",
+                  "price": 8000,
+                  "category": "Bedroom",
+                  "path": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_lamp.png",
+                  "asset": "bedroom_lamp",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#d7a34c",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "bedroom_mirror": {
+                  "id": "bedroom_mirror",
+                  "name": "Dressing mirror",
+                  "price": 18000,
+                  "category": "Bedroom",
+                  "path": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_mirror.png",
+                  "asset": "bedroom_mirror",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#8eabc0",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "bedroom_dresser": {
+                  "id": "bedroom_dresser",
+                  "name": "Blue linen dresser",
+                  "price": 25000,
+                  "category": "Bedroom",
+                  "path": "/assets/room-furniture/animated_bathroom_cabinet_blue_empty.png",
+                  "publicPath": "/assets/room-furniture/animated_bathroom_cabinet_blue_empty.png",
+                  "assetPath": "/assets/room-furniture/animated_bathroom_cabinet_blue_empty.png",
+                  "asset": "bedroom_dresser",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#7595ae",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 10,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": true
+                  }
+                },
+                "bathtub": {
+                  "id": "bathtub",
+                  "name": "Claw-foot bath",
+                  "price": 35000,
+                  "category": "Bathroom",
+                  "path": "/assets/room-furniture/animated_bathtub_2.png",
+                  "publicPath": "/assets/room-furniture/animated_bathtub_2.png",
+                  "assetPath": "/assets/room-furniture/animated_bathtub_2.png",
+                  "asset": "animated_bathtub_with_duck",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#b9d7dc",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 48,
+                    "frameCount": 4,
+                    "frameRate": 2,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "shower",
+                    "bathe"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 104,
+                    "actorOffset": {
+                      "x": 0,
+                      "y": -70
+                    }
+                  },
+                  "activityPose": {
+                    "shower": {
+                      "angle": 0,
+                      "scale": 2.4,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -4
+                      }
+                    },
+                    "bathe": {
+                      "angle": 0,
+                      "scale": 2.4,
+                      "wearableOffset": {
+                        "x": 0,
+                        "y": -4
+                      }
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 24,
+                      "depthBias": 0.01
+                    },
+                    "actions": {
+                      "shower": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      },
+                      "bathe": {
+                        "fromPx": 24,
+                        "depthBias": 0.01
+                      }
+                    }
+                  }
+                },
+                "bathroom_sink": {
+                  "id": "bathroom_sink",
+                  "name": "Bathroom sink",
+                  "price": 12000,
+                  "category": "Bathroom",
+                  "path": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "publicPath": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "assetPath": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "asset": "bathroom_sink",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#b9d7dc",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 14,
+                    "frameRate": 8,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "toggle_water"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 88
+                  }
+                },
+                "bathroom_sink_tap": {
+                  "id": "bathroom_sink_tap",
+                  "name": "Animated tap sink",
+                  "price": 25000,
+                  "category": "Bathroom",
+                  "path": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "publicPath": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "assetPath": "/assets/room-furniture/animated_bathroom_sink_new_3-10%20loop.png",
+                  "asset": "bathroom_sink_tap",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 1,
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#c2d5dd",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 14,
+                    "frameRate": 8,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "toggle_water"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 88
+                  }
+                },
+                "bathroom_toilet": {
+                  "id": "bathroom_toilet",
+                  "name": "Porcelain toilet",
+                  "price": 12000,
+                  "category": "Bathroom",
+                  "path": "/assets/neighborhood/interiors/bathroom_toilet.png",
+                  "publicPath": "/assets/neighborhood/interiors/bathroom_toilet.png",
+                  "assetPath": "/assets/neighborhood/interiors/bathroom_toilet.png",
+                  "asset": "bathroom_toilet",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 3,
+                  "footprint": {
+                    "width": 1,
+                    "height": 3
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#d5dce1",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "bathroom_cabinet": {
+                  "id": "bathroom_cabinet",
+                  "name": "White bathroom cabinet",
+                  "price": 18000,
+                  "category": "Bathroom",
+                  "path": "/assets/room-furniture/animated_bathroom_cabinet_white_empty.png",
+                  "publicPath": "/assets/room-furniture/animated_bathroom_cabinet_white_empty.png",
+                  "assetPath": "/assets/room-furniture/animated_bathroom_cabinet_white_empty.png",
+                  "asset": "bathroom_cabinet",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#e6e8e9",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 10,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": true
+                  }
+                },
+                "shower": {
+                  "id": "shower",
+                  "name": "Rain shower",
+                  "price": 35000,
+                  "category": "Bathroom",
+                  "path": "/assets/room-furniture/animated_jail_shower_4-8%20loop.png",
+                  "publicPath": "/assets/room-furniture/animated_jail_shower_4-8%20loop.png",
+                  "assetPath": "/assets/room-furniture/animated_jail_shower_4-8%20loop.png",
+                  "asset": "shower",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#76acd1",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 48,
+                    "frameCount": 11,
+                    "frameRate": 8,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "shower"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 96
+                  },
+                  "activityPose": {
+                    "shower": {
+                      "angle": 0,
+                      "scale": 2.7
+                    }
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 20,
+                      "depthBias": 0.01
+                    }
+                  }
+                },
+                "floor_rug": {
+                  "id": "floor_rug",
+                  "name": "Lavender ottoman",
+                  "price": 12000,
+                  "category": "Living",
+                  "path": "/assets/neighborhood/commercial/shop_rug.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_rug.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_rug.png",
+                  "asset": "floor_rug",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 2,
+                  "footprint": {
+                    "width": 2,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#9a8fc0",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  },
+                  "actions": [
+                    "sit"
+                  ],
+                  "interaction": {
+                    "facing": "down",
+                    "radius": 96
+                  },
+                  "occluder": {
+                    "default": {
+                      "fromPx": 27,
+                      "depthBias": 0.01
+                    }
+                  }
+                },
+                "plant_palm": {
+                  "id": "plant_palm",
+                  "name": "Garden topiary",
+                  "price": 18000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/neighborhood/commercial/garden_tree.png",
+                  "publicPath": "/assets/neighborhood/commercial/garden_tree.png",
+                  "assetPath": "/assets/neighborhood/commercial/garden_tree.png",
+                  "asset": "plant_palm",
+                  "scale": 1,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 2,
+                  "footprint": {
+                    "width": 2,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#579b68",
+                  "frames": {
+                    "frameWidth": 96,
+                    "frameHeight": 96,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "plant_small": {
+                  "id": "plant_small",
+                  "name": "Window pot",
+                  "price": 8000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/neighborhood/commercial/shop_plant_small.png",
+                  "publicPath": "/assets/neighborhood/commercial/shop_plant_small.png",
+                  "assetPath": "/assets/neighborhood/commercial/shop_plant_small.png",
+                  "asset": "plant_small",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#579b68",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "wall_art": {
+                  "id": "wall_art",
+                  "name": "Framed print",
+                  "price": 25000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/neighborhood/commercial/decor_art.png",
+                  "publicPath": "/assets/neighborhood/commercial/decor_art.png",
+                  "assetPath": "/assets/neighborhood/commercial/decor_art.png",
+                  "asset": "wall_art",
+                  "scale": 1,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 2,
+                  "height": 2,
+                  "footprint": {
+                    "width": 2,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#c29d63",
+                  "frames": {
+                    "frameWidth": 96,
+                    "frameHeight": 96,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "planter": {
+                  "id": "planter",
+                  "name": "Potted plant",
+                  "price": 8000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/neighborhood/commercial/garden_pot.png",
+                  "publicPath": "/assets/neighborhood/commercial/garden_pot.png",
+                  "assetPath": "/assets/neighborhood/commercial/garden_pot.png",
+                  "asset": "planter",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 2,
+                  "footprint": {
+                    "width": 1,
+                    "height": 2
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#c27550",
+                  "frames": {
+                    "frameWidth": 16,
+                    "frameHeight": 32,
+                    "frameCount": 1,
+                    "frameRate": 0,
+                    "initialFrame": 0,
+                    "loop": false
+                  }
+                },
+                "tv": {
+                  "id": "tv",
+                  "name": "Animated television",
+                  "price": 35000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/room-furniture/animated_old_tv.png",
+                  "publicPath": "/assets/room-furniture/animated_old_tv.png",
+                  "assetPath": "/assets/room-furniture/animated_old_tv.png",
+                  "asset": "tv",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#4c536e",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 6,
+                    "frameRate": 6,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "watch"
+                  ],
+                  "interaction": {
+                    "anchor": "front",
+                    "facing": "up",
+                    "radius": 96
+                  }
+                },
+                "television": {
+                  "id": "television",
+                  "name": "Television",
+                  "price": 35000,
+                  "category": "Miscellaneous",
+                  "path": "/assets/room-furniture/animated_old_tv.png",
+                  "publicPath": "/assets/room-furniture/animated_old_tv.png",
+                  "assetPath": "/assets/room-furniture/animated_old_tv.png",
+                  "asset": "TV_Studio_16x16",
+                  "scale": 3,
+                  "rotations": [
+                    0
+                  ],
+                  "width": 1,
+                  "height": 1,
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "anchor": "bottom-center",
+                  "color": "#4c536e",
+                  "frames": {
+                    "frameWidth": 32,
+                    "frameHeight": 32,
+                    "frameCount": 6,
+                    "frameRate": 6,
+                    "initialFrame": 0,
+                    "loop": true
+                  },
+                  "actions": [
+                    "watch"
+                  ],
+                  "interaction": {
+                    "anchor": "front",
+                    "facing": "up",
+                    "radius": 96
+                  }
+                }
+              },
+              "showroom": [
+                {
+                  "instanceId": "showroom-blue-sofa",
+                  "furnitureId": "blue_sofa",
+                  "x": 180,
+                  "y": 320,
+                  "stand": {
+                    "x": 180,
+                    "y": 254,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "Cream lounge sofa",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -34
+                      },
+                      "toggle": false
+                    },
+                    {
+                      "id": "lie",
+                      "label": "Lie down",
+                      "effect": "sleep",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-lounge-sofa",
+                  "furnitureId": "lounge_sofa",
+                  "x": 340,
+                  "y": 320,
+                  "stand": {
+                    "x": 340,
+                    "y": 254,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "Ivory reading sofa",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -34
+                      },
+                      "toggle": false
+                    },
+                    {
+                      "id": "lie",
+                      "label": "Lie down",
+                      "effect": "sleep",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-bed",
+                  "furnitureId": "plush_bed",
+                  "x": 760,
+                  "y": 320,
+                  "stand": {
+                    "x": 760,
+                    "y": 206,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 3,
+                    "height": 2
+                  },
+                  "category": "Bedroom",
+                  "name": "Walnut daybed",
+                  "actions": [
+                    {
+                      "id": "lie",
+                      "label": "Lie down",
+                      "effect": "sleep",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 104,
+                      "actorOffset": {
+                        "x": 40,
+                        "y": -20
+                      },
+                      "toggle": false
+                    },
+                    {
+                      "id": "sleep",
+                      "label": "Sleep",
+                      "effect": "sleep",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 104,
+                      "actorOffset": {
+                        "x": 40,
+                        "y": -20
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-counter",
+                  "furnitureId": "kitchen_counter",
+                  "x": 440,
+                  "y": 480,
+                  "stand": {
+                    "x": 440,
+                    "y": 540,
+                    "dir": "up"
+                  },
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "category": "Kitchen",
+                  "name": "Oak kitchen counter",
+                  "actions": []
+                },
+                {
+                  "instanceId": "showroom-bath",
+                  "furnitureId": "bathtub",
+                  "x": 620,
+                  "y": 480,
+                  "stand": {
+                    "x": 620,
+                    "y": 414,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "category": "Bathroom",
+                  "name": "Claw-foot bath",
+                  "actions": [
+                    {
+                      "id": "shower",
+                      "label": "Shower",
+                      "effect": "water",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 104,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -70
+                      },
+                      "toggle": false
+                    },
+                    {
+                      "id": "bathe",
+                      "label": "Bathe",
+                      "effect": "water",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 104,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -70
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-sink",
+                  "furnitureId": "bathroom_sink_tap",
+                  "x": 760,
+                  "y": 480,
+                  "stand": {
+                    "x": 760,
+                    "y": 414,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 2,
+                    "height": 1
+                  },
+                  "category": "Bathroom",
+                  "name": "Animated tap sink",
+                  "actions": [
+                    {
+                      "id": "toggle_water",
+                      "label": "Tap water",
+                      "effect": "water",
+                      "anchor": "center",
+                      "facing": "down",
+                      "radius": 88,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -6
+                      },
+                      "toggle": true
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-tv",
+                  "furnitureId": "television",
+                  "x": 500,
+                  "y": 140,
+                  "stand": {
+                    "x": 500,
+                    "y": 158,
+                    "dir": "up"
+                  },
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "category": "Miscellaneous",
+                  "name": "Television",
+                  "actions": [
+                    {
+                      "id": "watch",
+                      "label": "Watch TV",
+                      "effect": "tv",
+                      "anchor": "front",
+                      "facing": "up",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-oak-chair-1",
+                  "furnitureId": "oak_chair",
+                  "x": 200,
+                  "y": 520,
+                  "stand": {
+                    "x": 200,
+                    "y": 454,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "HQ gold stool",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "approach",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -37
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-oak-chair-2",
+                  "furnitureId": "oak_chair",
+                  "x": 360,
+                  "y": 520,
+                  "stand": {
+                    "x": 360,
+                    "y": 454,
+                    "dir": "down"
+                  },
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "HQ gold stool",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "approach",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -37
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-oak-chair-3",
+                  "furnitureId": "oak_chair",
+                  "x": 600,
+                  "y": 520,
+                  "stand": {
+                    "x": 600,
+                    "y": 538,
+                    "dir": "up"
+                  },
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "HQ gold stool",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "approach",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -9
+                      },
+                      "toggle": false
+                    }
+                  ]
+                },
+                {
+                  "instanceId": "showroom-oak-chair-4",
+                  "furnitureId": "oak_chair",
+                  "x": 760,
+                  "y": 520,
+                  "stand": {
+                    "x": 760,
+                    "y": 538,
+                    "dir": "up"
+                  },
+                  "footprint": {
+                    "width": 1,
+                    "height": 1
+                  },
+                  "category": "Living",
+                  "name": "HQ gold stool",
+                  "actions": [
+                    {
+                      "id": "sit",
+                      "label": "Sit",
+                      "effect": "comfort",
+                      "anchor": "center",
+                      "facing": "approach",
+                      "radius": 96,
+                      "actorOffset": {
+                        "x": 0,
+                        "y": -9
+                      },
+                      "toggle": false
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "event": "currentPlayers",
+            "payload": {
+              "kXJfvzQgsnWmb9wXAAAB": {
+                "id": "kXJfvzQgsnWmb9wXAAAB",
+                "locationId": "furniture-shop",
+                "x": 480,
+                "y": 576,
+                "dir": "up",
+                "anim": "idle",
+                "name": "QA Furniture",
+                "fullName": "QA Furniture Furniture",
+                "email": "qa-furniture-o13f83m@justpressone.com",
+                "character": "adam",
+                "hairIdx": 0,
+                "skinIdx": 0,
+                "shirtIdx": 0,
+                "pantsIdx": 0,
+                "coins": 500010,
+                "cosmetics": [],
+                "equipped": "",
+                "wings": "",
+                "slots": {
+                  "top": "",
+                  "bottom": "",
+                  "neckwear": "",
+                  "held": "",
+                  "feet": ""
+                },
+                "pet": "",
+                "petAcc": "",
+                "petXp": {},
+                "petNames": {},
+                "petBuilds": {},
+                "items": {},
+                "avatarChanges": 0,
+                "earnUntil": 0,
+                "isAnnouncer": false,
+                "department": "QA",
+                "wins": {},
+                "hobby": "",
+                "createdAt": 1789755452185,
+                "buddyEmail": "qa-furniture-ikz6sau@justpressone.com",
+                "location": "furniture-shop",
+                "seq": 0
+              }
+            }
+          }
+        ]
+      },
+      "browserErrors": [],
+      "screenshot": "/home/runner/workspace/artifacts/jpo-huddle/tests/evidence/real-game-furniture-o13f83m/fatal-owner.png"
+    },
+    {
+      "label": "guest",
+      "state": {
+        "url": "about:blank",
+        "readyState": "complete",
+        "bodyClass": "",
+        "bodyText": "",
+        "cards": [],
+        "playing": false,
+        "scene": null,
+        "gameScene": false,
+        "socketConnected": null,
+        "lastEvents": [],
+        "importantEvents": []
+      },
+      "browserErrors": [],
+      "screenshot": "/home/runner/workspace/artifacts/jpo-huddle/tests/evidence/real-game-furniture-o13f83m/fatal-guest.png"
+    }
+  ]
+}

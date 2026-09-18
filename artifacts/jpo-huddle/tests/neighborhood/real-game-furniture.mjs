@@ -76,6 +76,7 @@ import {
   validLocationMove,
 } from "../../neighborhood.mjs";
 import { furnitureActionStandCandidates } from "../../furniture-actions.mjs";
+import { captureRouteGeometry, collisionRegions, reachableRoute } from "./reachable-route.mjs";
 
 const require = createRequire(import.meta.url);
 const { Pool } = require("../../node_modules/pg");
@@ -308,7 +309,9 @@ async function seedExactFixture() {
   // hotbar → hover → click → Confirm UI path below.
   // The collision-only focus is a single authentic decorative catalog row; the
   // normal interaction fixture remains the original four-item layout.
-  const fixtures = PLACED_CHAIR_QA
+  const fixtures = process.env.REAL_GAME_FULL_CATALOG_QA === "1"
+    ? []
+    : PLACED_CHAIR_QA
     ? [["coffee_table", 15, 10]]
     : COFFEE_TABLE_FOCUS_ONLY
     ? [["coffee_table", 14, 10]]
@@ -903,6 +906,79 @@ async function moveTo(page, x, y, label, tolerance = 20) {
     `${label} reached (${Math.round(state.x)},${Math.round(state.y)}), ${Math.round(distance)}px from target`);
 }
 
+// Release the real held keyboard input on a simulation frame, not after a
+// delayed Puppeteer polling round-trip. Never assign coordinates or velocity.
+async function routeAxis(page, axis, target, label) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const state = await sceneState(page);
+    const delta = target - state[axis];
+    if (Math.abs(delta) <= (attempt ? 10 : 2)) return;
+    const key = axis === "x" ? (delta > 0 ? "ArrowRight" : "ArrowLeft")
+      : (delta > 0 ? "ArrowDown" : "ArrowUp");
+    await page.evaluate(({ axis, target, key, sign }) => {
+      window.__qaRouteStop?.cancel?.();
+      const scene = window._neighborhoodScene;
+      const code = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }[key];
+      let elapsed = 0, stalled = 0, previous = scene.player[axis];
+      const record = window.__qaRouteStop = { done: false, error: null };
+      const release = error => {
+        window.dispatchEvent(new KeyboardEvent("keyup", {
+          key, code: key, keyCode: code, which: code, bubbles: true,
+        }));
+        scene.events.off("postupdate", tick);
+        record.done = true;
+        record.error = error || null;
+      };
+      const tick = (_time, deltaMs) => {
+        const value = scene.player?.[axis];
+        const dt = Math.min(100, Number(deltaMs) || 16.67);
+        elapsed += dt;
+        const step = Math.abs(value - previous);
+        stalled = step < 0.05 ? stalled + dt : 0;
+        // Nearest achievable simulation tick, rather than an exact pixel
+        // crossing followed by another 50–250ms of held input.
+        if (sign * (target - value) <= Math.max(2, step / 2)) release();
+        else if (stalled > 1200 || elapsed > 15000) release(`simulation stalled at ${value}`);
+        previous = value;
+      };
+      record.cancel = () => release();
+      scene.events.on("postupdate", tick);
+    }, { axis, target, key, sign: Math.sign(delta) });
+    try {
+      await page.keyboard.down(key);
+      await page.waitForFunction(() => window.__qaRouteStop?.done,
+        { timeout: boundedTimeout(45_000) });
+      const error = await page.evaluate(() => window.__qaRouteStop?.error);
+      requireOk(!error, `${label}: ${error || "simulation arrival"}`);
+    } finally {
+      await page.keyboard.up(key);
+      await page.evaluate(() => window.__qaRouteStop?.cancel?.()).catch(() => {});
+    }
+  }
+  const state = await sceneState(page);
+  requireOk(Math.abs(state[axis] - target) <= 10,
+    `${label}: arrival outside 10px tolerance; axis=${axis}, target=${target}, actual=${state[axis]}, delta=${state[axis] - target}`);
+}
+
+async function walkReachable(page, anchor, label) {
+  const history = [];
+  // Re-read after every turn. A real movement tick need not land exactly on
+  // the lattice; carrying that drift into the next wall was the old failure.
+  for (let turn = 0; turn < 40; turn++) {
+    const geometry = await page.evaluate(captureRouteGeometry);
+    const goal = { ...anchor, radius: Math.max(12, anchor.radius - 24) };
+    if (Math.hypot(geometry.start.x - goal.x, geometry.start.y - goal.y) <= goal.radius + 10)
+      return { waypoints: history };
+    const route = reachableRoute({ ...geometry, regions: collisionRegions(geometry), goal, clearance: 12, step: 16 });
+    const next = route.waypoints.find(p => Math.hypot(p.x - geometry.start.x, p.y - geometry.start.y) > 0.1);
+    requireOk(next, `${label}: route makes progress`);
+    const axis = Math.abs(next.x - geometry.start.x) > 0.1 ? "x" : "y";
+    await routeAxis(page, axis, next[axis], `${label} turn ${turn + 1}`);
+    history.push(next);
+  }
+  throw new Error(`${label}: exceeded 40 replanned turns`);
+}
+
 async function walkToHomeAction(
   page, furnitureId, action, label, instanceId = null, { tight = false } = {},
 ) {
@@ -916,75 +992,13 @@ async function walkToHomeAction(
         (typeof entry === "string" ? entry : entry?.id) === wantedAction),
     );
     if (!scene?.player || !sprite || !anchor) return { error: "home action target unavailable" };
-    const blockers = [
-      ...(scene.info?.geometry?.blockers || []),
-      ...((scene._furnitureBlocks?.children?.entries || []).map((entry) => ({
-        x: Number(entry.body?.x ?? entry.x), y: Number(entry.body?.y ?? entry.y),
-        width: Number(entry.body?.width || 0), height: Number(entry.body?.height || 0),
-      })).filter((block) => block.width > 0 && block.height > 0)),
-    ];
-    const footRadius = Number(scene.info?.actorFootRadius) || 16;
-    const bounds = scene.info?.bounds || { width: 1152, height: 864 };
-    const walkable = (x, y) => x >= footRadius && y >= footRadius &&
-      x <= Number(bounds.width) - footRadius && y <= Number(bounds.height) - footRadius &&
-      !blockers.some((block) => {
-        const nearestX = Math.max(block.x, Math.min(x, block.x + block.width));
-        const nearestY = Math.max(block.y, Math.min(y, block.y + block.height));
-        return Math.hypot(x - nearestX, y - nearestY) <= footRadius;
-      });
-    const unit = 24;
-    const cols = Math.ceil(Number(bounds.width) / unit);
-    const rows = Math.ceil(Number(bounds.height) / unit);
-    const start = {
-      x: Math.max(1, Math.min(cols - 1, Math.round(Number(scene.player.x) / unit))),
-      y: Math.max(1, Math.min(rows - 1, Math.round(Number(scene.player.y) / unit))),
-    };
-    const queue = [start];
-    const previous = new Map([ [`${start.x},${start.y}`, null] ]);
-    let goal = null;
-    while (queue.length && !goal) {
-      const current = queue.shift();
-      const px = current.x * unit, py = current.y * unit;
-      if (walkable(px, py) && Math.hypot(px - anchor.x, py - anchor.y) <= Number(anchor.radius || 86)) {
-        goal = current;
-        break;
-      }
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const next = { x: current.x + dx, y: current.y + dy };
-        if (next.x < 1 || next.x >= cols || next.y < 1 || next.y >= rows) continue;
-        const key = `${next.x},${next.y}`;
-        if (previous.has(key) || !walkable(next.x * unit, next.y * unit)) continue;
-        previous.set(key, current);
-        queue.push(next);
-      }
-    }
-    if (!goal) return { error: "no walkable home route", anchor, start: scene.player };
-    const path = [];
-    for (let current = goal; current; current = previous.get(`${current.x},${current.y}`)) {
-      path.push({ x: current.x * unit, y: current.y * unit });
-    }
-    path.reverse();
-    const waypoints = [];
-    let lastDirection = null;
-    for (let index = 1; index < path.length; index++) {
-      const direction = `${Math.sign(path[index].x - path[index - 1].x)},${Math.sign(path[index].y - path[index - 1].y)}`;
-      if (direction !== lastDirection) {
-        waypoints.push(path[index - 1]);
-        lastDirection = direction;
-      }
-    }
-    waypoints.push(path.at(-1));
     return {
       anchor: { x: anchor.x, y: anchor.y, radius: anchor.radius },
       start: { x: scene.player.x, y: scene.player.y },
-      waypoints,
     };
   }, { furnitureId, action, instanceId });
   requireOk(!route.error, `${label} route exists (${route.error || "BFS"})`);
-  for (const [index, waypoint] of route.waypoints.entries()) {
-    await moveTo(page, waypoint.x, waypoint.y, `${label} waypoint ${index + 1}`,
-      tight ? 8 : 64);
-  }
+  route.waypoints = (await walkReachable(page, route.anchor, label)).waypoints;
   if (tight) {
     await page.waitForFunction(
       (wantedId) => window._neighborhoodScene?._nearbyFurnitureAction?.()?.instanceId === wantedId,
@@ -2769,27 +2783,39 @@ async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
   // Phaser's 18px movement tick can cross the requested x probe by one tick;
   // keep the assertion on the measured y collision edge, not a false exact-x
   // requirement that would mask the same physical result.
-  await moveTo(ownerPage, 340, 337, "showroom sofa south collision edge", 24);
-  const southCollision = await sceneState(ownerPage);
-  requireOk(southCollision.y >= 336 && southCollision.y <= 338,
-    `real client movement stops at the lounge sofa south edge (${Math.round(southCollision.y)})`);
-  await requireNearbyShowroomAction(ownerPage, "sit");
-  await pressFurnitureAction(ownerPage, "sit");
-  await screenshot(ownerPage, "showroom-sofa-sit");
-  await exitFurnitureAction(ownerPage);
-  // Exit returns to the dynamically derived north-side stand. Attempting to
-  // walk down must remain outside the same solid display body, proving Arcade
-  // collision from the opposite side with real held-key input.
-  await ownerPage.keyboard.down("ArrowDown");
-  await sleep(450);
-  await ownerPage.keyboard.up("ArrowDown");
-  const northCollision = await sceneState(ownerPage);
-  requireOk(northCollision.y >= 254 && northCollision.y <= 256,
-    `real client movement stops at the lounge sofa north edge (${Math.round(northCollision.y)})`);
-  await screenshot(ownerPage, "showroom-lounge-sofa-two-sided-collision");
+  if (process.env.REAL_GAME_PLAZA_SKIP_SHOWROOM_COLLISION !== "1") {
+    await moveTo(ownerPage, 340, 337, "showroom sofa south collision edge", 24);
+    const southCollision = await sceneState(ownerPage);
+    requireOk(southCollision.y >= 336 && southCollision.y <= 338,
+      `real client movement stops at the lounge sofa south edge (${Math.round(southCollision.y)})`);
+    await requireNearbyShowroomAction(ownerPage, "sit");
+    await pressFurnitureAction(ownerPage, "sit");
+    await screenshot(ownerPage, "showroom-sofa-sit");
+    await exitFurnitureAction(ownerPage);
+    // Exit returns to the dynamically derived north-side stand. Attempting to
+    // walk down must remain outside the same solid display body, proving Arcade
+    // collision from the opposite side with real held-key input.
+    await ownerPage.keyboard.down("ArrowDown");
+    await sleep(450);
+    await ownerPage.keyboard.up("ArrowDown");
+    const northCollision = await sceneState(ownerPage);
+    requireOk(northCollision.y >= 254 && northCollision.y <= 256,
+      `real client movement stops at the lounge sofa north edge (${Math.round(northCollision.y)}`);
+    await screenshot(ownerPage, "showroom-lounge-sofa-two-sided-collision");
+  } else {
+    stage("showroom collision focus skipped by explicit Plaza purchase QA flag");
+  }
   if (plazaOnly) {
     stage("showroom cashier E and real catalog purchase");
-    await moveTo(ownerPage, 480, 340, "showroom cashier", 12);
+    // The counter ends near x=488 and the bath begins near x=572. Use the
+    // narrow real corridor between them; the farther-east route dead-ends at
+    // the bath's physical body.
+    const cashier = await ownerPage.evaluate(() => {
+      const entry = window._neighborhoodScene?.cashierNpcs?.[0];
+      return entry ? { x: entry.x, y: entry.y, radius: entry.radius || 116 } : null;
+    });
+    requireOk(cashier, "showroom cashier route target exists");
+    await walkReachable(ownerPage, cashier, "showroom cashier full-body route");
     await ownerPage.waitForFunction(
       () => !!window._neighborhoodScene?.nearbyCashier?.id,
       { timeout: boundedTimeout(10_000) },
@@ -2801,15 +2827,12 @@ async function showroomAndStorePass(baseUrl, { plazaOnly = false } = {}) {
         text: String(button.closest(".home-item")?.textContent || "")
           .replace(/\s+/g, " ").trim(),
       })));
-    const requiredProducts = [
-      ["oak_chair", /HQ gold stool/i], ["fern", /fern/i],
-      ["reading_lamp", /reading lamp/i], ["coffee_table", /coffee table/i],
-      ["blue_sofa", /blue sofa/i], ["bookcase", /bookcase/i],
-    ];
-    requireOk(requiredProducts.every(([furnitureId, name]) =>
-      shopProducts.some((product) => product.furnitureId === furnitureId &&
-        name.test(product.text))),
-    "cashier E opens every real Huddle Home for-sale product, including retained display decor");
+    const requiredProducts = Object.values(FURNITURE_CATALOG);
+    const missingProducts = requiredProducts.filter(item =>
+      !shopProducts.some(product => product.furnitureId === item.id &&
+        product.text.includes(item.name)));
+    requireOk(shopProducts.length === requiredProducts.length && !missingProducts.length,
+      `cashier catalog: ${shopProducts.length}/${requiredProducts.length} rows; missing/misnamed IDs: ${missingProducts.map(item => item.id).join(", ") || "none"}`);
     await ownerPage.evaluate(() => {
       const button = document.querySelector('#shop-panel [data-buy="oak_chair"]');
       if (!button) throw new Error("Huddle Home HQ gold stool purchase button missing");
@@ -3128,6 +3151,9 @@ async function run() {
   stage("seed exact QA rows");
   db = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 8_000 });
   await seedExactFixture();
+  if (process.env.REAL_GAME_FULL_CATALOG_QA === "1") {
+    await db.query("UPDATE jpo_players SET coins=2000000 WHERE email=$1", [OWNER_EMAIL]);
+  }
   stage("start isolated local server");
   const baseUrl = await startLocalServer();
   stage("launch Chromium");
@@ -3143,6 +3169,21 @@ async function run() {
   guestPage = await createPage(guestContext, "guest");
   ownerPage.__realGameBaseUrl = baseUrl;
   guestPage.__realGameBaseUrl = baseUrl;
+
+  if (process.env.REAL_GAME_FULL_CATALOG_QA === "1") {
+    const { fullCatalogGameplay } = await import("./full-catalog-gameplay.mjs");
+    await fullCatalogGameplay({
+      ownerPage, guestPage, catalog: FURNITURE_CATALOG, ownerEmail: OWNER_EMAIL,
+      guestEmail: GUEST_EMAIL, db, outputDir: OUTPUT_DIR, remainingMs, ok,
+      registerThroughUi, waitForLocation, installEventCapture, moveThroughPortal,
+      walkReachable, pagePressAndOpenCashier, reloadOwnerHome, openInventoryHotbar,
+      selectHotbarItem, hideNeighborhoodOverlay, showNeighborhoodOverlay,
+      clickPlacementSpot, canvasPointForWorld, requestHomeSnapshot,
+      openHomeEditorForHotbar, walkToHomeAction, pressFurnitureAction,
+      exitFurnitureAction, screenshotChairCloseup, screenshot,
+    });
+    return;
+  }
 
   if (PLAZA_QA_ENABLED) {
     await showroomAndStorePass(baseUrl, { plazaOnly: true });

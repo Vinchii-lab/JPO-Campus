@@ -252,3 +252,19 @@ params.url`, not a clear "missing URL". Export `URL="https://$REPLIT_DEV_DOMAIN/
 - `npm install <pkg> --no-save` in /tmp PRUNES the other throwaway deps (installing socket.io-client deleted puppeteer-core). Reinstall pinned `puppeteer-core@21` (pairs with the nix chromium 123 binary above) if launches fail/hang after any /tmp npm churn.
 - Back-to-back headless logins with the SAME seeded email trip the server's one-live-session-per-email drop (socket shows connected:false) — use a fresh email per run or wait out the grace period.
 - Puppeteer `page.keyboard.press` sometimes never reaches Phaser Key objects headless even when arrows work; dispatch an in-page `new KeyboardEvent('keydown', {keyCode…})` on `window` instead to test key-bound features.
+
+## Distinguish a failed test route from an inaccessible interaction
+
+Prove reachability using the full player collision body before treating a stopped
+test character as a broken doorway or furniture interaction.
+
+**Why:** Real keyboard tests falsely reported the garden gate, showroom cashier,
+and bed as inaccessible. The routes crossed hedges or neighboring furniture;
+host-side key-release polling also overshot turns under browser load.
+
+**How to apply:** Keep sprite, feet, server blocker, and Arcade body coordinate
+conventions explicit. Route around the entire body footprint and record actual
+input/position progression when a turn fails. Frame-bound key release passed a
+timing double but still failed in a real browser; it is not a proven general fix.
+Require actual portal/action acknowledgement at the destination. A failed
+hardcoded waypoint alone is not a product bug.

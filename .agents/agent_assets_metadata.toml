@@ -822,3 +822,17 @@ mtime_ms = 1789591886239
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/67ac95a2-690d-491a-a4a7-a65fabe97ebc/db4c8698-7a15-434e-abe8-fd6f83760efe"
 storage_version_token = "1789591991721885"
 content_type = "image/png"
+
+[[outputs]]
+id = "DjpdRKF4HdYzHfsHyw6R4"
+uri = "file://artifacts/jpo-huddle/tests/evidence/real-game-furniture-9ptx73j/placed-chair-reload-interactive-seated.png"
+type = "image"
+title = "Live test: stool after reloading"
+description = "Dedicated QA character sitting on the placed HQ stool after a real browser reload. This verifies this stool flow, not the entire furniture catalog."
+logical_id = "8d1cbce4-d77c-4d48-902e-351a5d3cc48a"
+content_hash = "sha256:f0eacc86b852db2f5229ea75d5cfe7fba2f76d0ed640e8b4e5af6c56cfb1f654"
+size = 11564
+mtime_ms = 1789755316643
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/8d1cbce4-d77c-4d48-902e-351a5d3cc48a/3efab8ea-b7a9-450c-82ed-dbba1c5d856f"
+storage_version_token = "1789756678098601"
+content_type = "image/png"
