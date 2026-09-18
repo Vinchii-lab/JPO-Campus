@@ -63,6 +63,7 @@ import {
 } from "./furniture-actions.mjs";
 import { inspectMovementEnvelope } from "./movement-protocol.mjs";
 import commercialLayouts from "./public/commercial-layouts.json" with { type: "json" };
+import { GYM_STATIONS, GYM_DURATION_MS } from "./gym-layout.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";  // no insecure default: admin features stay disabled until this env/secret is set
@@ -76,7 +77,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // reconnecting client alternating stamps → reload churn) and unchanged by a
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
-for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
+for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -2421,12 +2422,6 @@ const FOOD_MENUS = {
     { id: "coconut",   name: "Coconut water",        icon: "🥥", price: 5 },
     { id: "boba",      name: "Bubble tea",           icon: "🧋", price: 6 },
   ] },
-  cafe: { title: "☕ Cafe Counter", items: [
-    { id: "espresso", name: "Espresso", icon: "☕", price: 5 },
-    { id: "latte", name: "Cafe latte", icon: "🥛", price: 7 },
-    { id: "tea", name: "Tea", icon: "🍵", price: 4 },
-    { id: "cafe_cookie", name: "Cafe cookie", icon: "🍪", price: 4 },
-  ] },
   diner: { title: "🍔 Diner Menu", items: [
     { id: "diner_burger", name: "Diner burger", icon: "🍔", price: 12 },
     { id: "fries", name: "Crispy fries", icon: "🍟", price: 6 },
@@ -3435,6 +3430,22 @@ function emitToLocation(locationId, event, payload, exceptId = null) {
   if (exceptId) room.except(exceptId).emit(event, payload);
   else room.emit(event, payload);
 }
+// Exercise is flavor only: location-scoped, exclusive equipment, no rewards.
+const plazaGymActivities = new Map();
+function stopPlazaGym(id, reason) {
+  const activity = plazaGymActivities.get(id);
+  if (!activity) return;
+  plazaGymActivities.delete(id);
+  emitToLocation("cafe", "plazaGymActivity", { ...activity, state: "stop", reason });
+}
+setInterval(() => {
+  for (const [id, activity] of plazaGymActivities) {
+    const p = players[id];
+    if (!p || locationOf(p) !== "cafe") stopPlazaGym(id, "leave");
+    else if (Date.now() >= activity.endsAt) stopPlazaGym(id, "complete");
+    else if (Math.hypot(p.x - activity.x, p.y - activity.y) > 12) stopPlazaGym(id, "walking");
+  }
+}, 150).unref();
 function locationPlayers(forId) {
   const p = players[forId];
   if (!p) return {};
@@ -13954,6 +13965,44 @@ io.on("connection", (socket) => {
     const { object, game } = payload || {};
     const p = players[socket.id];
     if (!p) return;
+    if (typeof object === "string" && object.startsWith("plaza-gym:")) {
+      // A scene's shutdown can arrive after travel has changed location.
+      // Stopping only your own activity is safe from anywhere and avoids
+      // leaving equipment occupied until the cleanup tick.
+      if (object === "plaza-gym:stop") {
+        if (p.email && takeToken(interactBucket)) stopPlazaGym(socket.id, "stop");
+        return;
+      }
+      if (!p.email || locationOf(p) !== "cafe") {
+        socket.emit("interactError", { message: "Visit Plaza Gym to use this equipment." });
+        return;
+      }
+      if (!takeToken(interactBucket)) return;
+      if (object === "plaza-gym:sync") {
+        socket.emit("plazaGymSnapshot", [...plazaGymActivities.values()]);
+        return;
+      }
+      const station = GYM_STATIONS.find(s => s.id === object);
+      if (!station || Math.hypot(p.x - station.anchor.x, p.y - station.anchor.y) > station.radius) {
+        socket.emit("interactError", { message: "Walk to the exercise marker in front of the equipment." });
+        return;
+      }
+      if ([...plazaGymActivities.values()].some(a => a.object === object && a.id !== socket.id)) {
+        socket.emit("interactError", { message: "This station is in use. Try another one." });
+        return;
+      }
+      if (p.activity || p.sitting) {
+        socket.emit("interactError", { message: "Stand up before exercising." });
+        return;
+      }
+      if (plazaGymActivities.has(socket.id)) { stopPlazaGym(socket.id, "stop"); return; }
+      const startedAt = Date.now();
+      const activity = { id: socket.id, object, kind: station.kind, x: p.x, y: p.y,
+        startedAt, endsAt: startedAt + GYM_DURATION_MS, state: "start" };
+      plazaGymActivities.set(socket.id, activity);
+      emitToLocation("cafe", "plazaGymActivity", activity);
+      return;
+    }
     if (!isOfficePlayer(socket.id)) {
       socket.emit("interactError", { message: "Office equipment is available at JPO HQ." });
       return;

@@ -1,4 +1,6 @@
 import commercialLayouts from "./public/commercial-layouts.json" with { type: "json" };
+import { GYM_STATIONS } from "./gym-layout.mjs";
+export { GYM_STATIONS } from "./gym-layout.mjs";
 
 // Authoritative neighborhood definitions.  These maps are intentionally
 // compact, deterministic, and editable source data rather than flattened
@@ -149,7 +151,7 @@ export const LOCATIONS = Object.freeze({
   office: { id: "office", label: "JPO HQ", spawn: { x: 1272, y: 2253, dir: "down" }, bounds: null },
   neighborhood: { id: "neighborhood", label: "Willow Walk", spawn: { x: 144, y: 504, dir: "right" }, bounds: { width: 1440, height: 1056 } },
   city: { id: "city", label: "Huddle Plaza", spawn: CITY_DIRECT_JOIN_SPAWN, bounds: CITY_PLAZA_BOUNDS },
-  cafe: { id: "cafe", label: "Cafe", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
+  cafe: { id: "cafe", label: "Plaza Gym", type: "gym", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   diner: { id: "diner", label: "Diner", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   bakery: { id: "bakery", label: "Bakery", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
   sushi: { id: "sushi", label: "Sushi", spawn: { x: 480, y: 576, dir: "up" }, bounds: { width: 960, height: 720 } },
@@ -341,15 +343,13 @@ export function streetDefinition(entries = []) {
   // road rows into the city; the player's remembered segment selects the
   // return point when they leave this gate.
   const cityPortals = [{
-    destination: "neighborhood",
-    x: STREET_BLOCK_LAYOUT.westPortal.x,
-    y: STREET_BLOCK_LAYOUT.road.y,
-    width: STREET_BLOCK_LAYOUT.westPortal.width,
-    height: STREET_BLOCK_LAYOUT.westPortal.height,
+    // Validate against the same Plaza gate sent to the renderer. The
+    // residential road is at y=432; Plaza's west promenade is at y=888.
+    // Reusing the road geometry here rejected every visible Plaza exit.
+    ...LOCATION_PORTALS.city.find((portal) => portal.destination === "neighborhood"),
     label: "Willow Walk",
     segment: 0,
     row: 0,
-    spawn: { x: 1248, y: 504, dir: "left" },
   }];
   return {
     bounds,
@@ -402,7 +402,7 @@ export function streetPortalForTransition(destination, x, y, entries) {
 // City has one west-side return gate. A remembered row is an additional
 // server-side guard: a player who entered from row 3 cannot be redirected to
 // row 0 by a stale client destination. With no remembered row (a direct city
-// join), the physical top gate remains an explicit, valid fallback.
+// join), the physical west gate remains an explicit, valid fallback.
 export function streetCityPortalForTransition(x, y, entries, preferredSegment = null) {
   const street = streetDefinition(entries);
   const gate = street.cityPortals[0];
@@ -460,13 +460,13 @@ function commercialRoomGeometry(id, architecture) {
   const propBlockers = id === "furniture-shop" ? [] : room.blockers;
   return {
     ...architecture,
-    blockers: [...walls, ...(Array.isArray(propBlockers) ? propBlockers : [])],
+    blockers: [...walls, ...(id === "cafe" ? GYM_STATIONS.map(s => s.blocker) : (Array.isArray(propBlockers) ? propBlockers : []))],
     // Furniture-shop display seats are legacy props. The client removes those
     // props and replaces them with the server-projected catalog demos, so
     // retaining their park-seat metadata would expose invisible [E] Sit
     // targets below the showroom. Other commercial rooms keep their authored
     // benches/chairs unchanged.
-    seats: id === "furniture-shop" ? [] :
+    seats: id === "furniture-shop" || id === "cafe" ? [] :
       (Array.isArray(room.seats) ? room.seats : (architecture.seats || [])),
     commercialLayout: room,
   };
@@ -509,7 +509,7 @@ const CITY_PLAZA_SHOPS = Object.freeze([
   cityShopLayout({ id: "furniture-shop", label: "Huddle Home", x: 368, y: 160 }),
   cityShopLayout({ id: "garden-shop", label: "Willow & Green", x: 1248, y: 160 }),
   cityShopLayout({ id: "decor-shop", label: "Plaza Decor", x: 2128, y: 160 }),
-  cityShopLayout({ id: "cafe", label: "Cafe", x: 3008, y: 160 }),
+  cityShopLayout({ id: "cafe", label: "Plaza Gym", x: 3008, y: 160 }),
   cityShopLayout({ id: "diner", label: "Diner", x: 368, y: 1120 }),
   cityShopLayout({ id: "bakery", label: "Sweet Crust Bakery", x: 1248, y: 1120 }),
   cityShopLayout({ id: "sushi", label: "Sakura Sushi", x: 2128, y: 1120 }),
@@ -778,13 +778,6 @@ export const COMMERCIAL_CASHIERS = Object.freeze({
     greeting: "Welcome in! Find something that brightens your space.",
     info: "Decorative pieces and cozy finishing touches.",
     kind: "furniture",
-  }),
-  cafe: Object.freeze({
-    id: "cashier:cafe", location: "cafe",
-    name: "Nia", character: "amelia", x: 760, y: 180, radius: 116,
-    greeting: "Welcome to the cafe! What can I get started for you?",
-    info: "Fresh drinks and small treats, served all day.",
-    kind: "food", menuKey: "cafe",
   }),
   diner: Object.freeze({
     id: "cashier:diner", location: "diner",

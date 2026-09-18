@@ -32,6 +32,7 @@ export async function load(url, context, nextLoad) {
 
   const ownerLiteral = JSON.stringify(owner);
   const guestLiteral = JSON.stringify(guest);
+  const venueFixtureLiteral = JSON.stringify(process.env.REAL_GAME_QA_VENUE_FIXTURE_FILE || "");
   const ownerPhase = String(process.env.REAL_GAME_QA_OWNER_PHASE || "").trim();
   if (ownerPhase && !["showroom", "home"].includes(ownerPhase)) {
     throw new Error("real-game loader received invalid REAL_GAME_QA_OWNER_PHASE");
@@ -53,8 +54,16 @@ export async function load(url, context, nextLoad) {
   const injected = `  const qaOwnerEmail = ${ownerLiteral};
   const qaGuestEmail = ${guestLiteral};
   const qaHomeSpawn = ${homeSpawnLiteral};
+  const qaVenueFixtureFile = ${venueFixtureLiteral};
   let qaSpawn = null;
-  if (row.email === qaOwnerEmail) {
+  if (qaVenueFixtureFile && (row.email === qaOwnerEmail || row.email === qaGuestEmail)) {
+    const fixture = JSON.parse(readFileSync(qaVenueFixtureFile, "utf8"));
+    const allowed = ["city", "neighborhood", "cafe", "decor-shop", "diner", "bakery", "sushi", "museum",
+      "museum-room-1", "museum-room-2", "museum-room-3", "museum-room-4"];
+    if (!allowed.includes(fixture.locationId) || !Number.isFinite(fixture.x) || !Number.isFinite(fixture.y))
+      throw new Error("Invalid isolated venue QA fixture");
+    qaSpawn = { locationId: fixture.locationId, x: fixture.x, y: fixture.y, dir: fixture.dir || "up" };
+  } else if (row.email === qaOwnerEmail) {
     // Focused runs name their session phase explicitly. A resume/reconnect can
     // invoke rowToPlayerState more than once before Phaser has built a scene,
     // so function-call count is not a session boundary. The legacy focused
@@ -133,7 +142,8 @@ export async function load(url, context, nextLoad) {
   source = source.replace(
     graceMarker,
     `  if (g && Number.isFinite(g.x) && Number.isFinite(g.y) &&
-      !(state.email === ${ownerLiteral} && String(state.locationId || "").startsWith("home:"))) {`,
+      !((state.email === ${ownerLiteral} || state.email === ${guestLiteral}) &&
+        (${venueFixtureLiteral} || String(state.locationId || "").startsWith("home:")))) {`,
   );
 
   const snapshotEmitMarker =

@@ -149,14 +149,14 @@ assert(denseStreet.roadPortals.every((portal) =>
 "city gates use only the east outer edge");
 for (const portal of denseStreet.roadPortals) {
   const returned = streetCityPortalForTransition(
-    48, 504, denseHomes, { segment: portal.row, roadY: portal.y, returnPoint: portal.returnPoint },
+    48, 960, denseHomes, { segment: portal.row, roadY: portal.y, returnPoint: portal.returnPoint },
   );
   assert.equal(returned.segment, portal.row);
   assert(validStreetWorldMove(denseStreet, returned.spawn.x, returned.spawn.y),
     `city return row ${portal.row} is current and walkable`);
 }
 const staleCityReturn = streetCityPortalForTransition(
-  48, 504, denseHomes, { segment: 99, roadY: 99_999, returnPoint: { x: -1, y: -1 } },
+  48, 960, denseHomes, { segment: 99, roadY: 99_999, returnPoint: { x: -1, y: -1 } },
 );
 assert.equal(staleCityReturn.segment, 0, "stale city metadata resolves to a current gate row");
 assert(validStreetWorldMove(denseStreet, staleCityReturn.spawn.x, staleCityReturn.spawn.y));

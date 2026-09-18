@@ -2,12 +2,13 @@
 // and movement validation remain authoritative in server.js / neighborhood.mjs.
 window.initNeighborhoodUI = function(socket, getGlobals) {
   if (document.getElementById('neighborhood-ui')) return;
+  window.JpoGym?.bind(socket);
 
   const ui = document.createElement('div');
   ui.id = 'neighborhood-ui';
   // This is a location plaque, deliberately not a travel menu.
   ui.innerHTML = '<div id="neighborhood-nav"><span id="neighborhood-title">JPO HQ</span><button id="neighborhood-panel-toggle" type="button" aria-controls="home-panel shop-panel" hidden>Hide panel</button></div>' +
-    '<div id="home-panel" hidden></div><div id="placement-controls" style="position:fixed; bottom:var(--neighborhood-hud-bottom, 60px); left:50%; transform:translateX(-50%); z-index:300; pointer-events:auto;" hidden></div>';
+    '<div id="home-panel" hidden style="display:none"></div><div id="placement-controls" style="position:fixed; bottom:var(--neighborhood-hud-bottom, 60px); left:50%; transform:translateX(-50%); z-index:300; pointer-events:auto;" hidden></div>';
   document.body.appendChild(ui);
 
   const title = ui.querySelector('#neighborhood-title');
@@ -505,7 +506,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   function renderShop() {
     syncPanelControls();
     let panel = document.getElementById('shop-panel');
-    if (!panel && (typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation)))) {
+    if (!panel && (typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['diner', 'bakery', 'sushi'].includes(currentLocation)))) {
       panel = document.createElement('div');
       panel.id = 'shop-panel';
       ui.appendChild(panel);
@@ -513,7 +514,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (panel) {
       if (typeof window.JpoUIBuilder?.renderShopPanel !== 'function') return;
       window.JpoUIBuilder.renderShopPanel(panel, {
-        isShop: typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['cafe', 'diner', 'bakery', 'sushi'].includes(currentLocation)),
+        isShop: typeof currentLocation === 'string' && (currentLocation.endsWith('-shop') || ['diner', 'bakery', 'sushi'].includes(currentLocation)),
         location: currentLocation,
         catalog: furnitureCatalog,
         showroom: showroomDemos,
@@ -1275,6 +1276,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _activityDepthAnchor(entry, fallback) {
+      const seat = this._staticSeatDepthMetadata(entry);
+      if (seat) return seat.depthAnchor;
       const furniture = entry?._activityFurnitureSprite;
       if (!furniture || (!furniture.getData?.('occluderParts')?.length &&
         !entry?._activityFurnitureDef?.interaction?.actorAboveSurface)) return finiteDepth(fallback);
@@ -1285,9 +1288,29 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _activityDepthBias(entry) {
+      const seat = this._staticSeatDepthMetadata(entry);
+      if (seat) return Number.isFinite(seat.depthBias)
+        ? seat.depthBias : INTERIOR_DEPTH.SEATED_ACTOR_BIAS;
       return (entry?._activityFurnitureSprite?.getData?.('occluderParts')?.length ||
         entry?._activityFurnitureDef?.interaction?.actorAboveSurface)
         ? INTERIOR_DEPTH.SEATED_ACTOR_BIAS : 0;
+    }
+
+    _staticSeatDepthMetadata(entry) {
+      // Static seats opt into floor-anchor sorting; outdoor seats without
+      // metadata retain their original pivot-Y depth. Never borrow a static
+      // seat's anchor for a home furniture activity, even at the same point.
+      const local = entry === this || (this.player && entry?.sprite === this.player);
+      if (entry?.activity?.instanceId || (local && this.activity)) return null;
+      const state = local ? this.staticSeatState
+        : entry?.activity?.action === 'sit' ? entry.activity : null;
+      if (!state) return null;
+      const actor = local ? this.player : entry?.sprite;
+      const x = Number.isFinite(state.x) ? state.x : actor?.x;
+      const y = Number.isFinite(state.y) ? state.y : actor?.y;
+      const seat = this.seats?.find((candidate) => state.seatId && candidate.id === state.seatId) ||
+        this.seats?.find((candidate) => candidate.x === x && candidate.y === y);
+      return Number.isFinite(seat?.depthAnchor) ? seat : null;
     }
 
     _interiorObjectNeedsOccluder(asset) {
@@ -2244,7 +2267,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' :
           portal.destination === 'garden-shop' ? 'WILLOW & GREEN' :
           portal.destination === 'decor-shop' ? 'PLAZA DECOR' :
-          portal.destination === 'cafe' ? 'THE DAILY GRIND' :
+          portal.destination === 'cafe' ? 'PLAZA GYM' :
           portal.destination === 'diner' ? 'NEON DINER' :
           portal.destination === 'bakery' ? 'SWEET CRUST BAKERY' :
           portal.destination === 'sushi' ? 'SAKURA SUSHI' :
@@ -2707,6 +2730,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this.player.body?.reset(this.player.x, this.player.y);
         this._applyActivityPose(this, null, this.playerDir || 'down');
       }
+      this._setActorDepth(this.player,
+        this._activityDepthAnchor(this, this.player.y), this._activityDepthBias(this));
     }
 
     _nearbyParkSeat() {
@@ -3485,6 +3510,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       for (const remote of Object.values(this.remotes)) {
         if (remote.activity) {
           this._applyActivityPose(remote, remote.activity, remote.lastDir || 'down');
+          if (remote.activity.action === 'sit' && !remote.activity.instanceId) {
+            const anchor = this._activityDepthAnchor(remote, remote.sprite.y);
+            const bias = this._activityDepthBias(remote);
+            this._setActorDepth(remote.sprite, anchor, bias);
+            this._setActorDepth(remote.nameTag, anchor, bias + 2);
+          }
         }
         if (remote._activityFx) remote._activityFx.setPosition(remote.sprite.x, remote.sprite.y - 54);
         if (remote.pet) {
@@ -3506,7 +3537,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         ? this._nearbyInteractiveAction() : null;
       const touchButton = document.getElementById('touch-action');
       if (touchButton) {
-        const touchAvailable = !!(this.nearbyCashier || nearbyParkSeat || nearbyAction ||
+        const touchAvailable = !!(window.JpoGym?.nearby(this) || this.nearbyCashier || nearbyParkSeat || nearbyAction ||
           this.activity || parkSeated);
         touchButton.classList.toggle('disabled', !touchAvailable);
         touchButton.textContent = this.nearbyCashier ? 'Talk' : 'E';
@@ -3591,7 +3622,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const doAction = !cashierDialogOpen && (actionKeyDown || touchAction.queued);
       touchAction.queued = false;
       if (doAction) {
-        if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
+        if (window.JpoGym?.interact(this)) { /* Gym handles its own server-validated start/stop. */ }
+        else if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
         else if (this.staticSeatState) this._leaveParkSeat('exit');
         else if (this.nearbyCashier) this._interactCashier();
         else if (nearbyParkSeat) this._requestParkSeat();
@@ -3613,6 +3645,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           dir: parkTarget?.dir || this.playerDir, anim,
         });
       }
+      window.JpoGym?.update(this);
     }
 
     shutdown() {
@@ -3733,7 +3766,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (isResidentialBlock()) {
           requestDirectory();
           renderHome();
-        } else homePanel.hidden = true;
+        } else renderHome();
       }
       renderShop();
       if (result.location === 'office') {

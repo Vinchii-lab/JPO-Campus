@@ -268,3 +268,9 @@ input/position progression when a turn fails. Frame-bound key release passed a
 timing double but still failed in a real browser; it is not a proven general fix.
 Require actual portal/action acknowledgement at the destination. A failed
 hardcoded waypoint alone is not a product bug.
+
+For isolated venue checks, changing a QA account's stored x/y is not enough to
+start it in a venue: normal sign-in intentionally starts in HQ, because location
+membership is session-only. Use normal gates or an exact-identity, test-only
+server fixture with the normal map bootstrap. Fixture entry is setup, not proof
+that a user can travel through that venue's doorway.

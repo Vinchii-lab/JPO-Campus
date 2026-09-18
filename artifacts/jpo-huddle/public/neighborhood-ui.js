@@ -133,16 +133,20 @@ window.JpoUIBuilder = {
     if (!ctx.isHome || !ctx.homeState) {
       if (!ctx.isResidentialBlock) {
         panel.hidden = true;
+        panel.style.display = 'none';
+        panel.innerHTML = '';
         window.jpoHouseColors?.render(panel);
         return;
       }
       panel.hidden = false;
+      panel.style.removeProperty('display');
       panel.innerHTML = this._buildOutsideMarkup(ctx);
       this._attachOutsideHandlers(panel, ctx);
       return;
     }
     
     panel.hidden = false;
+    panel.style.removeProperty('display');
     panel.innerHTML = this._buildInsideMarkup(ctx);
     this._attachInsideHandlers(panel, ctx);
   },

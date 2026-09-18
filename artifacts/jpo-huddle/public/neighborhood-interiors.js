@@ -8,7 +8,12 @@ window.JpoInteriors = {
     const queueAssets = (data) => {
       if (!data?.assets || !data?.rooms) throw new Error('Commercial interior manifest is missing or invalid');
       for (const [id, path] of Object.entries(data.assets)) {
-        if (!scene.textures.exists(id)) scene.load.image(id, path);
+        if (!scene.textures.exists(id)) {
+          // Rebuilt venue art can keep its logical key; bypass yesterday's
+          // browser-cached PNG when the application build changes.
+          const separator = path.includes('?') ? '&' : '?';
+          scene.load.image(id, path + separator + 'v=' + encodeURIComponent(window.__BUILD__ || 'current'));
+        }
       }
     };
     const cached = scene.cache.json.get('commercial-layouts');
@@ -95,7 +100,8 @@ window.JpoInteriors = {
 
     for (const portal of scene.info.portals || []) {
       if (portal.y !== 0) continue;
-      scene.add.image(portal.x + portal.width / 2, portal.y + portal.height, 'pe_shop_door')
+      const doorKey = scene.textures.exists('pe_shop_door') ? 'pe_shop_door' : 'museum_door';
+      scene.add.image(portal.x + portal.width / 2, portal.y + portal.height, doorKey)
         .setOrigin(0.5, 1).setScale(3).setDepth(portal.y + portal.height)
         .setData('floorAnchor', portal.y + portal.height)
         .setData('layerRole', 'interior-portal');

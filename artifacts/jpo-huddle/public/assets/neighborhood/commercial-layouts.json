@@ -1,0 +1,1401 @@
+{
+  "assets": {
+    "museum_velvet_rope": "assets/neighborhood/commercial/museum_velvet_rope.png",
+    "museum_info_board": "assets/neighborhood/commercial/museum_info_board.png",
+    "museum_art_1": "assets/neighborhood/commercial/museum_art_1.png",
+    "museum_art_2": "assets/neighborhood/commercial/museum_art_2.png",
+    "museum_art_3": "assets/neighborhood/commercial/museum_art_3.png",
+    "museum_sculpture_1": "assets/neighborhood/commercial/museum_sculpture_1.png",
+    "museum_gallery_display_1": "assets/neighborhood/commercial/museum_gallery_display_1.png",
+    "museum_gallery_display_2": "assets/neighborhood/commercial/museum_gallery_display_2.png",
+    "museum_fossil_exhibit_left": "assets/neighborhood/commercial/museum_fossil_exhibit_left.png",
+    "museum_fossil_exhibit_right": "assets/neighborhood/commercial/museum_fossil_exhibit_right.png",
+    "museum_display_case": "assets/neighborhood/commercial/museum_display_case.png",
+    "museum_display_case_2": "assets/neighborhood/commercial/museum_display_case_2.png",
+    "museum_plant_display": "assets/neighborhood/commercial/museum_plant_display.png",
+    "museum_butterfly_display": "assets/neighborhood/commercial/museum_butterfly_display.png",
+    "museum_vase": "assets/neighborhood/commercial/museum_vase.png",
+    "cafe_table": "assets/neighborhood/commercial/cafe_table.png",
+    "cafe_chair_up": "assets/neighborhood/commercial/cafe_chair_up.png",
+    "cafe_chair_down": "assets/neighborhood/commercial/cafe_chair_down.png",
+    "cafe_counter": "assets/neighborhood/commercial/cafe_counter.png",
+    "cafe_coffee_machine": "assets/neighborhood/commercial/cafe_coffee_machine.png",
+    "cafe_menu": "assets/neighborhood/commercial/cafe_menu.png",
+    "cafe_plant": "assets/neighborhood/commercial/cafe_plant.png",
+    "diner_booth_red": "assets/neighborhood/commercial/diner_booth_red.png",
+    "diner_table": "assets/neighborhood/commercial/diner_table.png",
+    "diner_counter": "assets/neighborhood/commercial/diner_counter.png",
+    "diner_stool": "assets/neighborhood/commercial/diner_stool.png",
+    "diner_jukebox": "assets/neighborhood/commercial/diner_jukebox.png",
+    "diner_grill": "assets/neighborhood/commercial/diner_grill.png",
+    "bakery_display_case": "assets/neighborhood/commercial/bakery_display_case.png",
+    "bakery_bread_rack": "assets/neighborhood/commercial/bakery_bread_rack.png",
+    "bakery_counter": "assets/neighborhood/commercial/bakery_counter.png",
+    "bakery_cake": "assets/neighborhood/commercial/bakery_cake.png",
+    "bakery_table": "assets/neighborhood/commercial/bakery_table.png",
+    "bakery_chair": "assets/neighborhood/commercial/bakery_chair.png",
+    "sushi_counter": "assets/neighborhood/commercial/sushi_counter.png",
+    "sushi_table": "assets/neighborhood/commercial/sushi_table.png",
+    "sushi_cushion": "assets/neighborhood/commercial/sushi_cushion.png",
+    "sushi_lantern": "assets/neighborhood/commercial/sushi_lantern.png",
+    "sushi_bonsai": "assets/neighborhood/commercial/sushi_bonsai.png",
+    "sushi_mat": "assets/neighborhood/commercial/sushi_mat.png",
+    "sushi_screen": "assets/neighborhood/commercial/sushi_screen.png",
+    "sushi_plate": "assets/neighborhood/commercial/sushi_plate.png",
+    "shop_sofa": "assets/neighborhood/commercial/shop_sofa.png",
+    "shop_shelf": "assets/neighborhood/commercial/shop_shelf.png",
+    "shop_lamp": "assets/neighborhood/commercial/shop_lamp.png",
+    "shop_rug": "assets/neighborhood/commercial/shop_rug.png",
+    "shop_mirror": "assets/neighborhood/commercial/shop_mirror.png",
+    "shop_plant_large": "assets/neighborhood/commercial/shop_plant_large.png",
+    "shop_plant_small": "assets/neighborhood/commercial/shop_plant_small.png",
+    "shop_display_stand": "assets/neighborhood/commercial/shop_display_stand.png",
+    "floor_wood": "assets/neighborhood/commercial/floor_wood.png",
+    "floor_tile": "assets/neighborhood/commercial/floor_tile.png",
+    "floor_carpet": "assets/neighborhood/commercial/floor_carpet.png",
+    "museum_door": "assets/neighborhood/commercial/museum_door.png",
+    "food_fixed_diner_counter": "assets/neighborhood/commercial/food-fixed-diner-counter.png",
+    "food_fixed_diner_food_display": "assets/neighborhood/commercial/food-fixed-diner-food-display.png",
+    "food_fixed_diner_table": "assets/neighborhood/commercial/food-fixed-diner-table.png",
+    "food_fixed_diner_chair": "assets/neighborhood/commercial/food-fixed-diner-chair.png",
+    "food_fixed_bakery_bread_rack": "assets/neighborhood/commercial/food-fixed-bakery-bread-rack.png",
+    "food_fixed_bakery_pastry_case": "assets/neighborhood/commercial/food-fixed-bakery-pastry-case.png",
+    "food_fixed_bakery_cake": "assets/neighborhood/commercial/food-fixed-bakery-cake.png",
+    "food_fixed_bakery_table": "assets/neighborhood/commercial/food-fixed-bakery-table.png",
+    "food_fixed_bakery_chair": "assets/neighborhood/commercial/food-fixed-bakery-chair.png",
+    "ds-fixed-decor-bookshelf": "assets/neighborhood/commercial/ds-fixed-decor-bookshelf.png",
+    "ds-fixed-decor-sofa": "assets/neighborhood/commercial/ds-fixed-decor-sofa.png",
+    "ds-fixed-decor-lamp": "assets/neighborhood/commercial/ds-fixed-decor-lamp.png",
+    "ds-fixed-decor-mirror": "assets/neighborhood/commercial/ds-fixed-decor-mirror.png",
+    "ds-fixed-decor-plant": "assets/neighborhood/commercial/ds-fixed-decor-plant.png",
+    "ds-fixed-sushi-counter-table": "assets/neighborhood/commercial/ds-fixed-sushi-counter-table.png",
+    "ds-fixed-sushi-low-table": "assets/neighborhood/commercial/ds-fixed-sushi-low-table.png",
+    "ds-fixed-sushi-single-cushion": "assets/neighborhood/commercial/ds-fixed-sushi-single-cushion.png",
+    "ds-fixed-sushi-plant": "assets/neighborhood/commercial/ds-fixed-sushi-plant.png"
+  },
+  "rooms": {
+    "museum": {
+      "label": "Museum Foyer",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "museum_door",
+          "x": 192,
+          "y": 48,
+          "depth": 48,
+          "scale": 3
+        },
+        {
+          "asset": "museum_door",
+          "x": 384,
+          "y": 48,
+          "depth": 48,
+          "scale": 3
+        },
+        {
+          "asset": "museum_door",
+          "x": 576,
+          "y": 48,
+          "depth": 48,
+          "scale": 3
+        },
+        {
+          "asset": "museum_door",
+          "x": 768,
+          "y": 48,
+          "depth": 48,
+          "scale": 3
+        },
+        {
+          "asset": "museum_info_board",
+          "x": 300,
+          "y": 300,
+          "depth": 300,
+          "scale": 3
+        },
+        {
+          "asset": "museum_info_board",
+          "x": 660,
+          "y": 300,
+          "depth": 300,
+          "scale": 3
+        },
+        {
+          "asset": "museum_gallery_display_1",
+          "x": 192,
+          "y": 420,
+          "depth": 420,
+          "scale": 3
+        },
+        {
+          "asset": "museum_gallery_display_2",
+          "x": 768,
+          "y": 420,
+          "depth": 420,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 276,
+          "y": 276,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 636,
+          "y": 276,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 168,
+          "y": 372,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 744,
+          "y": 372,
+          "width": 48,
+          "height": 48
+        }
+      ],
+      "seats": []
+    },
+    "museum-room-1": {
+      "label": "Art Gallery",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "museum_art_1",
+          "x": 200,
+          "y": 250,
+          "depth": 250,
+          "scale": 3
+        },
+        {
+          "asset": "museum_art_2",
+          "x": 480,
+          "y": 250,
+          "depth": 250,
+          "scale": 3
+        },
+        {
+          "asset": "museum_art_3",
+          "x": 760,
+          "y": 250,
+          "depth": 250,
+          "scale": 3
+        },
+        {
+          "asset": "museum_sculpture_1",
+          "x": 480,
+          "y": 450,
+          "depth": 450,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 152,
+          "y": 226,
+          "width": 96,
+          "height": 48
+        },
+        {
+          "x": 432,
+          "y": 226,
+          "width": 96,
+          "height": 48
+        },
+        {
+          "x": 712,
+          "y": 226,
+          "width": 96,
+          "height": 48
+        },
+        {
+          "x": 456,
+          "y": 426,
+          "width": 48,
+          "height": 48
+        }
+      ],
+      "seats": []
+    },
+    "museum-room-2": {
+      "label": "Fossil Gallery",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "museum_fossil_exhibit_left",
+          "x": 300,
+          "y": 300,
+          "depth": 300,
+          "scale": 3
+        },
+        {
+          "asset": "museum_fossil_exhibit_right",
+          "x": 660,
+          "y": 300,
+          "depth": 300,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 180,
+          "y": 252,
+          "width": 240,
+          "height": 72
+        },
+        {
+          "x": 540,
+          "y": 252,
+          "width": 240,
+          "height": 72
+        }
+      ],
+      "seats": []
+    },
+    "museum-room-3": {
+      "label": "Exhibit Gallery",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "museum_display_case",
+          "x": 300,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "museum_display_case_2",
+          "x": 660,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 276,
+          "y": 326,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 636,
+          "y": 326,
+          "width": 48,
+          "height": 48
+        }
+      ],
+      "seats": []
+    },
+    "museum-room-4": {
+      "label": "Nature Gallery",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "museum_plant_display",
+          "x": 300,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "museum_butterfly_display",
+          "x": 660,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 276,
+          "y": 326,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 636,
+          "y": 326,
+          "width": 48,
+          "height": 48
+        }
+      ],
+      "seats": []
+    },
+    "cafe": {
+      "label": "Plaza Gym",
+      "type": "gym",
+      "width": 960,
+      "height": 720,
+      "objects": [],
+      "seats": [],
+      "blockers": [
+        {
+          "x": 192,
+          "y": 144,
+          "width": 45,
+          "height": 72
+        },
+        {
+          "x": 432,
+          "y": 144,
+          "width": 45,
+          "height": 72
+        },
+        {
+          "x": 672,
+          "y": 144,
+          "width": 45,
+          "height": 72
+        },
+        {
+          "x": 186,
+          "y": 351,
+          "width": 60,
+          "height": 108
+        },
+        {
+          "x": 426,
+          "y": 351,
+          "width": 60,
+          "height": 108
+        },
+        {
+          "x": 666,
+          "y": 351,
+          "width": 60,
+          "height": 108
+        }
+      ],
+      "gymStations": [
+        {
+          "id": "plaza-gym:bag1",
+          "kind": "punch",
+          "x": 192,
+          "y": 120,
+          "anchor": {
+            "x": 216,
+            "y": 240
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 192,
+            "y": 144,
+            "width": 45,
+            "height": 72
+          }
+        },
+        {
+          "id": "plaza-gym:bag2",
+          "kind": "punch",
+          "x": 432,
+          "y": 120,
+          "anchor": {
+            "x": 456,
+            "y": 240
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 432,
+            "y": 144,
+            "width": 45,
+            "height": 72
+          }
+        },
+        {
+          "id": "plaza-gym:bag3",
+          "kind": "punch",
+          "x": 672,
+          "y": 120,
+          "anchor": {
+            "x": 696,
+            "y": 240
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 672,
+            "y": 144,
+            "width": 45,
+            "height": 72
+          }
+        },
+        {
+          "id": "plaza-gym:treadmill1",
+          "kind": "run",
+          "x": 144,
+          "y": 306,
+          "anchor": {
+            "x": 216,
+            "y": 486
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 186,
+            "y": 351,
+            "width": 60,
+            "height": 108
+          }
+        },
+        {
+          "id": "plaza-gym:treadmill2",
+          "kind": "run",
+          "x": 384,
+          "y": 306,
+          "anchor": {
+            "x": 456,
+            "y": 486
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 426,
+            "y": 351,
+            "width": 60,
+            "height": 108
+          }
+        },
+        {
+          "id": "plaza-gym:treadmill3",
+          "kind": "run",
+          "x": 624,
+          "y": 306,
+          "anchor": {
+            "x": 696,
+            "y": 486
+          },
+          "radius": 62,
+          "blocker": {
+            "x": 666,
+            "y": 351,
+            "width": 60,
+            "height": 108
+          }
+        }
+      ]
+    },
+    "diner": {
+      "label": "Diner",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "food_fixed_diner_counter",
+          "x": 250,
+          "y": 180,
+          "depth": 180,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_counter",
+          "x": 346,
+          "y": 180,
+          "depth": 180,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_counter",
+          "x": 442,
+          "y": 180,
+          "depth": 180,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_food_display",
+          "x": 565,
+          "y": 180,
+          "depth": 180,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_table",
+          "x": 270,
+          "y": 388,
+          "depth": 388,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_table",
+          "x": 690,
+          "y": 388,
+          "depth": 388,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_chair",
+          "x": 270,
+          "y": 492,
+          "depth": 492,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_diner_chair",
+          "x": 690,
+          "y": 492,
+          "depth": 492,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 202,
+          "y": 158,
+          "width": 288,
+          "height": 52
+        },
+        {
+          "x": 541,
+          "y": 156,
+          "width": 48,
+          "height": 54
+        },
+        {
+          "x": 235,
+          "y": 366,
+          "width": 70,
+          "height": 46
+        },
+        {
+          "x": 655,
+          "y": 366,
+          "width": 70,
+          "height": 46
+        }
+      ],
+      "seats": [
+        {
+          "id": "food-fixed:diner:table-west",
+          "x": 270,
+          "y": 438,
+          "dir": "up",
+          "depthAnchor": 492,
+          "stands": [
+            {
+              "x": 270,
+              "y": 540,
+              "dir": "up"
+            }
+          ]
+        },
+        {
+          "id": "food-fixed:diner:table-east",
+          "x": 690,
+          "y": 438,
+          "dir": "up",
+          "depthAnchor": 492,
+          "stands": [
+            {
+              "x": 690,
+              "y": 540,
+              "dir": "up"
+            }
+          ]
+        }
+      ]
+    },
+    "bakery": {
+      "label": "Bakery",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "food_fixed_bakery_bread_rack",
+          "x": 160,
+          "y": 190,
+          "depth": 190,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_bread_rack",
+          "x": 224,
+          "y": 190,
+          "depth": 190,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_pastry_case",
+          "x": 370,
+          "y": 190,
+          "depth": 190,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_pastry_case",
+          "x": 466,
+          "y": 190,
+          "depth": 190,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_cake",
+          "x": 750,
+          "y": 190,
+          "depth": 190,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_table",
+          "x": 270,
+          "y": 388,
+          "depth": 388,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_table",
+          "x": 690,
+          "y": 388,
+          "depth": 388,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_chair",
+          "x": 270,
+          "y": 492,
+          "depth": 492,
+          "scale": 3
+        },
+        {
+          "asset": "food_fixed_bakery_chair",
+          "x": 690,
+          "y": 492,
+          "depth": 492,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 136,
+          "y": 166,
+          "width": 112,
+          "height": 48
+        },
+        {
+          "x": 322,
+          "y": 166,
+          "width": 192,
+          "height": 48
+        },
+        {
+          "x": 716,
+          "y": 166,
+          "width": 68,
+          "height": 48
+        },
+        {
+          "x": 235,
+          "y": 366,
+          "width": 70,
+          "height": 46
+        },
+        {
+          "x": 655,
+          "y": 366,
+          "width": 70,
+          "height": 46
+        }
+      ],
+      "seats": [
+        {
+          "id": "food-fixed:bakery:table-west",
+          "x": 270,
+          "y": 438,
+          "dir": "up",
+          "depthAnchor": 492,
+          "stands": [
+            {
+              "x": 270,
+              "y": 548,
+              "dir": "up"
+            }
+          ]
+        },
+        {
+          "id": "food-fixed:bakery:table-east",
+          "x": 690,
+          "y": 438,
+          "dir": "up",
+          "depthAnchor": 492,
+          "stands": [
+            {
+              "x": 690,
+              "y": 548,
+              "dir": "up"
+            }
+          ]
+        }
+      ]
+    },
+    "sushi": {
+      "label": "Sushi",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "ds-fixed-sushi-counter-table",
+          "x": 312,
+          "y": 210,
+          "depth": 258,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 312,
+          "y": 305,
+          "depth": 329,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-counter-table",
+          "x": 408,
+          "y": 210,
+          "depth": 258,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 408,
+          "y": 305,
+          "depth": 329,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-counter-table",
+          "x": 504,
+          "y": 210,
+          "depth": 258,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 504,
+          "y": 305,
+          "depth": 329,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-low-table",
+          "x": 260,
+          "y": 455,
+          "depth": 503,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 182,
+          "y": 455,
+          "depth": 479,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 338,
+          "y": 455,
+          "depth": 479,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-low-table",
+          "x": 700,
+          "y": 455,
+          "depth": 503,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 622,
+          "y": 455,
+          "depth": 479,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-single-cushion",
+          "x": 778,
+          "y": 455,
+          "depth": 479,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-plant",
+          "x": 780,
+          "y": 185,
+          "depth": 233,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-sushi-plant",
+          "x": 165,
+          "y": 185,
+          "depth": 233,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 264,
+          "y": 174,
+          "width": 288,
+          "height": 84
+        },
+        {
+          "x": 214,
+          "y": 417,
+          "width": 92,
+          "height": 76
+        },
+        {
+          "x": 654,
+          "y": 417,
+          "width": 92,
+          "height": 76
+        },
+        {
+          "x": 758,
+          "y": 196,
+          "width": 44,
+          "height": 37
+        },
+        {
+          "x": 143,
+          "y": 196,
+          "width": 44,
+          "height": 37
+        }
+      ],
+      "seats": [
+        {
+          "id": "ds-fixed-seat-sushi-counter-0",
+          "x": 312,
+          "y": 292,
+          "depthAnchor": 329,
+          "dir": "up",
+          "stands": [
+            {
+              "x": 312,
+              "y": 348,
+              "dir": "up"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-counter-1",
+          "x": 408,
+          "y": 292,
+          "depthAnchor": 329,
+          "dir": "up",
+          "stands": [
+            {
+              "x": 408,
+              "y": 348,
+              "dir": "up"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-counter-2",
+          "x": 504,
+          "y": 292,
+          "depthAnchor": 329,
+          "dir": "up",
+          "stands": [
+            {
+              "x": 504,
+              "y": 348,
+              "dir": "up"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-table-0-left",
+          "x": 182,
+          "y": 443,
+          "depthAnchor": 479,
+          "dir": "right",
+          "stands": [
+            {
+              "x": 104,
+              "y": 446,
+              "dir": "right"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-table-0-right",
+          "x": 338,
+          "y": 443,
+          "depthAnchor": 479,
+          "dir": "left",
+          "stands": [
+            {
+              "x": 416,
+              "y": 446,
+              "dir": "left"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-table-1-left",
+          "x": 622,
+          "y": 443,
+          "depthAnchor": 479,
+          "dir": "right",
+          "stands": [
+            {
+              "x": 544,
+              "y": 446,
+              "dir": "right"
+            }
+          ]
+        },
+        {
+          "id": "ds-fixed-seat-sushi-table-1-right",
+          "x": 778,
+          "y": 443,
+          "depthAnchor": 479,
+          "dir": "left",
+          "stands": [
+            {
+              "x": 856,
+              "y": 446,
+              "dir": "left"
+            }
+          ]
+        }
+      ]
+    },
+    "decor-shop": {
+      "label": "Plaza Decor",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "ds-fixed-decor-bookshelf",
+          "x": 160,
+          "y": 160,
+          "depth": 232,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-bookshelf",
+          "x": 280,
+          "y": 160,
+          "depth": 232,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-bookshelf",
+          "x": 400,
+          "y": 160,
+          "depth": 232,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-sofa",
+          "x": 290,
+          "y": 400,
+          "depth": 448,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-lamp",
+          "x": 150,
+          "y": 360,
+          "depth": 432,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-mirror",
+          "x": 525,
+          "y": 315,
+          "depth": 339,
+          "scale": 3
+        },
+        {
+          "asset": "ds-fixed-decor-plant",
+          "x": 735,
+          "y": 380,
+          "depth": 428,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 114,
+          "y": 188,
+          "width": 92,
+          "height": 44
+        },
+        {
+          "x": 234,
+          "y": 188,
+          "width": 92,
+          "height": 44
+        },
+        {
+          "x": 354,
+          "y": 188,
+          "width": 92,
+          "height": 44
+        },
+        {
+          "x": 130,
+          "y": 398,
+          "width": 40,
+          "height": 34
+        },
+        {
+          "x": 503,
+          "y": 303,
+          "width": 44,
+          "height": 36
+        },
+        {
+          "x": 687,
+          "y": 350,
+          "width": 96,
+          "height": 78
+        }
+      ],
+      "seats": [
+        {
+          "id": "ds-fixed-seat-decor-sofa",
+          "x": 290,
+          "y": 393,
+          "depthAnchor": 448,
+          "dir": "down",
+          "stands": [
+            {
+              "x": 290,
+              "y": 473,
+              "dir": "up"
+            }
+          ]
+        }
+      ]
+    },
+    "furniture-shop": {
+      "label": "Furniture Shop",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "shop_shelf",
+          "x": 144,
+          "y": 150,
+          "depth": 150,
+          "scale": 3
+        },
+        {
+          "asset": "shop_shelf",
+          "x": 192,
+          "y": 150,
+          "depth": 150,
+          "scale": 3
+        },
+        {
+          "asset": "shop_shelf",
+          "x": 240,
+          "y": 150,
+          "depth": 150,
+          "scale": 3
+        },
+        {
+          "asset": "shop_shelf",
+          "x": 288,
+          "y": 150,
+          "depth": 150,
+          "scale": 3
+        },
+        {
+          "asset": "shop_sofa",
+          "x": 240,
+          "y": 400,
+          "depth": 400,
+          "scale": 3
+        },
+        {
+          "asset": "shop_lamp",
+          "x": 180,
+          "y": 400,
+          "depth": 400,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 120,
+          "y": 126,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 168,
+          "y": 126,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 216,
+          "y": 126,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 264,
+          "y": 126,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 166,
+          "y": 376,
+          "width": 30,
+          "height": 48
+        }
+      ],
+      "seats": [
+        {
+          "id": "seat-49",
+          "x": 240,
+          "y": 358,
+          "depthAnchor": 400,
+          "dir": "down",
+          "stands": [
+            {
+              "x": 240,
+              "y": 450,
+              "dir": "down"
+            }
+          ]
+        }
+      ]
+    },
+    "garden-shop": {
+      "label": "Garden Shop",
+      "width": 960,
+      "height": 720,
+      "objects": [
+        {
+          "asset": "shop_plant_large",
+          "x": 200,
+          "y": 200,
+          "depth": 200,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 296,
+          "y": 200,
+          "depth": 200,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 392,
+          "y": 200,
+          "depth": 200,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 488,
+          "y": 200,
+          "depth": 200,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 200,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 248,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 296,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 344,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 392,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 440,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 488,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_small",
+          "x": 536,
+          "y": 350,
+          "depth": 350,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 200,
+          "y": 500,
+          "depth": 500,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 296,
+          "y": 500,
+          "depth": 500,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 392,
+          "y": 500,
+          "depth": 500,
+          "scale": 3
+        },
+        {
+          "asset": "shop_plant_large",
+          "x": 488,
+          "y": 500,
+          "depth": 500,
+          "scale": 3
+        }
+      ],
+      "blockers": [
+        {
+          "x": 176,
+          "y": 176,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 272,
+          "y": 176,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 368,
+          "y": 176,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 464,
+          "y": 176,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 188,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 236,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 284,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 332,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 380,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 428,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 476,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 524,
+          "y": 338,
+          "width": 24,
+          "height": 24
+        },
+        {
+          "x": 176,
+          "y": 476,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 272,
+          "y": 476,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 368,
+          "y": 476,
+          "width": 48,
+          "height": 48
+        },
+        {
+          "x": 464,
+          "y": 476,
+          "width": 48,
+          "height": 48
+        }
+      ],
+      "seats": []
+    }
+  }
+}
