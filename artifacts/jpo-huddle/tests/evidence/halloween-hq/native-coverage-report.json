@@ -1,0 +1,1222 @@
+{
+  "first": {
+    "destroyed": false,
+    "rooms": [
+      {
+        "room": "Ops supervisor",
+        "col": 33,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "Ops open office",
+        "col": 33,
+        "row": 38,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "CMA supervisor",
+        "col": 81,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "CMA open office",
+        "col": 81,
+        "row": 36,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Claims supervisor",
+        "col": 128,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "Claims open office",
+        "col": 128,
+        "row": 36,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Nap west",
+        "col": 181,
+        "row": 17,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Nap east",
+        "col": 183,
+        "row": 17,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Gym",
+        "col": 208,
+        "row": 17,
+        "size": 3,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Front Desk",
+        "col": 35,
+        "row": 53,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Front Desk east",
+        "col": 78,
+        "row": 53,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Recruiters Room",
+        "col": 69,
+        "row": 66,
+        "size": 6,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "HR west meeting",
+        "col": 33,
+        "row": 81,
+        "size": 4,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "HR west lounge",
+        "col": 33,
+        "row": 84,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "HR east kitchenette",
+        "col": 49,
+        "row": 78,
+        "size": 2,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "HR east meeting",
+        "col": 49,
+        "row": 82,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "HR east office",
+        "col": 65,
+        "row": 94,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "Cafeteria",
+        "col": 93,
+        "row": 51,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "QA main",
+        "col": 152,
+        "row": 53,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "QA meeting",
+        "col": 190,
+        "row": 71,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "Game Room",
+        "col": 208,
+        "row": 53,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "L&D meeting",
+        "col": 181,
+        "row": 74,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "L&D classroom",
+        "col": 164,
+        "row": 83,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Dev Room",
+        "col": 50,
+        "row": 98,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Dev utility office",
+        "col": 71,
+        "row": 104,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "IT Office",
+        "col": 49,
+        "row": 113,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "IT utility office",
+        "col": 71,
+        "row": 115,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Executive east meeting",
+        "col": 147,
+        "row": 108,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Conference Hall",
+        "col": 89,
+        "row": 115,
+        "size": 5,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "COO's Office",
+        "col": 89,
+        "row": 118,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "CEO's Office",
+        "col": 106,
+        "row": 118,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "CFO's Office",
+        "col": 139,
+        "row": 118,
+        "size": 5,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true
+      },
+      {
+        "room": "Accounting main",
+        "col": 158,
+        "row": 126,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true
+      },
+      {
+        "room": "Accounting meeting",
+        "col": 171,
+        "row": 117,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true
+      }
+    ],
+    "props": [
+      {
+        "kind": "ghost",
+        "col": 73,
+        "row": 17,
+        "mounted": true
+      },
+      {
+        "kind": "ghost",
+        "col": 120,
+        "row": 17,
+        "mounted": true
+      },
+      {
+        "kind": "ghost",
+        "col": 166,
+        "row": 17,
+        "mounted": true
+      },
+      {
+        "kind": "ghost",
+        "col": 197,
+        "row": 53,
+        "mounted": true
+      },
+      {
+        "kind": "candles",
+        "col": 53,
+        "row": 59,
+        "mounted": true
+      },
+      {
+        "kind": "cauldron",
+        "col": 51,
+        "row": 70,
+        "mounted": true
+      },
+      {
+        "kind": "cauldron",
+        "col": 135,
+        "row": 89,
+        "mounted": true
+      },
+      {
+        "kind": "grave",
+        "col": 75,
+        "row": 91,
+        "mounted": true
+      },
+      {
+        "kind": "candles",
+        "col": 154,
+        "row": 90,
+        "mounted": true
+      },
+      {
+        "kind": "grave",
+        "col": 59,
+        "row": 124,
+        "mounted": true
+      },
+      {
+        "kind": "candles",
+        "col": 98,
+        "row": 112,
+        "mounted": true
+      },
+      {
+        "kind": "candles",
+        "col": 182,
+        "row": 121,
+        "mounted": true
+      }
+    ],
+    "objects": 111,
+    "tweens": 22
+  },
+  "repeat": {
+    "firstDestroyed": true,
+    "oldObjectsGone": true,
+    "oldTweensGone": true,
+    "liveDecorCount": 111,
+    "report": {
+      "destroyed": false,
+      "rooms": [
+        {
+          "room": "Ops supervisor",
+          "col": 33,
+          "row": 21,
+          "size": 2,
+          "dir": 1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "Ops open office",
+          "col": 33,
+          "row": 38,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "CMA supervisor",
+          "col": 81,
+          "row": 21,
+          "size": 2,
+          "dir": 1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "CMA open office",
+          "col": 81,
+          "row": 36,
+          "size": 4,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Claims supervisor",
+          "col": 128,
+          "row": 21,
+          "size": 2,
+          "dir": 1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "Claims open office",
+          "col": 128,
+          "row": 36,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Nap west",
+          "col": 181,
+          "row": 17,
+          "size": 4,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Nap east",
+          "col": 183,
+          "row": 17,
+          "size": 4,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Gym",
+          "col": 208,
+          "row": 17,
+          "size": 3,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Front Desk",
+          "col": 35,
+          "row": 53,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Front Desk east",
+          "col": 78,
+          "row": 53,
+          "size": 6,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Recruiters Room",
+          "col": 69,
+          "row": 66,
+          "size": 6,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "HR west meeting",
+          "col": 33,
+          "row": 81,
+          "size": 4,
+          "dir": 1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "HR west lounge",
+          "col": 33,
+          "row": 84,
+          "size": 5,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "HR east kitchenette",
+          "col": 49,
+          "row": 78,
+          "size": 2,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "HR east meeting",
+          "col": 49,
+          "row": 82,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "HR east office",
+          "col": 65,
+          "row": 94,
+          "size": 5,
+          "dir": -1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "Cafeteria",
+          "col": 93,
+          "row": 51,
+          "size": 4,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "QA main",
+          "col": 152,
+          "row": 53,
+          "size": 5,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "QA meeting",
+          "col": 190,
+          "row": 71,
+          "size": 5,
+          "dir": -1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "Game Room",
+          "col": 208,
+          "row": 53,
+          "size": 6,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "L&D meeting",
+          "col": 181,
+          "row": 74,
+          "size": 4,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "L&D classroom",
+          "col": 164,
+          "row": 83,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Dev Room",
+          "col": 50,
+          "row": 98,
+          "size": 4,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Dev utility office",
+          "col": 71,
+          "row": 104,
+          "size": 4,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "IT Office",
+          "col": 49,
+          "row": 113,
+          "size": 4,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "IT utility office",
+          "col": 71,
+          "row": 115,
+          "size": 4,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Executive east meeting",
+          "col": 147,
+          "row": 108,
+          "size": 6,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Conference Hall",
+          "col": 89,
+          "row": 115,
+          "size": 5,
+          "dir": 1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "COO's Office",
+          "col": 89,
+          "row": 118,
+          "size": 3,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "CEO's Office",
+          "col": 106,
+          "row": 118,
+          "size": 5,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "CFO's Office",
+          "col": 139,
+          "row": 118,
+          "size": 5,
+          "dir": -1,
+          "vertical": 1,
+          "mounted": true
+        },
+        {
+          "room": "Accounting main",
+          "col": 158,
+          "row": 126,
+          "size": 5,
+          "dir": -1,
+          "vertical": -1,
+          "mounted": true
+        },
+        {
+          "room": "Accounting meeting",
+          "col": 171,
+          "row": 117,
+          "size": 5,
+          "dir": 1,
+          "vertical": 1,
+          "mounted": true
+        }
+      ],
+      "props": [
+        {
+          "kind": "ghost",
+          "col": 73,
+          "row": 17,
+          "mounted": true
+        },
+        {
+          "kind": "ghost",
+          "col": 120,
+          "row": 17,
+          "mounted": true
+        },
+        {
+          "kind": "ghost",
+          "col": 166,
+          "row": 17,
+          "mounted": true
+        },
+        {
+          "kind": "ghost",
+          "col": 197,
+          "row": 53,
+          "mounted": true
+        },
+        {
+          "kind": "candles",
+          "col": 53,
+          "row": 59,
+          "mounted": true
+        },
+        {
+          "kind": "cauldron",
+          "col": 51,
+          "row": 70,
+          "mounted": true
+        },
+        {
+          "kind": "cauldron",
+          "col": 135,
+          "row": 89,
+          "mounted": true
+        },
+        {
+          "kind": "grave",
+          "col": 75,
+          "row": 91,
+          "mounted": true
+        },
+        {
+          "kind": "candles",
+          "col": 154,
+          "row": 90,
+          "mounted": true
+        },
+        {
+          "kind": "grave",
+          "col": 59,
+          "row": 124,
+          "mounted": true
+        },
+        {
+          "kind": "candles",
+          "col": 98,
+          "row": 112,
+          "mounted": true
+        },
+        {
+          "kind": "candles",
+          "col": 182,
+          "row": 121,
+          "mounted": true
+        }
+      ],
+      "objects": 111,
+      "tweens": 22
+    }
+  },
+  "normal": {
+    "cleanupNull": true,
+    "previousDestroyed": true,
+    "extraObjects": 0,
+    "detachedDecorTweens": 0
+  },
+  "capture": {
+    "destroyed": false,
+    "rooms": [
+      {
+        "room": "Ops supervisor",
+        "col": 33,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-01-ops-supervisor.png"
+      },
+      {
+        "room": "Ops open office",
+        "col": 33,
+        "row": 38,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-02-ops-open-office.png"
+      },
+      {
+        "room": "CMA supervisor",
+        "col": 81,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-03-cma-supervisor.png"
+      },
+      {
+        "room": "CMA open office",
+        "col": 81,
+        "row": 36,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-04-cma-open-office.png"
+      },
+      {
+        "room": "Claims supervisor",
+        "col": 128,
+        "row": 21,
+        "size": 2,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-05-claims-supervisor.png"
+      },
+      {
+        "room": "Claims open office",
+        "col": 128,
+        "row": 36,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-06-claims-open-office.png"
+      },
+      {
+        "room": "Nap west",
+        "col": 181,
+        "row": 17,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-07-nap-west.png"
+      },
+      {
+        "room": "Nap east",
+        "col": 183,
+        "row": 17,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-08-nap-east.png"
+      },
+      {
+        "room": "Gym",
+        "col": 208,
+        "row": 17,
+        "size": 3,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-09-gym.png"
+      },
+      {
+        "room": "Front Desk",
+        "col": 35,
+        "row": 53,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-10-front-desk.png"
+      },
+      {
+        "room": "Front Desk east",
+        "col": 78,
+        "row": 53,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-11-front-desk-east.png"
+      },
+      {
+        "room": "Recruiters Room",
+        "col": 69,
+        "row": 66,
+        "size": 6,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-12-recruiters-room.png"
+      },
+      {
+        "room": "HR west meeting",
+        "col": 33,
+        "row": 81,
+        "size": 4,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-13-hr-west-meeting.png"
+      },
+      {
+        "room": "HR west lounge",
+        "col": 33,
+        "row": 84,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-14-hr-west-lounge.png"
+      },
+      {
+        "room": "HR east kitchenette",
+        "col": 49,
+        "row": 78,
+        "size": 2,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-15-hr-east-kitchenette.png"
+      },
+      {
+        "room": "HR east meeting",
+        "col": 49,
+        "row": 82,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-16-hr-east-meeting.png"
+      },
+      {
+        "room": "HR east office",
+        "col": 65,
+        "row": 94,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-17-hr-east-office.png"
+      },
+      {
+        "room": "Cafeteria",
+        "col": 93,
+        "row": 51,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-18-cafeteria.png"
+      },
+      {
+        "room": "QA main",
+        "col": 152,
+        "row": 53,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-19-qa-main.png"
+      },
+      {
+        "room": "QA meeting",
+        "col": 190,
+        "row": 71,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-20-qa-meeting.png"
+      },
+      {
+        "room": "Game Room",
+        "col": 208,
+        "row": 53,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-21-game-room.png"
+      },
+      {
+        "room": "L&D meeting",
+        "col": 181,
+        "row": 74,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-22-l-d-meeting.png"
+      },
+      {
+        "room": "L&D classroom",
+        "col": 164,
+        "row": 83,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-23-l-d-classroom.png"
+      },
+      {
+        "room": "Dev Room",
+        "col": 50,
+        "row": 98,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-24-dev-room.png"
+      },
+      {
+        "room": "Dev utility office",
+        "col": 71,
+        "row": 104,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-25-dev-utility-office.png"
+      },
+      {
+        "room": "IT Office",
+        "col": 49,
+        "row": 113,
+        "size": 4,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-26-it-office.png"
+      },
+      {
+        "room": "IT utility office",
+        "col": 71,
+        "row": 115,
+        "size": 4,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-27-it-utility-office.png"
+      },
+      {
+        "room": "Executive east meeting",
+        "col": 147,
+        "row": 108,
+        "size": 6,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-28-executive-east-meeting.png"
+      },
+      {
+        "room": "Conference Hall",
+        "col": 89,
+        "row": 115,
+        "size": 5,
+        "dir": 1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-29-conference-hall.png"
+      },
+      {
+        "room": "COO's Office",
+        "col": 89,
+        "row": 118,
+        "size": 3,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-30-coo-s-office.png"
+      },
+      {
+        "room": "CEO's Office",
+        "col": 106,
+        "row": 118,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-31-ceo-s-office.png"
+      },
+      {
+        "room": "CFO's Office",
+        "col": 139,
+        "row": 118,
+        "size": 5,
+        "dir": -1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-32-cfo-s-office.png"
+      },
+      {
+        "room": "Accounting main",
+        "col": 158,
+        "row": 126,
+        "size": 5,
+        "dir": -1,
+        "vertical": -1,
+        "mounted": true,
+        "screenshot": "room-33-accounting-main.png"
+      },
+      {
+        "room": "Accounting meeting",
+        "col": 171,
+        "row": 117,
+        "size": 5,
+        "dir": 1,
+        "vertical": 1,
+        "mounted": true,
+        "screenshot": "room-34-accounting-meeting.png"
+      }
+    ],
+    "props": [
+      {
+        "kind": "ghost",
+        "col": 73,
+        "row": 17,
+        "mounted": true,
+        "screenshot": "prop-ghost-73-17.png"
+      },
+      {
+        "kind": "ghost",
+        "col": 120,
+        "row": 17,
+        "mounted": true,
+        "screenshot": "prop-ghost-120-17.png"
+      },
+      {
+        "kind": "ghost",
+        "col": 166,
+        "row": 17,
+        "mounted": true,
+        "screenshot": "prop-ghost-166-17.png"
+      },
+      {
+        "kind": "ghost",
+        "col": 197,
+        "row": 53,
+        "mounted": true,
+        "screenshot": "prop-ghost-197-53.png"
+      },
+      {
+        "kind": "candles",
+        "col": 53,
+        "row": 59,
+        "mounted": true,
+        "screenshot": "prop-candles-53-59.png"
+      },
+      {
+        "kind": "cauldron",
+        "col": 51,
+        "row": 70,
+        "mounted": true,
+        "screenshot": "prop-cauldron-51-70.png"
+      },
+      {
+        "kind": "cauldron",
+        "col": 135,
+        "row": 89,
+        "mounted": true,
+        "screenshot": "prop-cauldron-135-89.png"
+      },
+      {
+        "kind": "grave",
+        "col": 75,
+        "row": 91,
+        "mounted": true,
+        "screenshot": "prop-grave-75-91.png"
+      },
+      {
+        "kind": "candles",
+        "col": 154,
+        "row": 90,
+        "mounted": true,
+        "screenshot": "prop-candles-154-90.png"
+      },
+      {
+        "kind": "grave",
+        "col": 59,
+        "row": 124,
+        "mounted": true,
+        "screenshot": "prop-grave-59-124.png"
+      },
+      {
+        "kind": "candles",
+        "col": 98,
+        "row": 112,
+        "mounted": true,
+        "screenshot": "prop-candles-98-112.png"
+      },
+      {
+        "kind": "candles",
+        "col": 182,
+        "row": 121,
+        "mounted": true,
+        "screenshot": "prop-candles-182-121.png"
+      }
+    ],
+    "objects": 111,
+    "tweens": 22
+  },
+  "labelOverlaps": []
+}

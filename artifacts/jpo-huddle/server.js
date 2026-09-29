@@ -1172,8 +1172,8 @@ const GRACE_MS = 10_000;
 // drift only mislabels the shop row.
 const SHOP = {
   witchhat: 6500,
-  pumpkinhead: 8000,
-  vampirecape: 6000,
+  pumpkinhead: 10000,
+  vampirecape: 13000,
   // Aug 2026 shop cleanup: tiered pricing by category (hats / eyewear /
   // audio / accessories). Keep in lockstep with client COSMETICS labels.
   beanie:       4000,
@@ -1226,7 +1226,7 @@ const SHOP = {
 // looks (zero migration). Classic prices unchanged; fancy looks cost more.
 // Ids MUST match the client PETS catalog in public/index.html.
 const PETS = {
-  pet_bat: 12000,
+  pet_bat: 18000,
   pet_duck:             10000,
   pet_duck_snow:        14000,
   pet_cat:              12500,
