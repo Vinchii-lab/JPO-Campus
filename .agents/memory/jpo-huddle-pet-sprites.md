@@ -71,3 +71,10 @@ Later forms need distinct faces, head/ear proportions, silhouettes, and species-
 **Why:** The first Halloween bat was rejected as “just got big”; a procedural repeat of one face plus larger wings did not meet the established pet standard.
 
 **How to apply:** Compare stages side by side before delivery. For hovering bats, verify the actual stationary runtime cycles wing textures, not just that animation files exist. Asset replacements also require cache-busted URLs across world, shop, race, and battle consumers.
+
+## Flight-cycle coherence
+Use a stable face/body and shoulder anchors across wingbeats, not separately generated whole-body poses normalized only to the floor.
+
+**Why:** The regenerated bat looked better statically but its movement was rejected: inconsistent faces/body positions and inherited walking squash made the flap cycle jitter.
+
+**How to apply:** Judge animated previews at gameplay scale while hovering and following. Keep body scale stable for airborne bats; move wings relative to shoulders and ease hover/lean independently.

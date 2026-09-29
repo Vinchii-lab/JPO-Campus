@@ -892,3 +892,17 @@ mtime_ms = 1790699599102
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5ced1021-5615-4c74-90fa-adfcf4fd851d/970e4fd8-650d-43d6-a167-a547f891c7b3"
 storage_version_token = "1790699654683775"
 content_type = "image/gif"
+
+[[outputs]]
+id = "n8kl1NyQHcZX064H2eUhi"
+uri = "file://artifacts/jpo-huddle/design/halloween-bat-native-motion.gif"
+type = "image"
+title = "Revised bat flight"
+description = "Browser-captured hovering and following for all three stages, with stable bodies and smoother wingbeats."
+logical_id = "9a4479f9-b797-4b32-8f2a-43f788637c1c"
+content_hash = "sha256:b18bdb7fb45935d099409c4a51586cc14feaa86aa9c0b04799e26aa600d49bdc"
+size = 1418849
+mtime_ms = 1790701276562
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/9a4479f9-b797-4b32-8f2a-43f788637c1c/407c9990-33e3-4a9e-847b-ef16d2dd8ade"
+storage_version_token = "1790701454775896"
+content_type = "image/gif"

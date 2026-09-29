@@ -6378,8 +6378,8 @@
     // Bat evolution redraw: bypass the asset server's day-long PNG cache in
     // every renderer. Keep all other species' URLs (including frog v2) intact.
     function _petArtUrl(url) {
-      return /(?:^|\/)assets\/pets\/(?:pet_bat(?:_s[23])?|anim\/bat(?:_s[23])?_(?:walk[123]|sit|action))\.png(?:\?|$)/.test(url)
-        ? url + (url.includes('?') ? '&' : '?') + 'bat_rev=20260823-evolution2'
+      return /(?:^|\/)assets\/pets\/(?:pet_bat(?:_s[23])?|anim\/bat(?:_s[23])?_(?:walk[123]|flap\d+|sit|action))\.png(?:\?|$)/.test(url)
+        ? url + (url.includes('?') ? '&' : '?') + 'bat_rev=20260823-anchored-flight3'
         : url;
     }
     function _petStageArt(pet, stage) {
@@ -14009,6 +14009,11 @@
             this.load.image(`petanim_${stem}_${f}`, _petArtUrl(`/assets/pets/anim/${stem}_${f}.png`));
         }
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
+        for (const stage of [1, 2, 3]) {
+          const stem = stage === 1 ? 'bat' : `bat_s${stage}`;
+          for (let f = 0; f < 16; f++)
+            this.load.image(`petanim_${stem}_flap${f}`, _petArtUrl(`/assets/pets/anim/${stem}_flap${f}.png`));
+        }
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
         this.load.spritesheet('wear_shades', '/assets/wear_shades.png', { frameWidth: 8,  frameHeight: 3 });
         this.load.spritesheet('wear_fairywings', '/assets/wear_fairywings.png', { frameWidth: 32, frameHeight: 20 });
@@ -15443,6 +15448,10 @@
             idle: stageKey || `petanim_${stem}_walk2`,
           };
           obj.setTexture(obj._animSet.idle);
+          if (pet === 'pet_bat') {
+            const flight = Array.from({ length: 16 }, (_,i) => `petanim_${stem}_flap${i}`);
+            if (flight.every(key => this.textures.exists(key))) obj._animSet.walk = flight;
+          }
           obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
           // Dragons are the ONLY pets allowed to break the size cap (boss
           // rule: most expensive pet = biggest pet in the office). Stage 2
@@ -17487,7 +17496,7 @@
         // a fixed window expired mid-run for far owners and snapped it home.
         if (sprinting && dist > 120) petObj._sprintUntil = _now + 800;
         // No teleport while a trick plays or while sprinting back afterwards.
-        if (dist > 300 && !sprinting && !petObj._trickBusy) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
+        if (dist > 300 && petObj._petId !== 'pet_bat' && !sprinting && !petObj._trickBusy) { petObj.setPosition(px - gap, ty); this._placePetAcc(petObj); return; }
         if (seated && dist < 2) { dx = 0; dy = 1; dist = 1; }
         // Lively pets pilot: procedural walk waddle / idle breathing / random
         // idle tricks for PET_LIVELY species. Runs before the follow step so
@@ -17576,9 +17585,11 @@
             };
             const motion = petObj._mythic === 'cocoa' ? 'thump' : (MOTION[stageKey] || 'trot');
             const step = Math.abs(Math.sin(petObj._animT * gait.bounceF));
-            petObj.angle = motion === 'float' ? petObj.angle * 0.8
+            petObj.angle = petObj._petId === 'pet_bat' ? petObj.angle : motion === 'float' ? petObj.angle * 0.8
               : Math.sin(petObj._animT * gait.swayF) * gait.sway;             // waddle
-            if (motion === 'thump') {
+            if (petObj._petId === 'pet_bat') {
+              petObj.setScale(bs);
+            } else if (motion === 'thump') {
               // Sell each STEP with a footfall thump — squash wide on the
               // plant, stretch tall on the push-off.
               petObj.setScale(bs * (1 + 0.14 * (1 - step)), bs * (1 - 0.12 + (gait.bounce + 0.16) * step));
@@ -17698,8 +17709,8 @@
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
           } else {
-            petObj.angle *= 0.85;                                                    // settle upright
-            petObj.setScale(bs, bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004))); // idle breathing
+            if (petObj._petId !== 'pet_bat') petObj.angle *= 0.85; // settle upright
+            petObj.setScale(bs, petObj._petId === 'pet_bat' ? bs : bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004)));
             if (petObj._animSet) {
               const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
@@ -17851,11 +17862,16 @@
                 }
               }
             }
+            if (isBat) {
+              const target = 5 + Math.sin(petObj._animT * 0.0035) * 1.3;
+              petObj._batHover = (petObj._batHover || 0) + (target - (petObj._batHover || 0)) * (1 - Math.exp(-delta / 140));
+              hov = petObj._batHover;
+            }
             petObj.setOrigin(0.5, 1 + hov / Math.max(petObj.displayHeight, 1));
             // Movement animation: lean the nose INTO the flight direction
             // while traveling, ease back level when holding position.
             const leanTgt = movingFly ? (petObj.flipX ? -6 : 6) : 0;
-            petObj.angle += (leanTgt - petObj.angle) * 0.12;
+            petObj.angle += (leanTgt - petObj.angle) * (isBat ? 1 - Math.exp(-delta / 180) : 0.12);
             if (petObj._animSet && !petObj._trickBusy) {
               // Flight rhythm (boss note): not a bat — THREE quick flaps,
               // then a long wings-level GLIDE, repeat.
@@ -17863,7 +17879,7 @@
               const flapWin = fm * 12;                 // 3 full flap cycles (4 frames each)
               const t = petObj._animT % (flapWin + 1100);
               let fr = isBat
-                ? petObj._animSet.walk[Math.floor(petObj._animT / 110) % petObj._animSet.walk.length]
+                ? petObj._animSet.walk[Math.floor(petObj._animT / 40) % petObj._animSet.walk.length]
                 : t < flapWin
                 ? petObj._animSet.walk[Math.floor(t / fm) % petObj._animSet.walk.length]
                 : petObj._animSet.walk[1];             // glide on the wings-level frame
@@ -18081,6 +18097,10 @@
                     }
                   }
                 }
+              } else if (isBat) {
+                petObj._batHover = (petObj._batHover || 0) * Math.exp(-delta / 140);
+                petObj.setOrigin(0.5, 1 + petObj._batHover / Math.max(petObj.displayHeight, 1));
+                petObj.angle *= Math.exp(-delta / 180);
               } else petObj.setOrigin(0.5, 1);                   // already landed
             }
             if (petObj._flyShadow && petObj._flyShadow.active) petObj._flyShadow.setVisible(false);
@@ -18092,7 +18112,9 @@
         // smooth catch-up (or the >300px snap) reels it back in afterwards.
         if (petObj._trickBusy) { petObj._wasTricking = true; this._placePetAcc(petObj); return; }
         if (dist > gap || (seated && dist < gap - 2)) {
-          const k = Math.min(1, delta * (sprinting ? 0.022 : 0.008));   // smooth catch-up (fast sprint after tricks)
+          const k = petObj._petId === 'pet_bat'
+            ? 1 - Math.exp(-Math.min(delta, 50) * (sprinting ? 0.022 : 0.008))
+            : Math.min(1, delta * (sprinting ? 0.022 : 0.008));   // smooth catch-up (fast sprint after tricks)
           const mx = (px + (dx / dist) * gap - petObj.x) * k;
           petObj.x += mx;
           petObj.y += (ty + (dy / dist) * gap - petObj.y) * k;

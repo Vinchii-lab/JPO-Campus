@@ -76,10 +76,32 @@ function batRow(stage) {
 }
 const stages=[1,2,3];
 const poses=['static','walk1','walk2','walk3','sit','action'];
-// Runtime cycles walk1, walk2, walk3, walk2: up → level → down → level.
+// Only the wings move: inverse-map one wings-level drawing around fixed
+// shoulder roots. Never refit/trim individual flight frames. The entire
+// central strip (ears, face, chest and feet) is byte-identical in every frame.
+function flap(base, phase) {
+  const out=image(64,64);
+  for(let y=0;y<64;y++)for(let x=0;x<64;x++){
+    const reach=x<27 ? (27-x)/25 : x>44 ? (x-44)/19 : 0;
+    const shift=Math.sin(phase)*12*reach;
+    const sy=Math.round(y-shift);
+    if(sy>=0 && sy<64) {
+      const src=(sy*64+x)*4;
+      base.data.copy(out.data,(y*64+x)*4,src,src+4);
+    }
+  }
+  return out;
+}
+const flights=[];
 const stamps=stages.map(stage=>{
   const row=batRow(stage);
-  return [row[0],row[1],row[3],row[2],row[4],row[5]];
+  // Move the level drawing up 8px to reserve downstroke space, without
+  // rescaling it. Rest/action/static retain the approved original drawings.
+  const base=image(64,64);
+  row[3].data.copy(base.data,0,8*64*4);
+  const cycle=Array.from({length:16},(_,i)=>flap(base,i*Math.PI/8));
+  flights.push(cycle);
+  return [row[0],cycle[12],cycle[0],cycle[4],row[4],row[5]];
 });
 function save(name,p){fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
 function makePreview(){
@@ -100,6 +122,9 @@ stages.forEach((stage,j)=>poses.forEach((pose,k)=>{
   const previous=path.join(ROOT,`pets/anim/${stem}_${pose}.png`);
   if(pose!=='static' && fs.existsSync(previous))fs.unlinkSync(previous);
   save(path.join(ROOT,dest),stamps[j][k]);
+}));
+stages.forEach((stage,j)=>flights[j].forEach((frame,i)=>{
+  save(path.join(ROOT,`pets/anim/bat${stage===1?'':`_s${stage}`}_flap${i}.png`),frame);
 }));
 if(process.argv.includes('--bat-only')) {
   console.log('Installed generated bat: 3 distinct stages × 6 transparent 64×64 frames.');
