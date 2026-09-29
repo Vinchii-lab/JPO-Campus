@@ -976,3 +976,31 @@ mtime_ms = 1790703649010
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/f03cd0ef-8e02-4668-a968-40a3020a5135/13cb5b2d-16b9-484b-a1dc-c4357fadcc4f"
 storage_version_token = "1790703786426436"
 content_type = "video/mp4"
+
+[[outputs]]
+id = "JSvlxlABkE9elAg4UQ4Ga"
+uri = "file://artifacts/jpo-huddle/design/bat-sonar-reference.gif"
+type = "image"
+title = "Revised bat specials — visible sonar"
+description = "Adult: three strong directional sonar waves. Final form: charged ascent followed by a large radial sonic burst and spectral echoes. Reference only; not installed."
+logical_id = "ee12ee03-f5e2-490d-b4a0-e2e757e66ecb"
+content_hash = "sha256:4cfa823a6eb77021741775b05f86ccf73a94aa00052cba690cb9dae7854170ff"
+size = 3435007
+mtime_ms = 1790704445278
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/ee12ee03-f5e2-490d-b4a0-e2e757e66ecb/567fc50b-d876-49d3-a7ac-bc32c8bfbd73"
+storage_version_token = "1790704567697250"
+content_type = "image/gif"
+
+[[outputs]]
+id = "YqQuFrOmopNZQO4HQcS0o"
+uri = "file://artifacts/jpo-huddle/design/bat-sonar-storyboard.png"
+type = "image"
+title = "Sonar effects at their peak"
+description = "Side-by-side phases showing the adult directional call and the much larger final-form burst."
+logical_id = "08ec2161-44c2-44b3-849c-e25e4e03deba"
+content_hash = "sha256:b77f3a172053cb6e21f27a8203627725f536e79b23babfe2ba22317489d8c31a"
+size = 404131
+mtime_ms = 1790704448462
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/08ec2161-44c2-44b3-849c-e25e4e03deba/d63f39d6-3e5f-4401-872f-15d9168f3b13"
+storage_version_token = "1790704569083592"
+content_type = "image/png"
