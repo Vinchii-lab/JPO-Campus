@@ -6,7 +6,29 @@ import pg from "pg";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { migrateLotClaims, claimNeighborhoodLot } from "../../lot-claims.mjs";
-import { homeDirectory, ensureHome, streetDefinition } from "../../neighborhood.mjs";
+import { homeDirectory, ensureHome, homeAccess, streetDefinition, streetLotForOwner,
+  streetPortalForTransition, streetReturnSpawnForOwner, portalForTransition } from "../../neighborhood.mjs";
+
+test("portal refresh follows claimed owner even without stage change and preserves public gates", () => {
+  const source = readFileSync(new URL("../../public/neighborhood.js", import.meta.url), "utf8");
+  const body = source.match(/updateResidenceDirectory\(entries\) \{([\s\S]*?)\n    \}/)[1];
+  const refresh = vm.runInNewContext(`(function(entries) {${body}})`);
+  const oldDoor = { residence: true, destination: "home", ownerEmail: "old@example.com", lot: 40 };
+  const gate = { destination: "office" };
+  const scene = {
+    streetLotsVisual: [{ lot: { lot: 40, door: oldDoor }, stage: "complete", color: "teal",
+      yardKey: "", sign: { text: "", setText() {} } }],
+    info: { portals: [gate, oldDoor] },
+    _residenceSignText: () => "",
+    _streetYardKey: () => "",
+    _syncStreetLotVisibility() {},
+  };
+  refresh.call(scene, [{ lotIndex: 40, ownerEmail: "new@example.com", construction: { stage: "complete" } }]);
+  assert.equal(scene.doors.length, 2);
+  assert.equal(scene.doors[0], gate);
+  assert.equal(scene.doors[1].ownerEmail, "new@example.com");
+  assert.equal(scene.doors[1].lot, 40);
+});
 
 test("available signs have no owner name; realtime updates are keyed by permanent lot", () => {
   const source = readFileSync(new URL("../../public/neighborhood.js", import.meta.url), "utf8");
@@ -92,7 +114,7 @@ test("persistent atomic claims, idempotent migration and non-destructive release
         home_owner_email text REFERENCES jpo_homes(owner_email),
         grid_x integer, grid_y integer, rotation integer, placement_zone text
       );
-      INSERT INTO jpo_players (email) VALUES ('empty'),('partial'),('built'),('placed'),('alice'),('bob'),('charlie'),('dana');
+      INSERT INTO jpo_players (email) VALUES ('empty'),('partial'),('built'),('placed'),('alice@example.com'),('bob@example.com'),('charlie'),('dana');
       INSERT INTO jpo_homes (owner_email,lot_index,floor_built,walls_built,roof_built) VALUES
         ('empty', 40, false,false,false), ('partial', 71,true,false,false),
         ('built', 900,true,true,true), ('placed', 901,false,false,false);
@@ -120,12 +142,27 @@ test("persistent atomic claims, idempotent migration and non-destructive release
     assert.equal((await pool.query("SELECT 1 FROM jpo_homes WHERE owner_email='dana'")).rowCount, 0,
       "directory reads never materialize every account");
     const results = await Promise.all([
-      claimNeighborhoodLot(pool, "alice", 40), claimNeighborhoodLot(pool, "bob", 40),
+      claimNeighborhoodLot(pool, "alice@example.com", 40), claimNeighborhoodLot(pool, "bob@example.com", 40),
     ]);
     assert.equal(results.filter(r => r.ok).length, 1, "exactly one simultaneous claimant wins");
     assert.equal(results.find(r => !r.ok).code, "claimed");
-    const winner = results[0].ok ? "alice" : "bob";
+    const winner = results[0].ok ? "alice@example.com" : "bob@example.com";
     assert.equal((await claimNeighborhoodLot(pool, winner, 40)).alreadyClaimed, true);
+    // A claimed address must never be resolved through the possessions
+    // ledger's unrelated, auto-generated legacy lot_index.
+    const ledger = await ensureHome(pool, winner);
+    assert.notEqual(Number(ledger.lot_index), 40);
+    await pool.query("UPDATE jpo_homes SET floor_built=true,walls_built=true,roof_built=true WHERE owner_email=$1", [winner]);
+    const ownedStreet = (await homeDirectory(pool)).homes;
+    const ownedLot = streetLotForOwner(ownedStreet, winner);
+    assert.equal(ownedLot.lot, 40);
+    assert.equal((await homeAccess(pool, winner, winner)).ok, true);
+    const entry = streetPortalForTransition(`home:${winner}`, ownedLot.door.x + 36,
+      ownedLot.door.y + 50, ownedStreet);
+    assert.equal(entry.ownerEmail, winner);
+    const exit = portalForTransition(`home:${winner}`, "neighborhood", 576, 816, winner);
+    assert.ok(exit, "home exit remains a physical portal");
+    assert.deepEqual(streetReturnSpawnForOwner(ownedStreet, winner), ownedLot.returnSpawn);
     const twoLots = await Promise.all([
       claimNeighborhoodLot(pool, "charlie", migrated[4].lot_index),
       claimNeighborhoodLot(pool, "charlie", migrated[5].lot_index),

@@ -342,8 +342,32 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   const isHome = () => currentLocation.startsWith('home:');
   const isResidentialBlock = () => currentLocation === 'neighborhood';
   const ownHome = () => homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail ? homeState : null;
-  const travel = (destination, options = {}) =>
-    movement?.sendReliableEvent('locationTransition', currentLocation, { destination, ...options });
+  const travel = (destination, options = {}) => {
+    const sent = movement?.sendReliableEvent('locationTransition', currentLocation, { destination, ...options });
+    if (!sent) {
+      recoverFailedTravel();
+      toast('Connection interrupted. Reconnect and walk through the doorway again.');
+    }
+    return sent;
+  };
+  function recoverFailedTravel() {
+    officePortalTransition = false;
+    const scene = window._neighborhoodScene;
+    if (scene) {
+      scene._resetTransientTravel();
+      // Require leaving the trigger before retrying, rather than an automatic
+      // retry loop against a rejected or disconnected doorway.
+      scene.portalRelease = false;
+      scene.interactHint?.setVisible(false);
+    }
+    const active = window._phaserGame?.scene?.getScenes(true)?.find((entry) =>
+      entry.scene.key === 'NeighborhoodScene' || entry.scene.key === 'OfficeScene');
+    if (active?.cameras?.main) {
+      active._portalFading = false;
+      active._portalFadeAt = 0;
+      active.cameras.main.fadeIn(160, 16, 22, 34);
+    }
+  }
   const movement = window.JpoFocusedMovement?.create(socket, {
     onPause: () => {
       window._neighborhoodScene?._clearMovementTransport();
@@ -874,6 +898,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._portalTravelGeneration = (this._portalTravelGeneration || 0) + 1;
       clearTimeout(this._portalMoveTimer);
       clearTimeout(this._portalTravelTimer);
+      clearTimeout(this._portalResponseTimer);
+      this._portalResponseTimer = null;
       this._portalMoveTimer = this._portalTravelTimer = null;
       this.transitionRequested = false;
       this._portalFading = false;
@@ -2023,6 +2049,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         visual.visible = undefined;
       });
       this.info.streetLots = this.streetLotsVisual.map((visual) => visual.lot);
+      // Ownership changes independently of the construction stage. Never keep
+      // a doorway's pre-claim owner, and never discard the public road/HQ gates
+      // when rebuilding residence portals after construction.
+      this.doors = [
+        ...(this.info.portals || []).filter((portal) => !portal.residence),
+        ...this.streetLotsVisual.filter((visual) => visual.stage === 'complete')
+          .map((visual) => visual.lot.door),
+      ];
       // Rebuild only from the updated authoritative lot data. This keeps
       // client Arcade collision aligned with the server's street snapshot
       // after an owner places or stores an outdoor item.
@@ -2058,9 +2092,6 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (stageChanged && this._geometryBlocks) {
           this._geometryBlocks.clear(true, true);
           fixed.forEach((block) => this._addBlock(this._geometryBlocks, block));
-          this.doors = this.streetLotsVisual
-            .filter((visual) => visual.stage === 'complete')
-            .map((visual) => visual.lot.door);
           this.portalCues?.forEach((object) => object.destroy());
           this.portalCues = [];
           this._drawPortalCues();
@@ -3599,7 +3630,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         !lot.construction?.complete &&
         Math.hypot(this.player.x - lot.returnSpawn.x, this.player.y - lot.returnSpawn.y) <= 105,
       );
-      if (door) this.interactHint.setText('Walking through…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
+      if (door) this.interactHint.setText(this.portalRelease || this.transitionRequested
+        ? 'Walking through…' : 'Step away, then try the doorway again')
+        .setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (unfinishedLot) this.interactHint.setText(!unfinishedLot.ownerEmail
         ? (Date.now() < (this._lotClaimPendingUntil || 0) ? 'Claiming…'
           : this._confirmClaimLot === unfinishedLot.lot ? '[E] Confirm claim · walk away to cancel' : '[E] Claim this available lot')
@@ -3656,7 +3689,14 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
                this._portalTravelTimer = null;
                if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
                window.jpoBeginMapFade?.();
-                 travel(destination);
+                 if (travel(destination)) {
+                   this._portalResponseTimer = setTimeout(() => {
+                     this._portalResponseTimer = null;
+                     if (!this.scene.isActive() || !this.transitionRequested || generation !== this._portalTravelGeneration) return;
+                     recoverFailedTravel();
+                     toast('Travel could not be confirmed. Step away and try again.');
+                   }, 10000);
+                 }
              }, 38);
            }, 42);
         }
@@ -3764,25 +3804,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     clearTimeout(sceneTransitionTimer);
     sceneTransitionTimer = null;
     if (!result?.ok) {
-      officePortalTransition = false;
-      const active = window._phaserGame?.scene?.getScenes(true)?.find((scene) =>
-        scene.scene.key === 'NeighborhoodScene' || scene.scene.key === 'OfficeScene');
-      const camera = active?.cameras?.main;
-      if (active && camera) {
-        active._portalFading = false;
-        active._portalFadeAt = 0;
-        camera.fadeIn(160, 16, 22, 34);
-      }
-      if (window._neighborhoodScene) {
-        window._neighborhoodScene.transitionRequested = false;
-        // A denied doorway must be left before it can trigger another fade.
-        window._neighborhoodScene.portalRelease = false;
-        window._neighborhoodScene.interactHint?.setVisible(false);
-      }
+      recoverFailedTravel();
       if (result?.message) toast(result.message);
       return;
     }
     const game = window._phaserGame;
+    clearTimeout(window._neighborhoodScene?._portalResponseTimer);
     if (!game) return;
     const outgoing = game.scene.getScenes(true).find((scene) => scene.scene.key === 'OfficeScene' || scene.scene.key === 'NeighborhoodScene');
     const finish = () => {

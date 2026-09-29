@@ -10015,10 +10015,21 @@ io.on("connection", (socket) => {
 
   socket.on("locationTransition", (payload) => {
     const envelope = inspectMovementEnvelope(payload, locationOf(players[socket.id]), lastMoveSequence);
-    if (envelope.ignore) return;
+    if (envelope.ignore) {
+      socket.emit("locationTransitionResult", {
+        ok: false, code: envelope.reason,
+        message: "Your position changed. Step away and try the doorway again.",
+      });
+      return;
+    }
     const destination = typeof payload?.destination === "string" ? payload.destination : "";
     void transitionTo(destination).then((ok) => {
       if (ok && envelope.hasSequence) lastMoveSequence = Math.max(lastMoveSequence, envelope.sequence);
+    }).catch((err) => {
+      console.error("location transition failed:", err);
+      socket.emit("locationTransitionResult", {
+        ok: false, code: "unavailable", message: "Travel could not be completed. Please try again.",
+      });
     });
   });
 

@@ -331,4 +331,22 @@ for (const method of ["_resetTransientTravel", "_clearMovementTransport"]) {
   assert(stopped, `${method} still stops a live body`);
 }
 
-console.log("PASS: queued scene readiness and destroyed-Arcade-body teardown regressions");
+// Denial must cancel the delayed reliable movement and travel callbacks too,
+// not merely unfreeze walking (otherwise a stale callback can re-enter).
+const deniedScene = {
+  transitionRequested: true, portalRelease: true,
+  _portalTravelGeneration: 4,
+  _resetTransientTravel: scenePrototype._resetTransientTravel,
+  interactHint: { setVisible(value) { this.visible = value; } },
+};
+context.window._neighborhoodScene = deniedScene;
+socket.dispatch("locationTransitionResult", { ok: false, code: "portal" });
+assert.equal(deniedScene.transitionRequested, false);
+assert.equal(deniedScene.portalRelease, false);
+assert.equal(deniedScene._portalTravelGeneration, 5);
+assert.equal(deniedScene._portalMoveTimer, null);
+assert.equal(deniedScene._portalTravelTimer, null);
+assert.equal(deniedScene._portalResponseTimer, null);
+assert.equal(deniedScene.interactHint.visible, false);
+
+console.log("PASS: queued scene readiness, denied travel cleanup and destroyed-Arcade-body teardown regressions");
