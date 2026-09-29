@@ -11,7 +11,7 @@ assert.doesNotMatch(clientSource, /pt-challenge-bot|Challenge Bot|petBattleBotCh
   "the pet profile should not expose a training-bot challenge path");
 assert.doesNotMatch(serverSource, /socket\.on\("petBattleBotChallenge"/,
   "modified clients must not be able to request a training-bot battle");
-assert.doesNotMatch(serverSource, /BOT_ID|PB_BOT|petBattleIsBot|petBattleBotMove|Training Bot|__petbot__/,
+assert.doesNotMatch(serverSource, /\bBOT_ID\b|PB_BOT|petBattleIsBot|petBattleBotMove|Training Bot|__petbot__/,
   "standard pet battles must not retain a hidden bot combat path");
 assert.doesNotMatch(clientSource, /id="pet-bot-btn"|openPetTraining/,
   "the standalone Pet Arena entry should be removed");
@@ -144,7 +144,7 @@ const expectedPets = [
   "pet_bunny", "pet_bunny_cocoa",
   "pet_turtle", "pet_turtle_sapphire",
   "pet_dragon", "pet_dragon_crimson", "pet_dragon_obsidian",
-  "pet_frog", "pet_unicorn", "pet_phoenix",
+  "pet_frog", "pet_bat", "pet_unicorn", "pet_phoenix",
 ];
 assert.deepEqual(Object.keys(kits).sort(), expectedPets.sort(), "every current pet needs exactly one server kit");
 
@@ -177,7 +177,7 @@ const expectedUltimates = {
   pet_bunny: ["blizzard-binky", "kick"], pet_bunny_cocoa: ["drift-donuts", "kick"],
   pet_turtle: ["shell-garden", "shell"], pet_turtle_sapphire: ["frost-stomp", "shell"],
   pet_dragon: ["neon-ignition", "wing"], pet_dragon_crimson: ["inferno-breath", "wing"], pet_dragon_obsidian: ["void-slam", "wing"],
-  pet_frog: ["rain-dance", "tongue"], pet_unicorn: ["halo-blessing", "horn"], pet_phoenix: ["phoenix-rebirth", "wing"],
+  pet_frog: ["rain-dance", "tongue"], pet_bat: ["void-slam", "wing"], pet_unicorn: ["halo-blessing", "horn"], pet_phoenix: ["phoenix-rebirth", "wing"],
 };
 
 const profileStart = clientSource.indexOf("const PB_ATTACK_PROFILE_BY_PET =");
@@ -232,8 +232,12 @@ assert.doesNotMatch(clientSource, /preferredSuffix\s*=\s*moveId/,
 const actionPoseStart = clientSource.indexOf("function pbActionPoseCandidates(");
 const actionPoseEnd = clientSource.indexOf("const pbActionPoseAvailability", actionPoseStart);
 const actionPoseSandbox = {};
+const petArtStart = clientSource.indexOf("function _petArtUrl(");
+const petArtEnd = clientSource.indexOf("function _petStageArt(", petArtStart);
+assert.ok(petArtStart >= 0 && petArtEnd > petArtStart, "shared pet asset version helper exists");
 vm.runInNewContext(
-  `${clientSource.slice(actionPoseStart, actionPoseEnd)}
+  `${clientSource.slice(petArtStart, petArtEnd)}
+   ${clientSource.slice(actionPoseStart, actionPoseEnd)}
    globalThis.__pbActionPoseCandidates = pbActionPoseCandidates;`,
   actionPoseSandbox,
   { filename: "client-action-pose-candidates.js" },
@@ -244,8 +248,10 @@ for (const pet of expectedPets) {
     const suffix = stage === 3 ? "_s3" : stage === 2 ? "_s2" : "";
     const exactSrc = `assets/pets/anim/${stem}${suffix}_action.png`;
     const candidates = Array.from(actionPoseSandbox.__pbActionPoseCandidates(pet, stage));
-    assert.deepEqual(candidates, [exactSrc],
+    assert.deepEqual(candidates.map(src => src.split("?")[0]), [exactSrc],
       `${pet} stage ${stage} must never fall back to another evolution's action art`);
+    if (pet === "pet_bat")
+      assert.match(candidates[0], /\?bat_rev=/, "bat action art retains its cache version");
     if (stage > 1 && !fs.existsSync(path.join(root, "public", exactSrc))) {
       const lowerForm = stage === 3 ? `${stem}_s2_action.png` : `${stem}_action.png`;
       assert.ok(!candidates.some(src => src.endsWith(lowerForm)),

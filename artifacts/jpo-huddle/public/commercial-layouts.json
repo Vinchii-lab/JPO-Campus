@@ -1474,6 +1474,14 @@
       "label": "Furniture Shop",
       "width": 960,
       "height": 720,
+      "fixtureBlockers": [
+        { "x": 126, "y": 99, "width": 36, "height": 24 },
+        { "x": 174, "y": 99, "width": 36, "height": 24 },
+        { "x": 222, "y": 99, "width": 36, "height": 24 },
+        { "x": 270, "y": 99, "width": 36, "height": 24 },
+        { "x": 219, "y": 355, "width": 42, "height": 18 },
+        { "x": 156, "y": 364, "width": 45, "height": 15 }
+      ],
       "objects": [
         {
           "asset": "shop_shelf",

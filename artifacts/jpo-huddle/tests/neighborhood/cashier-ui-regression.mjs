@@ -15,9 +15,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const sceneSource = fs.readFileSync(path.join(here, '../../public/neighborhood.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(here, '../../public/neighborhood-ui.js'), 'utf8');
 
-const expected = ['furniture-shop', 'garden-shop', 'decor-shop', 'cafe', 'diner', 'bakery', 'sushi'];
+const expected = ['furniture-shop', 'garden-shop', 'decor-shop', 'diner', 'bakery', 'sushi'];
 assert.deepEqual(Object.keys(COMMERCIAL_CASHIERS), expected,
-  'all seven commercial rooms have one fixed cashier');
+  'all six shops have one fixed cashier; the former cafe is a gym');
+assert.equal(COMMERCIAL_CASHIERS.cafe, undefined, 'gym has stations, not a shop cashier');
 const ids = new Set();
 for (const location of expected) {
   const cashier = COMMERCIAL_CASHIERS[location];
@@ -30,7 +31,7 @@ for (const location of expected) {
   assert.match(cashier.info, /\S/, `${location}: cashier information is authored`);
 }
 assert.equal(COMMERCIAL_CASHIERS['furniture-shop'].kind, 'furniture');
-for (const location of ['cafe', 'diner', 'bakery', 'sushi']) {
+for (const location of ['diner', 'bakery', 'sushi']) {
   assert.equal(COMMERCIAL_CASHIERS[location].kind, 'food');
   assert.match(COMMERCIAL_CASHIERS[location].menuKey, /^\w+$/);
 }

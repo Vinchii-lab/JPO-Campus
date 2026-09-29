@@ -14008,6 +14008,9 @@
         // A missing/failed frame just means that pet stays static — _makePet
         // only attaches an anim set when all 5 textures actually loaded.
         for (const p of PETS) {
+          // Baby unicorn has only its authored static sprite. Keep that
+          // fallback rather than requesting five nonexistent animation PNGs.
+          if (p.id === 'pet_unicorn') continue;
           const stem = p.id.replace(/^pet_/, '');
           for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
             this.load.image(`petanim_${stem}_${f}`, _petArtUrl(`/assets/pets/anim/${stem}_${f}.png`));

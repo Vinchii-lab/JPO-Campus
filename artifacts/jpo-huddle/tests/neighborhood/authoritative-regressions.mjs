@@ -243,8 +243,17 @@ assert.match(officeSource, /for \(let r = 46; r <= 48; r\+\+\) for \(let c = 4; 
 assert.match(clientSource, /const LOT_GROUND_DEPTH = 2/);
 assert.match(clientSource, /\.setDepth\(LOT_GROUND_DEPTH\)/, "foundation and yard planes share a low depth");
 assert.match(clientSource, /\.setDepth\(top \+ 48 \* \(row \+ 1\)\)/, "wall tiles must y-sort by their bottom edge");
-assert.match(clientSource, /if \(portal\.residence\) \{\s*this\.portalCues\?\.push\(cue\);(?:(?!scene\.add\.text|this\.add\.text)[\s\S])*?continue;/,
-  "residence doors keep a cue but do not add a duplicate owner label");
+const portalPresentation = clientSource.slice(clientSource.indexOf("    _drawPortalCues() {"), clientSource.indexOf("    _drawPortalCues() {") + 3600);
+assert.match(portalPresentation, /if \(portal\.residence\) continue;/,
+  "residences retain their existing owner sign without duplicate doorway cues");
+assert.match(portalPresentation, /window\.jpoWoodenTravelSign\(/,
+  "non-residence pathways use wooden directional signs");
+assert.doesNotMatch(portalPresentation, /fillRect|fillRoundedRect|add\.rectangle|add\.ellipse/,
+  "pathway presentation must not paint highlighted ground pads");
+assert.match(clientSource, /String\(lot\.name \|\| lot\.ownerEmail\)/,
+  "existing residence sign retains its owner label");
+assert.ok(denseStreet.doors.length > 0,
+  "removing visual pads must preserve authoritative street portal triggers");
 assert.doesNotMatch(clientSource, /setDepth\(Math\.max\(2, originY - 1\)\)/,
   "yard ground must not be y-sorted over actors");
 assert.match(clientSource, /const COLLISION_SAFETY_MARGIN = 0\.5/,

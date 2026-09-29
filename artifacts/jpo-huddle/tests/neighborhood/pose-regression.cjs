@@ -45,6 +45,7 @@ const source = fs.readFileSync(
   'utf8',
 );
 const document = {
+  addEventListener() {},
   body: new Node(),
   activeElement: { tagName: 'BODY' },
   createElement: () => new Node(),

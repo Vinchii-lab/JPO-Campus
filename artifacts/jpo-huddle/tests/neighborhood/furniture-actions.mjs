@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { collisionRegions, reachableRoute } from "./reachable-route.mjs";
 import {
   FURNITURE_CATALOG,
   HOME_GRID,
@@ -82,6 +83,31 @@ assert.equal(LOCATION_GEOMETRY["furniture-shop"].seats.length, 0,
   "removed placeholder chairs cannot expose unrelated static Sit targets");
 assert.ok(Array.isArray(showroomFixtureBlocks) && showroomFixtureBlocks.length > 0,
   "retained Huddle Home decor fixtures have authored physical bodies");
+// These supplied PNGs have transparent bottom padding. The renderer uses
+// origin (0.5,1), scale 3; collide with their visible lower base, NOT their
+// padded image anchor or the discarded legacy rectangles below the art.
+const retainedBasePixels = {
+  shop_shelf: { width: 16, height: 32, left: 2, top: 15, right: 14, bottom: 23 },
+  shop_sofa: { width: 16, height: 32, left: 1, top: 17, right: 15, bottom: 23 },
+  shop_lamp: { width: 16, height: 48, left: 0, top: 36, right: 15, bottom: 41 },
+};
+const showroomRoom = commercialLayouts.rooms["furniture-shop"];
+assert.equal(showroomFixtureBlocks.length, showroomRoom.objects.length,
+  "exactly one physical base per retained shelf, sofa, or lamp");
+assert.deepEqual(showroomFixtureBlocks, showroomRoom.objects.map(object => {
+  const base = retainedBasePixels[object.asset];
+  assert.ok(base, `review collision when adding retained fixture ${object.asset}`);
+  const png = fs.readFileSync(path.join(here, "../../public", commercialLayouts.assets[object.asset]));
+  assert.equal(png.readUInt32BE(16), base.width);
+  assert.equal(png.readUInt32BE(20), base.height);
+  const scale = object.scale || 1;
+  return {
+    x: object.x + (base.left - base.width / 2) * scale,
+    y: object.y + (base.top - base.height) * scale,
+    width: (base.right - base.left) * scale,
+    height: (base.bottom - base.top) * scale,
+  };
+}), "fixture bodies follow actual bottom-centred native art, including transparent padding");
 const showroomDemos = [
   ["showroom-blue-sofa", "blue_sofa", 180, 320, "sit"],
   ["showroom-lounge-sofa", "lounge_sofa", 340, 320, "sit"],
@@ -108,6 +134,22 @@ const showroomDemos = [
   };
 });
 const showroomBlocks = [...showroomFixtureBlocks, ...showroomDemos.map((demo) => demo.block)];
+for (const block of showroomFixtureBlocks) {
+  assert.equal(validLocationMove(showroomLocation, block.x + block.width / 2,
+    block.y + block.height / 2, showroomBlocks), false, "visible fixture base is solid");
+}
+for (const point of [{ x: 144, y: 150 }, { x: 192, y: 150 }, { x: 180, y: 400 }])
+  assert.equal(validLocationMove(showroomLocation, point.x, point.y, showroomBlocks), true,
+    "discarded legacy rectangles must not leave ghost collisions below padded art");
+const showroomRegions = collisionRegions({
+  serverBlocks: [...LOCATION_GEOMETRY["furniture-shop"].blockers, ...showroomBlocks],
+});
+for (const goal of [{ x: 100, y: 200 }, { x: 400, y: 200 }, { x: 850, y: 400 }]) {
+  assert.ok(reachableRoute({
+    start: { x: 480, y: 576 }, goal: { ...goal, radius: 8 },
+    bounds: { width: 960, height: 720 }, regions: showroomRegions,
+  }).waypoints.length, "retained fixture bases preserve full-footprint showroom aisles");
+}
 function showroomActionAnchor(demo, action) {
   const gridX = demo.block.x / HOME_GRID.cell;
   const gridY = demo.block.y / HOME_GRID.cell;

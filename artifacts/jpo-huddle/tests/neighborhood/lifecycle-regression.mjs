@@ -41,7 +41,7 @@ class Node {
     this.innerHTML = "";
     this.style = { setProperty() {} };
     this.dataset = {};
-    this.classList = { toggle() {}, add() {}, remove() {} };
+    this.classList = { toggle() {}, add() {}, remove() {}, contains() { return false; } };
   }
   appendChild() {}
   setAttribute() {}
@@ -83,6 +83,7 @@ const source = fs.readFileSync(path.join(here, "../../public/neighborhood.js"), 
 const socket = new Socket();
 const elements = new Map();
 const document = {
+  addEventListener() {},
   body: new Node("body"),
   activeElement: { tagName: "BODY" },
   createElement: () => new Node(),
@@ -100,7 +101,7 @@ const context = {
   getComputedStyle: () => ({ display: "none" }),
   requestAnimationFrame: (fn) => fn(),
   ResizeObserver: class { observe() {} },
-  MutationObserver: class { observe() {} },
+  MutationObserver: class { observe() {} disconnect() {} },
   performance: { now: () => 1000 },
   setTimeout,
   clearTimeout,

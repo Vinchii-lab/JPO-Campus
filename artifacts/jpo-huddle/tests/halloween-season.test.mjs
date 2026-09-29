@@ -11,6 +11,23 @@ const neighborhood = readFileSync(new URL("public/neighborhood.js", root), "utf8
 const at = date => new Date(date);
 const released = at("2026-09-29T12:00:00Z");
 
+test("baby unicorn retains static art without missing animation requests", () => {
+  const start = html.indexOf("        for (const p of PETS) {", html.indexOf("// Animated pet frames"));
+  const end = html.indexOf("// Wearables are 2-frame sheets", start);
+  assert.ok(start >= 0 && end > start, "pet animation preload loop exists");
+  const requests = [];
+  vm.runInNewContext(html.slice(start, end), {
+    PETS: [{ id: "pet_unicorn" }, { id: "pet_phoenix" }, { id: "pet_bat" }],
+    _petArtUrl: url => url,
+    load: { image: (key, url) => requests.push({ key, url }) },
+  });
+  assert.equal(requests.length, 10, "other pets retain all five animation loads");
+  assert.ok(requests.every(({ url }) => !url.includes("unicorn")));
+  assert.ok(existsSync(new URL("public/assets/pets/pet_unicorn.png", root)), "authored static baby remains");
+  for (const frame of ["walk1", "walk2", "walk3", "sit", "action"])
+    assert.ok(existsSync(new URL(`public/assets/pets/anim/unicorn_s3_${frame}.png`, root)), "grown animation remains");
+});
+
 test("bounded release and UTC calendar have a single October 10 boundary", () => {
   assert.equal(seasonNow(new Date(HALLOWEEN_RELEASE_START - 1), true), "rainy");
   assert.equal(seasonNow(new Date(HALLOWEEN_RELEASE_START), true), "halloween");
@@ -81,7 +98,7 @@ test("real purchase handlers charge prices, stack cape, replace head slot, and b
   for (const item of ["witchhat", "vampirecape", "batwings", "pumpkinhead"])
     await h.handlers.buyCosmetic({ item });
   await h.handlers.buyPet({ item: "pet_bat" });
-  assert.equal(h.player.coins, 60000 - 6500 - 6000 - 12000 - 8000 - 12000);
+  assert.equal(h.player.coins, 60000 - 6500 - 13000 - 12000 - 10000 - 18000);
   assert.equal(h.player.equipped, "pumpkinhead");
   assert.equal(h.player.slots.neckwear, "vampirecape");
   assert.equal(h.player.wings, "batwings");
@@ -142,8 +159,8 @@ test("persistent purchases use existing atomic ownership/coins guards and correc
   assert.match(h.queries[0][0], /equipped_neckwear = \$3/);
   assert.match(h.queries[1][0], /equipped_cosmetic = \$3/);
   assert.match(h.queries[2][0], /equipped_pet = \$3/);
-  assert.deepEqual(Array.from(h.queries[0][1]), ["test@example.invalid", 6000, "vampirecape"]);
-  assert.deepEqual(Array.from(h.queries[2][1]), ["test@example.invalid", 12000, "pet_bat"]);
+  assert.deepEqual(Array.from(h.queries[0][1]), ["test@example.invalid", 13000, "vampirecape"]);
+  assert.deepEqual(Array.from(h.queries[2][1]), ["test@example.invalid", 18000, "pet_bat"]);
 });
 
 test("bat and preserved frog retain normal three-stage XP thresholds and race stems", () => {
@@ -249,7 +266,7 @@ test("all bat stage/frame assets and native wearable sheets match renderer contr
     assert.equal(png.readUInt32BE(16), 48);
     assert.equal(png.readUInt32BE(20), height);
   }
-  assert.match(html, /WEARABLE_DEFS\.vampirecape\.bakeLayer = true/);
+  assert.match(html, /WEARABLE_DEFS\.vampirecape\.poseLayer = true/);
   assert.match(html, /witchhat:'head', pumpkinhead:'head'/);
   assert.match(server, /const PET_EVOLVE_XP = \[30, 70\]/);
   assert.match(html, /const PET_EVOLVE_XP = \[30, 70\]/);

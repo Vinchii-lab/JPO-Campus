@@ -1,0 +1,86 @@
+[
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "office"
+      }
+    ]
+  },
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "office"
+      }
+    ]
+  },
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "neighborhood"
+      }
+    ]
+  },
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "office"
+      }
+    ]
+  },
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "neighborhood"
+      }
+    ]
+  },
+  {
+    "event": "locationTransitionResult",
+    "args": [
+      {
+        "ok": true,
+        "location": "home:qa-release-route-1790710729228@example.invalid"
+      }
+    ]
+  },
+  {
+    "event": "furnitureActivity",
+    "args": [
+      {}
+    ]
+  },
+  {
+    "event": "furnitureInteractionResult",
+    "args": [
+      {
+        "ok": true,
+        "action": "sit",
+        "instanceId": "fed73965-d1e8-4507-8a19-89c7702adb60"
+      }
+    ]
+  },
+  {
+    "event": "furnitureActivity",
+    "args": [
+      {}
+    ]
+  },
+  {
+    "event": "furnitureInteractionResult",
+    "args": [
+      {
+        "ok": true
+      }
+    ]
+  }
+]
