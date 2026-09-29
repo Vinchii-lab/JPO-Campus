@@ -934,3 +934,17 @@ mtime_ms = 1790702634558
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/6b9ff85c-93bd-443a-a484-01bce4f98e10/a489503b-5cae-4793-9bc4-68766e3126fc"
 storage_version_token = "1790702865245755"
 content_type = "image/png"
+
+[[outputs]]
+id = "guZEOnL-4uK5lL8hpsTpB"
+uri = "file://screenshots/cape-seated-direction.png"
+type = "image"
+title = "Corrected seated cape direction"
+description = "Native rendered pose checks: the cape trails behind seated characters, with the approved standing design and pumpkin head preserved."
+logical_id = "d4ac8d58-ff0d-41f7-afaf-5cddea078975"
+content_hash = "sha256:e013cf83118e9157448c66d37817e27bc6a2a7db17ec6cdb82cb771a7da0139f"
+size = 26690
+mtime_ms = 1790703259670
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/d4ac8d58-ff0d-41f7-afaf-5cddea078975/54deee59-86b4-4ebe-872f-d1dd046d84aa"
+storage_version_token = "1790703302348970"
+content_type = "image/png"

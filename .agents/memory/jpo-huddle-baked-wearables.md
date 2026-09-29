@@ -28,4 +28,10 @@ Capes need a broad, shoulder-to-ankle drape with visible flared sides while leav
 
 **Why:** The initial Halloween cape was rejected as a front panel; the tiny silhouette-masked revision was also rejected. The user explicitly wanted it longer and wider, recognizable as a cape.
 
+The user explicitly loved the full rounded pumpkin replacement and broad, long cape. Preserve that design when fixing pose bugs; do not shrink or redesign it again.
+
 **How to apply:** Allow pose-tracked overlays to extend beyond native body-frame bounds instead of clipping broad garments. Inspect tightly cropped native standing/seated renders in every direction, including combinations with owned seasonal layers. Full-head replacements must cover original hair/head, not merely stamp a face on top.
+
+Seated-sheet direction names describe chair mappings, not reliable anatomical facings. Inspect native frames (including their second halves) before choosing cape orientation.
+
+**Why:** Treating the down-seat sheet as a front-facing body produced a cape apron over a profile pose. When placing cape below body, keep head replacement above the body—not just above the cape.

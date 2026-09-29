@@ -207,21 +207,26 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
     const cx=clothing.length?Math.round(clothing.reduce((s,p)=>s+p[0],0)/clothing.length):a.hx;
     // 40px pose cells deliberately extend OUTSIDE the body's 16px tiles.
     // Native centre alignment also supports the 32px side-sitting sheets.
+    // All three native seated sheets are profiles, not compass-facing views:
+    // frames 0–5 face right (face/knees right), 6–11 face left. In particular
+    // sit3 is NOT a front view. Keep the approved pumpkin direction unchanged.
+    const capeDir=suffix==='run'?dir:f<6?'right':'left';
     const pad=(40-fw)/2, center=cx+pad, bottom=a.fy-1;
     const shoulder=Math.min(shoulderY,a.hy+14), top=Math.min(shoulder-2,a.hy+9);
     const cape=image(40,32);
     const side=dir==='right'||dir==='left', sign=dir==='left'?1:-1;
-    const points=side
-      ? [[center+sign*2,top+2],[center+sign*8,top-1],[center+sign*14,bottom-1],
-         [center+sign*9,bottom],[center+sign*5,bottom-1],[center+sign*1,bottom-2]]
+    const capeSide=capeDir==='right'||capeDir==='left', capeSign=capeDir==='left'?1:-1;
+    const points=capeSide
+      ? [[center+capeSign*2,top+2],[center+capeSign*8,top-1],[center+capeSign*14,bottom-1],
+         [center+capeSign*9,bottom],[center+capeSign*5,bottom-1],[center+capeSign*1,bottom-2]]
       : [[center-8,top],[center-5,top+2],[center+5,top+2],[center+8,top],[center+14,bottom-1],
          [center+8,bottom],[center+4,bottom-1],[center,bottom],
          [center-4,bottom-1],[center-8,bottom],[center-14,bottom-1]];
     poly(cape,points,'#24182f');
-    poly(cape,points.map(([x,y])=>[x+(x<center?1:-1),y+ (y===top?1:0)]),dir==='down'?'#9d2949':'#49305f');
-    if(side){
-      line(cape,center+sign*5,top+1,center+sign*11,bottom-2,'#bf3e58',2);
-      line(cape,center+sign*3,top+2,center+sign*6,bottom-2,'#765087');
+    poly(cape,points.map(([x,y])=>[x+(x<center?1:-1),y+ (y===top?1:0)]),capeDir==='down'?'#9d2949':'#49305f');
+    if(capeSide){
+      line(cape,center+capeSign*5,top+1,center+capeSign*11,bottom-2,'#bf3e58',2);
+      line(cape,center+capeSign*3,top+2,center+capeSign*6,bottom-2,'#765087');
     } else {
       for(const dx of [-4,4]){
         line(cape,center+dx,top+1,center+dx*2.3,bottom-2,dir==='down'?'#e05a6c':'#79518f',2);
@@ -232,8 +237,8 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
       const local=x-pad, i=(y*40+x)*4;
       // Mask to real anatomy: front torso/arms stay unobstructed. The back
       // drape covers clothing but never the head or hands.
-      if((dir!=='up' && alpha(base,local,y)) ||
-        (dir==='up' && (alpha(hair,local,y)||alpha(skin,local,y)))) cape.data[i+3]=0;
+      if((capeDir!=='up' && alpha(base,local,y)) ||
+        (capeDir==='up' && (alpha(hair,local,y)||alpha(skin,local,y)))) cape.data[i+3]=0;
     }
     // Full replacement HEAD: head bounds include every hair pixel above the
     // shoulders (including a rain hood), not the old 13-row face sticker.
