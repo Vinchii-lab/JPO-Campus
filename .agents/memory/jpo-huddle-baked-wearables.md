@@ -35,3 +35,10 @@ The user explicitly loved the full rounded pumpkin replacement and broad, long c
 Seated-sheet direction names describe chair mappings, not reliable anatomical facings. Inspect native frames (including their second halves) before choosing cape orientation.
 
 **Why:** Treating the down-seat sheet as a front-facing body produced a cape apron over a profile pose. When placing cape below body, keep head replacement above the body—not just above the cape.
+
+## Full-head animation coherence
+Derive a rigid head replacement from one approved pose per direction, then translate with the native crown motion; don't reshape its ellipse from changing shirt/hair bounds.
+
+**Why:** Frame-dependent bounds distorted pumpkin geometry, while packet-driven overlay updates lagged remote body animations. Both read as the pumpkin lifting away during walking.
+
+**How to apply:** Synchronize pose overlays after native animation advances, not just on movement packets. Verify the whole gait cycle, including opposite-phase final frames and remote animation without incoming packets.

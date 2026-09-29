@@ -6,6 +6,7 @@ const path = require('path');
 const { PNG } = require('pngjs');
 const ROOT = path.resolve(__dirname, '../public/assets');
 const previewOnly = process.argv.includes('--preview');
+const pumpkinOnly = process.argv.includes('--pumpkin-only');
 const C = {
   outline: '#20152f', edge: '#41244e', plum: '#47305f', light: '#695183',
   violet: '#946db1', wing: '#372139', membrane: '#703c61', rib: '#a15b83',
@@ -44,8 +45,8 @@ function line(p,x1,y1,x2,y2,color,width=1) {
 // Keep the generated source: the three rows have genuinely different anatomy,
 // not one procedural face scaled up. Explicit crops avoid wide-wing tile bleed.
 const { execFileSync } = require('child_process');
-function save(name,p){fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
-if (!process.argv.includes('--wear-only')) {
+function save(name,p){if(pumpkinOnly && !name.endsWith('_run_wear_pumpkinhead.png'))return;fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
+if (!process.argv.includes('--wear-only') && !pumpkinOnly) {
 const source = path.resolve(__dirname, '../../../attached_assets/generated_images/bat_evolution_native_sheet.png');
 const sheet = PNG.sync.read(fs.readFileSync(source));
 // Key the warm cream only; purple highlights and white teeth remain intact.
@@ -309,6 +310,31 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
       const si=(sy*hatSheet.width+art*16+x)*4;
       if(tx>=0&&tx<fw&&ty>=0&&ty<32&&hatSheet.data[si+3]&&!alpha(skin,tx,ty))
         hatSheet.data.copy(hats.data,(ty*hats.width+f*fw+tx)*4,si,si+4);
+    }
+  }
+  if(suffix==='run'){
+    // Preserve each approved standing drawing exactly. Clothing/skin split
+    // bounds are not head-motion trackers (Alex's crown is outside the hair
+    // mask, and Bob's rear shoulder stays fixed while his head rises).
+    // Translate the complete reference artwork with the native crown instead
+    // of redrawing/resizing its ellipse and face from changing arm bounds.
+    const crown=f=>{
+      for(let y=0;y<32;y++)for(let x=0;x<fw;x++)
+        if(base.data[(y*base.width+f*fw+x)*4+3])return y;
+      throw Error(`${character} run frame ${f}: missing native head`);
+    };
+    for(let start=0;start<24;start+=6){
+      const reference=image(40,32);
+      for(let y=0;y<32;y++)
+        pumpkins.data.copy(reference.data,y*40*4,(y*pumpkins.width+start*40)*4,(y*pumpkins.width+start*40+40)*4);
+      for(let f=start+1;f<start+6;f++){
+        const dy=crown(f)-crown(start);
+        for(let y=0;y<32;y++){
+          const dest=(y*pumpkins.width+f*40)*4, sy=y-dy;
+          pumpkins.data.fill(0,dest,dest+40*4);
+          if(sy>=0&&sy<32)reference.data.copy(pumpkins.data,dest,sy*40*4,(sy+1)*40*4);
+        }
+      }
     }
   }
   save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_vampirecape.png`),wideCape);

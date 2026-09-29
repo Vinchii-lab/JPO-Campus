@@ -1046,3 +1046,17 @@ mtime_ms = 1790706602678
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/cada9981-d5b3-497b-a513-d42a0a8f7601/9580f8d5-fbeb-4608-929c-9bb556e5ce64"
 storage_version_token = "1790706705896323"
 content_type = "image/png"
+
+[[outputs]]
+id = "tpkzLAx0f6xQIJaS2cXqh"
+uri = "file://screenshots/travel-hq-native.png"
+type = "image"
+title = "Willow Walk — wooden sign, plain ground"
+description = "Actual HQ exit with the highlighted rectangle removed. The invisible walk-through travel zone remains unchanged."
+logical_id = "677c6a62-13be-4ae5-8fd9-942b8149c119"
+content_hash = "sha256:38556db521d46651c7568c67847b510f8a600e56098632c308a7966ed80c53df"
+size = 57931
+mtime_ms = 1790708823100
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/677c6a62-13be-4ae5-8fd9-942b8149c119/c5d7006e-7fd1-4b45-a842-5bb46f373f5e"
+storage_version_token = "1790709020284847"
+content_type = "image/png"

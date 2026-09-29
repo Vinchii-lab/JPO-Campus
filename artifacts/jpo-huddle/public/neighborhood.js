@@ -1,5 +1,24 @@
 // Shared city / home presentation. Server transitions, permissions, placement,
 // and movement validation remain authoritative in server.js / neighborhood.mjs.
+// Pure scenery: no input handlers, physics bodies, or changes to travel bounds.
+window.jpoWoodenTravelSign = function(scene, x, footY, label, arrow, depth = 2000) {
+  const text = scene.add.text(x, footY - 35, `${arrow} ${label}`, {
+    fontFamily: 'monospace', fontSize: '11px', fontStyle: 'bold',
+    color: '#fff0cf',
+  }).setOrigin(0.5).setDepth(depth + 1);
+  const width = Math.ceil(text.width) + 24;
+  const wood = scene.add.graphics().setDepth(depth);
+  wood.fillStyle(0x503322, 1).fillRect(x - 5, footY - 37, 10, 37);
+  wood.fillStyle(0xa77a49, 1).fillRect(x - 2, footY - 35, 4, 34);
+  wood.fillStyle(0x493022, 1).fillRect(x - width / 2, footY - 50, width, 29);
+  wood.fillStyle(0x946239, 1).fillRect(x - width / 2 + 2, footY - 48, width - 4, 25);
+  wood.fillStyle(0xbf9058, 1).fillRect(x - width / 2 + 3, footY - 48, width - 6, 2);
+  wood.fillStyle(0x704727, 1).fillRect(x - width / 2 + 4, footY - 25, width - 8, 2);
+  wood.fillStyle(0xd8b77d, 1);
+  for (const side of [-1, 1]) wood.fillRect(x + side * (width / 2 - 7) - 1, footY - 36, 2, 2);
+  return [wood, text];
+};
+
 window.initNeighborhoodUI = function(socket, getGlobals) {
   if (document.getElementById('neighborhood-ui')) return;
   window.JpoGym?.bind(socket);
@@ -1943,7 +1962,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       });
 
       this._sign(square.x + square.width / 2, square.y + 28, 'HUDDLE PLAZA');
-      this._sign(94, square.y + square.height - 168, '← WILLOW WALK');
+      // The west exit is labeled by its roadside wooden travel sign.
       this._sign(square.x + 150, square.y + square.height - 18, 'GATHERING SQUARE');
     }
 
@@ -2243,13 +2262,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._interiorTileField('home_floor', 'home_wall', HOME_EXIT);
       this._drawHomeRoomDivisions();
 
-      // The centered exit stays open from the arrival tile to the threshold.
-      // This is the one non-tile cue in an otherwise unfurnished residence.
-      const doorArt = this.add.graphics();
-      doorArt.fillStyle(0x9e7355, 1).fillRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
-      doorArt.lineStyle(3, 0xe8d09b, 0.9).strokeRoundedRect(HOME_EXIT.x, HOME_EXIT.y, HOME_EXIT.width, HOME_EXIT.height - 30, 6);
-      this._setFloorDepth(doorArt, HOME_EXIT.y + HOME_EXIT.height, INTERIOR_DEPTH.FRONT_BIAS, 'interior-exit');
-      this.add.text(HOME_EXIT.x + HOME_EXIT.width / 2, HOME_EXIT.y + 30, 'WILLOW EXIT ↓', { fontFamily: 'monospace', fontSize: '10px', color: '#fff5d6', backgroundColor: '#604332cc', padding: { x: 4, y: 2 } }).setOrigin(0.5).setDepth(12);
+      // Keep the centered exit's authored floor plain and traversable.
+      // _drawPortalCues adds its wooden destination sign beside the opening.
     }
 
     _drawHomeRoomDivisions() {
@@ -2272,21 +2286,10 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _drawPortalCues() {
       this._streetPortalVisuals = [];
       for (const portal of this.doors) {
-        const cue = this.add.graphics().setDepth(3);
-        cue.fillStyle(0xf6df75, 0.32).fillRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
-        cue.lineStyle(2, 0xfff1a8, 0.9).strokeRoundedRect(portal.x + 3, portal.y + 3, portal.width - 6, portal.height - 6, 7);
-        // Each residence already has one lot/owner sign at its facade. Keep
-        // the door highlight for orientation, but do not stack a second
-        // "OWNER'S HOME" portal label over that sign.
-        if (portal.residence) {
-          this.portalCues?.push(cue);
-          this._streetPortalVisuals.push({
-            x: portal.x, width: portal.width, left: portal.x, right: portal.x + portal.width,
-            top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue],
-          });
-          continue;
-        }
-                const label = portal.destination === 'home' ? String(portal.label || (portal.residence ? ('Lot ' + portal.lot) : 'Home')).toUpperCase() :
+        // Leave the authored ground/doorway untouched. Residences already
+        // have a wooden owner sign, so do not stack a second sign on it.
+        if (portal.residence) continue;
+        const label = portal.destination === 'home' ? String(portal.label || 'Home').toUpperCase() :
           portal.destination === 'furniture-shop' ? 'FURNISHINGS' :
           portal.destination === 'garden-shop' ? 'WILLOW & GREEN' :
           portal.destination === 'decor-shop' ? 'PLAZA DECOR' :
@@ -2299,14 +2302,21 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           portal.destination === 'city' ? 'PLAZA' :
           portal.destination === 'neighborhood' ? String(portal.label || 'WILLOW WALK').toUpperCase() :
           String(portal.label || 'HQ GARDEN').toUpperCase();
-        const labelY = portal.y <= 0 ? portal.y + portal.height + 22 : portal.y - 5;
-        const text = this.add.text(portal.x + portal.width / 2, labelY, label, {
-          fontFamily: 'monospace', fontSize: '11px', color: '#fff7c7', backgroundColor: '#35424acc', padding: { x: 4, y: 2 },
-        }).setOrigin(0.5, 1).setDepth(2000);
-        this.portalCues?.push(cue, text);
+        const mapWidth = this.mapWidth;
+        const sideExit = portal.x <= 0 || portal.x + portal.width >= mapWidth;
+        const arrow = sideExit ? (portal.x <= 0 ? '←' : '→')
+          : (portal.y <= 0 || this.location === 'city' || this.location === 'neighborhood' ? '↑' : '↓');
+        // Boundary signs sit above the opening; doorway signs stand beside
+        // the threshold, never in the automatic walk-through trigger.
+        const signX = sideExit
+          ? (portal.x <= 0 ? 100 : mapWidth - 100)
+          : Math.min(mapWidth - 110, portal.x + portal.width + 110);
+        const footY = sideExit ? portal.y - 12 : portal.y + Math.min(portal.height, 60);
+        const objects = window.jpoWoodenTravelSign(this, signX, footY, label, arrow);
+        this.portalCues?.push(...objects);
         this._streetPortalVisuals.push({
-          x: portal.x, width: portal.width, left: portal.x, right: portal.x + portal.width,
-          top: portal.y - 64, bottom: portal.y + portal.height + 32, objects: [cue, text],
+          x: signX - 150, width: 300, left: signX - 150, right: signX + 150,
+          top: footY - 50, bottom: footY, objects,
         });
       }
       this._streetLotVisibleKey = null;

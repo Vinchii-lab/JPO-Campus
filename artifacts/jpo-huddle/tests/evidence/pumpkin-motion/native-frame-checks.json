@@ -1,0 +1,482 @@
+[
+  {
+    "char": "adam",
+    "frame": 0,
+    "overlay": 0
+  },
+  {
+    "char": "adam",
+    "frame": 6,
+    "overlay": 6
+  },
+  {
+    "char": "adam",
+    "frame": 12,
+    "overlay": 12
+  },
+  {
+    "char": "adam",
+    "frame": 18,
+    "overlay": 18
+  },
+  {
+    "char": "alex",
+    "frame": 0,
+    "overlay": 0
+  },
+  {
+    "char": "alex",
+    "frame": 6,
+    "overlay": 6
+  },
+  {
+    "char": "alex",
+    "frame": 12,
+    "overlay": 12
+  },
+  {
+    "char": "alex",
+    "frame": 18,
+    "overlay": 18
+  },
+  {
+    "char": "amelia",
+    "frame": 0,
+    "overlay": 0
+  },
+  {
+    "char": "amelia",
+    "frame": 6,
+    "overlay": 6
+  },
+  {
+    "char": "amelia",
+    "frame": 12,
+    "overlay": 12
+  },
+  {
+    "char": "amelia",
+    "frame": 18,
+    "overlay": 18
+  },
+  {
+    "char": "bob",
+    "frame": 0,
+    "overlay": 0
+  },
+  {
+    "char": "bob",
+    "frame": 6,
+    "overlay": 6
+  },
+  {
+    "char": "bob",
+    "frame": 12,
+    "overlay": 12
+  },
+  {
+    "char": "bob",
+    "frame": 18,
+    "overlay": 18
+  },
+  {
+    "char": "adam",
+    "frame": 1,
+    "overlay": 1
+  },
+  {
+    "char": "adam",
+    "frame": 7,
+    "overlay": 7
+  },
+  {
+    "char": "adam",
+    "frame": 13,
+    "overlay": 13
+  },
+  {
+    "char": "adam",
+    "frame": 19,
+    "overlay": 19
+  },
+  {
+    "char": "alex",
+    "frame": 1,
+    "overlay": 1
+  },
+  {
+    "char": "alex",
+    "frame": 7,
+    "overlay": 7
+  },
+  {
+    "char": "alex",
+    "frame": 13,
+    "overlay": 13
+  },
+  {
+    "char": "alex",
+    "frame": 19,
+    "overlay": 19
+  },
+  {
+    "char": "amelia",
+    "frame": 1,
+    "overlay": 1
+  },
+  {
+    "char": "amelia",
+    "frame": 7,
+    "overlay": 7
+  },
+  {
+    "char": "amelia",
+    "frame": 13,
+    "overlay": 13
+  },
+  {
+    "char": "amelia",
+    "frame": 19,
+    "overlay": 19
+  },
+  {
+    "char": "bob",
+    "frame": 1,
+    "overlay": 1
+  },
+  {
+    "char": "bob",
+    "frame": 7,
+    "overlay": 7
+  },
+  {
+    "char": "bob",
+    "frame": 13,
+    "overlay": 13
+  },
+  {
+    "char": "bob",
+    "frame": 19,
+    "overlay": 19
+  },
+  {
+    "char": "adam",
+    "frame": 2,
+    "overlay": 2
+  },
+  {
+    "char": "adam",
+    "frame": 8,
+    "overlay": 8
+  },
+  {
+    "char": "adam",
+    "frame": 14,
+    "overlay": 14
+  },
+  {
+    "char": "adam",
+    "frame": 20,
+    "overlay": 20
+  },
+  {
+    "char": "alex",
+    "frame": 2,
+    "overlay": 2
+  },
+  {
+    "char": "alex",
+    "frame": 8,
+    "overlay": 8
+  },
+  {
+    "char": "alex",
+    "frame": 14,
+    "overlay": 14
+  },
+  {
+    "char": "alex",
+    "frame": 20,
+    "overlay": 20
+  },
+  {
+    "char": "amelia",
+    "frame": 2,
+    "overlay": 2
+  },
+  {
+    "char": "amelia",
+    "frame": 8,
+    "overlay": 8
+  },
+  {
+    "char": "amelia",
+    "frame": 14,
+    "overlay": 14
+  },
+  {
+    "char": "amelia",
+    "frame": 20,
+    "overlay": 20
+  },
+  {
+    "char": "bob",
+    "frame": 2,
+    "overlay": 2
+  },
+  {
+    "char": "bob",
+    "frame": 8,
+    "overlay": 8
+  },
+  {
+    "char": "bob",
+    "frame": 14,
+    "overlay": 14
+  },
+  {
+    "char": "bob",
+    "frame": 20,
+    "overlay": 20
+  },
+  {
+    "char": "adam",
+    "frame": 3,
+    "overlay": 3
+  },
+  {
+    "char": "adam",
+    "frame": 9,
+    "overlay": 9
+  },
+  {
+    "char": "adam",
+    "frame": 15,
+    "overlay": 15
+  },
+  {
+    "char": "adam",
+    "frame": 21,
+    "overlay": 21
+  },
+  {
+    "char": "alex",
+    "frame": 3,
+    "overlay": 3
+  },
+  {
+    "char": "alex",
+    "frame": 9,
+    "overlay": 9
+  },
+  {
+    "char": "alex",
+    "frame": 15,
+    "overlay": 15
+  },
+  {
+    "char": "alex",
+    "frame": 21,
+    "overlay": 21
+  },
+  {
+    "char": "amelia",
+    "frame": 3,
+    "overlay": 3
+  },
+  {
+    "char": "amelia",
+    "frame": 9,
+    "overlay": 9
+  },
+  {
+    "char": "amelia",
+    "frame": 15,
+    "overlay": 15
+  },
+  {
+    "char": "amelia",
+    "frame": 21,
+    "overlay": 21
+  },
+  {
+    "char": "bob",
+    "frame": 3,
+    "overlay": 3
+  },
+  {
+    "char": "bob",
+    "frame": 9,
+    "overlay": 9
+  },
+  {
+    "char": "bob",
+    "frame": 15,
+    "overlay": 15
+  },
+  {
+    "char": "bob",
+    "frame": 21,
+    "overlay": 21
+  },
+  {
+    "char": "adam",
+    "frame": 4,
+    "overlay": 4
+  },
+  {
+    "char": "adam",
+    "frame": 10,
+    "overlay": 10
+  },
+  {
+    "char": "adam",
+    "frame": 16,
+    "overlay": 16
+  },
+  {
+    "char": "adam",
+    "frame": 22,
+    "overlay": 22
+  },
+  {
+    "char": "alex",
+    "frame": 4,
+    "overlay": 4
+  },
+  {
+    "char": "alex",
+    "frame": 10,
+    "overlay": 10
+  },
+  {
+    "char": "alex",
+    "frame": 16,
+    "overlay": 16
+  },
+  {
+    "char": "alex",
+    "frame": 22,
+    "overlay": 22
+  },
+  {
+    "char": "amelia",
+    "frame": 4,
+    "overlay": 4
+  },
+  {
+    "char": "amelia",
+    "frame": 10,
+    "overlay": 10
+  },
+  {
+    "char": "amelia",
+    "frame": 16,
+    "overlay": 16
+  },
+  {
+    "char": "amelia",
+    "frame": 22,
+    "overlay": 22
+  },
+  {
+    "char": "bob",
+    "frame": 4,
+    "overlay": 4
+  },
+  {
+    "char": "bob",
+    "frame": 10,
+    "overlay": 10
+  },
+  {
+    "char": "bob",
+    "frame": 16,
+    "overlay": 16
+  },
+  {
+    "char": "bob",
+    "frame": 22,
+    "overlay": 22
+  },
+  {
+    "char": "adam",
+    "frame": 5,
+    "overlay": 5
+  },
+  {
+    "char": "adam",
+    "frame": 11,
+    "overlay": 11
+  },
+  {
+    "char": "adam",
+    "frame": 17,
+    "overlay": 17
+  },
+  {
+    "char": "adam",
+    "frame": 23,
+    "overlay": 23
+  },
+  {
+    "char": "alex",
+    "frame": 5,
+    "overlay": 5
+  },
+  {
+    "char": "alex",
+    "frame": 11,
+    "overlay": 11
+  },
+  {
+    "char": "alex",
+    "frame": 17,
+    "overlay": 17
+  },
+  {
+    "char": "alex",
+    "frame": 23,
+    "overlay": 23
+  },
+  {
+    "char": "amelia",
+    "frame": 5,
+    "overlay": 5
+  },
+  {
+    "char": "amelia",
+    "frame": 11,
+    "overlay": 11
+  },
+  {
+    "char": "amelia",
+    "frame": 17,
+    "overlay": 17
+  },
+  {
+    "char": "amelia",
+    "frame": 23,
+    "overlay": 23
+  },
+  {
+    "char": "bob",
+    "frame": 5,
+    "overlay": 5
+  },
+  {
+    "char": "bob",
+    "frame": 11,
+    "overlay": 11
+  },
+  {
+    "char": "bob",
+    "frame": 17,
+    "overlay": 17
+  },
+  {
+    "char": "bob",
+    "frame": 23,
+    "overlay": 23
+  }
+]
