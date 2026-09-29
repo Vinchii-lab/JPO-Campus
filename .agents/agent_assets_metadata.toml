@@ -878,3 +878,17 @@ mtime_ms = 1790697371795
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5de2cb78-6f9b-4fb5-95b8-7ef1ef3800f6/55e12017-54e1-401c-8fe3-41ba133d87e3"
 storage_version_token = "1790697447628481"
 content_type = "image/png"
+
+[[outputs]]
+id = "p8vb8CkCo_bEDY4dQnKsL"
+uri = "file://screenshots/bat-evolution-flapping.gif"
+type = "image"
+title = "Revised bat evolution and wingbeats"
+description = "Baby, adult, and spectral forms with distinct faces and animated wing poses. Verified all three flap while hovering in the running game."
+logical_id = "5ced1021-5615-4c74-90fa-adfcf4fd851d"
+content_hash = "sha256:59881f883dcf7ab7ce85509e74b101d1084d32deb9cfb4272ac34916336d9f2b"
+size = 60612
+mtime_ms = 1790699599102
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5ced1021-5615-4c74-90fa-adfcf4fd851d/970e4fd8-650d-43d6-a167-a547f891c7b3"
+storage_version_token = "1790699654683775"
+content_type = "image/gif"

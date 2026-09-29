@@ -446,6 +446,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     const listedLot = directory.find((home) => home.ownerEmail === globals()._playerEmail);
     const construction = owned?.construction || listedLot?.construction;
     if (!listedLot || !construction) return '';
+    // The build checklist is only useful while a lot is being built. The
+    // directory and owner snapshot can refresh independently after the roof
+    // purchase, so either completed projection should retire it immediately.
+    const isComplete = (state) => state?.complete || state?.stage === 'complete' || state?.roofBuilt;
+    if (isComplete(construction) || isComplete(listedLot.construction)) return '';
     const components = Array.isArray(construction.components) ? construction.components : [];
     const states = {
       floor: !!construction.floorBuilt,
@@ -454,8 +459,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     };
     const next = components.find((component) => !states[component.id])?.id || null;
     const nearLot = nearbyConstructionLot?.ownerEmail === listedLot.ownerEmail;
-    const stageName = construction.stage === 'complete' ? 'Complete' :
-      construction.stage === 'walls' ? 'Walls raised' :
+    const stageName = construction.stage === 'walls' ? 'Walls raised' :
       construction.stage === 'floor' ? 'Foundation laid' : 'Empty lot';
     const steps = components.map((component) => {
       const built = states[component.id];
@@ -474,10 +478,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         ? 'You are at your lot sign. Components use coins and must be built in order.'
         : 'Walk to your own lot sign to unlock the next build control.') + '</small>' +
       steps +
-      (construction.complete
-        ? '<small class="construction-complete">Roof complete — your home door is open and all saved furnishings are active.</small>'
-        : '<small class="construction-archive">Archived furnishings: ' + archive +
-          '. Existing indoor and yard items are kept, not deleted, and return when the roof is complete.</small>') +
+      '<small class="construction-archive">Archived furnishings: ' + archive +
+        '. Existing indoor and yard items are kept, not deleted, and return when the roof is complete.</small>' +
       '</div>';
   }
 

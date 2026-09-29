@@ -1,5 +1,5 @@
 // Native Halloween pixel art. Run with NODE_PATH=.agents/tools/node_modules
-// node artifacts/jpo-huddle/tools/halloween-art-gen.cjs [--preview]
+// node artifacts/jpo-huddle/tools/halloween-art-gen.cjs [--preview|--bat-only]
 // Preview only writes design/halloween-bat-preview.png; full run writes the game art.
 const fs = require('fs');
 const path = require('path');
@@ -41,80 +41,46 @@ function line(p,x1,y1,x2,y2,color,width=1) {
   const n=Math.max(Math.abs(x2-x1),Math.abs(y2-y1))*2;
   for(let i=0;i<=n;i++) ellipse(p,x1+(x2-x1)*i/n,y1+(y2-y1)*i/n,Math.max(.55,width/2),Math.max(.55,width/2),color);
 }
-function bat(stage, pose) {
-  const p=image(64,64);
-  const scale=[.63,.79,.94][stage-1];
-  // All poses use the same per-stage scale and ground anchor. Never per-frame fit.
-  const ox=32, oy=stage===1?48:stage===2?46:43;
-  const X=x=>ox+(x-32)*scale, Y=y=>oy+(y-43)*scale;
-  const P=pts=>pts.map(([x,y])=>[X(x),Y(y)]);
-  const E=(x,y,rx,ry,c)=>ellipse(p,X(x),Y(y),rx*scale,ry*scale,c);
-  const L=(x1,y1,x2,y2,c,w=1)=>line(p,X(x1),Y(y1),X(x2),Y(y2),c,w*scale);
-  const W=(pts,col)=>poly(p,P(pts),col);
-  const seated=pose==='sit', act=pose==='action';
-  const flap=pose==='walk1'? -12:pose==='walk2'? 8:pose==='walk3'? 1:pose==='static'? -4:seated? 11:-17;
-  // Far wing first, then body, then near wing. Three scallops and vein highlights.
-  function wing(xsign,far) {
-    const sx=xsign;
-    const tipY=22+flap+(far?3:0);
-    const coords=[[32,39],[32+sx*12,35],[32+sx*29,tipY],[32+sx*25,tipY+14],
-      [32+sx*29,tipY+18],[32+sx*22,tipY+26],[32+sx*16,tipY+20],
-      [32+sx*12,tipY+28],[32+sx*7,tipY+23],[32,46]];
-    W(coords,'outline');
-    W([[32+sx*2,39],[32+sx*12,36],[32+sx*27,tipY+4],[32+sx*23,tipY+15],
-      [32+sx*26,tipY+18],[32+sx*21,tipY+22],[32+sx*16,tipY+18],
-      [32+sx*12,tipY+24],[32+sx*8,tipY+20],[32+sx*3,44]],far?'wing':'membrane');
-    L(32,39,32+sx*28,tipY+2,far?'edge':'rib',1.4);
-    L(32+sx*15,34,32+sx*21,tipY+21,'edge');
-    L(32+sx*15,34,32+sx*12,tipY+24,'edge');
-    E(32+sx*29,tipY,2,2,stage===3?'glowLight':'ivory');
-  }
-  wing(-1,true);
-  if(stage===3) {
-    // Spectral violet flame curling around the grown silhouette.
-    W([[13,53],[8,48],[11,43],[7,37],[13,40],[12,31],[16,35],[18,47]],'glow');
-    W([[51,53],[56,46],[54,39],[59,36],[52,34],[50,43],[46,49]],'glow');
-    E(10,52,2,2,'glowLight'); E(55,48,2,2,'glowLight');
-  }
-  E(32,46,12,12,'outline'); E(31,45,10,10,stage===3?'plum':'edge');
-  E(27,42,5,6,'light'); E(34,49,6,5,'plum');
-  // Tiny dangling feet visibly separate from the tail/body.
-  for(const dx of [-5,5]){
-    E(32+dx,56,3,4,'outline'); E(31+dx,55,1.4,2,'light');
-    L(30+dx,59,28+dx,61,'ivory');
-  }
-  // Baby has a rounder face; elder has a fur ruff and more angular eyebrows.
-  if(stage===3) {
-    for(let i=0;i<5;i++) W([[19+i*5,44],[17+i*5,52],[23+i*5,47]],'light');
-  }
-  W([[18,34],[17,15],[24,21],[30,32]],'outline');
-  W([[20,31],[20,19],[24,23],[27,33]],'membrane');
-  W([[41,33],[46,14],[51,24],[47,40]],'outline');
-  W([[43,32],[46,20],[49,25],[47,34]],'membrane');
-  L(21,21,22,29,'rib'); L(47,21,47,29,'rib');
-  E(34,38,16,14,'outline'); E(34,37,14,12,'plum');
-  E(29,35,9,7,'light'); E(35,42,11,5,'edge');
-  wing(1,false);
-  // A wing overlays only the far cheek; redraw the face for clear expression.
-  E(37,39,11,9,'plum');
-  if(stage===1){E(27,38,5,5,'outline');E(27,38,3,3,'amber');E(42,38,5,5,'outline');E(42,38,3,3,'amber');}
-  else {E(28,38,5,4,'outline');E(28,38,3,2.6,'amber');E(42,38,5,4,'outline');E(42,38,3,2.6,'amber');}
-  E(28,37,1,1,'cream'); E(42,37,1,1,'cream');
-  E(36,43,2,1.5,'nose');
-  L(35,46,41,47,'outline',2);
-  E(41,46,1,1,'ivory');
-  if(act){
-    // Action: delighted sonar chirp and a pair of magic glyphs.
-    E(55,32,2.5,2.5,'glow'); E(57,25,1.5,1.5,'glowLight');
-    L(51,34,56,30,'glowLight',1);
-  }
-  if(stage===3) for(const [x,y] of [[8,32],[58,37],[47,13],[17,18]]) E(x,y,1.5,1.5,'glowLight');
-  if(seated){E(28,56,4,2,'plum');E(38,56,4,2,'plum');}
-  return p;
+// Keep the generated source: the three rows have genuinely different anatomy,
+// not one procedural face scaled up. Explicit crops avoid wide-wing tile bleed.
+const { execFileSync } = require('child_process');
+const source = path.resolve(__dirname, '../../../attached_assets/generated_images/bat_evolution_native_sheet.png');
+const sheet = PNG.sync.read(fs.readFileSync(source));
+// Key the warm cream only; purple highlights and white teeth remain intact.
+for(let i=0;i<sheet.data.length;i+=4){
+  const [r,g,b]=sheet.data.subarray(i,i+3);
+  if(r>218 && g>208 && b>175 && r>=g && g-b>8 && r-g<26) sheet.data[i+3]=0;
+}
+const boxes = [
+  [[12,135,170,150],[202,110,140,180],[342,178,160,134],[508,174,216,116],[728,148,112,164],[862,146,157,155]],
+  [[2,404,178,183],[208,344,136,242],[329,445,174,163],[498,441,236,150],[732,408,120,200],[866,395,155,211]],
+  [[0,695,186,231],[200,645,142,276],[328,748,173,195],[500,731,242,193],[731,696,128,244],[860,679,162,261]],
+];
+function batRow(stage) {
+  const crops=boxes[stage-1].map(([x,y,w,h],pose)=>{
+    const p=image(w,h);
+    for(let j=0;j<h;j++) sheet.data.copy(p.data,j*w*4,((y+j)*sheet.width+x)*4,((y+j)*sheet.width+x+w)*4);
+    // Neighboring elder wisps cross rectangular cell bounds. Remove only
+    // their known empty-air regions, never a wing or this pose's own magic.
+    if(stage===3) for(let j=0;j<h;j++) for(let i=0;i<w;i++){
+      if((pose===2 && x+i<350 && y+j<886) || (pose===3 && x+i>734))
+        p.data[(j*w+i)*4+3]=0;
+    }
+    return PNG.sync.read(execFileSync('magick',['png:-','-trim','+repage','png:-'],{input:PNG.sync.write(p)}));
+  });
+  const factor=[44,53,60][stage-1]/Math.max(...crops.map(p=>Math.max(p.width,p.height)));
+  return crops.map(p=>PNG.sync.read(execFileSync('magick',[
+    'png:-','-filter','Lanczos','-resize',`${factor*100}%`,
+    '-gravity','south','-background','none','-extent','64x64','png:-'
+  ],{input:PNG.sync.write(p)})));
 }
 const stages=[1,2,3];
 const poses=['static','walk1','walk2','walk3','sit','action'];
-const stamps=stages.map(stage=>poses.map(pose=>bat(stage,pose)));
+// Runtime cycles walk1, walk2, walk3, walk2: up → level → down → level.
+const stamps=stages.map(stage=>{
+  const row=batRow(stage);
+  return [row[0],row[1],row[3],row[2],row[4],row[5]];
+});
 function save(name,p){fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
 function makePreview(){
   const p=image(64*6,64*3);
@@ -135,6 +101,10 @@ stages.forEach((stage,j)=>poses.forEach((pose,k)=>{
   if(pose!=='static' && fs.existsSync(previous))fs.unlinkSync(previous);
   save(path.join(ROOT,dest),stamps[j][k]);
 }));
+if(process.argv.includes('--bat-only')) {
+  console.log('Installed generated bat: 3 distinct stages × 6 transparent 64×64 frames.');
+  process.exit(0);
+}
 
 // Directional art sheets: front/down, right-facing side, rear/up.
 // Navy outline + left-hand highlights match the LimeZu sheets.

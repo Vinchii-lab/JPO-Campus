@@ -6375,9 +6375,16 @@
     });
     // ── Pet card: click YOUR pet → feed treats, watch the XP bar fill ────
     let _petPanelOpen = false;
+    // Bat evolution redraw: bypass the asset server's day-long PNG cache in
+    // every renderer. Keep all other species' URLs (including frog v2) intact.
+    function _petArtUrl(url) {
+      return /(?:^|\/)assets\/pets\/(?:pet_bat(?:_s[23])?|anim\/bat(?:_s[23])?_(?:walk[123]|sit|action))\.png(?:\?|$)/.test(url)
+        ? url + (url.includes('?') ? '&' : '?') + 'bat_rev=20260823-evolution2'
+        : url;
+    }
     function _petStageArt(pet, stage) {
       // Prefer real stage art if it shipped for this pet (dog lines so far).
-      return stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`;
+      return _petArtUrl(stage >= 2 ? `/assets/pets/${pet}_s${stage}.png` : `/assets/pets/${pet}.png`);
     }
     // Battle rewards add to the same per-pet XP that unlocks the training
     // budget: one point every 25 XP, plus points when a pet changes form.
@@ -6419,7 +6426,7 @@
         stage >= 3 ? 'FINAL FORM 👑' : stage === 2 ? 'Evolved ✨' : 'Baby 🐣';
       const img = document.getElementById('pet-panel-img');
       img.src = _petStageArt(pet, stage);
-      img.onerror = () => { img.onerror = null; img.src = `/assets/pets/${pet}.png`; };
+      img.onerror = () => { img.onerror = null; img.src = _petArtUrl(`/assets/pets/${pet}.png`); };
       const lo = stage >= 3 ? PET_EVOLVE_XP[1] : stage === 2 ? PET_EVOLVE_XP[0] : 0;
       const pct = next ? Math.round(((xp - lo) / (next - lo)) * 100) : 100;
       document.getElementById('pet-panel-bar').style.width = `${pct}%`;
@@ -6770,7 +6777,7 @@
         // Pets show their actual sprite in the shop (emoji is the fallback
         // elsewhere); crisp scaling for pixel art.
         const im = document.createElement('img');
-        im.src = `/assets/pets/${c.id}.png`;
+        im.src = _petArtUrl(`/assets/pets/${c.id}.png`);
         im.alt = c.name;
         im.style.cssText = 'width:38px;height:38px;object-fit:contain;image-rendering:pixelated;vertical-align:middle;';
         icon.append(im);
@@ -9952,7 +9959,7 @@
           '/assets/pets/anim/'+stem+'_walk2.png',
           '/assets/pets/anim/'+stem+'_walk3.png',
           '/assets/pets/anim/'+stem+'_walk2.png',
-        ];
+        ].map(_petArtUrl);
       }
 
       function _renderLobbyList(entrants) {
@@ -9967,7 +9974,7 @@
           } else {
             list.innerHTML = entrants.map(e =>
               '<div style="display:flex;align-items:center;gap:6px;background:#0d0b1e;border:1px solid #1e1b3a;border-radius:8px;padding:6px 10px;">' +
-              '<img src="/assets/pets/anim/'+e.stem+'_walk1.png" style="height:32px;image-rendering:pixelated;">' +
+              '<img src="'+_petArtUrl('/assets/pets/anim/'+e.stem+'_walk1.png')+'" style="height:32px;image-rendering:pixelated;">' +
               '<div><div style="font-size:12px;font-weight:700;color:#fff;">'+e.name+'</div></div></div>'
             ).join('');
           }
@@ -10002,8 +10009,8 @@
           lbl.style.cssText = 'font-size:10px;font-weight:700;background:rgba(10,8,20,0.82);color:#fff;border-radius:5px;padding:1px 6px;white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis;';
           lbl.textContent = e.name;
           const img = document.createElement('img');
-          img.src = '/assets/pets/anim/'+e.stem+'_walk1.png';
-          img.onerror = function() { this.src = '/assets/pets/anim/'+e.stem.replace(/_s[23]$/,'')+'_walk1.png'; };
+          img.src = _petArtUrl('/assets/pets/anim/'+e.stem+'_walk1.png');
+          img.onerror = function() { this.onerror = null; this.src = _petArtUrl('/assets/pets/anim/'+e.stem.replace(/_s[23]$/,'')+'_walk1.png'); };
           img.style.cssText = 'image-rendering:pixelated;height:'+SPR_H+'px;width:auto;filter:drop-shadow(2px 3px 5px rgba(0,0,0,0.7));';
           img.dataset.stem = e.stem;
           const placeTag = document.createElement('div');
@@ -10023,7 +10030,7 @@
         entrants.forEach(e => {
           if (seen.has(e.stem)) return;
           seen.add(e.stem);
-          _frames(e.stem).concat('/assets/pets/anim/'+e.stem+'_action.png')
+          _frames(e.stem).concat(_petArtUrl('/assets/pets/anim/'+e.stem+'_action.png'))
             .forEach(src => { const im = new Image(); im.src = src; });
         });
       }
@@ -10142,8 +10149,8 @@
         const oppPetEl = _ro('race-duel-opp-pet');
         const oppNmEl  = _ro('race-duel-opp-name');
         const timerEl  = _ro('race-duel-timer');
-        if (myPetEl  && myStem)       myPetEl.src  = '/assets/pets/anim/' + myStem       + '_walk1.png';
-        if (oppPetEl && opponentStem) oppPetEl.src = '/assets/pets/anim/' + opponentStem + '_walk1.png';
+        if (myPetEl  && myStem)       myPetEl.src  = _petArtUrl('/assets/pets/anim/' + myStem       + '_walk1.png');
+        if (oppPetEl && opponentStem) oppPetEl.src = _petArtUrl('/assets/pets/anim/' + opponentStem + '_walk1.png');
         if (oppNmEl)  oppNmEl.textContent  = opponentName;
         _showPhase('duel');
         clearInterval(_duelCountdownIv);
@@ -10345,7 +10352,7 @@
 
         // 1. Swap to action sprite
         if (img && stem) {
-          const actionSrc = '/assets/pets/anim/' + stem + '_action.png';
+          const actionSrc = _petArtUrl('/assets/pets/anim/' + stem + '_action.png');
           img.onerror = function() { this.onerror = null; };   // silently fail if missing
           img.src = actionSrc;
         }
@@ -13951,7 +13958,7 @@
         // drawn facing RIGHT (_stepPet flips toward the walk direction).
         // Texture key = the pet id; _makePet falls back to the emoji if a
         // texture is missing, so a failed load never breaks joining.
-        for (const p of PETS) this.load.image(p.id, `/assets/pets/${p.id}.png`);
+        for (const p of PETS) this.load.image(p.id, _petArtUrl(`/assets/pets/${p.id}.png`));
         // Evolution stage art (approved lines only; species without stage art
         // fall back to the grow + golden-tint treatment in _makePet). Each
         // stage also ships its own animation frames — evolved pets move
@@ -13965,14 +13972,14 @@
             // ?v= cache-bust per id: frog s2/s3 art was mirrored to face
             // RIGHT (Aug 2026) — bump when stage art is regenerated.
             const av = { pet_frog: '?v=2' }[id] || '';
-            this.load.image(`${id}_s${s}`, `/assets/pets/${id}_s${s}.png${av}`);
+            this.load.image(`${id}_s${s}`, _petArtUrl(`/assets/pets/${id}_s${s}.png${av}`));
             const stem = id.replace(/^pet_/, '');
             // (mythics load their s3-only art in the loop below)
             // Choco s3 frames are RECOLORS of the original walk cycle (same
             // motion the boss liked), palette-mapped to the approved dark
             // chocolate art — AI redraws kept producing a different dog.
             for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
-              this.load.image(`petanim_${stem}_s${s}_${f}`, `/assets/pets/anim/${stem}_s${s}_${f}.png${av}`);
+              this.load.image(`petanim_${stem}_s${s}_${f}`, _petArtUrl(`/assets/pets/anim/${stem}_s${s}_${f}.png${av}`));
           }
         // Mythic gift pets: baby form + s3 FINAL FORM only (no stage 2 art).
         for (const id of ['pet_unicorn', 'pet_phoenix']) {
@@ -13999,7 +14006,7 @@
         for (const p of PETS) {
           const stem = p.id.replace(/^pet_/, '');
           for (const f of ['walk1', 'walk2', 'walk3', 'sit', 'action'])
-            this.load.image(`petanim_${stem}_${f}`, `/assets/pets/anim/${stem}_${f}.png`);
+            this.load.image(`petanim_${stem}_${f}`, _petArtUrl(`/assets/pets/anim/${stem}_${f}.png`));
         }
         // Wearables are 2-frame sheets: frame 0 = front (facing down),
         // frame 1 = side profile drawn facing RIGHT (flipX handles left).
@@ -17802,7 +17809,9 @@
             || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3)
             || petObj._petId === 'pet_bat';
           const movingFly = dist > gap + 1;
-          const flying = airborneSpecies && movingFly && !seated;
+          // Bats hover even at rest; other flying pets retain their landing rules.
+          const isBat = petObj._petId === 'pet_bat';
+          const flying = airborneSpecies && (movingFly || isBat) && !seated;
           if (flying) {
             const nowF = Date.now();     // idle-block `now` is out of scope here
             // SWOOP LANDING (storyboard #3) — per-dragon personality:
@@ -17847,13 +17856,15 @@
             // while traveling, ease back level when holding position.
             const leanTgt = movingFly ? (petObj.flipX ? -6 : 6) : 0;
             petObj.angle += (leanTgt - petObj.angle) * 0.12;
-            if (petObj._animSet) {
+            if (petObj._animSet && !petObj._trickBusy) {
               // Flight rhythm (boss note): not a bat — THREE quick flaps,
               // then a long wings-level GLIDE, repeat.
               const fm = petObj._gaitFrameMs || 140;
               const flapWin = fm * 12;                 // 3 full flap cycles (4 frames each)
               const t = petObj._animT % (flapWin + 1100);
-              let fr = t < flapWin
+              let fr = isBat
+                ? petObj._animSet.walk[Math.floor(petObj._animT / 110) % petObj._animSet.walk.length]
+                : t < flapWin
                 ? petObj._animSet.walk[Math.floor(t / fm) % petObj._animSet.walk.length]
                 : petObj._animSet.walk[1];             // glide on the wings-level frame
               if (swooping) fr = petObj._animSet.walk[0];  // flare wings UP to brake
@@ -18032,7 +18043,7 @@
               // teleport into its seat — it visibly DESCENDS over ~half a
               // second, wings flared to brake, then the dust hits on touchdown.
               const nowL = Date.now();
-              if (petObj.originY > 1.01 && !petObj._landT0 && petObj._petStage >= 3) {   // just left the air (final form only)
+              if (!isBat && petObj.originY > 1.01 && !petObj._landT0 && petObj._petStage >= 3) {   // just left the air (final form only)
                 petObj._landT0 = nowL;
                 petObj._landH0 = (petObj.originY - 1) * Math.max(petObj.displayHeight, 1);
               }
@@ -19877,9 +19888,9 @@
 
     function pbSetPetImage(img, petId, stage, force = false) {
        const candidates = [];
-       if (stage >= 3) candidates.push('assets/pets/' + petId + '_s3.png');
-       if (stage >= 2) candidates.push('assets/pets/' + petId + '_s2.png');
-       candidates.push('assets/pets/' + petId + '.png');
+       if (stage >= 3) candidates.push(_petArtUrl('assets/pets/' + petId + '_s3.png'));
+       if (stage >= 2) candidates.push(_petArtUrl('assets/pets/' + petId + '_s2.png'));
+       candidates.push(_petArtUrl('assets/pets/' + petId + '.png'));
        const key = candidates.join('|');
        if (!force && img.dataset.pbCandidates === key && !img.dataset.pbActionPose) return;
        delete img.dataset.pbActionPose;
@@ -19900,7 +19911,7 @@
     function pbFlightFrames(petId, stage) {
        const stem = String(petId || '').replace(/^pet_/, '');
        const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
-       return [1, 2, 3].map((n) => `assets/pets/anim/${stem}${suffix}_walk${n}.png`);
+       return [1, 2, 3].map((n) => _petArtUrl(`assets/pets/anim/${stem}${suffix}_walk${n}.png`));
     }
 
     function pbStopFlightIdle(img) {
@@ -19931,7 +19942,7 @@
        // form to perform it. Never fall back to another evolution's action
        // image; if this exact asset is missing, keep the stage-matched idle art.
        const suffix = stage >= 3 ? '_s3' : stage >= 2 ? '_s2' : '';
-       return ['assets/pets/anim/' + stem + suffix + '_action.png'];
+       return [_petArtUrl('assets/pets/anim/' + stem + suffix + '_action.png')];
     }
 
     const pbActionPoseAvailability = new Map();

@@ -64,3 +64,10 @@ removeBackground output can contain FULLY OPAQUE near-white checkerboard patches
 
 # Approval workflow that works with the owner
 He rejects art repeatedly unless aligned first: generate 3-4 single-pose style options, `presentAsset` a labeled lineup (ReadFile renders only to the agent — the USER sees nothing until presentAsset), let him pick, then sheet → sliced strip + evolution-line size comparison → explicit 👍 → install. Keep static+anim in the same visual family as the stage-1/2 pets (chunky cute, not realistic).
+
+## Evolution must change anatomy, not merely scale
+Later forms need distinct faces, head/ear proportions, silhouettes, and species-specific details at the same art quality as established evolved pets.
+
+**Why:** The first Halloween bat was rejected as “just got big”; a procedural repeat of one face plus larger wings did not meet the established pet standard.
+
+**How to apply:** Compare stages side by side before delivery. For hovering bats, verify the actual stationary runtime cycles wing textures, not just that animation files exist. Asset replacements also require cache-busted URLs across world, shop, race, and battle consumers.
