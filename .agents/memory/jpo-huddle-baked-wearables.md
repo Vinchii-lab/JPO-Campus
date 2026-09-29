@@ -24,8 +24,8 @@ description: Wearables are baked into player textures per frame via layer-derive
 - Hooded coat lesson (Vince-approved look): a hood must be its OWN drawn geometry — ellipse from the head bbox, crown peak, drape to the shoulder line, neck taper below cheek level. Recoloring hair pixels (or building the dome from hair columns) reads as "yellow hair" and was rejected twice. Layers can't erase base pixels, so the hood must be a superset of every hair pixel. Bump the ?v= cache param on /assets/layers URLs whenever sheets regenerate.
 
 ## Cape readability
-Capes should leave front-facing torso, arms, and face readable; fit their back drape and collar to actual body silhouettes rather than a broad head-relative polygon.
+Capes need a broad, shoulder-to-ankle drape with visible flared sides while leaving front-facing torso, arms, and face readable. Do not shrink them to thin shoulder strips to avoid covering the avatar.
 
-**Why:** The initial Halloween cape was rejected in-game: its dark front panel and diagonal gold decoration obscured the avatar rather than reading as a cape.
+**Why:** The initial Halloween cape was rejected as a front panel; the tiny silhouette-masked revision was also rejected. The user explicitly wanted it longer and wider, recognizable as a cape.
 
-**How to apply:** Inspect tightly cropped native standing/seated renders in every direction, including combinations with owned seasonal layers. A wide contact sheet alone can conceal how much anatomy is covered.
+**How to apply:** Allow pose-tracked overlays to extend beyond native body-frame bounds instead of clipping broad garments. Inspect tightly cropped native standing/seated renders in every direction, including combinations with owned seasonal layers. Full-head replacements must cover original hair/head, not merely stamp a face on top.

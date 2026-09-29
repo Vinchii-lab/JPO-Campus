@@ -4929,7 +4929,10 @@
     // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
     // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
     WEARABLE_DEFS.raincoat.bakeLayer = true;
-    WEARABLE_DEFS.vampirecape.bakeLayer = true;
+    // Wide, frame-fitted art must not be clipped to the 16px body tiles.
+    WEARABLE_DEFS.vampirecape.poseLayer = true;
+    WEARABLE_DEFS.pumpkinhead.poseLayer = true;
+    delete WEARABLE_DEFS.pumpkinhead.bake;
     WEARABLE_DEFS.witchhat.bakeLayer = true;
     // Rainboots: also a LAYER sheet (painted onto each frame's own foot pixels
     // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
@@ -5495,14 +5498,14 @@
       let pending = 0;
       const settle = () => { if (--pending === 0) _rewearAll(); };
       for (const [wid, def] of Object.entries(WEARABLE_DEFS)) {
-        if (!def.bakeLayer) continue;
+        if (!def.bakeLayer && !def.poseLayer) continue;
         for (const char of CHARACTERS) {
           for (const suffix of LAYER_SUFFIXES) {
             pending++;
             const im = new Image();
             im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
             im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
-            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=9-halloween-fit`;
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=12-wide-halloween`;
           }
         }
       }
@@ -15272,6 +15275,26 @@
       // set = sprite wearable (follow the body), null = emoji (float at y-68,
       // raise the chat bubble).
       _placeWearable(img, def, x, y, dir) {
+        if (def.poseLayer && img._under && img._poseChar) {
+          const body = img._under, key = body.texture.key;
+          const suffix = key.includes('pl_sit_right_') ? 'sit' :
+            key.includes('pl_sit_up_') ? 'sit2' : key.includes('pl_sit_down_') ? 'sit3' : 'run';
+          const id = def === WEARABLE_DEFS.vampirecape ? 'vampirecape' : 'pumpkinhead';
+          const source = _wearLayerImgs[`${img._poseChar}_${suffix}_${id}`];
+          if (!source) { img.setVisible(false); return; }
+          const tex = `pose12_${img._poseChar}_${suffix}_${id}`;
+          if (!this.textures.exists(tex)) this.textures.addSpriteSheet(tex, source, { frameWidth: 40, frameHeight: 32 });
+          img.setTexture(tex, Number(body.frame.name) || 0);
+          img.setFlipX(body.flipX).setFlipY(body.flipY);
+          img.setScale(body.scaleX, body.scaleY).setPosition(x, y).setVisible(body.visible);
+          img.setDepth(body.depth);
+          this.children.moveAbove(img, body);
+          // Head replacement is always above the cape, independent of slot iteration order.
+          if (id === 'pumpkinhead') body._pumpkinLayer = img;
+          else if (body._pumpkinLayer && body._pumpkinLayer.active)
+            this.children.moveAbove(body._pumpkinLayer, img);
+          return;
+        }
         // Back view: face gear hides, but back-worn gear (wings) shows fully.
         if (dir === 'up' && !def.showUp) { img.setVisible(false); return; }
         img.setVisible(true);
@@ -15305,6 +15328,7 @@
         if (wd) {
           const sc = wd.scale || 3;                 // per-item fit (default 3)
           const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(sc).setDepth(10);
+          if (wd.poseLayer) { img._under = under; img._poseChar = charFor; }
           if (wd.behind && under) {
             img._under = under;
             img.setDepth(under.depth);

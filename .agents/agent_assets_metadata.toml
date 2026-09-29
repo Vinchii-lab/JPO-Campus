@@ -920,3 +920,17 @@ mtime_ms = 1790701955767
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5dd91b57-1370-4667-a6bf-f4206e51ed40/fb4ef00b-0214-4c2c-bade-fb880b1154db"
 storage_version_token = "1790702021496624"
 content_type = "image/png"
+
+[[outputs]]
+id = "kie_PDFuDxvo38DVbVmLP"
+uri = "file://artifacts/jpo-huddle/design/halloween-wear-closeup.png"
+type = "image"
+title = "Wider cape and full pumpkin head"
+description = "Actual rendered outfits: base avatar, long flared cape, pumpkin head with cape, and raincoat combination. Standing and seated views."
+logical_id = "6b9ff85c-93bd-443a-a484-01bce4f98e10"
+content_hash = "sha256:590e8977898ce9e0c2bf95f40c7ee701be1406d1c00496b5d6ff7c5d1150be51"
+size = 78316
+mtime_ms = 1790702634558
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/6b9ff85c-93bd-443a-a484-01bce4f98e10/a489503b-5cae-4793-9bc4-68766e3126fc"
+storage_version_token = "1790702865245755"
+content_type = "image/png"

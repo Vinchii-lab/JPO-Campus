@@ -191,9 +191,10 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
   const hatSheet=PNG.sync.read(fs.readFileSync(path.join(ROOT,'wear_witchhat.png')));
   const out=image(shirt.width,shirt.height);
   const hats=image(shirt.width,shirt.height);
+  const wideCape=image(frames.length*40,32), pumpkins=image(frames.length*40,32);
   const fw=shirt.width/frames.length;
   for(let f=0;f<frames.length;f++){
-    const dir=suffix==='run'?['right','up','left','down'][Math.floor(f/6)]:{sit:'right',sit2:'up',sit3:'down'}[suffix];
+    const dir=suffix==='run'?['right','up','left','down'][Math.floor(f/6)]:{sit:'right',sit2:'right',sit3:'down'}[suffix];
     const a=frames[f]; if(!a||a.hy<0)continue;
     const alpha=(img,x,y)=>x>=0&&x<fw&&y>=0&&y<32 ? img.data[(y*img.width+f*fw+x)*4+3] : 0;
     const clothing=[];
@@ -204,6 +205,68 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
     const shoulderY=Math.min(...clothing.map(p=>p[1]),a.hy+(dir==='up'?14:13));
     const hem=Math.min(a.fy-2,shoulderY+10);
     const cx=clothing.length?Math.round(clothing.reduce((s,p)=>s+p[0],0)/clothing.length):a.hx;
+    // 40px pose cells deliberately extend OUTSIDE the body's 16px tiles.
+    // Native centre alignment also supports the 32px side-sitting sheets.
+    const pad=(40-fw)/2, center=cx+pad, bottom=a.fy-1;
+    const shoulder=Math.min(shoulderY,a.hy+14), top=Math.min(shoulder-2,a.hy+9);
+    const cape=image(40,32);
+    const side=dir==='right'||dir==='left', sign=dir==='left'?1:-1;
+    const points=side
+      ? [[center+sign*2,top+2],[center+sign*8,top-1],[center+sign*14,bottom-1],
+         [center+sign*9,bottom],[center+sign*5,bottom-1],[center+sign*1,bottom-2]]
+      : [[center-8,top],[center-5,top+2],[center+5,top+2],[center+8,top],[center+14,bottom-1],
+         [center+8,bottom],[center+4,bottom-1],[center,bottom],
+         [center-4,bottom-1],[center-8,bottom],[center-14,bottom-1]];
+    poly(cape,points,'#24182f');
+    poly(cape,points.map(([x,y])=>[x+(x<center?1:-1),y+ (y===top?1:0)]),dir==='down'?'#9d2949':'#49305f');
+    if(side){
+      line(cape,center+sign*5,top+1,center+sign*11,bottom-2,'#bf3e58',2);
+      line(cape,center+sign*3,top+2,center+sign*6,bottom-2,'#765087');
+    } else {
+      for(const dx of [-4,4]){
+        line(cape,center+dx,top+1,center+dx*2.3,bottom-2,dir==='down'?'#e05a6c':'#79518f',2);
+        line(cape,center+dx*.7,top+2,center+dx*1.3,bottom-2,'#35213f');
+      }
+    }
+    for(let y=0;y<32;y++)for(let x=0;x<40;x++){
+      const local=x-pad, i=(y*40+x)*4;
+      // Mask to real anatomy: front torso/arms stay unobstructed. The back
+      // drape covers clothing but never the head or hands.
+      if((dir!=='up' && alpha(base,local,y)) ||
+        (dir==='up' && (alpha(hair,local,y)||alpha(skin,local,y)))) cape.data[i+3]=0;
+    }
+    // Full replacement HEAD: head bounds include every hair pixel above the
+    // shoulders (including a rain hood), not the old 13-row face sticker.
+    let minX=fw,maxX=0;
+    for(let y=a.hy;y<=shoulder;y++)for(let x=0;x<fw;x++)
+      if(alpha(hair,x,y)||alpha(skin,x,y)){minX=Math.min(minX,x);maxX=Math.max(maxX,x);}
+    const head=image(40,32), hc=pad+(minX+maxX)/2;
+    const ht=Math.max(2,a.hy-1), hb=Math.min(shoulder+1,27);
+    const ry=(hb-ht)/2, cy=(hb+ht)/2, rx=Math.max(9,(maxX-minX)/2+2);
+    ellipse(head,hc,cy,rx,ry,'#66302a');
+    ellipse(head,hc,cy,rx-1,ry-1,'#d86120');
+    ellipse(head,hc-2,cy-.5,rx-3,ry-1.5,'#f58a27');
+    for(const dx of [-.65,-.25,.3,.68]){
+      for(let y=ht+2;y<hb-1;y++){
+        const width=Math.sqrt(Math.max(0,1-((y-cy)/ry)**2))*rx;
+        pixel(head,hc+dx*width,y,dx<0?'#ffac3e':'#b94a20');
+      }
+    }
+    line(head,hc,ht,hc+1,ht-2,'#42612d',2);
+    poly(head,[[hc+1,ht-1],[hc+5,ht-2],[hc+4,ht+1],[hc+1,ht+1]],'#6d943b');
+    if(dir!=='up'){
+      const eyeY=Math.round(cy-1), face=side?hc+sign*-3:hc;
+      if(!side) poly(head,[[face-6,eyeY+2],[face-3,eyeY-2],[face-1,eyeY+2]],'#482333');
+      poly(head,[[face+1,eyeY+2],[face+3,eyeY-2],[face+5,eyeY+2]],'#482333');
+      if(!side)pixel(head,face-3,eyeY+1,'#ffd36a');
+      pixel(head,face+3,eyeY+1,'#ffd36a');
+      poly(head,[[face-5,eyeY+4],[face,eyeY+5],[face+5,eyeY+3],[face+3,eyeY+7],[face-3,eyeY+7]],'#482333');
+      for(const dx of [-2,1,3])pixel(head,face+dx,eyeY+5,'#ffd36a');
+    }
+    for(let y=0;y<32;y++){
+      cape.data.copy(wideCape.data,(y*wideCape.width+f*40)*4,y*40*4,(y+1)*40*4);
+      head.data.copy(pumpkins.data,(y*pumpkins.width+f*40)*4,y*40*4,(y+1)*40*4);
+    }
     // Material starts at shoulder, flows with torso, and ends ABOVE feet.
     // Charcoal outer cloth; only the narrow inner side edge shows crimson.
     let pts;
@@ -233,7 +296,7 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
     }
     // Brim intersects the crown by two pixels, following each actual head.
     // The source's transparent top padding is excluded from the fit.
-    const art=dir==='up'?2:dir==='down'?0:1;
+    const art=dir==='up'||suffix==='sit2'?2:dir==='down'?0:1;
     const hatH=Math.min(9,a.hy+3),hatY=a.hy+3-hatH, hatX=a.hx-8;
     for(let y=0;y<hatH;y++)for(let x=0;x<16;x++){
       const tx=hatX+(dir==='left'?15-x:x),ty=hatY+y;
@@ -243,7 +306,8 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
         hatSheet.data.copy(hats.data,(ty*hats.width+f*fw+tx)*4,si,si+4);
     }
   }
-  save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_vampirecape.png`),out);
+  save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_vampirecape.png`),wideCape);
+  save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_pumpkinhead.png`),pumpkins);
   save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_witchhat.png`),hats);
 }
 console.log('Fitted Halloween wearable layers: 4 characters x 4 sheets.');
