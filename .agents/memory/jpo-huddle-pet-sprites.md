@@ -78,3 +78,10 @@ Use a stable face/body and shoulder anchors across wingbeats, not separately gen
 **Why:** The regenerated bat looked better statically but its movement was rejected: inconsistent faces/body positions and inherited walking squash made the flap cycle jitter.
 
 **How to apply:** Judge animated previews at gameplay scale while hovering and following. Keep body scale stable for airborne bats; move wings relative to shoulders and ease hover/lean independently.
+
+## Approved evolved bat specials
+Use unmistakable sonar: adult braces and emits three bright directional waves; final form charges upward and releases large radial sonic rings with spectral echoes.
+
+**Why:** Subtle swoops/trails were rejected as looking the same and lacking sonar. The user enthusiastically approved the revised visible-sonar reference, with a substantially more dramatic final form.
+
+**How to apply:** Preserve the approved bat artwork and anchored flight; keep sonar clear at gameplay scale. Effects must disappear immediately with hidden pets and scene changes.

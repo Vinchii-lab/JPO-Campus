@@ -1004,3 +1004,17 @@ mtime_ms = 1790704448462
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/08ec2161-44c2-44b3-849c-e25e4e03deba/d63f39d6-3e5f-4401-872f-15d9168f3b13"
 storage_version_token = "1790704569083592"
 content_type = "image/png"
+
+[[outputs]]
+id = "yyT5-Pr6uzoyxnK_iOZbS"
+uri = "file://artifacts/jpo-huddle/design/bat-sonar-native.gif"
+type = "image"
+title = "Implemented bat sonar moves"
+description = "Captured from the actual game animation code: adult directional sonar and final-form charged radial blast, with right- and left-facing checks."
+logical_id = "fffed772-3ce8-4eb3-8b91-d6fe506c6d9e"
+content_hash = "sha256:a1bfe34b3be074593c9306b415cb98f9d357abab91addcb799bfbe73237d6c0f"
+size = 1313943
+mtime_ms = 1790705577830
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/fffed772-3ce8-4eb3-8b91-d6fe506c6d9e/210c82eb-c125-45aa-9b3a-cd26a9572076"
+storage_version_token = "1790705681443399"
+content_type = "image/gif"

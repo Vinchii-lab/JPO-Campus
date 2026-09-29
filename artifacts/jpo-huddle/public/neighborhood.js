@@ -912,6 +912,8 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     _killPetFx(...args) { return this._office('_killPetFx', ...args); }
     _trackPetFx(...args) { return this._office('_trackPetFx', ...args); }
     _petTrick(...args) { return this._office('_petTrick', ...args); }
+    _startBatSonar(...args) { return this._office('_startBatSonar', ...args); }
+    _stepBatSonar(...args) { return this._office('_stepBatSonar', ...args); }
     _stepPet(...args) { return this._office('_stepPet', ...args); }
 
     preload() {

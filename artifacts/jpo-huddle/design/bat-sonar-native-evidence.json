@@ -1,0 +1,37 @@
+{
+  "lifecycle": [
+    {
+      "stage": 2,
+      "remote": false,
+      "hidden": "clean",
+      "destroy": "clean"
+    },
+    {
+      "stage": 3,
+      "remote": false,
+      "hidden": "clean",
+      "destroy": "clean"
+    },
+    {
+      "stage": 2,
+      "remote": true,
+      "hidden": "clean",
+      "destroy": "clean"
+    },
+    {
+      "stage": 3,
+      "remote": true,
+      "hidden": "clean",
+      "destroy": "clean"
+    }
+  ],
+  "anchors": "unchanged",
+  "scale": 1,
+  "duplicates": "blocked",
+  "completion": "3.6s",
+  "sceneShutdown": "clean",
+  "hiddenPhases": [
+    "charge",
+    "release"
+  ]
+}
