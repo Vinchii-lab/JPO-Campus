@@ -10,7 +10,7 @@
   const SHELVES = [
     { col: 46, row: 17 }, { col: 96, row: 17 }, { col: 143, row: 17 }
   ];
-  // Tiny jack-o'-lantern wall plaques: the uninterrupted solid wall under
+   // Jack-o'-lantern wall clusters: the uninterrupted solid wall under
   // reception and inside the recruiters' gathering room, never the desks.
   const WALL_PUMPKINS = [
     { col: 34, row: 52 }, { col: 69, row: 52 },
@@ -22,74 +22,104 @@
     { col: 39, row: 52 }, { col: 49, row: 52 },
     { col: 41, row: 65 }, { col: 62, row: 65 }
   ];
-  // Upper inside corners of the same rooms, plus the front-desk wall.
-  // Cobwebs stay within the top 32px of wall/floor, away from door openings.
+   // Authored empty corner pockets, checked against BOTH furniture and wall.
+   // Radii are in tiles, not pixels: these are room-scale webs, not icons.
+   // The upper nap room, middle office, reception, gathering room and south rooms
+   // have no seats/stations inside these quarter circles.
   const CORNERS = [
-    { col: 33, row: 17 }, { col: 81, row: 17 },
-    { col: 128, row: 17 }, { col: 35, row: 53 },
-    { col: 80, row: 53 }
+     { col: 183, row: 17, size: 4 }, { col: 81, row: 36, size: 4 },
+     { col: 35, row: 53, size: 3 }, { col: 78, row: 53, size: 6, dir: -1 },
+     { col: 69, row: 66, size: 6 }, { col: 33, row: 84, size: 5 },
+     { col: 50, row: 98, size: 4 }, { col: 147, row: 108, size: 6, dir: -1 }
   ];
 
   function gid(layer, col, row) {
-    return layer && layer.getTileAt(col, row)?.index || 0;
+     return Math.max(0, layer?.getTileAt(col, row)?.index || 0);
   }
 
   function pumpkin(scene, col, row, objects, tweens) {
     // On either a cabinet's upper tile or a solid wall-plaque tile,
     // never in the walkway or a seat below.
-    const x = (col + 0.8) * CELL;
-    const y = row * CELL + 28;
+     const x = (col + 0.9) * CELL;
+     const y = row * CELL + 41;
     const g = scene.add.graphics({ x, y }).setDepth(0);
-    g.fillStyle(0x24182f, 0.5);
-    g.fillEllipse(0, 3, 35, 11);
-    g.fillStyle(0x345438);
-    g.fillRect(-2, -19, 5, 7);
-    g.fillStyle(0x703b1f);
-    g.fillEllipse(-9, -5, 15, 24);
-    g.fillEllipse(9, -5, 15, 24);
-    g.fillStyle(0xb86a2b);
-    g.fillEllipse(0, -5, 25, 27);
-    g.lineStyle(1, 0xdd9341, 0.72);
-    g.lineBetween(-5, -17, -7, 5);
-    g.lineBetween(5, -17, 7, 5);
-    g.fillStyle(0x412033);
-    g.fillTriangle(-8, -8, -3, -8, -5, -3);
-    g.fillTriangle(3, -8, 8, -8, 5, -3);
-    g.fillRect(-5, 0, 10, 2);
-    g.fillRect(-3, 2, 6, 2);
-    objects.push(g);
-
-    // Only the carved face breathes; no flashing room-sized light or particles.
     const ember = scene.add.graphics({ x, y }).setDepth(0);
-    ember.fillStyle(0xffc66b, 0.67);
-    ember.fillTriangle(-7, -7, -4, -7, -5, -5);
-    ember.fillTriangle(4, -7, 7, -7, 5, -5);
-    ember.fillRect(-3, 1, 6, 2);
-    ember.setAlpha(0.56);
-    objects.push(ember);
+     // Three hand-pixelled gourds form a deliberate shelf vignette.
+     // Largest is 42px tall, companions 26/31px, within the two-tile top.
+     for (const [dx, dy, p] of [[-29, 0, 2], [25, 0, 2.4], [-3, 0, 3]]) {
+       const rect = (target, color, a, b, w, h) => {
+         target.fillStyle(color);
+         target.fillRect(dx + a * p, dy + b * p, w * p, h * p);
+       };
+       rect(g, 0x362039, -7, -9, 14, 8);
+       rect(g, 0x362039, -5, -11, 10, 12);
+       rect(g, 0x536244, -1, -14, 2, 4);
+       rect(g, 0xa84425, -6, -9, 12, 8);
+       rect(g, 0xe77830, -4, -10, 8, 10);
+       rect(g, 0xffa447, -3, -9, 2, 7);
+       rect(g, 0xbf5428, 2, -9, 2, 8);
+       rect(g, 0x42203a, -4, -7, 3, 3);
+       rect(g, 0x42203a, 1, -7, 3, 3);
+       rect(g, 0x42203a, -3, -3, 6, 2);
+       rect(ember, 0xffe69b, -4, -6, 2, 1);
+       rect(ember, 0xffe69b, 2, -6, 2, 1);
+       rect(ember, 0xffc45f, -2, -2, 4, 1);
+     }
+     // Small violet votive, not room lighting.
+     g.fillStyle(0x65467d); g.fillRect(40, -20, 6, 18);
+     ember.fillStyle(0xe7beff); ember.fillRect(40, -27, 6, 6);
+     ember.fillStyle(0xffedbd); ember.fillRect(42, -30, 3, 6);
+     objects.push(g, ember);
+     ember.setAlpha(0.7);
     tweens.push(scene.tweens.add({
       targets: ember, alpha: 0.84, duration: 1900 + col * 13,
       yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     }));
   }
 
-  function web(scene, col, row, objects) {
-    const x = col * CELL;
+   function web(scene, col, row, size, dir, objects, tweens) {
+     const x = (col + (dir < 0 ? 1 : 0)) * CELL;
     const y = row * CELL;
-    const g = scene.add.graphics({ x, y }).setDepth(0);
-    // A 34px corner motif: it never reaches the middle of a tile.
-    g.lineStyle(1, 0xcab6dd, 0.55);
-    const tips = [[34, 0], [32, 13], [25, 25], [12, 32], [0, 34]];
-    tips.forEach(([tx, ty]) => g.lineBetween(0, 0, tx, ty));
-    for (const t of [0.36, 0.68, 0.94]) {
-      for (let i = 0; i < tips.length - 1; i++) {
-        g.lineBetween(tips[i][0] * t, tips[i][1] * t,
-          tips[i + 1][0] * t, tips[i + 1][1] * t);
-      }
-    }
-    g.fillStyle(0xa579b7, 0.62);
-    g.fillCircle(10, 10, 1.4);
+     const g = scene.add.graphics({ x, y }).setDepth(0).setScale(dir, 1);
+     // Silk is authored on the same 3px grid as the tiles. Dark under-thread
+     // + ivory core stays legible on both pale flooring and dark walls.
+     const radius = size * CELL - 9;
+     function strand(ax, ay, bx, by) {
+       const n = Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / 3);
+       for (let i = 0; i <= n; i++) {
+         const px = Math.round((ax + (bx - ax) * i / (n || 1)) / 3) * 3;
+         const py = Math.round((ay + (by - ay) * i / (n || 1)) / 3) * 3;
+         g.fillStyle(0x5d4b77, 0.8); g.fillRect(px, py, 6, 6);
+         g.fillStyle(0xf1e6ff, 0.95); g.fillRect(px, py, 3, 3);
+       }
+     }
+     const tips = Array.from({ length: 9 }, (_, i) =>
+       [Math.cos(i * Math.PI / 16) * radius, Math.sin(i * Math.PI / 16) * radius]);
+     tips.forEach(([tx, ty]) => strand(0, 0, tx, ty));
+     for (const t of [0.17, 0.33, 0.5, 0.68, 0.84, 1]) {
+       for (let i = 0; i < tips.length - 1; i++) {
+         const [ax, ay] = tips[i].map(v => v * t);
+         const [bx, by] = tips[i + 1].map(v => v * t);
+         // Inward scallops give the silk a stretched, layered shape.
+         const mx = (ax + bx) * 0.46, my = (ay + by) * 0.46;
+         strand(ax, ay, mx, my); strand(mx, my, bx, by);
+       }
+     }
     objects.push(g);
+     const sx = Math.round(radius * 0.63 / 3) * 3;
+     const sy = Math.round(radius * 0.43 / 3) * 3;
+     strand(sx, sy - 33, sx, sy);
+     const spider = scene.add.graphics({ x: x + sx * dir, y: y + sy }).setDepth(0);
+     spider.fillStyle(0x382342);
+     spider.fillRect(-6, -3, 15, 15);
+     for (const side of [-1, 1]) for (let leg = 0; leg < 3; leg++) {
+       spider.fillRect(side < 0 ? -12 : 9, leg * 6 - 6, 6, 3);
+       spider.fillRect(side < 0 ? -15 : 15, leg * 6 - 9, 3, 6);
+     }
+     spider.fillStyle(0xdf8bed); spider.fillRect(-3, 0, 3, 3); spider.fillRect(3, 0, 3, 3);
+     objects.push(spider);
+     tweens.push(scene.tweens.add({ targets: spider, y: spider.y + 6,
+       duration: 2300 + col * 9, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
   }
 
   function garland(scene, col, row, objects) {
@@ -97,13 +127,15 @@
     const width = 5 * CELL;
     g.lineStyle(2, 0x62406d, 0.8);
     g.lineBetween(8, 8, width - 8, 8);
-    // Small alternating pennants and warm bulbs, hung within the wall tile.
+     // Torn velvet pennants and amber bulbs, entirely within the wall tile.
     for (let i = 0; i < 5; i++) {
       const x = i * CELL + CELL / 2;
-      g.fillStyle(i % 2 ? 0x9c6136 : 0x644675, 0.86);
-      g.fillTriangle(x - 8, 9, x + 8, 9, x, 27);
-      g.fillStyle(0xe6ad61, 0.78);
-      g.fillCircle(x - 14, 8, 2);
+       g.fillStyle(i % 2 ? 0xb56533 : 0x644675);
+       g.fillRect(x - 9, 9, 18, 12);
+       g.fillRect(x - 9, 21, 6, 9);
+       g.fillRect(x, 21, 6, 6);
+       g.fillStyle(0xe6ad61, 0.9);
+       g.fillRect(x - 15, 6, 3, 6);
     }
     objects.push(g);
   }
@@ -152,12 +184,19 @@
         garland(scene, col, row, objects);
       }
     });
-    CORNERS.forEach(({ col, row }) => {
+     CORNERS.forEach(({ col, row, size, dir = 1 }) => {
+       // Fail closed if map edits introduce a desk, sign, door or station.
+       const clear = Array.from({ length: size * size }, (_, i) => {
+         const c = i % size, r = Math.floor(i / size);
+         return c * c + r * r >= size * size ||
+           (gid(scene.floorLayer, col + c * dir, row + r) > 0 &&
+            gid(scene.furnitureLayer, col + c * dir, row + r) <= 0 &&
+            gid(scene.wallLayer, col + c * dir, row + r) <= 0);
+       }).every(Boolean);
       if (gid(scene.floorLayer, col, row) &&
-          !gid(scene.furnitureLayer, col, row) &&
-          !gid(scene.wallLayer, col, row) &&
-          gid(scene.wallLayer, col - 1, row)) {
-        web(scene, col, row, objects);
+           clear && gid(scene.wallLayer, col - dir, row) > 0 &&
+           gid(scene.wallLayer, col, row - 1) > 0) {
+         web(scene, col, row, size, dir, objects, tweens);
       }
     });
     // Tilemap layers and players both use depth 0 here. Inserting immediately

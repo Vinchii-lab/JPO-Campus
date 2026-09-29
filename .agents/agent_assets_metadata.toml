@@ -1018,3 +1018,31 @@ mtime_ms = 1790705577830
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/fffed772-3ce8-4eb3-8b91-d6fe506c6d9e/210c82eb-c125-45aa-9b3a-cd26a9572076"
 storage_version_token = "1790705681443399"
 content_type = "image/gif"
+
+[[outputs]]
+id = "-827DgYhb_yo02EMeghUB"
+uri = "file://artifacts/jpo-huddle/tests/evidence/halloween-hq/reception-east.png"
+type = "image"
+title = "HQ — giant Halloween cobwebs"
+description = "Actual map view showing a six-tile corner web, spider, and jack-o’-lantern decorations."
+logical_id = "a2bbbf8b-9bf7-4073-a1df-27bbcec4103f"
+content_hash = "sha256:f6f42ebea4ba9faf68b61b85ff85a216d59341d46dae90979874b8ea9bec57a1"
+size = 161190
+mtime_ms = 1790706603264
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/a2bbbf8b-9bf7-4073-a1df-27bbcec4103f/890a37a5-3572-4110-bed5-cdc9b6536d24"
+storage_version_token = "1790706704332053"
+content_type = "image/png"
+
+[[outputs]]
+id = "lCJ_spqNfCTw_526UTBBr"
+uri = "file://artifacts/jpo-huddle/tests/evidence/halloween-hq/reception.png"
+type = "image"
+title = "HQ — Halloween reception"
+description = "Pumpkins, corner webs, and torn garlands around reception, with signage and walking routes kept clear."
+logical_id = "cada9981-d5b3-497b-a513-d42a0a8f7601"
+content_hash = "sha256:07f91f954d2975d96319514611e8cfcac07507cfd2953a532aba3799692763fd"
+size = 179437
+mtime_ms = 1790706602678
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/cada9981-d5b3-497b-a513-d42a0a8f7601/9580f8d5-fbeb-4608-929c-9bb556e5ce64"
+storage_version_token = "1790706705896323"
+content_type = "image/png"
