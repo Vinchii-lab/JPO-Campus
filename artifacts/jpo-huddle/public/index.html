@@ -4012,6 +4012,7 @@
   <script src="focused-movement-helper.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="furniture-renderer.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood-ui.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="halloween-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="inventory-hotbar.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -4770,21 +4771,23 @@
     // be wearable AT ONCE. Legacy single slot keeps hats/eyewear/extras; NEW
     // body wearables live here. Keep WEAR_SLOT in lockstep with server.js.
     let _equippedSlots = { top: '', bottom: '', neckwear: '', held: '', feet: '' };
-    const WEAR_SLOT = { raincoat: 'top', rainboots: 'feet', umbrella: 'held' };
+    const WEAR_SLOT = { raincoat: 'top', rainboots: 'feet', umbrella: 'held', vampirecape: 'neckwear' };
     const SLOT_KEYS = ['top', 'bottom', 'neckwear', 'held', 'feet'];
-    // Seasonal calendar — mirror of server seasonNow() (server is the real
-    // gate; this only hides off-season shop rows).
-    function seasonNow(d = new Date()) {
-      const m = d.getMonth(), day = d.getDate();
-      if (m === 7 || m === 8 || (m === 9 && day <= 10)) return 'rainy';
-      if ((m === 9 && day >= 11) || (m === 10 && day <= 4)) return 'halloween';
-      if ((m === 10 && day >= 5) || (m === 11 && day <= 26)) return 'christmas';
-      if ((m === 11 && day >= 27) || (m === 0 && day <= 15)) return 'newyears';
-      if ((m === 0 && day >= 16) || (m === 1 && day <= 16)) return 'valentines';
-      return null;
-    }
+    // Authoritative server state, shared by weather, decor and seasonal stock.
+    // No client clock/calendar fallback: disconnected/unknown fails closed.
+    let _activeSeason = null;
+    function seasonNow() { return _activeSeason; }
+    socket.on('seasonState', ({ season }) => {
+      _activeSeason = season;
+      window.dispatchEvent(new Event('seasonChanged'));
+      if (document.getElementById('shop-modal')?.classList.contains('open')) _refreshShopUI();
+    });
+    socket.on('disconnect', () => {
+      _activeSeason = null; // fail closed until the reconnect snapshot arrives
+      window.dispatchEvent(new Event('seasonChanged'));
+    });
     // Owned seasonal gear stays wearable forever — only the BUY rows hide.
-    const _seasonRowOk = (c) => !c.season || c.season === seasonNow() || _ownedItems.includes(c.id);
+    const _seasonRowOk = (c) => _ownedItems.includes(c.id) || (c.id !== 'pet_frog' && (!c.season || c.season === seasonNow()));
 
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the
@@ -4815,12 +4818,15 @@
       { id: 'camera',       emoji: '📷', name: 'Camera',        cost: 4000, cat: '💎 Extras', desc: 'strapped around your neck' },
       { id: 'chain',        emoji: '📿', name: 'Gold Chain',    cost: 6000, cat: '💎 Extras', desc: 'bright gold V with a medallion' },
       { id: 'guitar',       emoji: '🎸', name: 'Guitar',        cost: 7500, cat: '💎 Extras', desc: 'sunburst, slung across your body' },
-      // Rainy-season limited drop (Aug 1 – Oct 10): hidden off-season via
+      // Rainy-season limited drop (calendar Aug 1 – Oct 9): hidden off-season via
       // _seasonRowOk; the server buy handlers reject off-season anyway. These
       // use the NEW outfit slots (WEAR_SLOT) so they stack with a hat + wings.
       { id: 'rainboots',    emoji: '🥾', name: 'Rain Boots',    cost: 3500, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'yellow wellies, puddle-proof' },
       { id: 'umbrella',     emoji: '☂️', name: 'Umbrella',      cost: 4000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'stay dry in style' },
       { id: 'raincoat',     emoji: '🧥', name: 'Raincoat',      cost: 6000, cat: '🌧️ Rainy Season — limited!', season: 'rainy', desc: 'classic yellow slicker' },
+      { id: 'witchhat', emoji: '🧙', name: 'Witch Hat', cost: 6500, cat: '🎃 Halloween — limited!', season: 'halloween', desc: 'a little midnight magic' },
+      { id: 'pumpkinhead', emoji: '🎃', name: 'Pumpkin Head', cost: 8000, cat: '🎃 Halloween — limited!', season: 'halloween', desc: 'a glowing jack-o-lantern grin' },
+      { id: 'vampirecape', emoji: '🧛', name: 'Vampire Cape', cost: 6000, cat: '🎃 Halloween — limited!', season: 'halloween', desc: 'a velvet cape — stacks with hats and wings' },
       // Wings: 8k–30k ladder, cheapest first (fairy tops the list). Costs
       // display-only — server SHOP is authoritative, keep in lockstep.
       { id: 'fairywings',   emoji: '🧚', name: 'Fairy Wings',   cost: 8000, wings: true, desc: 'shimmering wings on your back' },
@@ -4893,6 +4899,9 @@
       scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
       // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
       // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
+      witchhat: { tex: 'wear_witchhat', dy: -27, side: 0, frames: 3, backFrame: 2, showUp: true },
+      pumpkinhead: { tex: 'wear_pumpkinhead', dy: -9, side: 0, frames: 3, backFrame: 2, showUp: true },
+      vampirecape: { tex: 'wear_vampirecape', dy: 18, side: -3, frames: 3, backFrame: 2, behind: true, showUp: true },
       raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2, frames: 3, backFrame: 2, showUp: true },
       // dy 45 (not 25): baked frames put the boot art's centre at texel 16+dy/3,
       // and the feet+shoe rows sit at 28-31 — 25 left the boots floating at the
@@ -4914,12 +4923,13 @@
       headphones:'head', beret:'head', chefhat:'head', camera:'head',
       gamerheadset:'head', book:'head', guitar:'head', spectacles:'head',
       beanie:'head', flatcap:'head', rangerhat:'head', catears:'head',
-      umbrella:'head',
+      umbrella:'head', witchhat:'head', pumpkinhead:'head',
     };
     for (const [wid, anc] of Object.entries(_WEAR_BAKE_ANCHOR)) WEARABLE_DEFS[wid].bake = anc;
     // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
     // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
     WEARABLE_DEFS.raincoat.bakeLayer = true;
+    WEARABLE_DEFS.vampirecape.bakeLayer = true;
     // Rainboots: also a LAYER sheet (painted onto each frame's own foot pixels
     // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
     // the sprite the way anchored overlay stickers can.
@@ -4967,8 +4977,9 @@
       { id: 'pet_dragon',          species: 'Baby Dragon', emoji: '🐉', name: 'Violet',         cost: 30000, desc: 'the ultimate office flex' },
       { id: 'pet_dragon_crimson',  species: 'Baby Dragon', emoji: '🐲', name: 'Crimson',        cost: 38000, desc: 'runs a little hot in meetings' },
       { id: 'pet_dragon_obsidian', species: 'Baby Dragon', emoji: '🖤', name: 'Obsidian',       cost: 45000, desc: 'forged in the server room' },
-      // Rainy-season limited pet (Aug 1 – Oct 10): Tadpole → Frog → King Frog.
-      { id: 'pet_frog',            species: 'Frog',        emoji: '🐸', name: 'Tadpole',        cost: 12000, season: 'rainy', desc: 'rainy-season only — grows into a king' },
+      // Shelved rainy pet: Tadpole → Frog → King Frog; existing ownership stays usable.
+      { id: 'pet_frog',            species: 'Frog',        emoji: '🐸', name: 'Tadpole',        cost: 12000, season: 'rainy', desc: 'shelved from new adoption — owned frogs stay with you' },
+      { id: 'pet_bat', species: 'Bat', emoji: '🦇', name: 'Moonwing', cost: 12000, season: 'halloween', desc: 'baby bat → midnight bat → spectral bat' },
       // Rare tier: shop-visible so everyone can drool, but NOT buyable at any
       // price — the only way in is a personal gift from the boss. (cost 0 is
       // display-only anyway; the server hard-blocks buyPet on rare ids.)
@@ -5017,6 +5028,7 @@
     // dx toward the FACING side (pets are drawn facing right; the offset
     // mirrors when the pet flips). A duck's head is not a dragon's head.
     const PET_ACC_ANCHOR = {
+      pet_bat: { dx: 0, dy: -20 },
       pet_duck:   { dx: 9,  dy: -30 },
       pet_cat:    { dx: 10, dy: -30 },
       pet_dog:    { dx: 10, dy: -32 },
@@ -5031,7 +5043,7 @@
     // (see _stepPet/_petTrick). Everything is derived client-side from the
     // pet object each frame, zero network traffic, so mirroring a species
     // later is just adding it to this set (+ a trick case if it gets one).
-    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix', 'pet_frog']);
+    const PET_LIVELY = new Set(['pet_unicorn', 'pet_dog', 'pet_bunny', 'pet_dragon', 'pet_cat', 'pet_duck', 'pet_turtle', 'pet_phoenix', 'pet_frog', 'pet_bat']);
     // Deliberately SIMPLE (user call, July 2026): every accessory is headwear
     // and hovers on the head — one fit for all, off the species head anchor.
     // mx pulls dx toward the facing side, dy +2 sinks past the emoji box's
@@ -13947,7 +13959,7 @@
         for (const id of ['pet_dog', 'pet_dog_husky', 'pet_dog_choco',
                           'pet_duck', 'pet_duck_snow', 'pet_cat', 'pet_cat_black',
                           'pet_cat_snow', 'pet_turtle', 'pet_turtle_sapphire',
-                          'pet_bunny', 'pet_bunny_cocoa', 'pet_frog',
+                          'pet_bunny', 'pet_bunny_cocoa', 'pet_frog', 'pet_bat',
                           'pet_dragon', 'pet_dragon_crimson', 'pet_dragon_obsidian'])
           for (const s of [2, 3]) {
             // ?v= cache-bust per id: frog s2/s3 art was mirrored to face
@@ -13996,6 +14008,9 @@
         for (const w of ['beewings', 'batwings', 'butterflywings', 'angelwings', 'devilwings', 'jetpackwings', 'goldenwings', 'phoenixwings'])
           this.load.spritesheet('wear_' + w, `/assets/wear_${w}.png`, { frameWidth: 32, frameHeight: 20 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
+        this.load.spritesheet('wear_witchhat', '/assets/wear_witchhat.png', { frameWidth: 16, frameHeight: 13 });
+        this.load.spritesheet('wear_pumpkinhead', '/assets/wear_pumpkinhead.png', { frameWidth: 16, frameHeight: 13 });
+        this.load.spritesheet('wear_vampirecape', '/assets/wear_vampirecape.png', { frameWidth: 16, frameHeight: 14 });
         // Rainy-season outfit-slot wearables (Aug 2026).
         this.load.spritesheet('wear_raincoat',  '/assets/wear_raincoat.png',  { frameWidth: 12, frameHeight: 10 });
         this.load.spritesheet('wear_rainboots', '/assets/wear_rainboots.png', { frameWidth: 10, frameHeight: 4 });
@@ -14350,7 +14365,7 @@
           cam.setZoom(Phaser.Math.Clamp(cam.zoom+(dy<0?0.1:-0.1),0.5,4));
         });
 
-        // ── Seasonal weather (client-only, calendar-gated) ──
+        // ── Seasonal weather (server-authoritative season gate) ──
         // Aug–Oct = rainy season: subtle drizzle all day plus a synced "full
         // storm" burst every so often. The storm schedule derives from wall-
         // clock time (10-minute slots, hashed), so every player sees the same
@@ -14358,12 +14373,20 @@
         // are screen-space (scrollFactor 0) sized 2x the viewport so they
         // still cover the screen at the minimum zoom (0.5).
         this._wx = null;
-        // Owner's season calendar: rainy Aug 1–Oct 10 · halloween Oct 10–Nov 4 ·
-        // christmas Nov 5–Dec 26 · new years Dec 27–Jan 15 · valentine's Jan 16–Feb 16.
-        // Only the rainy theme is built so far; the others get their own visuals later.
-        const _wxD = new Date(), _wxM = _wxD.getMonth(), _wxDay = _wxD.getDate();  // month 0-based
-        const wxRainy = (_wxM === 7) || (_wxM === 8) || (_wxM === 9 && _wxDay <= 10);
-        if (wxRainy) {
+        // Reconcile on creation, reconnect and live transitions. Clear rain and
+        // active lightning tweens immediately before mounting the next theme.
+        this._syncSeason = () => {
+          this._halloweenCleanup?.();
+          this._halloweenCleanup = null;
+          if (this._wx) {
+            for (const key of ['far', 'near', 'tint', 'flash']) {
+              this.tweens.killTweensOf(this._wx[key]);
+              this._wx[key].destroy();
+            }
+            this._wx = null;
+          }
+          if (seasonNow() === 'halloween') this._halloweenCleanup = window.HalloweenOffice?.mount(this);
+          if (seasonNow() !== 'rainy') return;
           if (!this.textures.exists('rainTex')) {
             const c = this.textures.createCanvas('rainTex', 128, 128);
             const ctx = c.context; let s = 42;
@@ -14407,10 +14430,18 @@
               wx.boltAt = now + 6000;
               wx.flash.alpha = 0.55;
               this.tweens.add({ targets: wx.flash, alpha: 0, duration: 420, ease: 'Cubic.easeOut' });
-              if (Math.random() < 0.5) this.time.delayedCall(140, () => { if (this._wx) wx.flash.alpha = Math.max(wx.flash.alpha, 0.35); });
+              if (Math.random() < 0.5) this.time.delayedCall(140, () => { if (this._wx === wx) wx.flash.alpha = Math.max(wx.flash.alpha, 0.35); });
             }
           };
-        }
+        };
+        this._syncSeason();
+        window.addEventListener('seasonChanged', this._syncSeason);
+        this.events.once('shutdown', () => {
+          window.removeEventListener('seasonChanged', this._syncSeason);
+          this._halloweenCleanup?.();
+          this._halloweenCleanup = null;
+          this._wx = null;
+        });
 
         // ── Prop Hunt scene handlers ──
         // Prop cleanup hook for _phReset (which also runs on socket disconnect
@@ -15265,7 +15296,7 @@
             img._under = under;
             img.setDepth(under.depth);
             this.children.moveBelow(img, under);
-            this.tweens.add({ targets: img, scaleX: { from: sc, to: sc * 0.77 },
+            if (equipped !== 'vampirecape') this.tweens.add({ targets: img, scaleX: { from: sc, to: sc * 0.77 },
               duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
           }
           this._placeWearable(img, wd, x, y, dir || 'down');
@@ -15447,7 +15478,9 @@
         if (accEmoji) {
           obj._acc = this.add.text(obj.x, obj.y, accEmoji, { fontSize: '13px', resolution: 2 })
             .setOrigin(0.5, 1).setDepth(3);
-          const an = PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
+          const an = pet === 'pet_bat'
+            ? { dx: 0, dy: stage >= 3 ? -26 : stage >= 2 ? -23 : -20 }
+            : PET_ACC_ANCHOR[petSpeciesId(pet)] || { dx: 5, dy: -30 };
           const fit = PET_ACC_FIT_ALL;
           obj._accOffX = an.dx * fit.mx;                 // mirrored by flip in _placePetAcc
           obj._accOffY = an.dy * fit.my + fit.dy;
@@ -15527,6 +15560,16 @@
         // No explicit restore needed — once the trick's tween clears
         // _trickBusy, the next _stepPet frame reasserts walk/idle/sit.
         if (petObj._animSet) petObj.setTexture(petObj._animSet.action);
+        if (sp === 'pet_bat') {
+          petObj._trickBusy = true;
+          const y0 = petObj.y;
+          this.tweens.add({
+            targets: petObj, y: y0 - 16, angle: petObj.flipX ? -10 : 10,
+            duration: 420, yoyo: true, ease: 'Sine.easeInOut',
+            onComplete: () => { petObj.y = y0; petObj.angle = 0; petObj._trickBusy = false; },
+          });
+          return;
+        }
         if (sp === 'pet_unicorn') {
           // The unicorn has ONE form and FOUR signature moves (boss-approved
           // storyboard) — it cycles through them so every trick feels fresh:
@@ -17756,7 +17799,8 @@
           // show the pet's real sit/nest art. Pet Wars owns its separate,
           // continuously-airborne battle renderer.
           const airborneSpecies = (petObj._petStage >= 2 && (petObj._petId || '').startsWith('pet_dragon'))
-            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3);
+            || (petObj._petId === 'pet_phoenix' && petObj._petStage >= 3)
+            || petObj._petId === 'pet_bat';
           const movingFly = dist > gap + 1;
           const flying = airborneSpecies && movingFly && !seated;
           if (flying) {
@@ -19278,6 +19322,7 @@
       'pet_dragon_crimson':  { color: '#f04444', color2: '#ffd24d', fx: 'fire', special: 'Ember Spit', ultimate: 'Inferno' },
       'pet_dragon_obsidian': { color: '#5e4b78', color2: '#16101f', fx: 'shadow', special: 'Dark Pulse', ultimate: 'Void Eruption' },
       'pet_frog':            { color: '#20c997', color2: '#b9ff63', fx: 'splash', special: 'Bubble', ultimate: 'Swamp Bomb' },
+      'pet_bat':             { color: '#a97ce8', color2: '#b8f4ef', fx: 'shadow', special: 'Echo Pulse', ultimate: 'Spectral Swoop' },
       'pet_unicorn':         { color: '#ff7cba', color2: '#91f7ff', fx: 'holy', special: 'Prism Beam', ultimate: 'Starlight' },
       'pet_phoenix':         { color: '#ff4d3d', color2: '#ffe34d', fx: 'fire', special: 'Searing Wing', ultimate: 'Supernova' },
       'default':             { color: '#ffffff', color2: '#b8c0ff', fx: 'impact', special: 'Special', ultimate: 'Ultimate' }
@@ -19412,6 +19457,14 @@
           attack: { choreo: 'frog-hop', label: 'RIBBIT HOP!' },
           special: { choreo: 'rain-drizzle', label: 'RAIN DRIZZLE!' },
           ultimate: { choreo: 'rain-dance', label: 'STORM DANCE!' },
+        },
+      },
+      pet_bat: {
+        effect: 'wing',
+        moves: {
+          attack: { choreo: 'showoff-flap', label: 'WING CUT!' },
+          special: { choreo: 'moonlit-blink', label: 'ECHO PULSE!' },
+          ultimate: { choreo: 'void-slam', label: 'SPECTRAL SWOOP!' },
         },
       },
       pet_unicorn: {
@@ -19841,7 +19894,7 @@
     }
 
     function pbIsFlyingPet(petId) {
-       return String(petId || '').startsWith('pet_dragon') || petId === 'pet_phoenix';
+       return String(petId || '').startsWith('pet_dragon') || petId === 'pet_phoenix' || petId === 'pet_bat';
     }
 
     function pbFlightFrames(petId, stage) {

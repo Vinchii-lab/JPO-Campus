@@ -1,4 +1,5 @@
 import express from "express";
+import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END } from "./season.mjs";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { fileURLToPath } from "url";
@@ -78,6 +79,8 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 // restart that didn't touch the page — tabs reload only for real new code.
 const buildHasher = crypto.createHash("sha1");
 for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
+  buildHasher.update(readFileSync(path.join(__dirname, file)));
+for (const file of ["public/halloween-office.js", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -1168,6 +1171,9 @@ const GRACE_MS = 10_000;
 // hanging out, crown is a long-term goal); server is authoritative — client
 // drift only mislabels the shop row.
 const SHOP = {
+  witchhat: 6500,
+  pumpkinhead: 8000,
+  vampirecape: 6000,
   // Aug 2026 shop cleanup: tiered pricing by category (hats / eyewear /
   // audio / accessories). Keep in lockstep with client COSMETICS labels.
   beanie:       4000,
@@ -1220,6 +1226,7 @@ const SHOP = {
 // looks (zero migration). Classic prices unchanged; fancy looks cost more.
 // Ids MUST match the client PETS catalog in public/index.html.
 const PETS = {
+  pet_bat: 12000,
   pet_duck:             10000,
   pet_duck_snow:        14000,
   pet_cat:              12500,
@@ -1256,19 +1263,14 @@ const RARE_IDS = new Set([...RARE_PETS, ...RARE_COSMETICS]);
 // off-season rows, and (authoritatively) the buy handlers below REJECT
 // off-season purchases — client hiding alone is not a gate. Equip/ownership
 // paths are deliberately NOT gated: you keep and can wear what you bought
-// year-round; only the ability to BUY comes and goes. Keep in lockstep with
-// the client's seasonNow() copy in public/index.html.
-function seasonNow(d = new Date()) {
-  const m = d.getMonth(), day = d.getDate();   // m is 0-based
-  if (m === 7 || m === 8 || (m === 9 && day <= 10)) return "rainy";        // Aug 1 – Oct 10
-  if ((m === 9 && day >= 11) || (m === 10 && day <= 4)) return "halloween"; // Oct 11 – Nov 4
-  if ((m === 10 && day >= 5) || (m === 11 && day <= 26)) return "christmas";// Nov 5 – Dec 26
-  if ((m === 11 && day >= 27) || (m === 0 && day <= 15)) return "newyears"; // Dec 27 – Jan 15
-  if ((m === 0 && day >= 16) || (m === 1 && day <= 16)) return "valentines";// Jan 16 – Feb 16
-  return null;
-}
-const SEASONAL_ITEMS = { raincoat: "rainy", umbrella: "rainy", rainboots: "rainy" };
-const SEASONAL_PETS  = { pet_frog: "rainy" };
+// year-round; only new issuance is gated. season.mjs is the sole calendar;
+// clients consume seasonState on connection and on every live transition.
+const seasonSnapshot = () => ({ season: seasonNow(), releaseEndsAt: HALLOWEEN_RELEASE_END });
+let lastSeason = seasonNow();
+setInterval(() => {
+  const next = seasonNow();
+  if (next !== lastSeason) { lastSeason = next; io.emit("seasonState", seasonSnapshot()); }
+}, 1000).unref();
 
 // ── Outfit slots (Aug 2026) ──────────────────────────────────────────────────
 // Owner rule: head / neck / top / bottom wearables must all be wearable AT THE
@@ -1277,7 +1279,7 @@ const SEASONAL_PETS  = { pet_frog: "rainy" };
 // NEW body wearables declare a slot here and live in their own DB column, so
 // they stack with the legacy slot and wings. An item absent from WEAR_SLOT
 // equips into the legacy slot.
-const WEAR_SLOT = { raincoat: "top", rainboots: "feet", umbrella: "held" };
+const WEAR_SLOT = { raincoat: "top", rainboots: "feet", umbrella: "held", vampirecape: "neckwear" };
 const SLOT_COL  = { top: "equipped_top", bottom: "equipped_bottom", neckwear: "equipped_neckwear", held: "equipped_held", feet: "equipped_feet" };
 const SLOT_KEYS = ["top", "bottom", "neckwear", "held", "feet"];
 const emptySlots = () => ({ top: "", bottom: "", neckwear: "", held: "", feet: "" });
@@ -2230,6 +2232,13 @@ const PB_KITS = {
     attackHint: "Long-range tongue hit", guardHint: "Slippery guard", specialHint: "Applies poison", ultimateHint: "Storm weakens the enemy",
     hpMult: .98, atkMult: .97, guardBonus: .02, critBonus: 0, dodgeBonus: .05,
     attackMult: .96, specialMult: .78, ultimateMult: 1.02, specialEffect: "poison", ultimateEffect: "storm", guardCounter: 0,
+  },
+  pet_bat: {
+    id: "echo-flier", passive: "Night Wings", motion: "wing",
+    attackName: "Wing Cut", guardName: "Wing Fold", specialName: "Echo Pulse", ultimateName: "Spectral Swoop",
+    attackHint: "A swift wing strike", guardHint: "Fold into cover", specialHint: "Banks an evade", ultimateHint: "A spectral draining dive",
+    hpMult: .95, atkMult: .98, guardBonus: 0, critBonus: .02, dodgeBonus: .05,
+    attackMult: 1, specialMult: .82, ultimateMult: .94, specialEffect: "evade", ultimateEffect: "voidDrain", guardCounter: 0,
   },
   pet_unicorn: {
     id: "prism-guardian", passive: "Gentle Light", motion: "beam",
@@ -8036,6 +8045,7 @@ function voicePairOk(aId, bId) {
 }
 
 io.on("connection", (socket) => {
+  socket.emit("seasonState", seasonSnapshot());
   console.log("Socket connected:", socket.id);
   // Bounded aggregate diagnostics, never raw client content or identity.
   // Pair real-browser timing with server-observed movement rejections.
@@ -12479,7 +12489,7 @@ io.on("connection", (socket) => {
     // Rare wearables are shop-visible bait, never purchasable — gift-only.
     if (RARE_COSMETICS.has(item)) { socket.emit("shopError", "This one can't be bought — only the boss can gift it. 🎁"); return; }
     // Seasonal stock: authoritative gate (client hiding is cosmetic only).
-    if (SEASONAL_ITEMS[item] && seasonNow() !== SEASONAL_ITEMS[item]) { socket.emit("shopError", "That's a seasonal item — it's out of season right now! 📅"); return; }
+    if (!canIssueItem(item)) { socket.emit("shopError", "That's a seasonal item — it's out of season right now! 📅"); return; }
     if (!cost) return;
     if (!takeToken(buyBucket)) return;   // throttle rapid buy attempts
     // No spending while in an RPS challenge/match: this is what keeps the
@@ -12685,7 +12695,7 @@ io.on("connection", (socket) => {
     // Rare pets are shop-visible bait, never purchasable — gift-only.
     if (RARE_PETS.has(item)) { socket.emit("shopError", "This one can't be bought — only the boss can gift it. 🎁"); return; }
     // Seasonal stock: authoritative gate (client hiding is cosmetic only).
-    if (SEASONAL_PETS[item] && seasonNow() !== SEASONAL_PETS[item]) { socket.emit("shopError", "That pet is seasonal — it's out of season right now! 📅"); return; }
+    if (!canIssueItem(item)) { socket.emit("shopError", item === "pet_frog" ? "Frogs are resting from the shop. Owned frogs remain yours to equip and trade." : "That pet is seasonal — it's out of season right now! 📅"); return; }
     if (!cost) return;
     if (!takeToken(buyBucket)) return;   // shares the shop's spam throttle
     if (inAnyMatch(socket.id)) { socket.emit("shopError", "Finish your match first!"); return; }

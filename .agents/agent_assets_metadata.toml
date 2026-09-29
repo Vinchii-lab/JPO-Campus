@@ -836,3 +836,45 @@ mtime_ms = 1789755316643
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/8d1cbce4-d77c-4d48-902e-351a5d3cc48a/3efab8ea-b7a9-450c-82ed-dbba1c5d856f"
 storage_version_token = "1789756678098601"
 content_type = "image/png"
+
+[[outputs]]
+id = "sUYWj-8H0AaFCJ-N29jXP"
+uri = "file://artifacts/jpo-huddle/design/halloween-bat-preview.png"
+type = "image"
+title = "Halloween bat — three growth stages"
+description = "Native-size sprite preview: baby, adult, and spectral forms with movement, rest, and action poses."
+logical_id = "37a8ed28-4e10-4555-bc70-9501ef2c3bdd"
+content_hash = "sha256:66942277919be732afeeb1877707bb03e5a49aa2b3d5d7c1314a94c3ec4870ff"
+size = 29685
+mtime_ms = 1790696399691
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/37a8ed28-4e10-4555-bc70-9501ef2c3bdd/ab730ba6-1fe5-4f0d-b92b-d798eca3ea98"
+storage_version_token = "1790696400452464"
+content_type = "image/png"
+
+[[outputs]]
+id = "Eee2sRlQmUzei_1LZqpLA"
+uri = "file://screenshots/halloween-standing-reload.png"
+type = "image"
+title = "Halloween in the running office"
+description = "Actual post-reload gameplay with pumpkin head, vampire cape, wings, and the new bat companion."
+logical_id = "c631d16a-5e4a-467d-90f1-000e37799006"
+content_hash = "sha256:a7092f0be35de9d7a8d0f1c9cf99ce1e0b93af848c4faac3085d02082b57bcc2"
+size = 71636
+mtime_ms = 1790697057154
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/c631d16a-5e4a-467d-90f1-000e37799006/01d25633-839f-4b47-876d-462cdfa59477"
+storage_version_token = "1790697446193992"
+content_type = "image/png"
+
+[[outputs]]
+id = "YQqiw3IhKfvOni8Ph3qpE"
+uri = "file://screenshots/halloween-native-pose-fit.png"
+type = "image"
+title = "Halloween outfit fit check"
+description = "Game-rendered standing and seated textures for all four avatars, with both head items and the cape."
+logical_id = "5de2cb78-6f9b-4fb5-95b8-7ef1ef3800f6"
+content_hash = "sha256:dbcca99900974a46090746636a237081e4a147f40813f5e67e1763c647de48e6"
+size = 103140
+mtime_ms = 1790697371795
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5de2cb78-6f9b-4fb5-95b8-7ef1ef3800f6/55e12017-54e1-401c-8fe3-41ba133d87e3"
+storage_version_token = "1790697447628481"
+content_type = "image/png"
