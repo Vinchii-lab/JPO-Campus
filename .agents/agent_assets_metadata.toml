@@ -948,3 +948,31 @@ mtime_ms = 1790703259670
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/d4ac8d58-ff0d-41f7-afaf-5cddea078975/54deee59-86b4-4ebe-872f-d1dd046d84aa"
 storage_version_token = "1790703302348970"
 content_type = "image/png"
+
+[[outputs]]
+id = "ilKvxtW2vDc2AHHxUxn_V"
+uri = "file://artifacts/jpo-huddle/design/bat-special-reference.gif"
+type = "image"
+title = "Bat special moves — animated reference"
+description = "Form 2: Echo Swoop with sonar pulses. Final form: Spectral Dash with fading duplicates and a rune-ring finish. Proposed animation using the current bat sprites—not installed in the game yet."
+logical_id = "4c645f4c-0920-4ee6-9dc7-bd2cc6dee466"
+content_hash = "sha256:e18e2732d51491ff6e0e372509c7692779b695acd19fb27294404732cf614b88"
+size = 1506145
+mtime_ms = 1790703647918
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/4c645f4c-0920-4ee6-9dc7-bd2cc6dee466/522777b7-37d3-40e1-8e3e-b1c44bc07586"
+storage_version_token = "1790703784877410"
+content_type = "image/gif"
+
+[[outputs]]
+id = "JxKpvztpX-i5kCsOSU4bK"
+uri = "file://artifacts/jpo-huddle/design/bat-special-reference.mp4"
+type = "video"
+title = "Bat special moves — video reference"
+description = "Video version of the proposed adult and final-form special animations."
+logical_id = "f03cd0ef-8e02-4668-a968-40a3020a5135"
+content_hash = "sha256:36769a070009f4b1b2b8c18dd7d6f66b7391e65d5ee247fee996259a94b0cbc7"
+size = 182267
+mtime_ms = 1790703649010
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/f03cd0ef-8e02-4668-a968-40a3020a5135/13cb5b2d-16b9-484b-a1dc-c4357fadcc4f"
+storage_version_token = "1790703786426436"
+content_type = "video/mp4"
