@@ -22,3 +22,10 @@ description: Wearables are baked into player textures per frame via layer-derive
 - Clothing = LAYER sheets, not stickers (Aug 2026): shirts/pants/footwear items should paint the sprite's own pixels (tools/cosmetic-layer-gen.cjs pattern; boots via tools/boot-layer-gen.cjs paint each column's bottom-3 rows). Overlays are only for items that genuinely sit ON the character (hats, held). Slots: top/bottom/neckwear/held/feet + legacy hat + wings.
 - Fitting-room QA: tools/wearable-fitcheck.cjs dumps a 4-direction contact sheet per item — run it for every new/changed wearable before presenting.
 - Hooded coat lesson (Vince-approved look): a hood must be its OWN drawn geometry — ellipse from the head bbox, crown peak, drape to the shoulder line, neck taper below cheek level. Recoloring hair pixels (or building the dome from hair columns) reads as "yellow hair" and was rejected twice. Layers can't erase base pixels, so the hood must be a superset of every hair pixel. Bump the ?v= cache param on /assets/layers URLs whenever sheets regenerate.
+
+## Cape readability
+Capes should leave front-facing torso, arms, and face readable; fit their back drape and collar to actual body silhouettes rather than a broad head-relative polygon.
+
+**Why:** The initial Halloween cape was rejected in-game: its dark front panel and diagonal gold decoration obscured the avatar rather than reading as a cape.
+
+**How to apply:** Inspect tightly cropped native standing/seated renders in every direction, including combinations with owned seasonal layers. A wide contact sheet alone can conceal how much anatomy is covered.

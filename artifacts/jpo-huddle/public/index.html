@@ -4899,7 +4899,7 @@
       scifihelmet:  { tex: 'wear_scifihelmet',  dy: -5,  side: 0, sideDy: -5, scale: 4.4 },   // full-face: big enough to swallow hair too
       // Rainy-season outfit-slot wearables (Aug 2026). dy values follow the
       // head-geometry note above: torso ≈ y+6..y+20, feet ≈ y+27.
-      witchhat: { tex: 'wear_witchhat', dy: -27, side: 0, frames: 3, backFrame: 2, showUp: true },
+      witchhat: { tex: 'wear_witchhat', dy: -30, side: 0, frames: 3, backFrame: 2, showUp: true },
       pumpkinhead: { tex: 'wear_pumpkinhead', dy: -9, side: 0, frames: 3, backFrame: 2, showUp: true },
       vampirecape: { tex: 'wear_vampirecape', dy: 18, side: -3, frames: 3, backFrame: 2, behind: true, showUp: true },
       raincoat:  { tex: 'wear_raincoat',  dy: 13,  side: 2, frames: 3, backFrame: 2, showUp: true },
@@ -4930,6 +4930,7 @@
     // from each character's own body layers by tools/cosmetic-layer-gen.cjs).
     WEARABLE_DEFS.raincoat.bakeLayer = true;
     WEARABLE_DEFS.vampirecape.bakeLayer = true;
+    WEARABLE_DEFS.witchhat.bakeLayer = true;
     // Rainboots: also a LAYER sheet (painted onto each frame's own foot pixels
     // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
     // the sprite the way anchored overlay stickers can.
@@ -5501,7 +5502,7 @@
             const im = new Image();
             im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
             im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
-            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=8`;
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=9-halloween-fit`;
           }
         }
       }
@@ -14020,9 +14021,9 @@
         for (const w of ['beewings', 'batwings', 'butterflywings', 'angelwings', 'devilwings', 'jetpackwings', 'goldenwings', 'phoenixwings'])
           this.load.spritesheet('wear_' + w, `/assets/wear_${w}.png`, { frameWidth: 32, frameHeight: 20 });
         this.load.spritesheet('wear_cap',    '/assets/wear_cap.png',    { frameWidth: 10, frameHeight: 6 });
-        this.load.spritesheet('wear_witchhat', '/assets/wear_witchhat.png', { frameWidth: 16, frameHeight: 13 });
+        this.load.spritesheet('wear_witchhat', '/assets/wear_witchhat.png?v=9-halloween-fit', { frameWidth: 16, frameHeight: 13 });
         this.load.spritesheet('wear_pumpkinhead', '/assets/wear_pumpkinhead.png', { frameWidth: 16, frameHeight: 13 });
-        this.load.spritesheet('wear_vampirecape', '/assets/wear_vampirecape.png', { frameWidth: 16, frameHeight: 14 });
+        this.load.spritesheet('wear_vampirecape', '/assets/wear_vampirecape.png?v=9-halloween-fit', { frameWidth: 16, frameHeight: 14 });
         // Rainy-season outfit-slot wearables (Aug 2026).
         this.load.spritesheet('wear_raincoat',  '/assets/wear_raincoat.png',  { frameWidth: 12, frameHeight: 10 });
         this.load.spritesheet('wear_rainboots', '/assets/wear_rainboots.png', { frameWidth: 10, frameHeight: 4 });

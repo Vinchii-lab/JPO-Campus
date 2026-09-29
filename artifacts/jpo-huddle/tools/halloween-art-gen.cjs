@@ -1,5 +1,5 @@
 // Native Halloween pixel art. Run with NODE_PATH=.agents/tools/node_modules
-// node artifacts/jpo-huddle/tools/halloween-art-gen.cjs [--preview|--bat-only]
+// node artifacts/jpo-huddle/tools/halloween-art-gen.cjs [--preview|--bat-only|--wear-only]
 // Preview only writes design/halloween-bat-preview.png; full run writes the game art.
 const fs = require('fs');
 const path = require('path');
@@ -44,6 +44,8 @@ function line(p,x1,y1,x2,y2,color,width=1) {
 // Keep the generated source: the three rows have genuinely different anatomy,
 // not one procedural face scaled up. Explicit crops avoid wide-wing tile bleed.
 const { execFileSync } = require('child_process');
+function save(name,p){fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
+if (!process.argv.includes('--wear-only')) {
 const source = path.resolve(__dirname, '../../../attached_assets/generated_images/bat_evolution_native_sheet.png');
 const sheet = PNG.sync.read(fs.readFileSync(source));
 // Key the warm cream only; purple highlights and white teeth remain intact.
@@ -103,7 +105,6 @@ const stamps=stages.map(stage=>{
   flights.push(cycle);
   return [row[0],cycle[12],cycle[0],cycle[4],row[4],row[5]];
 });
-function save(name,p){fs.mkdirSync(path.dirname(name),{recursive:true});fs.writeFileSync(name,PNG.sync.write(p));}
 function makePreview(){
   const p=image(64*6,64*3);
   stamps.forEach((row,j)=>row.forEach((src,i)=>{
@@ -130,6 +131,7 @@ if(process.argv.includes('--bat-only')) {
   console.log('Installed generated bat: 3 distinct stages × 6 transparent 64×64 frames.');
   process.exit(0);
 }
+}
 
 // Directional art sheets: front/down, right-facing side, rear/up.
 // Navy outline + left-hand highlights match the LimeZu sheets.
@@ -152,9 +154,9 @@ function gridSprite(name,frames) {
   console.log(`wear_${name}: ${w}x${h}, 3 frames, ${out.width}x${h} sheet`);
 }
 gridSprite('witchhat',[
-  ['........H.......','.......HV.......','......HLVV......','......LVVVD.....','.....LVVVDD.....','....LVVVVD.....','.....VVVD......','.....VVDB......','...OOOBBBOOO...','..OVVVKKVVDDO..','.OVVVKYKVVDDDO.','..OOOOOOOOOOOO..','................'],
-  ['.........H......','........HV......','.......HLV......','......LVVVD.....','.....LVVVDD.....','......VVVD......','......VVDB......','.....OOOBBOO....','...OOVVKKDDOO...','..OVVVKYKVDDDO..','...OOOOOOOOOO...','................','................'],
-  ['........H.......','.......HV.......','......HLVV......','......LVVVD.....','.....LVVVDD.....','....LVVVVD.....','.....VVVD......','.....VVDB......','...OOOBBBOOO...','..OVVVBBVVDDO..','.OVVVBBVVVDDDO.','..OOOOOOOOOOOO..','................']
+  ['................','................','................','.......OOO......','......OLVDO.....','.....OLVDD......','.....LVVDD......','....OVVVDDO.....','....OBBKBDO.....','..OOVVVVDDDOO...','.OVVVVVVVDDDDO..','..OOOOOOOOOOOO..','................'],
+  ['................','................','................','........OOO.....','.......OLVDO....','......OLVDD.....','......LVVDD.....','.....OVVDDO.....','.....OBBKDO.....','...OOVVVDDOO....','..OVVVVVDDDDO...','...OOOOOOOOOO...','................'],
+  ['................','................','................','.......OOO......','......OLVDO.....','.....OLVDD......','.....LVVDD......','....OVVVDDO.....','....OBBBBDO.....','..OOVVVVDDDOO...','.OVVVVVVVDDDDO..','..OOOOOOOOOOOO..','................']
 ]);
 gridSprite('pumpkinhead',[
   ['......G.........','......G.........','....OOAAOO......','...OAAAAAAO.....','..OIAAAAAADOO...','.OIIAAAAAADDO...','.OIAOAADOOADDO..','.OIAKKAADKKAADO.','.OIAKKADAKKAADO.','.OIAAOOOAAADDO..','..OIAKAKAKADO...','...OOAKAKOOO....','.....OOOO.......'],
@@ -164,15 +166,15 @@ gridSprite('pumpkinhead',[
 // Fallback directional cape sheet; the tailored per-character layer below is
 // the preferred bake path (body-shaped, extends behind shoulder instead of sticker).
 gridSprite('vampirecape',[
-  ['.OOSSSSSSSSOO..','..ORRRRRRRRO...','...OTTKTTO.....','...OCCCCCО.....'.replace('О','O'),
-    '..OCCCCCCCO....','..OCCCCCCCO....','..OCCCTCCCO....','..OCCCTCCCO....','..OCCCTCCCO....','..OCCCTCCCO....',
-    '.OCCTCCTCCCO...','OCCCTCCTCCCO...','OCCOCCOOCCCO...','OOOOOOOOOOOO...'],
+  ['...OR....RO.....','..OCR....RCO....','..OCR....RCO....','..OC......CO....',
+    '..OC......CO....','..OC......CO....','.OCT......TCO...','.OCT......TCO...',
+    '.OCT......TCO...','.OCT......TCO...','OCT........TCO..','OCT........TCO..','OCO........OCO..','OO..........OO..'],
   ['...OOSSSSO......','..ORRRRRRO......','..OCTKCCO.......','..OCCCCCO.......','.OCCCTCO........',
     '.OCCCTCO........','OCCCTCO.........','OCCCTCO.........','OCCCTCO.........','OCCCTCO.........',
     'OCCTCO..........','OCCTCO..........','OCCTCO..........','OOOOOO..........'],
-  ['.OOSSSSSSSSOO..','..ORRRRRRRRO...','..OSRRKRRRSO...','..ORRRRRRRRO...','..ORRRTRRRO.....',
-    '..ORRRTRRRO.....','.ORRRRTRRRRO....','.ORRRRTRRRRO....','.ORRRRTRRRRO....','.ORRRRTRRRRO....',
-    'ORRRRTRRRRRRO...','ORRRTTRTRRRRO...','ORROTRTTRORRO...','OOOOOOOOOOOO...']
+  ['...ORRRRRO......','..OCCCCCCCO.....','..OCCCCCCCO.....','..OCCCCCCCO.....','..OCCCTCCCO.....',
+    '..OCCCTCCCO.....','.OCCCCTCCCCO....','.OCCCCTCCCCO....','.OCCCCTCCCCO....','.OCCCCTCCCCO....',
+    'OCCCCTCTCCCCO...','OCCCCTCTCCCCO...','OCCOTTTTOCCCO...','OOOOOOOOOOOO....']
 ]);
 
 // Per-frame cape layers sit at the actual shirt/shoulder and are cut to the
@@ -183,42 +185,65 @@ for(const [character,sheets] of Object.entries(anchors)) for(const [suffix,frame
   const file=path.join(ROOT,'layers',`${cap}_${suffix}_shirt.png`);
   if(!fs.existsSync(file))continue;
   const shirt=PNG.sync.read(fs.readFileSync(file));
+  const load = part => PNG.sync.read(fs.readFileSync(path.join(ROOT,'layers',`${cap}_${suffix}_${part}.png`)));
+  const pants=load('pants'), hair=load('hair'), skin=load('skin');
+  const base=PNG.sync.read(fs.readFileSync(path.join(ROOT,`${cap}_${suffix}_16x16.png`)));
+  const hatSheet=PNG.sync.read(fs.readFileSync(path.join(ROOT,'wear_witchhat.png')));
   const out=image(shirt.width,shirt.height);
+  const hats=image(shirt.width,shirt.height);
   const fw=shirt.width/frames.length;
   for(let f=0;f<frames.length;f++){
     const dir=suffix==='run'?['right','up','left','down'][Math.floor(f/6)]:{sit:'right',sit2:'up',sit3:'down'}[suffix];
     const a=frames[f]; if(!a||a.hy<0)continue;
-    const shoulderY=Math.min(27,a.hy+10);
+    const alpha=(img,x,y)=>x>=0&&x<fw&&y>=0&&y<32 ? img.data[(y*img.width+f*fw+x)*4+3] : 0;
+    const clothing=[];
+    for(let y=0;y<32;y++)for(let x=0;x<fw;x++)
+      if(alpha(shirt,x,y)||alpha(pants,x,y))clothing.push([x,y]);
+    // Some legacy split sheets (Amelia seated) have empty clothing masks.
+    // Head/feet bounds remain valid, so never drop either wearable there.
+    const shoulderY=Math.min(...clothing.map(p=>p[1]),a.hy+(dir==='up'?14:13));
+    const hem=Math.min(a.fy-2,shoulderY+10);
+    const cx=clothing.length?Math.round(clothing.reduce((s,p)=>s+p[0],0)/clothing.length):a.hx;
     // Material starts at shoulder, flows with torso, and ends ABOVE feet.
-    // Back cape displays its red lining; side cape trails opposite motion.
+    // Charcoal outer cloth; only the narrow inner side edge shows crimson.
     let pts;
-    if(dir==='right') pts=[[a.hx-2,shoulderY],[a.hx-4,shoulderY+1],[a.hx-8,shoulderY+12],[a.hx-13,shoulderY+15],[a.hx-10,shoulderY+15],[a.hx-5,shoulderY+14],[a.hx,shoulderY+7],[a.hx+2,shoulderY+2]];
-    else if(dir==='left') pts=[[a.hx+2,shoulderY],[a.hx+4,shoulderY+1],[a.hx+8,shoulderY+12],[a.hx+13,shoulderY+15],[a.hx+10,shoulderY+15],[a.hx+5,shoulderY+14],[a.hx,shoulderY+7],[a.hx-2,shoulderY+2]];
-    else pts=[[a.hx-5,shoulderY],[a.hx-3,shoulderY+2],[a.hx+3,shoulderY+2],[a.hx+5,shoulderY],
-      [a.hx+7,shoulderY+14],[a.hx+4,shoulderY+13],[a.hx+2,shoulderY+15],[a.hx,shoulderY+13],
-      [a.hx-3,shoulderY+15],[a.hx-7,shoulderY+14]];
+    if(dir==='right') pts=[[cx-1,shoulderY],[cx-5,shoulderY],[cx-8,hem],[cx-3,hem-1],[cx+1,shoulderY+2]];
+    else if(dir==='left') pts=[[cx+1,shoulderY],[cx+5,shoulderY],[cx+8,hem],[cx+3,hem-1],[cx-1,shoulderY+2]];
+    else pts=[[cx-4,shoulderY],[cx+4,shoulderY],[cx+6,hem],[cx+3,hem-1],[cx,hem],[cx-3,hem-1],[cx-6,hem]];
     // Local temporary frame ensures capes NEVER bleed into adjoining frames.
     const q=image(fw,32);
-    poly(q,pts,dir==='up'?'T':'O');
-    if(dir==='up'){
-      poly(q,pts,'R');
-      line(q,a.hx,shoulderY+3,a.hx,shoulderY+12,'T');
-    } else {
-      const rim=dir==='right'?a.hx-3:dir==='left'?a.hx+3:a.hx;
-      line(q,rim,shoulderY+2,rim+(dir==='left'?5:-5),shoulderY+12,'T');
-    }
+    poly(q,pts,'O');
+    poly(q,pts.map(([x,y])=>[x+(x<cx?1:-1),y]),'C');
+    for(const dx of [-3,3])line(q,cx+dx,shoulderY+2,cx+dx,hem-1,'T');
+    if(dir==='right')line(q,cx-5,shoulderY+1,cx-7,hem-1,'R');
+    if(dir==='left')line(q,cx+5,shoulderY+1,cx+7,hem-1,'R');
     // A raised velvet collar is visible above the shirt shoulder in every
     // direction.  It wraps the neck rather than floating in front of the face.
-    poly(q,[[a.hx-5,shoulderY-2],[a.hx-2,shoulderY-4],[a.hx,shoulderY],
-      [a.hx+2,shoulderY-4],[a.hx+5,shoulderY-2],[a.hx+3,shoulderY+2],[a.hx-3,shoulderY+2]],'O');
-    line(q,a.hx-4,shoulderY-1,a.hx-2,shoulderY+1,'R');
-    line(q,a.hx+4,shoulderY-1,a.hx+2,shoulderY+1,'R');
-    ellipse(q,a.hx,shoulderY+2,1.3,1.3,'K');
+    for(const dx of [-4,4]){
+      line(q,cx+dx,shoulderY-2,cx+dx,shoulderY+1,'O',2);
+      line(q,cx+dx,shoulderY-1,cx+dx,shoulderY+1,'R');
+    }
     for(let y=0;y<32;y++)for(let x=0;x<fw;x++){
       const i=(y*fw+x)*4;
-      if(q.data[i+3] && y<=Math.min(31,a.fy-2))q.data.copy(out.data,(y*out.width+f*fw+x)*4,i,i+4);
+      // Front and side fabric is entirely BEHIND the original silhouette.
+      // Rear fabric may cover clothes, never hair, face, arms or hands.
+      const rearCloth=dir==='up'&&(alpha(shirt,x,y)||alpha(pants,x,y));
+      if(q.data[i+3] && y<=hem && !alpha(hair,x,y)&&!alpha(skin,x,y)&&(!alpha(base,x,y)||rearCloth))
+        q.data.copy(out.data,(y*out.width+f*fw+x)*4,i,i+4);
+    }
+    // Brim intersects the crown by two pixels, following each actual head.
+    // The source's transparent top padding is excluded from the fit.
+    const art=dir==='up'?2:dir==='down'?0:1;
+    const hatH=Math.min(9,a.hy+3),hatY=a.hy+3-hatH, hatX=a.hx-8;
+    for(let y=0;y<hatH;y++)for(let x=0;x<16;x++){
+      const tx=hatX+(dir==='left'?15-x:x),ty=hatY+y;
+      const sy=3+Math.round(y*8/(hatH-1));
+      const si=(sy*hatSheet.width+art*16+x)*4;
+      if(tx>=0&&tx<fw&&ty>=0&&ty<32&&hatSheet.data[si+3]&&!alpha(skin,tx,ty))
+        hatSheet.data.copy(hats.data,(ty*hats.width+f*fw+tx)*4,si,si+4);
     }
   }
   save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_vampirecape.png`),out);
+  save(path.join(ROOT,'layers',`${cap}_${suffix}_wear_witchhat.png`),hats);
 }
-console.log('Bat 3 stages x 6 frames: transparent 64x64; cape layers: 4 characters x 4 sheets.');
+console.log('Fitted Halloween wearable layers: 4 characters x 4 sheets.');

@@ -906,3 +906,17 @@ mtime_ms = 1790701276562
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/9a4479f9-b797-4b32-8f2a-43f788637c1c/407c9990-33e3-4a9e-847b-ef16d2dd8ade"
 storage_version_token = "1790701454775896"
 content_type = "image/gif"
+
+[[outputs]]
+id = "EHe42jGO841kV5to2HYiN"
+uri = "file://screenshots/halloween-wearable-fixed.png"
+type = "image"
+title = "Corrected hat and cape fit"
+description = "Actual game-rendered textures: base avatar, fitted cape, and hat with cape. Standing and seated, all four directions."
+logical_id = "5dd91b57-1370-4667-a6bf-f4206e51ed40"
+content_hash = "sha256:79f2900d3a2c835ec58af74d3ade258cff84bcafbb205a2a04882330d555d774"
+size = 22937
+mtime_ms = 1790701955767
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/5dd91b57-1370-4667-a6bf-f4206e51ed40/fb4ef00b-0214-4c2c-bade-fb880b1154db"
+storage_version_token = "1790702021496624"
+content_type = "image/png"
