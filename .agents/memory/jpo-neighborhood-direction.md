@@ -71,3 +71,9 @@ Verify world-anchored DOM at the actual low gameplay zoom as well as zoom 1.
 **Why:** Cashier speech bubbles initially drifted from the NPC because a simple scroll subtraction ignored Phaser's zoom origin. A desktop/mobile render also exposed a speech tail clipped by the catalog's scrolling container despite passing position tests.
 
 **How to apply:** Include actual camera projection and expanded scrollable content in visual fixtures, not just a centered bubble at zoom 1.
+
+Land ownership must be an explicit player choice, never an automatic account allocation.
+
+**Why:** The user rejected named empty lots assigned to every account. Players must walk to an available lot and claim it first come, first served, using native E interaction and confirmation.
+
+**How to apply:** Keep persistent, atomic land claims separate from the home possessions ledger. Directory reads and home/inventory initialization must never claim land. Freeze physical lot positions so claims do not rearrange neighbors. Preserve built/partially built homes and all paid construction, furniture, inventories, and saved layouts; releasing an automatic empty assignment is not permission to delete its account or possessions. Empty explicitly claimed lots must remain owned across restarts. Validate identity and proximity on the server, enforce one lot per owner, make retries idempotent, and refresh other players' signs after a claim.

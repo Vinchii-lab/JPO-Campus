@@ -10,14 +10,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { jpoPlayersTable } from "./jpoPlayers";
 
-// Personal homes deliberately live outside jpo_players.  A home is created on
-// first use, which lets existing approved accounts receive the starter home
-// without a data backfill or application-startup DDL.
+// Personal home rows are possessions ledgers, NOT automatic land assignments.
+// Explicit land ownership lives in jpo_neighborhood_lots.
 export const jpoHomesTable = pgTable("jpo_homes", {
   ownerEmail: text("owner_email").primaryKey().references(() => jpoPlayersTable.email, { onDelete: "cascade" }),
-  // Generated once and never derived from a current directory position. This
-  // is the physical Willow Walk address, so approvals/inserts cannot reshuffle
-  // an established resident's lot.
+  // Legacy home identity retained for compatibility. It does not assign land:
+  // jpo_neighborhood_lots owns permanent street addresses and positions.
   lotIndex: integer("lot_index").notNull().generatedByDefaultAsIdentity({
     name: "jpo_home_lot_index_seq",
   }),
@@ -36,6 +34,13 @@ export const jpoHomesTable = pgTable("jpo_homes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("jpo_homes_lot_index_unique").on(t.lotIndex)]);
+
+export const jpoNeighborhoodLotsTable = pgTable("jpo_neighborhood_lots", {
+  lotIndex: integer("lot_index").primaryKey(),
+  displayIndex: integer("display_index").notNull().unique(),
+  ownerEmail: text("owner_email").unique().references(() => jpoHomesTable.ownerEmail, { onDelete: "set null" }),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+});
 
 // Furniture is instance based rather than a count map.  Consequently two
 // identical chairs can be independently placed, rotated, or returned to the

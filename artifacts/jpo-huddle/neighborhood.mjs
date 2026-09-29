@@ -225,7 +225,7 @@ export function streetDefinition(entries = []) {
       // sparse durable address become a visual position.
       .map((home, sourceIndex) => ({ home, sourceIndex }))
       .sort((a, b) => {
-        const aLot = Number(a.home?.lotIndex), bLot = Number(b.home?.lotIndex);
+        const aLot = Number(a.home?.displayIndex ?? a.home?.lotIndex), bLot = Number(b.home?.displayIndex ?? b.home?.lotIndex);
         const aValid = Number.isFinite(aLot) && aLot > 0;
         const bValid = Number.isFinite(bLot) && bLot > 0;
         if (aValid !== bValid) return aValid ? -1 : 1;
@@ -264,7 +264,7 @@ export function streetDefinition(entries = []) {
     const door = {
       destination: "home", residence: true, lot: permanentLot, ownerEmail: home.ownerEmail,
       x: x - 36, y: bottom - 90, width: 72, height: 100,
-      label: `${home.name || home.ownerEmail}'s home`,
+      label: home.ownerEmail ? `${home.name || home.ownerEmail}'s home` : "Available · Claim this lot",
     };
     return {
       ...home,
@@ -1390,6 +1390,8 @@ export function layoutBlockers(layout) {
 
 export async function ensureHome(pool, email) {
   if (isHuddleTestIdentity(email)) return null;
+  // This row is only a possessions ledger. Its legacy identity is NOT a land
+  // assignment; land is assigned exclusively by claimNeighborhoodLot.
   await pool.query(
     // `ON CONFLICT DO NOTHING` alone still evaluates the lot identity before
     // discovering an existing owner, burning a durable street slot on every
@@ -1416,6 +1418,8 @@ export async function homeAccess(pool, ownerEmail, visitorEmail) {
   }
   const home = await ensureHome(pool, ownerEmail);
   if (!home) return { ok: false, code: "not_found" };
+  const claim = await pool.query("SELECT 1 FROM jpo_neighborhood_lots WHERE owner_email=$1", [ownerEmail]);
+  if (!claim.rows.length) return { ok: false, code: "not_found" };
   if (!homeConstruction(home).complete) return { ok: false, code: "unfinished", home };
   if (ownerEmail === visitorEmail || home.access_mode === "public") return { ok: true, home };
   if (home.access_mode !== "invite_only") return { ok: false, code: "denied", home };
@@ -1531,37 +1535,22 @@ export async function homeSnapshot(pool, ownerEmail, viewerEmail) {
   };
 }
 
-// Safe street projection: all approved resident accounts have a visible
-// exterior lot, while access is still enforced at the actual front door.
-// Session-only Huddle A/B identities are intentionally omitted even when a
-// retained database row exists. The projection deliberately omits indoor
-// layout, inventory, and account data beyond name/email; the small outdoor
-// yard projection is required to render the shared street.
+// Safe, read-only street projection: frozen slots show explicit owners or an
+// Available sign. Never infer ownership from a possessions ledger. Indoor
+// layouts/inventory remain private; yards are part of the shared street.
 export async function homeDirectory(pool, viewerEmail) {
-  // Materialise a row for every approved account while processing an explicit
-  // street request. This is not startup DDL and gives each actual resident a
-  // durable address before their first visit.
-  await pool.query(`INSERT INTO jpo_homes (owner_email)
-                    SELECT p.email
-                      FROM jpo_players p
-                     WHERE p.approved=true
-                        AND lower(p.email) !~ '^huddle-[ab](-[a-z0-9]+)?@justpressone[.]com$'
-                       AND NOT EXISTS (
-                         SELECT 1 FROM jpo_homes h WHERE h.owner_email=p.email
-                       )
-                    ON CONFLICT (owner_email) DO NOTHING`);
   const { rows } = await pool.query(
-    `SELECT h.owner_email, h.lot_index, h.access_mode, h.exterior_color,
+    `SELECT l.owner_email, l.lot_index, l.display_index, h.access_mode, h.exterior_color,
             h.floor_built, h.walls_built, h.roof_built,
             coalesce(nullif(p.nickname,''), p.first_name, p.name, h.owner_email) AS name
-       FROM jpo_homes h JOIN jpo_players p ON p.email=h.owner_email
-        WHERE p.approved=true
-          AND lower(p.email) !~ '^huddle-[ab](-[a-z0-9]+)?@justpressone[.]com$'
-       ORDER BY h.lot_index ASC
+       FROM jpo_neighborhood_lots l
+       LEFT JOIN jpo_homes h ON h.owner_email=l.owner_email
+       LEFT JOIN jpo_players p ON p.email=l.owner_email
+       ORDER BY l.display_index ASC
     `,
     [],
   );
-  const owners = rows.map((row) => row.owner_email);
+  const owners = rows.map((row) => row.owner_email).filter(Boolean);
   const yardRows = owners.length ? (await pool.query(
     `SELECT f.owner_email, f.id, f.furniture_id, l.grid_x, l.grid_y, l.rotation
        FROM jpo_home_layout_items l JOIN jpo_home_furniture f ON f.id=l.furniture_instance_id
@@ -1581,7 +1570,8 @@ export async function homeDirectory(pool, viewerEmail) {
   const total = rows.length;
   return {
     homes: rows.map((row) => ({
-      ownerEmail: row.owner_email, lotIndex: Number(row.lot_index), name: row.name, accessMode: row.access_mode,
+      ownerEmail: row.owner_email, lotIndex: Number(row.lot_index), displayIndex: Number(row.display_index),
+      available: !row.owner_email, name: row.owner_email ? row.name : "Available", accessMode: row.access_mode,
       exteriorColor: homeExteriorColor(row.exterior_color),
       construction: homeConstruction(row),
       yard: yards.get(row.owner_email) || [],

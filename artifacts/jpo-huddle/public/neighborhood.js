@@ -723,6 +723,13 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     if (result?.message) toast(result.message);
     if (isResidentialBlock()) renderHome();
   });
+  socket.on('homeLotClaimResult', (result) => {
+    const scene = window._neighborhoodScene;
+    if (scene) { scene._lotClaimPendingUntil = 0; scene._confirmClaimLot = null; }
+    toast(result?.message || 'Could not confirm the lot claim.');
+    requestDirectory();
+    if (result?.ok) socket.emit('homeSnapshotRequest');
+  });
   socket.on('homeActionResult', (result) => {
     // A mutation always ends its placement gesture. This prevents a stale
     // preview from being re-used after either a server rejection or a move.
@@ -1781,6 +1788,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     }
 
     _residenceSignText(lot) {
+      if (!lot.ownerEmail) return 'LOT ' + lot.lot + ' · AVAILABLE\nClaim this lot';
       const stage = lot.construction?.stage || 'empty';
       const label = stage === 'complete' ? 'HOME' : stage === 'walls' ? 'WALLS' :
         stage === 'floor' ? 'FOUNDATION' : 'EMPTY LOT';
@@ -1982,12 +1990,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
     updateResidenceDirectory(entries) {
       if (!this.streetLotsVisual) return;
       const homes = Array.isArray(entries) ? entries : [];
-      const homesByOwner = new Map(homes.map((home) => [home.ownerEmail, home]));
+      const homesByLot = new Map(homes.map((home) => [Number(home.lotIndex), home]));
       let yardChanged = false;
       let stageChanged = false;
       this.streetLotsVisual.forEach((visual) => {
-        const current = homesByOwner.get(visual.lot.ownerEmail);
-        if (!current || current.ownerEmail !== visual.lot.ownerEmail) return;
+        const current = homesByLot.get(Number(visual.lot.lot));
+        if (!current) return;
         const color = current.exteriorColor || 'teal';
         const stage = current.construction?.stage || 'empty';
         if (visual.stage !== stage || (stage === 'complete' && visual.color !== color)) {
@@ -2009,7 +2017,9 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
           visual.yardKey = yardKey;
           yardChanged = true;
         }
-        visual.lot = { ...visual.lot, ...current };
+        visual.lot = { ...visual.lot, ...current,
+          door: { ...visual.lot.door, ownerEmail: current.ownerEmail,
+            label: current.ownerEmail ? (current.name || current.ownerEmail) + "'s home" : 'Available · Claim this lot' } };
         visual.visible = undefined;
       });
       this.info.streetLots = this.streetLotsVisual.map((visual) => visual.lot);
@@ -3590,8 +3600,11 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         Math.hypot(this.player.x - lot.returnSpawn.x, this.player.y - lot.returnSpawn.y) <= 105,
       );
       if (door) this.interactHint.setText('Walking through…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
-      else if (unfinishedLot) this.interactHint.setText(unfinishedLot.ownerEmail === globals()._playerEmail
-        ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
+      else if (unfinishedLot) this.interactHint.setText(!unfinishedLot.ownerEmail
+        ? (Date.now() < (this._lotClaimPendingUntil || 0) ? 'Claiming…'
+          : this._confirmClaimLot === unfinishedLot.lot ? '[E] Confirm claim · walk away to cancel' : '[E] Claim this available lot')
+        : unfinishedLot.ownerEmail === globals()._playerEmail
+          ? 'Your lot · use Construction panel' : 'Home under construction · roof needed')
         .setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this.activity) this.interactHint.setText('[E] Stand').setPosition(this.player.x, this.player.y - 65).setVisible(true);
       else if (this._parkSeatPending === 'stand') this.interactHint.setText('Standing…').setPosition(this.player.x, this.player.y - 65).setVisible(true);
@@ -3654,8 +3667,19 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const actionKeyDown = Phaser.Input.Keyboard.JustDown(this.keyE);
       const doAction = !cashierDialogOpen && (actionKeyDown || touchAction.queued);
       touchAction.queued = false;
+      if (!unfinishedLot || unfinishedLot.ownerEmail || this._confirmClaimLot !== unfinishedLot.lot) this._confirmClaimLot = null;
       if (doAction) {
-        if (window.JpoGym?.interact(this)) { /* Gym handles its own server-validated start/stop. */ }
+        if (unfinishedLot && !unfinishedLot.ownerEmail) {
+          if (Date.now() >= (this._lotClaimPendingUntil || 0)) {
+            if (this._confirmClaimLot === unfinishedLot.lot) {
+              this._lotClaimPendingUntil = Date.now() + 8000;
+              socket.emit('homeLotClaim', { lotIndex: unfinishedLot.lot });
+            } else {
+              this._confirmClaimLot = unfinishedLot.lot;
+            }
+          }
+        }
+        else if (window.JpoGym?.interact(this)) { /* Gym handles its own server-validated start/stop. */ }
         else if (this.activity || this._activityPending) this._leaveFurnitureActivity('exit');
         else if (this.staticSeatState) this._leaveParkSeat('exit');
         else if (this.nearbyCashier) this._interactCashier();

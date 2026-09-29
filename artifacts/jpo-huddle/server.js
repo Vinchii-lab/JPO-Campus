@@ -1,4 +1,5 @@
 import express from "express";
+import { migrateLotClaims, claimNeighborhoodLot } from "./lot-claims.mjs";
 import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END } from "./season.mjs";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -10434,9 +10435,8 @@ io.on("connection", (socket) => {
     const requestId = Number(payload?.requestId);
     const responseRequestId = Number.isInteger(requestId) && requestId >= 0 ? requestId : undefined;
     try {
-      // homeDirectory materialises all approved accounts (including this
-      // requester) in its one cold-cache query. Avoid an extra two-query
-      // ensureHome round trip for every client directory response.
+      // Directory reads project explicit claims and available fixed slots;
+      // they never provision accounts or assign land.
       const directory = await refreshStreetHomes();
       socket.emit("homeDirectory", responseRequestId === undefined ? directory : { ...directory, requestId: responseRequestId });
     } catch (err) {
@@ -10445,6 +10445,49 @@ io.on("connection", (socket) => {
         homes: [], page: 0, pageCount: 1, total: 0, error: "Could not load the home directory.",
         ...(responseRequestId === undefined ? {} : { requestId: responseRequestId }),
       });
+    }
+  });
+
+  // Contract: { lotIndex: integer }. Identity and position are taken only from
+  // the authenticated, movement-validated session; no client coordinates.
+  socket.on("homeLotClaim", async (payload) => {
+    const p = players[socket.id];
+    const reply = (result) => socket.emit("homeLotClaimResult", result);
+    if (!p?.email || isHuddleTestIdentity(p.email)) {
+      reply({ ok: false, code: "unauthorized", message: "An approved resident account is required." });
+      return;
+    }
+    if (!Number.isSafeInteger(payload?.lotIndex) || payload.lotIndex < 1) {
+      reply({ ok: false, code: "invalid", message: "Choose an available lot sign." });
+      return;
+    }
+    if (!takeToken(buyBucket)) {
+      reply({ ok: false, code: "rate_limit", message: "Please wait a moment before trying again." });
+      return;
+    }
+    if (inAnyMatch(socket.id) || inActiveRound(socket.id)) {
+      reply({ ok: false, code: "busy", message: "Finish your current activity before claiming a lot." });
+      return;
+    }
+    try {
+      await refreshStreetHomes();
+      const lot = streetWorld.lots.find((entry) => entry.lot === payload.lotIndex);
+      if (locationOf(p) !== "neighborhood" || !lot || !Number.isFinite(p.x) || !Number.isFinite(p.y) ||
+          Math.hypot(p.x - lot.returnSpawn.x, p.y - lot.returnSpawn.y) > 180) {
+        reply({ ok: false, code: "distance", message: "Walk up to the available lot sign to claim it." });
+        return;
+      }
+      const result = await claimNeighborhoodLot(pool, p.email, payload.lotIndex);
+      invalidateStreetHomes();
+      await refreshStreetHomes();
+      reply(result);
+      if (result.ok) {
+        io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
+        socket.emit("homeSnapshot", await homeSnapshot(pool, p.email, p.email));
+      }
+    } catch (err) {
+      console.error("home lot claim failed:", err);
+      reply({ ok: false, code: "unavailable", message: "Could not confirm the claim. Retry this same lot to check it safely." });
     }
   });
 
@@ -14829,6 +14872,11 @@ try {
   // or lose entry coins.
   console.error("Grand Event restore failed:", err);
 }
+
+// Production's actual entrypoint performs additive migrations before listen.
+// Fail closed if land ownership cannot be migrated; never serve auto-assigned
+// or partially initialized lots. No dev-only schema push is required.
+await migrateLotClaims(pool);
 
 const port = process.env.PORT || 3000;
 httpServer.listen(port, () => {
