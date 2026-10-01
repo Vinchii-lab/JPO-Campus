@@ -2875,13 +2875,13 @@ function takeToken(b) {
 
 // Movement: accept at most one update per MOVE_MIN_INTERVAL_MS (the client sends
 // every ~50ms), and reject teleports. A single move may cover at most the distance
-// a normal walk could since the last ACCEPTED update (MOVE_SPEED · elapsed, with a
+// a normal walk could in server-earned time (MOVE_SPEED · elapsed, with a
 // modest tolerance for jitter and a small fixed floor for one frame at ~0 elapsed).
 // A previous version added a 160px allowance to EVERY move, which let a modified
 // client chain small hops far faster than walking; that allowance is now granted
 // ONLY on a sit<->stand "snap" (see SEAT_SNAP_ALLOWANCE), so normal travel stays
 // bounded to roughly walk speed.
-const MOVE_MIN_INTERVAL_MS  = 33;    // < client's 50ms cadence, so legit frames never drop
+const MOVE_MIN_INTERVAL_MS  = 33;    // below client's 50ms sampling cadence; arrivals may bunch
 const MOVE_SPEED            = 195;   // px/s, MUST match client SPEED in public/index.html
 const MOVE_SPEED_TOLERANCE  = 1.6;   // multiplicative slack over walk speed for network jitter
 const MOVE_JITTER_PX        = 12;    // small additive floor: covers one ~7.5px frame at near-0 elapsed
@@ -8137,6 +8137,7 @@ io.on("connection", (socket) => {
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let lastMoveSequence = 0;                 // newest accepted client envelope sequence
   const movementCorrectionFence = createMovementCorrectionFence();
+  let movementSample = null;                // accepted sample clock + unspent server arrival time
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
 
@@ -11060,6 +11061,7 @@ io.on("connection", (socket) => {
     // authoritative point. Otherwise a client can remain visibly inside a
     // facade until another accepted packet happens to correct it.
     const rejectMove = (reason = "validation") => {
+      movementSample = null; // a correction starts a new prediction/time origin
       if (performanceReports < 3)
         performanceRejectedMoves[reason] = (performanceRejectedMoves[reason] || 0) + 1;
       const correctionId = movementCorrectionFence.issue(locationOf(me));
@@ -11076,8 +11078,8 @@ io.on("connection", (socket) => {
 
     // Throttle: cap how often we accept + rebroadcast movement. The client sends
     // ~20/s (every 50ms); anything faster than MOVE_MIN_INTERVAL_MS is a flood.
-    // (Two legit 50ms-cadence sends can still arrive <33ms apart when TCP
-    // bunches them — that's a by-design cosmetic drop, the next move corrects.)
+    // TCP can bunch legitimate samples. Dropping a sample must not discard the
+    // server time earned during the stall (see sample-time accounting below).
     const now = Date.now();
     if (now - lastMoveAt < MOVE_MIN_INTERVAL_MS) { if (LT_METRICS) ltState.mvThr++; return; }
 
@@ -11185,8 +11187,31 @@ io.on("connection", (socket) => {
     // at a fixed point that may differ from the server's restored coords, so a
     // distance check there would falsely reject a legitimate spawn. Normal travel is
     // bounded to ~MOVE_SPEED (walk speed); only a real sit/stand adds snapBonus.
+    const sampleTime = data.sampleTime;
+    const hasSampleTime = Number.isFinite(sampleTime) && sampleTime >= 0 &&
+      sampleTime <= Number.MAX_SAFE_INTEGER;
+    let nextArrivalCredit = 0;
     if (lastMoveAt) {
-      const elapsed = Math.min(now - lastMoveAt, MOVE_ELAPSED_CAP_MS) / 1000;
+      let elapsedMs = Math.min(now - lastMoveAt, MOVE_ELAPSED_CAP_MS);
+      // Arrival intervals are not sampling intervals: the FIRST old packet in
+      // a TCP bundle used to spend the entire stall, then the next current
+      // packet was rejected for covering that same stall in only ~50ms.
+      // Sample time can only allocate time already earned on the SERVER clock,
+      // never mint it. Preserve the unused remainder across accepted samples.
+      // Sample-clock deltas include throttled samples; only accepted samples
+      // commit this ledger. The 1500ms cap includes retained credit, and neither
+      // fixed pixel slack nor seat bonuses can be banked.
+      // Missing/invalid/backwards clocks, corrections, snaps, and authoritative
+      // anchor/map changes discard credit and retain the legacy budget.
+      if (!snapBonus && !me.activity && hasSampleTime && movementSample &&
+          movementSample.location === locationOf(me) &&
+          movementSample.x === me.x && movementSample.y === me.y &&
+          sampleTime >= movementSample.time) {
+        const availableMs = Math.min(elapsedMs + movementSample.credit, MOVE_ELAPSED_CAP_MS);
+        elapsedMs = Math.min(sampleTime - movementSample.time, availableMs);
+        nextArrivalCredit = availableMs - elapsedMs;
+      }
+      const elapsed = elapsedMs / 1000;
       // Coffee boost: while active the client legitimately walks at
       // SPEED × COFFEE_MULT, so the per-move budget must grow in lockstep or
       // every boosted step gets rejected. BOOST_GRACE_MS of slack past expiry
@@ -11228,6 +11253,9 @@ io.on("connection", (socket) => {
     bumpMovementRevision(me);
     wasSitting = sitting;
     lastMoveAt = now;
+    movementSample = hasSampleTime && !snapBonus && !me.activity
+      ? { time: sampleTime, credit: nextArrivalCredit, location: locationOf(me), x, y }
+      : null;
     if (LT_METRICS) ltState.mvOk++;
     if (performanceReports < 3) performanceAcceptedMoves++;
     // Red Light Green Light rides the validated pipeline: the move was already

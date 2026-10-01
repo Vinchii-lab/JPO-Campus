@@ -27,3 +27,9 @@ Treat a local position correction as a prediction-origin boundary, not just a co
 **Why:** With healthy rendering, one short TCP stall can initiate sustained backwards/forwards corrections: the server accepts pre-correction samples while its correction travels to the client, then rejects the client's corrected coordinates as a reverse-speed jump. A production-handler deterministic trace at 60Hz, 300ms RTT and one 150ms upstream stall reproduced 59 speed rejects and 22 visible resets in 12 seconds, long after the stall ended. This does not require a doorway or slow rendering.
 
 **How to apply:** Fence old-origin walking samples until correction receipt is acknowledged; preserve server speed/collision checks and reliable action validation. Exercise both HQ and neighborhood with healthy and high-Hz frames, delayed/bunched delivery, old clients, map changes and reconnects. One successful door crossing or a server-only waypoint test does not establish sustained walking quality. Deterministic network/physics models prove the feedback defect, not that it explains every live report.
+
+Arrival-time spacing is not movement-sampling spacing when TCP bundles delayed updates.
+
+**Why:** Even with correction acknowledgement, the first old packet can consume a stall's entire time allowance; the next legitimate current packet is then falsely rejected. Preventing a repeating correction loop does not prevent that initial snap.
+
+**How to apply:** Preserve unused server-earned time across bundled samples, with client sample intervals only allocating—not creating—that time. Keep the total capped, never bank fixed pixel or seat-snap allowances, and reset on correction or authoritative anchor changes. Verify repeated jitter and forged-clock traces, not only one stall.

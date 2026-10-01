@@ -12,6 +12,7 @@ const neighborhoodSource = fs.readFileSync(path.join(here, "../../public/neighbo
 const listeners = {};
 const fakeWindow = {
   document: { hidden: false },
+  performance: { now: () => 1234 },
   addEventListener(name, fn) { listeners[name] = fn; },
 };
 const context = vm.createContext({ window: fakeWindow, Number, Math });
@@ -34,6 +35,7 @@ assert.equal(volatilePackets.length, 0);
 assert.equal(movement.tick(1, "office", { x: 1, y: 2 }), true);
 assert.equal(volatilePackets[0].payload.location, "office");
 assert.equal(volatilePackets[0].payload.seq, 1);
+assert.equal(volatilePackets[0].payload.sampleTime, 1234, "sampling uses the monotonic browser clock, not arrival time");
 
 // Backpressure/disconnect drops the accumulator instead of queuing a burst.
 socket.connected = false;

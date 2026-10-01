@@ -96,7 +96,12 @@
       const room = locationOf(payload, location);
       if (!room || !connected(socket)) return null;
       state.sequence += 1;
-      return { ...payload, location: room, seq: state.sequence, correctionId: state.correctionId };
+      // Preserve sampling intervals when TCP bunches arrivals. The server caps
+      // this clock's deltas against its own earned time; it is not authority.
+      return {
+        ...payload, location: room, seq: state.sequence, correctionId: state.correctionId,
+        sampleTime: root.performance.now(),
+      };
     };
     const send = (location, payload, reliable) => {
       const packet = envelope(location, payload);
