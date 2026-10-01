@@ -12,6 +12,18 @@ Scope movement and corrections to their map. Keep inbound client ordering separa
 
 Treat reconnect as an authoritative scene synchronization, not only a socket restart.
 
-**Why:** The server's existing restore policy returns players to HQ. A surviving neighborhood scene can keep sending a different map ID forever unless the server explicitly synchronizes the scene and roster.
+**Why:** City/neighborhood positions survive a short disconnect through the server's in-memory grace snapshot; absent that snapshot (or if the neighborhood directory cannot be refreshed), restore falls back to HQ. A surviving scene can keep sending the wrong map ID forever unless the server explicitly synchronizes the scene and roster.
 
 **How to apply:** Test stale packets, connection interruption outside HQ, a server teleport followed by honest client movement, and HQ roster reconciliation after waking its sleeping scene. Do not relax speed or collision checks to hide corrections.
+
+An authenticated replacement can arrive before the server detects the old transport's disconnect.
+
+**Why:** Deleting the old live player before disconnect cleanup means that cleanup cannot create a grace snapshot. Even a short browser network interruption can then lose its outdoor location without the grace timer ever starting.
+
+**How to apply:** Preserve the live outdoor snapshot for the authenticated resume before removing the old player, then reuse the normal restore checks. Test both disconnect-first and replacement-first ordering. Do not fix this by blindly running disconnect first: game settlement, seat cleanup and one-session identity have separate invariants. Browser offline duration is not the server's disconnect-to-resume interval.
+
+Treat a local position correction as a prediction-origin boundary, not just a coordinate assignment.
+
+**Why:** With healthy rendering, one short TCP stall can initiate sustained backwards/forwards corrections: the server accepts pre-correction samples while its correction travels to the client, then rejects the client's corrected coordinates as a reverse-speed jump. A production-handler deterministic trace at 60Hz, 300ms RTT and one 150ms upstream stall reproduced 59 speed rejects and 22 visible resets in 12 seconds, long after the stall ended. This does not require a doorway or slow rendering.
+
+**How to apply:** Fence old-origin walking samples until correction receipt is acknowledged; preserve server speed/collision checks and reliable action validation. Exercise both HQ and neighborhood with healthy and high-Hz frames, delayed/bunched delivery, old clients, map changes and reconnects. One successful door crossing or a server-only waypoint test does not establish sustained walking quality. Deterministic network/physics models prove the feedback defect, not that it explains every live report.

@@ -1,6 +1,7 @@
 // Focused movement transport.  The game still renders local movement
 // immediately and the server still owns validation; this helper only prevents
-// Socket.IO from replaying an old movement packet after a connection/map seam.
+// Socket.IO from replaying an old movement packet after a connection/map seam
+// or advancing an obsolete prediction origin while a correction is in flight.
 (function (root) {
   'use strict';
 
@@ -14,7 +15,7 @@
   function stateFor(socket) {
     let state = socketStates.get(socket);
     if (state) return state;
-    state = { sequence: 0, transports: new Set(), lifecycleBound: false };
+    state = { sequence: 0, correctionId: 0, transports: new Set(), lifecycleBound: false };
     socketStates.set(socket, state);
     const pause = () => state.transports.forEach((transport) => transport.pause());
     const visibilityPause = () => {
@@ -27,7 +28,21 @@
       root.addEventListener('visibilitychange', visibilityPause);
     }
     root.document?.addEventListener?.('visibilitychange', visibilityPause);
-    socket.on?.('disconnect', pause);
+    socket.on?.('disconnect', () => {
+      // A new server socket has a new fence. Do not carry its predecessor's
+      // acknowledgement into reconnect, even though this helper is reused.
+      state.correctionId = 0;
+      pause();
+    });
+    socket.on?.('playerMoveCorrection', (payload) => {
+      if (!payload || !validSequence(payload.correctionId) ||
+          !Number.isFinite(payload.x) || !Number.isFinite(payload.y)) return;
+      // Acknowledge receipt even if the scene has since travelled. The scene's
+      // map/revision checks still decide whether to apply the coordinates.
+      // Socket.IO dispatches this before the scene's correction listener, so
+      // the next sample is sent only after that listener resets its body.
+      state.correctionId = Math.max(state.correctionId, payload.correctionId);
+    });
     state.lifecycleBound = true;
     return state;
   }
@@ -81,7 +96,7 @@
       const room = locationOf(payload, location);
       if (!room || !connected(socket)) return null;
       state.sequence += 1;
-      return { ...payload, location: room, seq: state.sequence };
+      return { ...payload, location: room, seq: state.sequence, correctionId: state.correctionId };
     };
     const send = (location, payload, reliable) => {
       const packet = envelope(location, payload);

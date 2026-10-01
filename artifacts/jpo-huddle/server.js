@@ -63,7 +63,7 @@ import {
   furnitureActionPathClear,
   furnitureActivityConflictsWithBlock,
 } from "./furniture-actions.mjs";
-import { inspectMovementEnvelope } from "./movement-protocol.mjs";
+import { inspectMovementEnvelope, createMovementCorrectionFence } from "./movement-protocol.mjs";
 import commercialLayouts from "./public/commercial-layouts.json" with { type: "json" };
 import { GYM_STATIONS, GYM_DURATION_MS } from "./gym-layout.mjs";
 
@@ -4075,9 +4075,10 @@ function liveSocketsForEmail(email, exceptId) {
 }
 
 // Enforce one live session per email: drop and disconnect any older socket
-// already using this email. This is the seam the reconnection grace period
-// (a later task) will build on.
-function dropLiveByEmail(email, exceptId) {
+// already using this email. Only an authenticated, approved resume may carry
+// an outdoor position into its replacement session.
+function dropLiveByEmail(email, exceptId, preserveOutdoorPosition = false) {
+  let resumeSnapshot = null;
   for (const id of liveSocketsForEmail(email, exceptId)) {
     // Settle any match the dropped session was in: an ACTIVE match is a
     // forfeit (the refresh-to-dodge-the-wager seam — the new session dropping
@@ -4093,7 +4094,17 @@ function dropLiveByEmail(email, exceptId) {
     if (!roundDeferLeave(id)) roundHandleLeave(id);
     rlglHandleLeave(id);
     if (players[id]) {
-      const locationId = locationOf(players[id]);
+      const p = players[id];
+      const locationId = locationOf(p);
+      if (preserveOutdoorPosition && (locationId === "city" || locationId === "neighborhood")) {
+        // The old transport may not have detected its disconnect yet. Capture
+        // the same positional fields as grace BEFORE deleting its player.
+        // Do not run disconnect first: that would reorder game/seat cleanup.
+        resumeSnapshot = {
+          email: p.email, x: p.x, y: p.y, dir: p.dir, anim: p.anim, locationId,
+          residentialExitBlock: p.residentialExitBlock ? { ...p.residentialExitBlock } : null,
+        };
+      }
       delete players[id];
       emitToLocation(locationId, "playerLeft", id);
     }
@@ -4101,6 +4112,7 @@ function dropLiveByEmail(email, exceptId) {
     const stale = io.sockets.sockets.get(id);
     if (stale) stale.disconnect(true);
   }
+  return resumeSnapshot;
 }
 
 // Cancel a pending grace hold for an email (called when they reconnect): stop the
@@ -4121,13 +4133,16 @@ function cancelGrace(email) {
 // approves someone and when an already-approved email reconnects. The identity
 // gate that decides *who* gets restored lives in the register handler — the
 // reconnection-token task will swap the email check there for a token check.
-async function restorePlayer(socket, row) {
+async function restorePlayer(socket, row, resumeSnapshot = null) {
   const state = rowToPlayerState(row);
 
   // If they're returning within the grace window, remove the frozen old sprite and
   // prefer the live in-memory position snapshot over the DB row (the disconnect
   // flush may still be in flight, and the row is only written each coin tick).
-  const g = state.email ? cancelGrace(state.email) : null;
+  const parked = state.email ? cancelGrace(state.email) : null;
+  // A live replacement is newer than any parked snapshot. Both feed the same
+  // outdoor restore/geometry checks below; homes still require normal access.
+  const g = resumeSnapshot?.email === state.email ? resumeSnapshot : parked;
   if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
     state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
     state.anim = g.anim === "sit" ? "sit" : "idle";
@@ -8121,6 +8136,7 @@ io.on("connection", (socket) => {
   const voiceTalkBucket = makeBucket(8, 600);  // 🎙 badge flips + the 4s keepalive while the key is held
   let lastMoveAt = 0;                       // last ACCEPTED playerMove ts (0 = none yet)
   let lastMoveSequence = 0;                 // newest accepted client envelope sequence
+  const movementCorrectionFence = createMovementCorrectionFence();
   let wasSitting = false;                   // last reported sit state, to detect sit<->stand snaps
   let lastSnapAt = 0;                       // last time a seat-snap allowance was granted
 
@@ -8377,10 +8393,10 @@ io.on("connection", (socket) => {
       }
 
       // One live session per email — drop any stale live duplicate.
-      dropLiveByEmail(em, socket.id);
+      const resumeSnapshot = dropLiveByEmail(em, socket.id, !!row.approved);
 
       if (row.approved) {
-        await restorePlayer(socket, row);
+        await restorePlayer(socket, row, resumeSnapshot);
         _notifyAdmins();
         console.log(`Resumed: ${row.name} <${em}>`);
       } else {
@@ -11038,6 +11054,7 @@ io.on("connection", (socket) => {
     // survive a disconnect, so an old-map/old-sequence packet must be inert.
     const envelope = inspectMovementEnvelope(data, locationOf(me), lastMoveSequence);
     if (envelope.ignore) return;
+    if (!movementCorrectionFence.inspect(data, locationOf(me))) return;
     const packetSequence = envelope.hasSequence ? envelope.sequence : null;
     // A rejected packet must put the local physics body back on the last
     // authoritative point. Otherwise a client can remain visibly inside a
@@ -11045,9 +11062,15 @@ io.on("connection", (socket) => {
     const rejectMove = (reason = "validation") => {
       if (performanceReports < 3)
         performanceRejectedMoves[reason] = (performanceRejectedMoves[reason] || 0) + 1;
+      const correctionId = movementCorrectionFence.issue(locationOf(me));
+      // A new prediction origin is a server revision even if its coordinates
+      // are unchanged. This lets another genuine correction at the same
+      // anchor pass the client's revision guard after it acknowledged the last.
+      if (correctionId !== null) bumpMovementRevision(me);
       socket.emit("playerMoveCorrection", {
         x: me.x, y: me.y, dir: me.dir || "down", anim: me.anim || "idle",
         location: locationOf(me), seq: movementRevisionOf(me), clientSeq: packetSequence, reason,
+        ...(correctionId !== null ? { correctionId } : {}),
       });
     };
 

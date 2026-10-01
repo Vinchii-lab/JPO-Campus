@@ -37,3 +37,36 @@ export function inspectMovementEnvelope(data, currentLocation, lastSequence = 0)
     sequence,
   };
 }
+
+// A correction changes the origin of client prediction. Samples already in
+// flight still use the old origin and must not advance the server while the
+// correction is travelling back. Otherwise the corrected client is rejected
+// for moving *backwards* and the two origins can oscillate indefinitely.
+// This is a transport fence, not a speed/collision allowance.
+export function createMovementCorrectionFence() {
+  let supported = false;
+  let issued = 0;
+  let required = 0;
+  let location = null;
+  return {
+    inspect(data, currentLocation) {
+      // Only call after the ordinary envelope's authoritative map check.
+      // Travel/ejection owns a new anchor; an old map's fence cannot freeze it.
+      if (location !== currentLocation) {
+        location = currentLocation;
+        required = 0;
+      }
+      const id = data.correctionId;
+      if (id === undefined) return !supported; // pre-protocol browsers
+      if (!Number.isSafeInteger(id) || id < 0 || id > issued) return false;
+      supported = true;
+      return id >= required;
+    },
+    issue(currentLocation) {
+      if (!supported) return null;
+      location = currentLocation;
+      required = ++issued;
+      return required;
+    },
+  };
+}
