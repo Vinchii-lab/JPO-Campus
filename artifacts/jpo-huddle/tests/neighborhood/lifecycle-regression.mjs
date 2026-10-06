@@ -167,6 +167,10 @@ const office = {
   cursors: null,
   wasd: null,
   _syncOfficePlayers(players) { this.roster = players; },
+  _applyOfficeArrival(state) {
+    this.player.setPosition(state.x, state.y);
+    this.player.body.reset(state.x, state.y);
+  },
 };
 const neighborhood = {
   scene: {

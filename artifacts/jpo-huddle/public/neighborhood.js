@@ -3870,8 +3870,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
             if (generation !== sceneTransitionGeneration) return;
             const spawn = result.self || result.spawn;
             if (Number.isFinite(spawn?.x) && Number.isFinite(spawn?.y)) {
-              target.player.setPosition(spawn.x, spawn.y);
-              target.player.body?.reset(spawn.x, spawn.y);
+              target._applyOfficeArrival(spawn);
             }
             target._syncOfficePlayers?.(result.players || {});
             target._portalFading = false;

@@ -33,3 +33,9 @@ Arrival-time spacing is not movement-sampling spacing when TCP bundles delayed u
 **Why:** Even with correction acknowledgement, the first old packet can consume a stall's entire time allowance; the next legitimate current packet is then falsely rejected. Preventing a repeating correction loop does not prevent that initial snap.
 
 **How to apply:** Preserve unused server-earned time across bundled samples, with client sample intervals only allocating—not creating—that time. Keep the total capped, never bank fixed pixel or seat-snap allowances, and reset on correction or authoritative anchor changes. Verify repeated jitter and forged-clock traces, not only one stall.
+
+An authoritative office arrival must reconcile seated/standing state as well as coordinates.
+
+**Why:** A surviving seated OfficeScene has disabled Arcade physics. When session grace expires, the server can restore an idle lawn spawn; a coordinate-only reset leaves that body disabled and old seat state active.
+
+**How to apply:** Clear old seat anchors and occluders, enable/reset physics for standing arrivals, and reapply seating only when the authoritative snapshot says seated. Do not reset a legitimate seated resume to standing.

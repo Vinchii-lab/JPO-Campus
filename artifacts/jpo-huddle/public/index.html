@@ -15032,6 +15032,28 @@
         if (hasPos && data.anim === 'sit') this._restoreSeatedPose(startX, startY, data.dir);
       }
 
+      _applyOfficeArrival(state) {
+        if (!this.player?.body || !Number.isFinite(state?.x) || !Number.isFinite(state?.y)) return;
+        // A surviving scene may still own a disabled seated body even though
+        // the new session restores an idle player at the lawn. Coordinates
+        // alone do not reconcile that old pose.
+        this._clearOccluders(this._seatOccluders);
+        this._seatOccluders = [];
+        this._preSitPos = null;
+        this._deskPose = null;
+        this.sitting = false;
+        this._moving = false;
+        this.lastDir = DIR_START[state.dir] !== undefined ? state.dir : 'down';
+        this.player.body.enable = true;
+        this.player.body.reset(state.x, state.y);
+        this._lastPaintedPos = { x: state.x, y: state.y };
+        _setWorkChip(false);
+        this.player.setTexture(this.playerTexKey);
+        this.player.anims.stop();
+        this.player.setFrame(DIR_START[this.lastDir]);
+        if (state.anim === 'sit') this._restoreSeatedPose(state.x, state.y, state.dir);
+      }
+
       // Re-enter the seated pose from a server-restored state. Mirrors the E-press
       // sit branch, but every input derives from the restored position — the exact
       // derivation remote viewers run in playerMoved/_deskPoseAt — so the restored
