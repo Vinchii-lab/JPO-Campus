@@ -1074,3 +1074,31 @@ mtime_ms = 1793124855275
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/f3c59a56-fce3-4a54-a27b-e1ed86750495/8ba58e35-2538-4fba-9fc5-7f963caf8da3"
 storage_version_token = "1793124873378202"
 content_type = "image/png"
+
+[[outputs]]
+id = "ye71oBFw5F-m2nZzJWRTU"
+uri = "file://attached_assets/christmas-on-character-preview.png"
+type = "image"
+title = "Christmas Outfits on Characters"
+description = "Current game-rendered wearables on Adam and Amelia, front and side views, plus all three reindeer stages."
+logical_id = "2b616761-4395-47ca-ba92-b03a1f5496bf"
+content_hash = "sha256:6fa9cca46b40a118bbcdca97f59fff3115708af09c09bb5e4de8d51662c34948"
+size = 148550
+mtime_ms = 1793125397392
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/2b616761-4395-47ca-ba92-b03a1f5496bf/7385f812-c718-413a-b313-ac0b85e00ddb"
+storage_version_token = "1793125443830419"
+content_type = "image/png"
+
+[[outputs]]
+id = "J0XzcxVyNe5bxIr2URPHn"
+uri = "file://attached_assets/christmas-outfits-corrected-detail.png"
+type = "image"
+title = "Corrected Christmas Clothing"
+description = "Actual game-rendered outfits on all four characters. Clothes now fit below the face, with scarf-over-sweater combinations included."
+logical_id = "bbb93f87-6f12-405d-a11e-c3f1d7ea058e"
+content_hash = "sha256:f6108249bd68e12873095e817de8aaec7eed346534a949e81719ecff07f7aa12"
+size = 104979
+mtime_ms = 1793126421826
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/bbb93f87-6f12-405d-a11e-c3f1d7ea058e/3ccc1a39-9106-4578-8861-dfa305186474"
+storage_version_token = "1793126442927877"
+content_type = "image/png"

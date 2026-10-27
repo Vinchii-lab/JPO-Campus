@@ -4955,8 +4955,7 @@
       gamerheadset:'head', book:'head', guitar:'head', spectacles:'head',
       beanie:'head', flatcap:'head', rangerhat:'head', catears:'head',
       umbrella:'head', witchhat:'head', pumpkinhead:'head',
-      santahat:'head', reindeerantlers:'head', christmasscarf:'head',
-      christmassweater:'head', elfoutfit:'head',
+      santahat:'head', reindeerantlers:'head',
     };
     for (const [wid, anc] of Object.entries(_WEAR_BAKE_ANCHOR)) WEARABLE_DEFS[wid].bake = anc;
     // Raincoat: silhouette-derived LAYER sheet (covers torso+legs, generated
@@ -4971,6 +4970,13 @@
     // by tools/boot-layer-gen.cjs) — painted-on clothing can never detach from
     // the sprite the way anchored overlay stickers can.
     WEARABLE_DEFS.rainboots.bakeLayer = true;
+    // Christmas clothing: silhouette-derived LAYER sheets painted onto each
+    // frame's body silhouette (tools/christmas-layer-gen.py), below the head.
+    // _WEAR_NO_STICKER: while layers load, draw NOTHING (no head-sticker flash).
+    const _WEAR_NO_STICKER = new Set(['christmassweater', 'elfoutfit', 'christmasscarf']);
+    for (const wid of _WEAR_NO_STICKER) WEARABLE_DEFS[wid].bakeLayer = true;
+    // Bake order among layers: body garments first, neckwear on top.
+    const _WEAR_LAYER_ORDER = { christmasscarf: 1 };
 
     // Usable-items catalog: ids MUST stay in lockstep with the server
     // USABLE_ITEMS map in server.js (the server is authoritative on price and
@@ -5540,7 +5546,7 @@
             const im = new Image();
             im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
             im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
-            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=${wid === 'vampirecape' ? '13-seated-profile-cape' : wid === 'pumpkinhead' ? '14-native-head-tracking' : '12-wide-halloween'}`;
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=${wid === 'vampirecape' ? '13-seated-profile-cape' : wid === 'pumpkinhead' ? '14-native-head-tracking' : _WEAR_NO_STICKER.has(wid) ? '15-xmas-body-layers' : '12-wide-halloween'}`;
           }
         }
       }
@@ -14892,7 +14898,7 @@
         if (!wearIds || !wearIds.length) return;
         const A = _wearAnchors && _wearAnchors[char];
         const RUN = A && A.run;
-        const prio = id => WEARABLE_DEFS[id].bakeLayer ? 0 : WEARABLE_DEFS[id].bake === 'feet' ? 1 : 2;
+        const prio = id => WEARABLE_DEFS[id].bakeLayer ? (_WEAR_LAYER_ORDER[id] || 0) * 0.5 : WEARABLE_DEFS[id].bake === 'feet' ? 1 : 2;
         const order = [...wearIds].sort((a, b) => prio(a) - prio(b) || (a < b ? -1 : 1));
         const SHEET_FACING = { sit: 'right', sit2: 'up', sit3: 'down' };
         for (const id of order) {
@@ -15398,6 +15404,7 @@
         // — creating the overlay too would double-draw it. charFor tells us
         // whose texture; without it we can't know bake readiness, so overlay.
         if (wd && (wd.bake || wd.bakeLayer) && charFor && _wearBakeReady(equipped, charFor)) return null;
+        if (_WEAR_NO_STICKER.has(equipped)) return null;   // layer-only clothing: never a sticker
         if (wd) {
           const sc = wd.scale || 3;                 // per-item fit (default 3)
           const img = this.add.image(x, y + wd.dy, wd.tex, 0).setScale(sc).setDepth(10);
