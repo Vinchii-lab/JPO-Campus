@@ -1,5 +1,6 @@
 import express from "express";
 import { migrateLotClaims, claimNeighborhoodLot } from "./lot-claims.mjs";
+import { migrateChristmas, registerChristmas } from "./christmas.mjs";
 import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END } from "./season.mjs";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -81,7 +82,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const buildHasher = crypto.createHash("sha1");
 for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
-for (const file of ["public/halloween-office.js", "season.mjs"])
+for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -1172,6 +1173,12 @@ const GRACE_MS = 10_000;
 // hanging out, crown is a long-term goal); server is authoritative — client
 // drift only mislabels the shop row.
 const SHOP = {
+  santahat: 6500,
+  reindeerantlers: 5500,
+  christmasscarf: 4500,
+  christmassweater: 8000,
+  elfoutfit: 9500,
+  snowflakewings: 16000,
   witchhat: 6500,
   pumpkinhead: 10000,
   vampirecape: 13000,
@@ -1227,6 +1234,7 @@ const SHOP = {
 // looks (zero migration). Classic prices unchanged; fancy looks cost more.
 // Ids MUST match the client PETS catalog in public/index.html.
 const PETS = {
+  pet_reindeer: 18000,
   pet_bat: 18000,
   pet_duck:             10000,
   pet_duck_snow:        14000,
@@ -1280,14 +1288,15 @@ setInterval(() => {
 // NEW body wearables declare a slot here and live in their own DB column, so
 // they stack with the legacy slot and wings. An item absent from WEAR_SLOT
 // equips into the legacy slot.
-const WEAR_SLOT = { raincoat: "top", rainboots: "feet", umbrella: "held", vampirecape: "neckwear" };
+const WEAR_SLOT = { raincoat: "top", rainboots: "feet", umbrella: "held", vampirecape: "neckwear",
+  christmasscarf: "neckwear", christmassweater: "top", elfoutfit: "top" };
 const SLOT_COL  = { top: "equipped_top", bottom: "equipped_bottom", neckwear: "equipped_neckwear", held: "equipped_held", feet: "equipped_feet" };
 const SLOT_KEYS = ["top", "bottom", "neckwear", "held", "feet"];
 const emptySlots = () => ({ top: "", bottom: "", neckwear: "", held: "", feet: "" });
 // Wings are their OWN equip slot (Aug 2026): you wear wings AND a wearable
 // at the same time. Ownership still lives in the shared cosmetics array;
 // only the equipped slot differs (jpo_players.equipped_wings).
-const WINGS_IDS = new Set(["fairywings", "beewings", "batwings", "butterflywings",
+const WINGS_IDS = new Set(["snowflakewings", "fairywings", "beewings", "batwings", "butterflywings",
   "angelwings", "devilwings", "jetpackwings", "goldenwings", "phoenixwings"]);
 
 // ── Pet accessories catalog ──────────────────────────────────────────────────
@@ -2240,6 +2249,13 @@ const PB_KITS = {
     attackHint: "A swift wing strike", guardHint: "Fold into cover", specialHint: "Banks an evade", ultimateHint: "A spectral draining dive",
     hpMult: .95, atkMult: .98, guardBonus: 0, critBonus: .02, dodgeBonus: .05,
     attackMult: 1, specialMult: .82, ultimateMult: .94, specialEffect: "evade", ultimateEffect: "voidDrain", guardCounter: 0,
+  },
+  pet_reindeer: {
+    id: "winter-runner", passive: "Winter Step", motion: "dash",
+    attackName: "Antler Tap", guardName: "Snow Guard", specialName: "Jingle Dash", ultimateName: "Golden Sleighride",
+    attackHint: "A quick antler strike", guardHint: "Shelter behind snow", specialHint: "A swift winter dash", ultimateHint: "A golden charging finish",
+    hpMult: 1, atkMult: 1, guardBonus: .02, critBonus: .02, dodgeBonus: .02,
+    attackMult: 1, specialMult: .9, ultimateMult: 1.05, specialEffect: "evade", ultimateEffect: "storm", guardCounter: 0,
   },
   pet_unicorn: {
     id: "prism-guardian", passive: "Gentle Light", motion: "beam",
@@ -8061,6 +8077,14 @@ function voicePairOk(aId, bId) {
 }
 
 io.on("connection", (socket) => {
+  registerChristmas({ socket, pool, io, getPlayer: () => players[socket.id],
+    isBusy: () => inAnyMatch(socket.id) || inRound(socket.id) || phFrozen(socket.id) || rlglFrozen(socket.id),
+    locations: {
+      pickup: { id: "frontdesk_parcels", label: "Front Desk parcel shelf", x: 2592, y: 2904 },
+      destination: { id: "ld_classroom", label: "L&D classroom", x: 7440, y: 4392 },
+      tree: { id: "cafeteria_tree", label: "Cafeteria community tree", x: 4560, y: 2568 },
+    },
+  });
   socket.emit("seasonState", seasonSnapshot());
   console.log("Socket connected:", socket.id);
   // Bounded aggregate diagnostics, never raw client content or identity.
@@ -14939,6 +14963,7 @@ try {
 // Fail closed if land ownership cannot be migrated; never serve auto-assigned
 // or partially initialized lots. No dev-only schema push is required.
 await migrateLotClaims(pool);
+await migrateChristmas(pool);
 
 const port = process.env.PORT || 3000;
 httpServer.listen(port, () => {

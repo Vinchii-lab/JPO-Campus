@@ -1,0 +1,41 @@
+/* Holiday desk: evergreen felt card, cranberry + brass accents, matches the
+   game's monospace HUD language. Shown only while seasonState is christmas. */
+#xmas-btn {
+  position: fixed; top: 58px; right: 14px; z-index: 300;
+  padding: 6px 12px; font: 12px monospace; letter-spacing: .5px;
+  color: #fff6e2; background: linear-gradient(180deg, #2f7d52, #1c5236);
+  border: 1px solid #f2c14e; border-radius: 7px; cursor: pointer;
+  box-shadow: 0 2px 0 #10321f, 0 4px 12px rgba(0,0,0,.35);
+}
+#xmas-btn:hover { filter: brightness(1.1); }
+#xmas-btn[hidden], #xmas-panel[hidden] { display: none; }
+#xmas-panel {
+  position: fixed; top: 96px; right: 14px; z-index: 7900; width: 330px; max-width: calc(100vw - 28px);
+  font-family: monospace; color: #f6efe0;
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,.025) 0 3px, transparent 3px 6px),
+    linear-gradient(170deg, #1d4a33, #12301f 70%);
+  border: 1px solid rgba(242,193,78,.45); border-radius: 14px; padding: 14px 16px 10px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);
+}
+#xmas-panel header { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+#xmas-panel h3 { font-size: 15px; letter-spacing: 1.5px; text-transform: uppercase; color: #fff3cf; }
+#xmas-panel header p { font-size: 11px; color: #b9d3c1; margin-top: 3px; }
+#xmas-panel .xm-x { background: none; border: 0; color: #b9d3c1; font-size: 18px; cursor: pointer; line-height: 1; }
+#xmas-panel section { padding: 9px 0; border-top: 1px dashed rgba(242,193,78,.25); }
+#xmas-panel .xm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#xmas-panel b { font-size: 13px; color: #fff6e2; display: block; }
+#xmas-panel small { font-size: 11px; color: #a9c7b3; display: block; margin-top: 2px; }
+#xmas-panel button[data-act] {
+  flex-shrink: 0; padding: 6px 12px; font: bold 12px monospace; color: #2a0d12;
+  background: linear-gradient(180deg, #f2c14e, #c9932b); border: 1px solid rgba(255,255,255,.3);
+  border-radius: 6px; cursor: pointer; box-shadow: 0 2px 0 #7a5212;
+}
+#xmas-panel button[data-act]:hover:not(:disabled) { filter: brightness(1.08); }
+#xmas-panel button[data-act]:disabled { background: rgba(255,255,255,.08); color: #7f9a88; box-shadow: none; cursor: not-allowed; }
+#xmas-panel .xm-done { flex-shrink: 0; font-size: 11px; color: #f6efe0; background: #b8283a; padding: 4px 9px; border-radius: 999px; }
+#xmas-panel .xm-hint { font-size: 11px; color: #cfe2d5; margin-top: 6px; }
+#xmas-panel .xm-bar { height: 8px; margin-top: 8px; border-radius: 4px; background: rgba(0,0,0,.35); overflow: hidden; }
+#xmas-panel .xm-bar i { display: block; height: 100%; background: repeating-linear-gradient(90deg, #e64553 0 8px, #f6efe0 8px 12px); }
+#xmas-panel .xm-err { min-height: 14px; font-size: 11px; color: #ffb3a7; margin-top: 4px; }
+@media (max-width: 700px) { #xmas-panel { top: auto; bottom: 80px; } }

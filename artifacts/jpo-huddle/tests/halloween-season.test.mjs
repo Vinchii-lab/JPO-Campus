@@ -180,7 +180,7 @@ test("bat and preserved frog retain normal three-stage XP thresholds and race st
 });
 
 test("authoritative reconnect/live-season lifecycle and shared neighborhood pet methods are wired", () => {
-  assert.match(server, /io\.on\("connection", \(socket\) => \{\s*socket\.emit\("seasonState", seasonSnapshot\(\)\)/);
+  assert.match(server, /io\.on\("connection", \(socket\) => \{[\s\S]*?socket\.emit\("seasonState", seasonSnapshot\(\)\)/);
   assert.match(server, /io\.emit\("seasonState", seasonSnapshot\(\)\)/);
   assert.doesNotMatch(html, /getMonth\(\)|getDate\(\).*wxRainy/);
   assert.match(html, /function seasonNow\(\) \{ return _activeSeason; \}/);

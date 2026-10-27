@@ -12,8 +12,9 @@ export function seasonNow(d = new Date(), enabled = process.env.HALLOWEEN_RELEAS
   if ((m === 0 && day >= 16) || (m === 1 && day <= 16)) return "valentines";
   return null;
 }
-export const SEASONAL_ITEMS = { raincoat: "rainy", umbrella: "rainy", rainboots: "rainy", witchhat: "halloween", pumpkinhead: "halloween", vampirecape: "halloween" };
-export const SEASONAL_PETS = { pet_frog: "rainy", pet_bat: "halloween" };
+export const SEASONAL_ITEMS = { raincoat: "rainy", umbrella: "rainy", rainboots: "rainy", witchhat: "halloween", pumpkinhead: "halloween", vampirecape: "halloween",
+  santahat: "christmas", reindeerantlers: "christmas", christmasscarf: "christmas", christmassweater: "christmas", elfoutfit: "christmas", snowflakewings: "christmas" };
+export const SEASONAL_PETS = { pet_frog: "rainy", pet_bat: "halloween", pet_reindeer: "christmas" };
 export function canIssueItem(id, d = new Date(), enabled) {
   if (id === "pet_frog") return false; // Shelved, not deleted; transfers are not issuance.
   const season = SEASONAL_ITEMS[id] || SEASONAL_PETS[id];
