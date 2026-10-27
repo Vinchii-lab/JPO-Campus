@@ -181,6 +181,18 @@
       label: () => (liveProgress() >= SLIPPERY_AT ? 'Ice ready' : 'Snow collecting')
     };
     const surfaces = [], sheens = [];
+    // Keep ground effects immediately after the floor, not after the wall.
+    // Scene rebuilds and deferred depth sorting can reorder the display list.
+    const orderGround = () => {
+      const list = scene.children;
+      if (destroyed || !list?.getIndex || !list?.moveTo) return;
+      const floorIndex = list.getIndex(scene.floorLayer);
+      if (floorIndex < 0) return;
+      objects.forEach((o, i) => {
+        const wanted = floorIndex + 1 + i;
+        if (list.getIndex(o) !== wanted) list.moveTo(o, wanted);
+      });
+    };
     const refresh = () => {
       if (destroyed) return;
       const p = liveProgress(), step = Math.round(p * 48);
@@ -196,6 +208,7 @@
       if (destroyed) return;
       destroyed = true;
       scene.events.off('update', tick);
+      scene.events.off('postupdate', orderGround);
       scene.events.off('shutdown', destroy);
       scene.events.off('destroy', destroy);
       tweens.forEach(t => t.remove());
@@ -228,9 +241,8 @@
     if (!reduced && scene.tweens && sheens.length) {
       tweens.push(scene.tweens.add({ targets: sheens, alpha: 0.25, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
     }
-    if (scene.children?.moveAbove && scene.wallLayer) {
-      for (let i = objects.length - 1; i >= 0; i--) scene.children.moveAbove(objects[i], scene.wallLayer);
-    }
+    orderGround();
+    scene.events.on('postupdate', orderGround);
     return destroy;
   }
 

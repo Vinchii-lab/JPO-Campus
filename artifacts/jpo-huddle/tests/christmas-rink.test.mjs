@@ -42,6 +42,37 @@ function fixture({ withOffice = false } = {}) {
 }
 
 const clear = (c, r) => at('Floor', c, r) > 0 && !at('Wall', c, r) && !at('Furniture', c, r);
+test('ground ice stays below furniture, local/remote avatars and pets after reorder and remount', () => {
+  const f = fixture();
+  const actors = [{ name: 'local' }, { name: 'remote' }, { name: 'pet' }];
+  const base = [f.scene.floorLayer, f.scene.furnitureLayer, f.scene.wallLayer, ...actors];
+  const list = [...base];
+  f.scene.children = {
+    getIndex: o => list.indexOf(o),
+    moveTo(o, index) { list.splice(list.indexOf(o), 1); list.splice(index, 0, o); }
+  };
+  const graphics = f.scene.add.graphics;
+  f.scene.add.graphics = c => {
+    const o = graphics(c); list.push(o);
+    const destroy = o.destroy;
+    o.destroy = () => { const i = list.indexOf(o); if (i >= 0) list.splice(i, 1); destroy.call(o); };
+    return o;
+  };
+  for (let n = 0; n < 2; n++) {
+    const cleanup = f.Rink.mount(f.scene);
+    const ice = f.objects.filter(o => !o.destroyed);
+    const check = () => ice.forEach(o => {
+      assert(list.indexOf(o) > list.indexOf(f.scene.floorLayer));
+      for (const above of base.slice(1)) assert(list.indexOf(o) < list.indexOf(above));
+    });
+    check();
+    list.push(list.splice(list.indexOf(ice[0]), 1)[0]);
+    f.scene.events.emit('postupdate');
+    check();
+    cleanup();
+    assert.equal(f.scene.events.listenerCount('postupdate'), 0);
+  }
+});
 const walled = (c, r) => c >= 0 && r >= 0 && c < map.width && r < map.height && at('Wall', c, r) > 0;
 const isDoor = (c, r) => {
   if (!clear(c, r)) return false;
