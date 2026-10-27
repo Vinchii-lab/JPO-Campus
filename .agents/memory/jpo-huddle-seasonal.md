@@ -35,6 +35,12 @@ description: Seasonal presentation and availability must agree; approved species
 
 **How to apply:** Use organic snow edges and visible ice rather than rink borders or signage. Keep spawn points and doorways clear, and preserve collision and speed safeguards.
 
+**Keep the Christmas reindeer; the huge Shenron-style dragon is a separate ultra-rare pet, not Christmas-exclusive.**
+
+**Why:** The user explicitly distinguished the reindeer from the rare dragon and said the dragon is “not just christmas.”
+
+**How to apply:** Preserve the reindeer seasonal role. Treat dragon acquisition as a separate rarity decision; no acquisition odds or method have been approved yet.
+
 **Ice edges must not instantly stop a slide.**
 
 **Why:** The user asked for wider slippery areas and explicitly preferred continuing beyond the edge rather than stopping there.
