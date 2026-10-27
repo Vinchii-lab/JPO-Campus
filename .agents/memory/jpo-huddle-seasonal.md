@@ -16,3 +16,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** “Putting the frog on the back burner” means keeping existing frogs, progression, equips, and permitted ownership transfers for their owners and a future return.
 
 **How to apply:** Audit purchases and automatic rewards separately from equip, trading, and progression. Previously owned seasonal wearables likewise remain usable.
+
+**Christmas scope: exclude home decor; focus on HQ.**
+
+**Why:** The user said, “Forget home decor. Since most are all in HQ.”
+
+**How to apply:** Keep Christmas decoration proposals centered on the shared office rather than player homes or a home-decor shop lineup.
