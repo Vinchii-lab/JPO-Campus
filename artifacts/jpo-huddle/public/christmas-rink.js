@@ -17,22 +17,32 @@
   const FOOT_OFFSET_Y = 27, HALF_W = 18, HALF_H = 15;
   const MARGIN = 1; // runtime audit ring around each envelope (authoring used 2 + doorway check)
 
-  // Envelopes (tile col/row, cols x rows). The blob always stays strictly
-  // inside its envelope; every envelope is clear floor with a 2-tile margin,
-  // >=3 tiles from doorways, off the r43-51 main aisle and away from spawns
-  // and Christmas activity anchors.
+  // Ten envelopes, one per distinct HQ room/area, each on a different side of
+  // its room. The blob stays strictly inside its envelope; every envelope is
+  // clear floor (no wall/furniture) with a 1-tile ring, >=2 tiles from
+  // doorways, off the r43-51 main aisle and >=5 tiles from spawns/anchors.
   const PATCHES = Object.freeze([
-    // South-west open hall, long east-west drift (longest glide).
-    Object.freeze({ id: 'southwest_hall', col: 82, row: 86, cols: 32, rows: 6, seed: 11 }),
-    // South-central commons below the cafeteria block.
-    Object.freeze({ id: 'south_commons', col: 118, row: 92, cols: 18, rows: 9, seed: 23 }),
-    // Cafeteria south lounge, north-south run between table columns.
-    Object.freeze({ id: 'cafeteria_south', col: 126, row: 73, cols: 10, rows: 12, seed: 37 }),
-    // Cafeteria west lounge, beside the first table column.
-    Object.freeze({ id: 'cafeteria_west', col: 82, row: 59, cols: 9, rows: 12, seed: 41 }),
-    // East wing lounge beyond the cafeteria east wall.
-    Object.freeze({ id: 'east_lounge', col: 152, row: 58, cols: 8, rows: 11, seed: 53 })
-  ].map(p => Object.freeze({ ...p })));
+    // Ops open office (north-west wing), drift on the room's east desk lane.
+    Object.freeze({ id: 'ops_office', room: 'Ops open office', side: 'east', col: 44, row: 34, cols: 6, rows: 8, seed: 11 }),
+    // CMA open office (north), tall run down its east aisle.
+    Object.freeze({ id: 'cma_office', room: 'CMA open office', side: 'east', col: 92, row: 30, cols: 6, rows: 12, seed: 23 }),
+    // Claims open office (north-east), wide drift across its south floor.
+    Object.freeze({ id: 'claims_office', room: 'Claims open office', side: 'south', col: 158, row: 35, cols: 13, rows: 7, seed: 37 }),
+    // Front Desk reception, east pocket by the recruiters wall.
+    Object.freeze({ id: 'front_desk', room: 'Front Desk reception', side: 'east', col: 68, row: 55, cols: 10, rows: 8, seed: 41 }),
+    // Cafeteria, single drift along its south lounge (no clustering).
+    Object.freeze({ id: 'cafeteria', room: 'Cafeteria', side: 'south', col: 124, row: 72, cols: 23, rows: 7, seed: 53 }),
+    // QA main floor (east wing), west-side run.
+    Object.freeze({ id: 'qa_main', room: 'QA main', side: 'west', col: 151, row: 57, cols: 10, rows: 12, seed: 61 }),
+    // HR west lounge (south-west), north edge of the lounge.
+    Object.freeze({ id: 'hr_west_lounge', room: 'HR west lounge', side: 'north', col: 34, row: 86, cols: 7, rows: 6, seed: 67 }),
+    // HR east office, west side.
+    Object.freeze({ id: 'hr_east_office', room: 'HR east office', side: 'west', col: 65, row: 82, cols: 7, rows: 9, seed: 71 }),
+    // South open hall outside HR / Dev: the long east-west glide.
+    Object.freeze({ id: 'south_hall', room: 'South open hall', side: 'centre', col: 82, row: 86, cols: 32, rows: 6, seed: 79 }),
+    // L&D classroom (south-east), long drift along its south wall.
+    Object.freeze({ id: 'ld_classroom', room: 'L&D classroom', side: 'south', col: 162, row: 97, cols: 26, rows: 5, seed: 83 })
+].map(p => Object.freeze({ ...p })));
 
   function hash(i, j, s) {
     let h = (i * 374761393 + j * 668265263 + s * 2246822519) | 0;

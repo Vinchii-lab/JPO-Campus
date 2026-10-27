@@ -5,7 +5,7 @@ import vm from "node:vm";
 const window = {};
 vm.runInNewContext(fs.readFileSync(new URL("../public/ice-motion.js", import.meta.url), "utf8"), { window });
 const { step } = window.JpoIceMotion;
-test("glide is capped, controllable and coasts several tiles across frame rates", () => {
+test("exaggerated glide remains capped and coasts roughly twelve tiles across frame rates", () => {
   for (const hz of [30, 60, 120, 144, 240]) {
     let v = { x: 0, y: 0 };
     for (let n = 0; n < hz * 2; n++) {
@@ -14,15 +14,17 @@ test("glide is capped, controllable and coasts several tiles across frame rates"
     }
     assert(Math.hypot(v.x, v.y) > 190);
     let distance = 0;
-    for (let n = 0; n < hz * 4; n++) {
+    for (let n = 0; n < hz * 11; n++) {
       v = step(v, { x: 0, y: 0 }, 195, 1000 / hz);
       distance += Math.hypot(v.x, v.y) / hz;
     }
     assert.equal(v.x, 0); assert.equal(v.y, 0);
-    assert(distance > 195 && distance < 215, "release coasts about four tiles on uninterrupted ice");
+    assert(distance > 555 && distance < 575, "release coasts roughly twelve tiles on uninterrupted ice");
     v = { x: 195, y: 0 };
     for (let n = 0; n < Math.ceil(hz * .25); n++) v = step(v, { x: -195, y: 0 }, 195, 1000 / hz);
-    assert(v.x < 0, "opposite input reverses within a quarter-second");
+    assert(v.x > 0, "opposite input initially skids instead of instantly reversing");
+    for (let n = 0; n < Math.ceil(hz * .4); n++) v = step(v, { x: -195, y: 0 }, 195, 1000 / hz);
+    assert(v.x < 0, "opposite input can still reverse within two-thirds of a second");
   }
 });
 test("corrections/collisions cannot leave hidden momentum, speed reductions clamp immediately", () => {

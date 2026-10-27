@@ -29,8 +29,8 @@ description: Seasonal presentation and availability must agree; approved species
 
 **How to apply:** Keep HQ decorations, seasonal issuance and holiday activities on the same early-release window. Let it expire for New Year's; do not make Christmas permanent.
 
-**Christmas snow should accumulate as multiple natural, irregular slippery patches inside HQ, with long glides.**
+**Christmas snow should accumulate as ten natural, irregular slippery patches across HQ rooms, on varied sides, with exaggerated long glides.**
 
-**Why:** After seeing the designated rink, the user rejected its artificial look and short glide, explicitly requesting multiple accumulated patches across HQ instead.
+**Why:** The user rejected the artificial rink and short glide, then explicitly requested ten patches distributed room-by-room on different sides and a “more absurd slide.”
 
 **How to apply:** Use organic snow edges and visible ice rather than rink borders or signage. Keep spawn points and doorways clear, and preserve collision and speed safeguards.

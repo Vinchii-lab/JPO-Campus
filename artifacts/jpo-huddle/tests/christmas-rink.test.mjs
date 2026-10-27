@@ -55,14 +55,25 @@ const isDoor = (c, r) => {
 test('multiple patch envelopes are clear indoor floor, spread out, away from aisle/spawn/doors/anchors', () => {
   const { Rink, Office } = fixture({ withOffice: true });
   const P = Rink.PATCHES;
-  assert.ok(P.length >= 4, 'several patches');
+  assert.equal(P.length, 10, 'exactly ten patches');
   assert.deepEqual(JSON.parse(JSON.stringify(P.map(p => [p.col, p.row, p.cols, p.rows]))),
-    [[82, 86, 32, 6], [118, 92, 18, 9], [126, 73, 10, 12], [82, 59, 9, 12], [152, 58, 8, 11]]);
+    [[44, 34, 6, 8], [92, 30, 6, 12], [158, 35, 13, 7], [68, 55, 10, 8], [124, 72, 23, 7],
+     [151, 57, 10, 12], [34, 86, 7, 6], [65, 82, 7, 9], [82, 86, 32, 6], [162, 97, 26, 5]]);
+  // Distinct rooms, varied sides, at most one cafeteria patch.
+  assert.equal(new Set(P.map(p => p.room)).size, 10);
+  assert.ok(new Set(P.map(p => p.side)).size >= 4);
+  assert.equal(P.filter(p => /cafeteria/i.test(p.room)).length, 1);
+  // Building-wide: north (r<43) and south halves, west and east wings.
+  assert.ok(P.filter(p => p.row + p.rows < 43).length >= 3);
+  assert.ok(P.filter(p => p.row > 80).length >= 3);
+  assert.ok(P.some(p => p.col < 50) && P.some(p => p.col > 150));
   for (const p of P) {
     assert.ok(p.col >= 31, `${p.id} indoors (lawn is c<30)`);
-    for (let c = p.col - 2; c < p.col + p.cols + 2; c++) for (let r = p.row - 2; r < p.row + p.rows + 2; r++)
+    // Envelope + 1-tile ring clear (the ice blob sits >=1 sub-cell inside the
+    // envelope, so the whole foot body on ice is >=1 tile from any blocker).
+    for (let c = p.col - 1; c < p.col + p.cols + 1; c++) for (let r = p.row - 1; r < p.row + p.rows + 1; r++)
       assert.ok(clear(c, r), `${p.id} clear ${c},${r}`);
-    for (let c = p.col - 3; c < p.col + p.cols + 3; c++) for (let r = p.row - 3; r < p.row + p.rows + 3; r++)
+    for (let c = p.col - 2; c < p.col + p.cols + 2; c++) for (let r = p.row - 2; r < p.row + p.rows + 2; r++)
       assert.ok(!isDoor(c, r), `${p.id} doorway near ${c},${r}`);
     assert.ok(p.row > 51 || p.row + p.rows < 43, `${p.id} off main aisle`);
     const far = (c, r, d) => c < p.col - d || c >= p.col + p.cols + d || r < p.row - d || r >= p.row + p.rows + d;
@@ -78,7 +89,7 @@ test('multiple patch envelopes are clear indoor floor, spread out, away from ais
   assert.ok(Math.max(...P.map(p => p.col)) - Math.min(...P.map(p => p.col)) >= 60);
   // Bigger than the old 7x10 rink, with at least one long glide lane.
   assert.ok(P.some(p => p.cols >= 30));
-  assert.ok(P.reduce((s, p) => s + p.cols * p.rows, 0) > 5 * 70);
+  assert.ok(P.reduce((s, p) => s + p.cols * p.rows, 0) > 10 * 70);
 });
 
 test('shapes are irregular (not rectangles), stay inside envelope, ice nested inside snow', () => {
@@ -130,6 +141,9 @@ test('slippery geometry equals painted ice cells with full foot containment, and
     const cy = oy + p.rows * 24 - OY; let run = 0, best = 0;
     for (let x = ox; x < ox + p.cols * 48; x += 6) { run = Rink.containsBody(x, cy, 1) ? run + 6 : 0; best = Math.max(best, run); }
     longest = Math.max(longest, best);
+    // Narrow rooms glide along their long axis (centre column).
+    const cx = ox + p.cols * 24; run = 0;
+    for (let y = oy; y < oy + p.rows * 48; y += 6) { run = Rink.containsBody(cx, y - OY, 1) ? run + 6 : 0; best = Math.max(best, run); }
     assert.ok(best >= 150, `${p.id} glide ${best}`);
     void sh;
   });
@@ -196,6 +210,7 @@ test('isSlippery needs ice (server clock) and full foot body inside an ice core'
   assert.equal(rink.label(), 'Ice ready');
   cleanup();
   assert.equal(rink.isSlippery((82 + 16) * 48, (86 + 3) * 48 - 27), false);
+  assert.equal(rink.isSlippery((124 + 11.5) * 48, (72 + 3.5) * 48 - 27), false);
 });
 
 test('lifecycle: repeat mount, shutdown, reduced, and office integration', () => {
