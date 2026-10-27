@@ -34,3 +34,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** The user rejected the artificial rink and short glide, then explicitly requested ten patches distributed room-by-room on different sides and a “more absurd slide.”
 
 **How to apply:** Use organic snow edges and visible ice rather than rink borders or signage. Keep spawn points and doorways clear, and preserve collision and speed safeguards.
+
+**Ice edges must not instantly stop a slide.**
+
+**Why:** The user asked for wider slippery areas and explicitly preferred continuing beyond the edge rather than stopping there.
+
+**How to apply:** Carry existing momentum onto ordinary floor and slow gradually; retain normal collision and action-stop behavior.

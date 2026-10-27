@@ -3,6 +3,9 @@
 (function (root) {
   'use strict';
   root.JpoIceMotion = {
+    active(allowed, onIce, wasSliding, velocity) {
+      return !!allowed && (!!onIce || (!!wasSliding && Math.hypot(velocity?.x || 0, velocity?.y || 0) >= 6));
+    },
     step(previous, target, speed, delta) {
       const dt = Math.max(0, Math.min(Number(delta) || 0, 50)) / 1000;
       const cap = Math.max(0, Number(speed) || 0);
@@ -16,7 +19,7 @@
       const input = Math.hypot(to.x, to.y) > 0;
       // Exaggerated ice: ~10 seconds / twelve tiles of free coast at full speed.
       // Build speed quickly, but make braking/reversing deliberately slippery.
-      // Leaving ice, collisions and ordinary action stops still cancel the slide.
+      // Carry momentum beyond the ice edge; collisions/action stops clear it.
       const turning = input && Math.hypot(from.x, from.y) > 6 &&
         from.x * to.x + from.y * to.y < Math.hypot(from.x, from.y) * Math.hypot(to.x, to.y) * 0.9;
       const k = 1 - Math.exp(-dt / (input ? (turning ? 0.65 : 0.18) : 3));

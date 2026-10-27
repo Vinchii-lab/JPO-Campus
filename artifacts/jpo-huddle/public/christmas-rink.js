@@ -72,7 +72,7 @@
   const SHAPES = PATCHES.map(buildShape);
 
   const snowCut = (p) => 1 - Math.min(1, p / 0.85) * 0.97;          // s >= cut is snow
-  const iceCut = (p) => p < SLIPPERY_AT ? Infinity : 1 - (0.32 + 0.43 * (p - SLIPPERY_AT) / (1 - SLIPPERY_AT));
+  const iceCut = (p) => p < SLIPPERY_AT ? Infinity : 1 - (0.42 + 0.48 * (p - SLIPPERY_AT) / (1 - SLIPPERY_AT));
 
   function isIceCell(k, i, j, p) {
     const sh = SHAPES[k];

@@ -19219,9 +19219,12 @@
             this._rlglSlideV = null;
           }
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
-          const skating = seasonNow() === 'christmas' && socket.connected &&
-            !_roundPhase && !_rlgl.running && !window._ph.phase &&
-            this._christmasRink?.isSlippery(player.x, player.y);
+          const iceAllowed = seasonNow() === 'christmas' && socket.connected &&
+            !_roundPhase && !_rlgl.running && !window._ph.phase && !!this._christmasRink;
+          const skating = window.JpoIceMotion?.active(
+            iceAllowed, this._christmasRink?.isSlippery(player.x, player.y),
+            this._iceCoasting, previousIceVelocity);
+          this._iceCoasting = !!skating;
           if (skating && window.JpoIceMotion) {
             const v = window.JpoIceMotion.step(previousIceVelocity, player.body.velocity, spd, delta);
             player.setVelocity(v.x, v.y);
