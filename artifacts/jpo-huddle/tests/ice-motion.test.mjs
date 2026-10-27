@@ -5,21 +5,21 @@ import vm from "node:vm";
 const window = {};
 vm.runInNewContext(fs.readFileSync(new URL("../public/ice-motion.js", import.meta.url), "utf8"), { window });
 const { step } = window.JpoIceMotion;
-test("glide is capped, controllable and settles in under a second across frame rates", () => {
+test("glide is capped, controllable and coasts several tiles across frame rates", () => {
   for (const hz of [30, 60, 120, 144, 240]) {
     let v = { x: 0, y: 0 };
-    for (let n = 0; n < hz; n++) {
+    for (let n = 0; n < hz * 2; n++) {
       v = step(v, { x: 195, y: 195 }, 195, 1000 / hz);
       assert(Math.hypot(v.x, v.y) <= 195 + 1e-9);
     }
     assert(Math.hypot(v.x, v.y) > 190);
     let distance = 0;
-    for (let n = 0; n < hz; n++) {
+    for (let n = 0; n < hz * 4; n++) {
       v = step(v, { x: 0, y: 0 }, 195, 1000 / hz);
       distance += Math.hypot(v.x, v.y) / hz;
     }
     assert.equal(v.x, 0); assert.equal(v.y, 0);
-    assert(distance < 44, "release glides less than one tile");
+    assert(distance > 195 && distance < 215, "release coasts about four tiles on uninterrupted ice");
     v = { x: 195, y: 0 };
     for (let n = 0; n < Math.ceil(hz * .25); n++) v = step(v, { x: -195, y: 0 }, 195, 1000 / hz);
     assert(v.x < 0, "opposite input reverses within a quarter-second");

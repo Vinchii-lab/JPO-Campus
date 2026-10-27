@@ -14,7 +14,9 @@
       };
       const from = clamp(previous), to = clamp(target);
       const input = Math.hypot(to.x, to.y) > 0;
-      const k = 1 - Math.exp(-dt / (input ? 0.16 : 0.22));
+      // Low friction gives a ~4-second coast (~four floor tiles) at full speed.
+      // Steering remains responsive; leaving a patch restores ordinary walking.
+      const k = 1 - Math.exp(-dt / (input ? 0.24 : 1.1));
       let x = from.x + (to.x - from.x) * k;
       let y = from.y + (to.y - from.y) * k;
       if (!input && Math.hypot(x, y) < 6) x = y = 0;

@@ -29,8 +29,8 @@ description: Seasonal presentation and availability must agree; approved species
 
 **How to apply:** Keep HQ decorations, seasonal issuance and holiday activities on the same early-release window. Let it expire for New Year's; do not make Christmas permanent.
 
-**Christmas skating stays in one designated indoor HQ area, not scattered across office floors.**
+**Christmas snow should accumulate as multiple natural, irregular slippery patches inside HQ, with long glides.**
 
-**Why:** The user asked for accumulating snow agents can glide on and selected “Designated HQ skating area” when offered that or scattered patches.
+**Why:** After seeing the designated rink, the user rejected its artificial look and short glide, explicitly requesting multiple accumulated patches across HQ instead.
 
-**How to apply:** Preserve normal walking around desks, doors and spawn points. Keep ice visibly marked and bounded rather than spreading it across the office.
+**How to apply:** Use organic snow edges and visible ice rather than rink borders or signage. Keep spawn points and doorways clear, and preserve collision and speed safeguards.

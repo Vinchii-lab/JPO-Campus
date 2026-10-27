@@ -1,32 +1,79 @@
-/* Christmas HQ skating area: ONE authored, visual-only rink in the east end of
-   the cafeteria lounge. No tiles, bodies, colliders or map data are touched.
-   Snow accumulates from the SERVER clock that main publishes on seasonState:
+/* Christmas HQ snow + ice: several naturally accumulated, irregular snow
+   patches across clear indoor HQ floor. Visual-only: no tiles, bodies,
+   colliders or map data are touched. Snow accumulates from the SERVER clock
+   that main publishes on seasonState:
      window._christmasSnowStartedAt (ms timestamp), window._christmasServerOffsetMs
    progress = clamp((Date.now() + offset - start) / 120000, 0, 1); null/invalid -> 0.
-   Slippery once progress >= 0.5 and the avatar's whole foot body is inside. */
+   Each patch is a deterministic blob rasterised on a 12px cell grid. Snow
+   grows from the centre outward; once progress >= 0.5 a translucent ice core
+   forms and widens. isSlippery() uses EXACTLY the painted ice cells: the
+   avatar's whole foot body must cover only ice cells of one patch. */
 (function () {
   'use strict';
 
-  const CELL = 48;
+  const CELL = 48, SUB = 12, K = CELL / SUB;
   const FILL_MS = 120000;
   const SLIPPERY_AT = 0.5;
   const FOOT_OFFSET_Y = 27, HALF_W = 18, HALF_H = 15;
-  // Cafeteria east lounge, between the last table column (c135-138) and the
-  // east wall (c149); north of the c149 doorway (r69-71), south of the main
-  // r44-50 aisle. Tiles c141..147 x r56..65 inclusive (7 x 10 tiles).
-  const RECT = Object.freeze({ col: 141, row: 56, cols: 7, rows: 10 });
-  const MARGIN = 1;
-  const BOUNDS = Object.freeze({
-    x: RECT.col * CELL, y: RECT.row * CELL, w: RECT.cols * CELL, h: RECT.rows * CELL,
-    left: RECT.col * CELL, top: RECT.row * CELL,
-    right: (RECT.col + RECT.cols) * CELL, bottom: (RECT.row + RECT.rows) * CELL
-  });
-  const active = new WeakMap();
+  const MARGIN = 1; // runtime audit ring around each envelope (authoring used 2 + doorway check)
+
+  // Envelopes (tile col/row, cols x rows). The blob always stays strictly
+  // inside its envelope; every envelope is clear floor with a 2-tile margin,
+  // >=3 tiles from doorways, off the r43-51 main aisle and away from spawns
+  // and Christmas activity anchors.
+  const PATCHES = Object.freeze([
+    // South-west open hall, long east-west drift (longest glide).
+    Object.freeze({ id: 'southwest_hall', col: 82, row: 86, cols: 32, rows: 6, seed: 11 }),
+    // South-central commons below the cafeteria block.
+    Object.freeze({ id: 'south_commons', col: 118, row: 92, cols: 18, rows: 9, seed: 23 }),
+    // Cafeteria south lounge, north-south run between table columns.
+    Object.freeze({ id: 'cafeteria_south', col: 126, row: 73, cols: 10, rows: 12, seed: 37 }),
+    // Cafeteria west lounge, beside the first table column.
+    Object.freeze({ id: 'cafeteria_west', col: 82, row: 59, cols: 9, rows: 12, seed: 41 }),
+    // East wing lounge beyond the cafeteria east wall.
+    Object.freeze({ id: 'east_lounge', col: 152, row: 58, cols: 8, rows: 11, seed: 53 })
+  ].map(p => Object.freeze({ ...p })));
+
+  function hash(i, j, s) {
+    let h = (i * 374761393 + j * 668265263 + s * 2246822519) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+
+  // Precompute per-cell depth s (1 at centre, 0 at blob edge, <0 outside).
+  function buildShape(p) {
+    const w = p.cols * K, h = p.rows * K, s = new Float32Array(w * h), si = new Float32Array(w * h);
+    const r = (k) => hash(k, 7, p.seed);
+    const ph = [r(1) * 6.283, r(2) * 6.283, r(3) * 6.283];
+    const cx = w / 2, cy = h / 2, ax = w / 2 - 1, ay = h / 2 - 1;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const u = (i + 0.5 - cx) / ax, v = (j + 0.5 - cy) / ay;
+      const th = Math.atan2(v, u);
+      // Irregular rim: 1 at most, dented by low-frequency harmonics.
+      const R = 0.86 + 0.06 * Math.sin(2 * th + ph[0]) + 0.05 * Math.sin(3 * th + ph[1]) + 0.03 * Math.sin(5 * th + ph[2]);
+      const d = 1 - Math.hypot(u, v) / R;
+      const n = hash(i, j, p.seed) - 0.5;
+      s[j * w + i] = d + n * 0.12;      // feathered snow
+      si[j * w + i] = d + n * 0.05;     // calmer ice edge
+    }
+    return { w, h, s, si };
+  }
+  const SHAPES = PATCHES.map(buildShape);
+
+  const snowCut = (p) => 1 - Math.min(1, p / 0.85) * 0.97;          // s >= cut is snow
+  const iceCut = (p) => p < SLIPPERY_AT ? Infinity : 1 - (0.32 + 0.43 * (p - SLIPPERY_AT) / (1 - SLIPPERY_AT));
+
+  function isIceCell(k, i, j, p) {
+    const sh = SHAPES[k];
+    if (i < 0 || j < 0 || i >= sh.w || j >= sh.h) return false;
+    return sh.si[j * sh.w + i] >= iceCut(p);
+  }
 
   function gid(layer, c, r) { return Math.max(0, layer?.getTileAt?.(c, r)?.index || 0); }
-  function areaClear(scene) {
-    for (let c = RECT.col - MARGIN; c < RECT.col + RECT.cols + MARGIN; c++)
-      for (let r = RECT.row - MARGIN; r < RECT.row + RECT.rows + MARGIN; r++)
+  function patchClear(scene, p) {
+    for (let c = p.col - MARGIN; c < p.col + p.cols + MARGIN; c++)
+      for (let r = p.row - MARGIN; r < p.row + p.rows + MARGIN; r++)
         if (!(gid(scene.floorLayer, c, r) > 0) || gid(scene.wallLayer, c, r) || gid(scene.furnitureLayer, c, r)) return false;
     return true;
   }
@@ -41,80 +88,96 @@
   function liveProgress() {
     return computeProgress(Date.now(), window._christmasSnowStartedAt, window._christmasServerOffsetMs);
   }
-  function containsBody(x, y) {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+
+  // Index of the patch whose ice fully contains the foot body at progress p, or -1.
+  function iceContainsBody(x, y, p, enabled) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !(p >= SLIPPERY_AT)) return -1;
     const fy = y + FOOT_OFFSET_Y;
-    return x - HALF_W >= BOUNDS.left && x + HALF_W <= BOUNDS.right &&
-      fy - HALF_H >= BOUNDS.top && fy + HALF_H <= BOUNDS.bottom;
+    const L = x - HALF_W, R = x + HALF_W, T = fy - HALF_H, B = fy + HALF_H;
+    for (let k = 0; k < PATCHES.length; k++) {
+      if (enabled && !enabled[k]) continue;
+      const P = PATCHES[k], ox = P.col * CELL, oy = P.row * CELL;
+      if (L < ox || T < oy || R > ox + P.cols * CELL || B > oy + P.rows * CELL) continue;
+      const i0 = Math.floor((L - ox) / SUB), i1 = Math.ceil((R - ox) / SUB) - 1;
+      const j0 = Math.floor((T - oy) / SUB), j1 = Math.ceil((B - oy) / SUB) - 1;
+      let ok = true;
+      for (let j = j0; j <= j1 && ok; j++) for (let i = i0; i <= i1; i++) if (!isIceCell(k, i, j, p)) { ok = false; break; }
+      if (ok) return k;
+    }
+    return -1;
+  }
+  const containsBody = (x, y, p = 1) => iceContainsBody(x, y, p) >= 0;
+
+  // Paint one patch. Pixel-art: 12px cells, 3px texel details.
+  function paintPatch(g, k, p) {
+    g.clear();
+    const sh = SHAPES[k], seed = PATCHES[k].seed, sc = snowCut(p), ic = iceCut(p);
+    if (p <= 0) return;
+    for (let j = 0; j < sh.h; j++) for (let i = 0; i < sh.w; i++) {
+      const v = sh.s[j * sh.w + i], x = i * SUB, y = j * SUB, hv = hash(i, j, seed + 99);
+      if (sh.si[j * sh.w + i] >= ic) {
+        const depth = sh.si[j * sh.w + i] - ic;
+        if (depth < 0.05) { g.fillStyle(0xa8cfe6, 0.62); g.fillRect(x, y, SUB, SUB); continue; } // rim
+        g.fillStyle(depth > 0.22 ? 0x9fcbe8 : 0xbcdff1, 0.5);
+        g.fillRect(x, y, SUB, SUB);
+        if ((i + j * 2 + seed) % 11 === 0) { g.fillStyle(0xf2f9ff, 0.55); g.fillRect(x + 3, y + 3, 6, 3); }
+        else if (hv < 0.05) { g.fillStyle(0x86b6d6, 0.45); g.fillRect(x, y + 6, SUB, 3); }
+        continue;
+      }
+      if (v < sc) continue;
+      const t = v - sc;
+      if (t < 0.08) {           // feathered edge: sparse dusting
+        if (hv > 0.45 + t * 4) continue;
+        g.fillStyle(0xf3f7fc, 0.55); g.fillRect(x + (hv < 0.2 ? 3 : 0), y + (hv > 0.3 ? 3 : 0), hv < 0.12 ? 6 : 9, hv < 0.12 ? 6 : 9);
+        continue;
+      }
+      g.fillStyle(t < 0.2 ? 0xe9f1f8 : 0xf6f9fd, Math.min(0.95, 0.7 + t));
+      g.fillRect(x, y, SUB, SUB);
+      if (hv < 0.12) { g.fillStyle(0xd3e2ef, 0.8); g.fillRect(x + 3, y + 6, 6, 3); }
+      else if (hv > 0.94) { g.fillStyle(0xffffff, 0.9); g.fillRect(x + 6, y + 3, 3, 3); }
+    }
+  }
+  function paintSheen(g, k) {
+    g.clear();
+    const sh = SHAPES[k], seed = PATCHES[k].seed;
+    g.fillStyle(0xffffff, 0.8);
+    for (let j = 0; j < sh.h; j++) for (let i = 0; i < sh.w; i++)
+      if (sh.si[j * sh.w + i] > 0.45 && hash(i, j, seed + 5) < 0.035) { g.fillRect(i * SUB + 3, j * SUB, 3, 9); g.fillRect(i * SUB, j * SUB + 3, 9, 3); }
   }
 
-  // Deterministic snow speck layout (texel grid, 3px).
-  const SPECKS = (() => {
-    const out = []; let s = 4421;
-    const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
-    for (let i = 0; i < 260; i++) out.push([Math.floor(rnd() * (BOUNDS.w / 3 - 2)) + 1, Math.floor(rnd() * (BOUNDS.h / 3 - 2)) + 1, rnd()]);
-    return out;
+  const UNION = (() => {
+    const l = Math.min(...PATCHES.map(p => p.col)) * CELL, t = Math.min(...PATCHES.map(p => p.row)) * CELL;
+    const r = Math.max(...PATCHES.map(p => p.col + p.cols)) * CELL, b = Math.max(...PATCHES.map(p => p.row + p.rows)) * CELL;
+    return Object.freeze({ x: l, y: t, w: r - l, h: b - t, left: l, top: t, right: r, bottom: b });
   })();
 
-  function paintSurface(g, p) {
-    g.clear();
-    const W = BOUNDS.w, H = BOUNDS.h;
-    const ice = p >= SLIPPERY_AT;
-    // Base: pale frost tint that deepens with accumulation.
-    g.fillStyle(ice ? 0xcfe6f5 : 0xe8f0f7, Math.min(0.85, 0.12 + p * 0.9));
-    g.fillRect(0, 0, W, H);
-    // Specks: count grows linearly with progress (gradual fill).
-    const n = Math.round(SPECKS.length * Math.min(1, p * 1.6));
-    for (let i = 0; i < n; i++) {
-      const [tx, ty, k] = SPECKS[i];
-      g.fillStyle(k < 0.5 ? 0xffffff : 0xdbe9f6, ice ? 0.5 : 0.85);
-      g.fillRect(tx * 3, ty * 3, k < 0.2 ? 6 : 3, 3);
-    }
-    if (ice) {
-      // Static skate scratches + glossy diagonal bands.
-      g.fillStyle(0xa9cde6, 0.55);
-      for (let i = 0; i < 6; i++) g.fillRect(30 + i * 45, 60 + (i % 3) * 140, 60, 3);
-      g.fillStyle(0xffffff, 0.35);
-      for (let i = 0; i < 4; i++) g.fillRect(24 + i * 72, 24, 9, H - 48);
-    }
-  }
-  function paintBorder(g) {
-    const W = BOUNDS.w, H = BOUNDS.h;
-    g.clear();
-    for (let x = 0; x < W; x += 12) {
-      const col = (x / 12) % 2 ? 0xf4f8fc : 0x3f7fb5;
-      g.fillStyle(col, 1); g.fillRect(x, -3, 12, 6); g.fillRect(x, H - 3, 12, 6);
-    }
-    for (let y = 0; y < H; y += 12) {
-      const col = (y / 12) % 2 ? 0xf4f8fc : 0x3f7fb5;
-      g.fillStyle(col, 1); g.fillRect(-3, y, 6, 12); g.fillRect(W - 3, y, 6, 12);
-    }
-  }
-
+  const active = new WeakMap();
   function mount(scene, opts = {}) {
     if (!scene?.add || !scene?.events) throw new Error('ChristmasRink.mount requires a Phaser scene');
     active.get(scene)?.();
     const reduced = !!opts.reduced;
     const objects = [], tweens = [];
-    let destroyed = false, lastStep = -1, lastIce = null;
-    const ok = !!(scene.floorLayer && scene.wallLayer && scene.furnitureLayer) && areaClear(scene);
+    let destroyed = false, lastStep = -1;
+    const layersOk = !!(scene.floorLayer && scene.wallLayer && scene.furnitureLayer);
+    const enabled = PATCHES.map(p => layersOk && patchClear(scene, p));
+    const ok = enabled.some(Boolean);
     const api = {
-      bounds: BOUNDS, rect: RECT, mounted: ok,
+      bounds: UNION, mounted: ok,
+      patches: PATCHES.map((p, k) => ({ ...p, mounted: enabled[k] })),
       progress: liveProgress,
-      contains: containsBody,
-      isSlippery(x, y) { return !destroyed && ok && liveProgress() >= SLIPPERY_AT && containsBody(x, y); },
+      contains: (x, y) => iceContainsBody(x, y, liveProgress(), enabled) >= 0,
+      patchAt: (x, y) => { const k = iceContainsBody(x, y, liveProgress(), enabled); return k >= 0 ? PATCHES[k].id : null; },
+      isSlippery(x, y) { return !destroyed && ok && iceContainsBody(x, y, liveProgress(), enabled) >= 0; },
       label: () => (liveProgress() >= SLIPPERY_AT ? 'Ice ready' : 'Snow collecting')
     };
-    let surface = null, border = null, sheen = null, label = null;
+    const surfaces = [], sheens = [];
     const refresh = () => {
-      if (destroyed || !surface) return;
-      const p = liveProgress(), step = Math.round(p * 40), ice = p >= SLIPPERY_AT;
-      if (step !== lastStep) { lastStep = step; paintSurface(surface, p); }
-      if (ice !== lastIce) {
-        lastIce = ice;
-        label?.setText?.(ice ? 'Ice ready' : 'Snow collecting · ' + Math.round(p / SLIPPERY_AT * 100) + '%');
-        if (sheen) sheen.setVisible(ice);
-      } else if (!ice) label?.setText?.('Snow collecting · ' + Math.round(p / SLIPPERY_AT * 100) + '%');
+      if (destroyed) return;
+      const p = liveProgress(), step = Math.round(p * 48);
+      if (step === lastStep) return;
+      lastStep = step;
+      surfaces.forEach(([g, k]) => paintPatch(g, k, p));
+      sheens.forEach(s => s.setVisible(p >= 0.75));
     };
     let acc = 0;
     const tick = (_t, delta) => { acc += Math.min(delta || 16, 100); if (acc >= 400) { acc = 0; refresh(); } };
@@ -132,40 +195,28 @@
     }
     destroy.destroy = destroy;
     destroy.api = api;
-    destroy.report = () => ({ destroyed, mounted: ok, reduced, objects: objects.length, tweens: tweens.length });
+    destroy.report = () => ({ destroyed, mounted: ok, reduced, objects: objects.length, tweens: tweens.length,
+      patches: PATCHES.map((p, k) => ({ id: p.id, mounted: enabled[k] })) });
     active.set(scene, destroy);
     scene.events.once('shutdown', destroy);
     scene.events.once('destroy', destroy);
 
-    if (!ok) {
-      console.warn('Christmas rink map audit failed', { rect: RECT });
-      return destroy;
-    }
+    const blocked = PATCHES.filter((_, k) => !enabled[k]).map(p => p.id);
+    if (blocked.length) console.warn('Christmas snow patch map audit failed', { blocked });
+    if (!ok) return destroy;
     scene._christmasRink = api;
 
-    surface = scene.add.graphics({ x: BOUNDS.x, y: BOUNDS.y }).setDepth(0);
-    border = scene.add.graphics({ x: BOUNDS.x, y: BOUNDS.y }).setDepth(0);
-    paintBorder(border);
-    sheen = scene.add.graphics({ x: BOUNDS.x, y: BOUNDS.y }).setDepth(0).setVisible(false);
-    sheen.fillStyle(0xffffff, 0.18); sheen.fillRect(6, 6, BOUNDS.w - 12, BOUNDS.h / 3);
-    // Sign: small navy board on two posts at the rink's north edge.
-    const sign = scene.add.graphics({ x: BOUNDS.x + BOUNDS.w / 2, y: BOUNDS.y + 6 }).setDepth(0);
-    sign.fillStyle(0x2a2f4a, 1); sign.fillRect(-60, 0, 120, 30);
-    sign.fillStyle(0xf4f8fc, 1); sign.fillRect(-57, 3, 114, 2);
-    sign.fillStyle(0x3f7fb5, 1); sign.fillRect(-57, 25, 114, 2);
-    objects.push(surface, border, sheen, sign);
-    const textStyle = (sz, col) => ({ fontFamily: 'monospace', fontSize: sz + 'px', color: col, fontStyle: 'bold' });
-    if (scene.add.text) {
-      const title = scene.add.text(BOUNDS.x + BOUNDS.w / 2, BOUNDS.y + 13, 'SKATING AREA', textStyle(11, '#f4f8fc')).setDepth(0);
-      title.setOrigin?.(0.5, 0.5);
-      label = scene.add.text(BOUNDS.x + BOUNDS.w / 2, BOUNDS.y + 48, '', textStyle(10, '#2a4f73')).setDepth(0);
-      label.setOrigin?.(0.5, 0.5);
-      objects.push(title, label);
-    }
+    PATCHES.forEach((P, k) => {
+      if (!enabled[k]) return;
+      const g = scene.add.graphics({ x: P.col * CELL, y: P.row * CELL }).setDepth(0);
+      const sheen = scene.add.graphics({ x: P.col * CELL, y: P.row * CELL }).setDepth(0).setVisible(false);
+      paintSheen(sheen, k);
+      surfaces.push([g, k]); sheens.push(sheen); objects.push(g, sheen);
+    });
     refresh();
     scene.events.on('update', tick);
-    if (!reduced && scene.tweens) {
-      tweens.push(scene.tweens.add({ targets: sheen, alpha: 0.35, duration: 1800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
+    if (!reduced && scene.tweens && sheens.length) {
+      tweens.push(scene.tweens.add({ targets: sheens, alpha: 0.25, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
     }
     if (scene.children?.moveAbove && scene.wallLayer) {
       for (let i = objects.length - 1; i >= 0; i--) scene.children.moveAbove(objects[i], scene.wallLayer);
@@ -173,6 +224,8 @@
     return destroy;
   }
 
-  window.ChristmasRink = { mount, RECT, BOUNDS, computeProgress, containsBody, FILL_MS, SLIPPERY_AT,
+  window.ChristmasRink = { mount, PATCHES, BOUNDS: UNION, CELL, SUB, computeProgress, containsBody,
+    iceContainsBody, isIceCell, snowCut, iceCut, shape: (k) => SHAPES[k], paintPatch,
+    FILL_MS, SLIPPERY_AT, FOOT: Object.freeze({ FOOT_OFFSET_Y, HALF_W, HALF_H }),
     current: (scene) => active.get(scene) || null };
 })();
