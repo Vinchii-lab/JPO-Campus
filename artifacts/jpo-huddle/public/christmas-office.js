@@ -302,7 +302,7 @@
           : '<span class="xm-done">Done</span>';
       const hint = d.stage === 'ready' ? `Walk to the ${esc(d.pickup?.label)}.` : d.stage === 'carrying' ? `Walk to the ${esc(d.destination?.label)}.` : 'A new parcel arrives tomorrow (UTC).';
       panel.innerHTML = `
-        <header><div><h3>HQ Holiday Desk</h3><p>${esc(fmtDate(st.date))} · Season ${esc(st.seasonYear)} · runs Nov 5 – Dec 26 UTC</p></div>
+        <header><div><h3>HQ Holiday Desk</h3><p>${esc(fmtDate(st.date))} · Season ${esc(st.seasonYear)} · ends Dec 26 UTC</p></div>
           <button class="xm-x" data-close aria-label="Close">×</button></header>
         <section><div class="xm-row"><div><b>Daily gift</b><small>+${esc(rw.daily)} coins, once per UTC day</small></div>
           ${st.dailyClaimed ? '<span class="xm-done">Claimed today</span>' : '<button data-act="christmasClaimDaily">Claim</button>'}</div></section>

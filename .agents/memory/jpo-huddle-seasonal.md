@@ -22,3 +22,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** The user said, “Forget home decor. Since most are all in HQ.”
 
 **How to apply:** Keep Christmas decoration proposals centered on the shared office rather than player homes or a home-decor shop lineup.
+
+**Christmas 2026 launches early, on October 27, rather than waiting for November 5.**
+
+**Why:** After the Christmas build, the user reported that the cobwebs and Halloween were still present; the intended release replaces them now.
+
+**How to apply:** Keep HQ decorations, seasonal issuance and holiday activities on the same early-release window. Let it expire for New Year's; do not make Christmas permanent.

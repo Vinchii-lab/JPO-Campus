@@ -13,7 +13,7 @@ export async function migrateChristmas(pool) {
 }
 
 export function christmasGate(player, action, locations, date = new Date()) {
-  if (seasonNow(date) !== "christmas") return "Christmas activities are available November 5–December 26 (UTC).";
+  if (seasonNow(date) !== "christmas") return "Christmas activities are available during the active Christmas season.";
   if (!player?.email) return "Sign in to join Christmas activities.";
   if (player.locationId !== "office") return "Return to HQ for Christmas activities.";
   const target = action === "pickup" ? locations.pickup : action === "deliver" ? locations.destination

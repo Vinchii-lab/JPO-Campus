@@ -29,6 +29,12 @@ test("baby unicorn retains static art without missing animation requests", () =>
 });
 
 test("bounded release and UTC calendar have a single October 10 boundary", () => {
+  assert.equal(seasonNow(at("2026-10-26"), true), "halloween");
+  assert.equal(seasonNow(at("2026-10-27"), true), "christmas");
+  assert.equal(seasonNow(at("2026-10-27"), false), "christmas");
+  assert.equal(canIssueItem("santahat", at("2026-10-27")), true);
+  assert.equal(canIssueItem("witchhat", at("2026-10-27")), false);
+  assert.equal(seasonNow(at("2026-12-27")), "newyears");
   assert.equal(seasonNow(new Date(HALLOWEEN_RELEASE_START - 1), true), "rainy");
   assert.equal(seasonNow(new Date(HALLOWEEN_RELEASE_START), true), "halloween");
   assert.equal(seasonNow(new Date(HALLOWEEN_RELEASE_END - 1), true), "halloween");

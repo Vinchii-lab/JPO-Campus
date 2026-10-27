@@ -1,7 +1,7 @@
 import express from "express";
 import { migrateLotClaims, claimNeighborhoodLot } from "./lot-claims.mjs";
 import { migrateChristmas, registerChristmas } from "./christmas.mjs";
-import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END } from "./season.mjs";
+import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END, CHRISTMAS_RELEASE_END } from "./season.mjs";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { fileURLToPath } from "url";
@@ -1274,7 +1274,7 @@ const RARE_IDS = new Set([...RARE_PETS, ...RARE_COSMETICS]);
 // paths are deliberately NOT gated: you keep and can wear what you bought
 // year-round; only new issuance is gated. season.mjs is the sole calendar;
 // clients consume seasonState on connection and on every live transition.
-const seasonSnapshot = () => ({ season: seasonNow(), releaseEndsAt: HALLOWEEN_RELEASE_END });
+const seasonSnapshot = () => ({ season: seasonNow(), releaseEndsAt: seasonNow() === "christmas" ? CHRISTMAS_RELEASE_END : HALLOWEEN_RELEASE_END });
 let lastSeason = seasonNow();
 setInterval(() => {
   const next = seasonNow();
