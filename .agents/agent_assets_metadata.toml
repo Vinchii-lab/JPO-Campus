@@ -1060,3 +1060,17 @@ mtime_ms = 1790708823100
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/677c6a62-13be-4ae5-8fd9-942b8149c119/c5d7006e-7fd1-4b45-a842-5bb46f373f5e"
 storage_version_token = "1790709020284847"
 content_type = "image/png"
+
+[[outputs]]
+id = "orYL2YXUghueFya4Lzl0d"
+uri = "file://attached_assets/christmas-art-preview.png"
+type = "image"
+title = "Reindeer & Christmas Wearables"
+description = "Actual in-game artwork: three reindeer growth stages and all six Christmas wearables, enlarged for review."
+logical_id = "f3c59a56-fce3-4a54-a27b-e1ed86750495"
+content_hash = "sha256:9e00d826c5be943580979b028d3dd4530bba4b06dcab85357eb39e3ec62a5604"
+size = 60203
+mtime_ms = 1793124855275
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/f3c59a56-fce3-4a54-a27b-e1ed86750495/8ba58e35-2538-4fba-9fc5-7f963caf8da3"
+storage_version_token = "1793124873378202"
+content_type = "image/png"
