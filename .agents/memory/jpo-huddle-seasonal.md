@@ -28,3 +28,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** After the Christmas build, the user reported that the cobwebs and Halloween were still present; the intended release replaces them now.
 
 **How to apply:** Keep HQ decorations, seasonal issuance and holiday activities on the same early-release window. Let it expire for New Year's; do not make Christmas permanent.
+
+**Christmas skating stays in one designated indoor HQ area, not scattered across office floors.**
+
+**Why:** The user asked for accumulating snow agents can glide on and selected “Designated HQ skating area” when offered that or scattered patches.
+
+**How to apply:** Preserve normal walking around desks, doors and spawn points. Keep ice visibly marked and bounded rather than spreading it across the office.

@@ -238,6 +238,13 @@
       else if (kind === 'pickup') drawParcels(scene, objects);
       else drawSack(scene, objects);
     }
+    // Skating area (separate module; its cleanup rides on ours).
+    if (window.ChristmasRink?.mount && opts.rink !== false) {
+      try {
+        const rinkCleanup = window.ChristmasRink.mount(scene, { reduced });
+        if (typeof rinkCleanup === 'function') cleanups.push(rinkCleanup);
+      } catch (e) { console.warn('Christmas rink mount failed', e); }
+    }
     // Floating chevron over the current delivery target (hidden until state).
     pointer = scene.add.graphics({ x: 0, y: 0 }).setDepth(0).setVisible(false);
     R(pointer, 0x8a1c2c, -4, -4, 9, 3); R(pointer, 0xf2c14e, -3, -4, 7, 2);

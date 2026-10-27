@@ -4014,6 +4014,8 @@
   <script src="furniture-renderer.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood-ui.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="halloween-office.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="ice-motion.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="christmas-rink.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -4780,13 +4782,16 @@
     // No client clock/calendar fallback: disconnected/unknown fails closed.
     let _activeSeason = null;
     function seasonNow() { return _activeSeason; }
-    socket.on('seasonState', ({ season }) => {
+    socket.on('seasonState', ({ season, snowStartedAt, serverNow }) => {
+      window._christmasSnowStartedAt = Number.isFinite(snowStartedAt) ? snowStartedAt : null;
+      window._christmasServerOffsetMs = Number.isFinite(serverNow) ? serverNow - Date.now() : 0;
       _activeSeason = season;
       window.dispatchEvent(new Event('seasonChanged'));
       if (document.getElementById('shop-modal')?.classList.contains('open')) _refreshShopUI();
     });
     socket.on('disconnect', () => {
       _activeSeason = null; // fail closed until the reconnect snapshot arrives
+      window._christmasSnowStartedAt = null;
       window.dispatchEvent(new Event('seasonChanged'));
     });
     // Owned seasonal gear stays wearable forever — only the BUY rows hide.
@@ -19184,6 +19189,7 @@
             }
           }
         } else {
+          const previousIceVelocity = { x: player.body.velocity.x, y: player.body.velocity.y };
           player.setVelocity(0,0);
           // The shared selector preserves HQ's coffee, Prop Hunt, After Dark,
           // and RLGL precedence while also serving NeighborhoodScene.
@@ -19213,13 +19219,21 @@
             this._rlglSlideV = null;
           }
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
+          const skating = seasonNow() === 'christmas' && socket.connected &&
+            !_roundPhase && !_rlgl.running && !window._ph.phase &&
+            this._christmasRink?.isSlippery(player.x, player.y);
+          if (skating && window.JpoIceMotion) {
+            const v = window.JpoIceMotion.step(previousIceVelocity, player.body.velocity, spd, delta);
+            player.setVelocity(v.x, v.y);
+          }
           // Void containment: zero any velocity axis that would carry the
           // feet onto an unpainted tile (per-axis, so you slide along the
           // world's edge). Mirrors the server's isUnpaintedPosition reject.
           window._voidClampVelocity?.(this, player);
 
           player.setFlipX(false);
-          const moving = left || right || up || down;
+          const moving = left || right || up || down ||
+            (skating && Math.hypot(player.body.velocity.x, player.body.velocity.y) >= 6);
           if (moving) {
             // vertical sets facing, horizontal overrides so diagonals show a side view
             let dir = this.lastDir;
