@@ -4017,6 +4017,7 @@
   <script src="ice-motion.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="christmas-rink.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="reindeer-battle.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="inventory-hotbar.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -19822,7 +19823,8 @@
         ultimate: { choreo: 'basic-slam', label: 'ULTIMATE!' },
       },
     };
-    function getPbAttackProfile(petId, moveId = 'attack') {
+    function getPbAttackProfile(petId, moveId = 'attack', stage = 1) {
+      if (petId === 'pet_reindeer') return window.ReindeerBattle.profile(stage, moveId);
       const profile = PB_ATTACK_PROFILE_BY_PET[petId] || PB_DEFAULT_ATTACK_PROFILE;
       const move = profile.moves[moveId] || profile.moves.attack;
       return { effect: profile.effect, moveId, ...move };
@@ -20631,10 +20633,15 @@
        const dy = to.y - from.y;
        const c1 = theme?.color || '#ffcf4d';
        const c2 = theme?.color2 || '#ffffff';
-       const attackProfile = getPbAttackProfile(attacker.petId, moveId);
+       const attackProfile = getPbAttackProfile(attacker.petId, moveId, attacker.stage);
        const choreo = pbResolveOfficeChoreo(attacker.petId, moveId);
        const label = attackProfile.label;
        pbTrickLabel(from, label, c1, c2, gen);
+       if (attacker.petId === 'pet_reindeer') return window.ReindeerBattle.play({
+         stage: attacker.stage || 1, moveId, from, to, mover, gen,
+         animate: pbAnimateTracked, node: pbTrickNode, burst: pbBurstAt,
+         alive: () => gen === pbGen,
+       });
 
        const move = (frames, duration, easing = 'ease-in-out') =>
          pbAnimateTracked(mover, frames, { duration, easing }, gen);
@@ -21327,7 +21334,7 @@
           
              async function doHit(attacker, attRes, attSprite, attTheme, oppPrefix, myPrefix) {
              if (attRes.move === 'guard') return;
-               const attackProfile = getPbAttackProfile(attacker.petId, attRes.move);
+               const attackProfile = getPbAttackProfile(attacker.petId, attRes.move, attacker.stage);
                const restorePose = pbShowActionPose(attSprite, attacker.petId, attacker.stage);
                try {
                    if (!(await pbPlayOfficeChoreo(myPrefix, oppPrefix, attacker, attRes.move, attTheme, myGen))) return;

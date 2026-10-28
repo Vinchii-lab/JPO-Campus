@@ -82,7 +82,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const buildHasher = crypto.createHash("sha1");
 for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
-for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
+for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -2298,8 +2298,16 @@ const PB_PASSIVE_HINTS = {
   "prism-guardian": "durable guard and reliable restoration",
   "reborn-flame": "high crit/dodge; Searing Wing regenerates",
 };
-function petBattleKit(petId) {
-  return { ...PB_DEFAULT_KIT, ...(PB_KITS[petId] || {}), petId };
+function petBattleKit(petId, stage = 1) {
+  const kit = { ...PB_DEFAULT_KIT, ...(PB_KITS[petId] || {}), petId };
+  if (petId === "pet_reindeer") {
+    const names = stage >= 3
+      ? ["Golden Antler Strike", "Jingle Dash", "Santa’s Sleighride"]
+      : stage >= 2 ? ["Antler Bash", "Jingle Dash", "Jingle Stampede"]
+      : ["Snowball Bonk", "Present Pop", "Present Blizzard"];
+    [kit.attackName, kit.specialName, kit.ultimateName] = names;
+  }
+  return kit;
 }
 function petBattlePublicKit(kit) {
   const visualHints = kit.motion === "wing"
@@ -4802,7 +4810,7 @@ function petBattleView(b) {
 // the single source of truth (so evolving/retraining mid-battle can't change
 // an in-flight fight, and a client can't inject stats).
 function petBattleSnapshot(id, name, petId, stage, build) {
-  const kit = petBattleKit(petId);
+  const kit = petBattleKit(petId, stage);
   const stats = petBattleStats(stage, build, kit);
   return {
     id, name, petId, stage, build: { ...build },
@@ -12175,7 +12183,7 @@ io.on("connection", (socket) => {
       pet,
       petName: ((target.petNames || {})[pet]) || "",
       stage,
-      kit: petBattlePublicKit(petBattleKit(pet)),
+      kit: petBattlePublicKit(petBattleKit(pet, stage)),
     };
     if (self) {
       const build = effectivePetBuild(target, pet);

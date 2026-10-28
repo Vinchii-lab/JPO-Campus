@@ -52,3 +52,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** The user said the elf outfit did not cover pants, requested a beard instead of a scarf, and said Halloween is already done.
 
 **How to apply:** Preserve ownership rather than deleting Halloween items. Keep existing scarf ownership valid when replacing its appearance and label with the beard.
+
+**Reindeer battle specials must be recognizably Christmas-themed, not generic leaps with recolored sparkles.**
+
+**Why:** The user requested Christmas specials, then approved snowball/gift attacks for baby, antler and Jingle Dash for adult, and a dramatic sleigh-and-exploding-presents sequence for golden.
+
+**How to apply:** Preserve stage-specific attack identity. Multiple visual impacts remain one server-resolved move, not extra damage. Office tricks are separate from these approved battle animations.
