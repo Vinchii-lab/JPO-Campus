@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Christmas clothing LAYER sheets (sweater / elf outfit / scarf).
+"""Christmas clothing LAYER sheets (sweater / elf outfit / Santa beard).
 
 Same layer-sheet contract as the raincoat, with per-frame body geometry
 derived from the native sprite and skin/pants/hair masks. Split clothing
@@ -120,20 +120,31 @@ def gen(char, suffix):
                     O['christmassweater'][x, y] = shade(c, B[x, y], ref) if c in (RED, RED_D) else c + (255,)
                     c = RED if y == top else GOLD if y == bot else GREEN
                     O['elfoutfit'][x, y] = GOLD + (255,) if c == GOLD else shade(c, B[x, y], ref)
-                elif y <= feet_row(B, x, h) - 3:
+                elif P[x, y][3] >= 128 or y < feet_row(B, x, h):
                     c = RED if (y // 2) % 2 == 0 else CREAM
                     O['elfoutfit'][x, y] = shade(c, B[x, y], ref)
-        # scarf: 2-row wrap at the shoulder line + short tail
-        for x in range(x0, x1):
-            for y in (top, top + 1):
-                if body(x, y):
-                    O['christmasscarf'][x, y] = (CREAM if x % 3 == 0 else RED) + (255,)
-        tx = int(round(cx)) - 1
-        tend = min(bot, top + 5)
-        for y in range(top + 2, tend + 1):
-            for x in (tx, tx + 1):
-                if x0 <= x < x1 and body(x, y):
-                    O['christmasscarf'][x, y] = (CREAM if y == tend else RED_D) + (255,)
+        # Keep the persisted scarf ID so existing owners receive the beard.
+        # Fit to the lower FACE, not the clothing/hair-derived shoulder.
+        direction = ('right', 'up', 'left', 'down')[f // 6] if suffix == 'run' else ('right' if f < 6 else 'left')
+        if direction == 'up':
+            continue
+        headtop = min(y for y in range(h) if any(B[x,y][3] for x in range(x0,x1)))
+        face_rows = [y for y in range(headtop, min(h, headtop + 13))
+                     if any(K[x,y][3] for x in range(x0,x1))]
+        if not face_rows:
+            continue
+        face_bottom = face_rows[0]
+        while face_bottom + 1 in face_rows:
+            face_bottom += 1
+        face_x = [x for x in range(x0,x1)
+                  if any(K[x,y][3] for y in range(max(headtop,face_bottom-2),face_bottom+1))]
+        center = round((min(face_x)+max(face_x))/2)
+        for dy in range(5):
+            radius = (3,3,2,1,0)[dy] if direction == 'down' else (1,1,1,0,0)[dy]
+            for x in range(center-radius,center+radius+1):
+                y = face_bottom - 1 + dy
+                if x0 <= x < x1 and 0 <= y < h:
+                    O['christmasscarf'][x,y] = ((255,253,246) if dy<3 else (217,225,226))+(255,)
     for k, im in outs.items():
         im.save(os.path.join(LDIR, f'{char.capitalize()}_{suffix}_wear_{k}.png'))
 

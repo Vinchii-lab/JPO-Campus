@@ -4803,7 +4803,7 @@
       getPlayerPos: () => _xmasScene?.player ? { x: _xmasScene.player.x, y: _xmasScene.player.y } : null,
       isInOffice: () => !!_xmasScene?.sys?.isActive?.(),
     });
-    const _seasonRowOk = (c) => _ownedItems.includes(c.id) || (c.id !== 'pet_frog' && (!c.season || c.season === seasonNow()));
+    const _seasonRowOk = (c) => c.season !== 'halloween' && (_ownedItems.includes(c.id) || (c.id !== 'pet_frog' && (!c.season || c.season === seasonNow())));
 
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the
@@ -4844,7 +4844,7 @@
       { id: 'pumpkinhead', emoji: '🎃', name: 'Pumpkin Head', cost: 10000, cat: '🎃 Halloween — limited!', season: 'halloween', desc: 'a glowing jack-o-lantern grin' },
       { id: 'vampirecape', emoji: '🧛', name: 'Vampire Cape', cost: 13000, cat: '🎃 Halloween — limited!', season: 'halloween', desc: 'a velvet cape — stacks with hats and wings' },
       // Christmas HQ drop (Nov 5 – Dec 26 UTC, server seasonState authoritative).
-      { id: 'christmasscarf',   emoji: '🧣', name: 'Knitted Scarf',    cost: 4500,  cat: '🎄 Christmas — limited!', season: 'christmas', desc: 'candy-stripe knit, tails and all' },
+      { id: 'christmasscarf',   emoji: '🎅', name: 'Santa Beard',    cost: 4500,  cat: '🎄 Christmas — limited!', season: 'christmas', desc: 'a fluffy white Santa beard' },
       { id: 'reindeerantlers',  emoji: '🦌', name: 'Reindeer Antlers', cost: 5500,  cat: '🎄 Christmas — limited!', season: 'christmas', desc: 'felt antlers on a cranberry band' },
       { id: 'santahat',         emoji: '🎅', name: 'Santa Hat',        cost: 6500,  cat: '🎄 Christmas — limited!', season: 'christmas', desc: 'red velvet, fluffy trim, floppy tip' },
       { id: 'christmassweater', emoji: '🎄', name: 'Holiday Sweater',  cost: 8000,  cat: '🎄 Christmas — limited!', season: 'christmas', desc: 'the office-party classic, gold star included' },
@@ -5555,7 +5555,7 @@
             const im = new Image();
             im.onload = () => { _wearLayerImgs[`${char}_${suffix}_${wid}`] = im; settle(); };
             im.onerror = settle;   // 404 = that item never bakes; don't hang the settle
-            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=${['santahat','reindeerantlers'].includes(wid) ? '15-christmas-fit' : wid === 'vampirecape' ? '13-seated-profile-cape' : wid === 'pumpkinhead' ? '14-native-head-tracking' : _WEAR_NO_STICKER.has(wid) ? '15-xmas-body-layers' : '12-wide-halloween'}`;
+            im.src = `/assets/layers/${CAPC(char)}_${suffix}_wear_${wid}.png?v=${['santahat','reindeerantlers'].includes(wid) ? '15-christmas-fit' : wid === 'vampirecape' ? '13-seated-profile-cape' : wid === 'pumpkinhead' ? '14-native-head-tracking' : _WEAR_NO_STICKER.has(wid) ? '16-beard-elf-legs' : '12-wide-halloween'}`;
           }
         }
       }

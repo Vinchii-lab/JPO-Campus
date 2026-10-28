@@ -213,7 +213,11 @@ test("actual client lifecycle clears rain/tweens, refreshes stock, and remounts 
   vm.runInContext(html.slice(start, end), context);
   assert.equal(vm.runInContext("seasonNow()", context), null);
   handlers.seasonState({ season: "halloween" });
-  assert.equal(vm.runInContext("_seasonRowOk({id:'witchhat',season:'halloween'})", context), true);
+  assert.equal(vm.runInContext("_seasonRowOk({id:'witchhat',season:'halloween'})", context), false);
+  assert.equal(vm.runInContext("_seasonRowOk({id:'pet_bat',season:'halloween'})", context), false);
+  vm.runInContext("_ownedItems.push('witchhat', 'pet_bat')", context);
+  assert.equal(vm.runInContext("_seasonRowOk({id:'witchhat',season:'halloween'})", context), false);
+  assert.equal(vm.runInContext("_seasonRowOk({id:'pet_bat',season:'halloween'})", context), false);
   assert.equal(vm.runInContext("_seasonRowOk({id:'pet_frog',season:'rainy'})", context), true);
   assert.equal(vm.runInContext("_seasonRowOk({id:'rainboots',season:'rainy'})", context), false);
   const killed = [], objects = [], shutdown = {};

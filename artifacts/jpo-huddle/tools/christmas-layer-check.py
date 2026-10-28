@@ -32,8 +32,14 @@ for ch in ['Adam', 'Alex', 'Amelia', 'Bob']:
                     for y in range(h):
                         if o[x, y][3] == 0: continue
                         n += 1
-                        if K[x, y][3] >= 128: fail.append(f'{p} paints skin @{x},{y}')
-                        if y <= chin: fail.append(f'{p} paints above shoulder (face) @{x},{y}')
+                        if wid != 'christmasscarf':
+                            if K[x, y][3] >= 128: fail.append(f'{p} paints skin @{x},{y}')
+                            if y <= chin: fail.append(f'{p} paints above shoulder (face) @{x},{y}')
+                if wid == 'elfoutfit':
+                    for x in range(f*fw,(f+1)*fw):
+                        for y in range(chin+1,h):
+                            if P[x,y][3] and not K[x,y][3] and B[x,y][3] and not o[x,y][3]:
+                                fail.append(f'{p} leaves pants uncovered @{x},{y}')
             if n < (w // fw) * 4: fail.append(f'{p} nearly empty ({n}px)')
 html = open(os.path.join(ROOT, 'index.html')).read()
 m = re.search(r'const _WEAR_BAKE_ANCHOR = \{(.*?)\};', html, re.S)
