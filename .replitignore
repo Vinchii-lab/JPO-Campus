@@ -4,3 +4,4 @@
 # No need to store the pnpm store twice.
 /attached_assets/generated_images/reindeer_*_sheet.png
 .local
+/generated-artifacts/

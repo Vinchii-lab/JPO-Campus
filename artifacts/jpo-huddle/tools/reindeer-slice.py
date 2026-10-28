@@ -19,13 +19,16 @@ def blobs(mask,W,H):
                     if 0<=nj<W*H and d[nj] and not lab[nj]: lab[nj]=1; q.append(nj)
             out.append((cnt,x0,y0,x1,y1))
     return out
-for s in (1,2,3):
+for s in ([int(v) for v in sys.argv[1:]] or (1,2,3)):
     im=Image.open(SRC%s).convert('RGBA'); W,H=im.size; px=list(im.getdata())
     bg=px[4*W+4][:3]
     mask=[max(abs(p[0]-bg[0]),abs(p[1]-bg[1]),abs(p[2]-bg[2]))>26 for p in px]
     im.putdata([p if m else (0,0,0,0) for p,m in zip(px,mask)])
-    bl=sorted(blobs(mask,W,H),reverse=True)[:6]
-    bl=sorted(bl,key=lambda b:(round(b[2]/250),b[1]))
+    bl=sorted(blobs(mask,W,H),reverse=True)[:7 if s==2 else 6]
+    bl=sorted(bl,key=lambda b:(b[2] >= H*.47,b[1]))
+    # Adult source has four poses on top, then an EXTRA walking pose,
+    # sitting and action below. Selecting six by area dropped the sitter.
+    if s==2: bl=[bl[i] for i in (0,1,2,3,5,6)]
     crops=[]
     for _,x0,y0,x1,y1 in bl:
         c=im.crop((x0,y0,x1,y1)); crops.append(c.crop(c.getbbox()))

@@ -32,3 +32,4 @@
 - [Preview runtime verification](jpo-preview-runtime-verification.md) — verify live loaded code, not retained errors; update cooldowns must retry independently of gameplay sockets.
 - [Furniture pose verification](jpo-furniture-pose-proof.md) — use canonical action anchors and real wearable metadata; passing depth order alone does not prove a correct pose.
 - [Home layout safety](jpo-home-layout-safety.md) — snapshot reads must not repair/delete placements; version inventory changes too, and reconcile collision state after committed Store.
+- [Christmas fitting pitfalls](jpo-christmas-fit.md) — verify native anatomy rather than trusting layer bounds; pet source sheets may contain extra walking poses.
