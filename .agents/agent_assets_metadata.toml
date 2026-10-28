@@ -1130,3 +1130,17 @@ mtime_ms = 1793213250870
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/bb02e0d3-2a6a-4de2-978b-e778b339c496/21015c04-5100-47cd-9604-ed71a05adf4c"
 storage_version_token = "1793213269267303"
 content_type = "image/gif"
+
+[[outputs]]
+id = "HNeZzdqGo9WyKQo7jcrFb"
+uri = "file://generated-artifacts/reindeer-full-movement-concept.gif"
+type = "image"
+title = "Reindeer — Corrected Sizes and Full Movement Concept"
+description = "Six sequences: idle, walking, running, turning, sitting, and special moves. Baby is smallest; golden is largest. Proposed motion using existing artwork—not implemented gameplay."
+logical_id = "54d0a1d3-23e0-484c-8f77-0f10e50291a9"
+content_hash = "sha256:271825f4ffb7027beee452b82140bdf5c2fe3e853e7e08eca64af213242f87d6"
+size = 4220017
+mtime_ms = 1793215548951
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/54d0a1d3-23e0-484c-8f77-0f10e50291a9/8a812027-b09a-43dc-bf7c-f41801756fde"
+storage_version_token = "1793215586281030"
+content_type = "image/gif"

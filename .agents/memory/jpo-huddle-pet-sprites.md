@@ -4,6 +4,12 @@ description: How to produce a pet's 6-frame set (static + walk1-3 + sit + action
 ---
 
 # Pet stage art contract
+Preview stage sizes using visible silhouettes and the runtime evolution scaling, not equal image-box sizes.
+
+**Why:** The reindeer preview omitted evolution scaling and made the baby appear largest, misleading the user.
+
+**How to apply:** Use one stable scale per stage across every animation frame. Clearly label proposed movement/effects separately from actual game footage.
+
 - Files: `public/assets/pets/pet_<id>_s<n>.png` (static) + `anim/<stem>_s<n>_{walk1,walk2,walk3,sit,action}.png`, all 64x64 bottom-aligned (`-resize 60x60 -gravity south -extent 64x64`).
 - `_animSet` only attaches when ALL 5 anim textures exist — a missing frame silently leaves the pet static.
 - ALL pet art must face RIGHT (client flips with flipX; only legacy static bunnies face left). A left-facing sheet walks backwards — check facing against `pet_<id>.png` stage 1 before installing.
