@@ -1102,3 +1102,31 @@ mtime_ms = 1793126421826
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/bbb93f87-6f12-405d-a11e-c3f1d7ea058e/3ccc1a39-9106-4578-8861-dfa305186474"
 storage_version_token = "1793126442927877"
 content_type = "image/png"
+
+[[outputs]]
+id = "oYnaWgwlD5JS5oqJMl3RR"
+uri = "file://generated-artifacts/reindeer-three-forms.gif"
+type = "image"
+title = "Reindeer — Current Animation Frames"
+description = "All three forms: walk cycle, sitting pose, and action pose using the existing game artwork."
+logical_id = "b885a471-43eb-4a93-88db-d97fbe2654ef"
+content_hash = "sha256:a510c889acd458512d60e685077ddff4862b9d0229a7cede298035785120e318"
+size = 774942
+mtime_ms = 1793213249214
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/b885a471-43eb-4a93-88db-d97fbe2654ef/7e034776-c238-4699-82bb-3e69a4308199"
+storage_version_token = "1793213267971448"
+content_type = "image/gif"
+
+[[outputs]]
+id = "dut4BAMtKfDPEnNzu94Lm"
+uri = "file://generated-artifacts/reindeer-animation-concept.gif"
+type = "image"
+title = "Reindeer — Proposed Animation"
+description = "Concept only: playful baby hops, adult trot, and a floating golden gallop with sparkles. Not yet implemented in-game."
+logical_id = "bb02e0d3-2a6a-4de2-978b-e778b339c496"
+content_hash = "sha256:a4ff3dd9b8d83911cd7fa1d57a257cd7975f4d0308f2aab34d7d93fc22358dc3"
+size = 1145772
+mtime_ms = 1793213250870
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/bb02e0d3-2a6a-4de2-978b-e778b339c496/21015c04-5100-47cd-9604-ed71a05adf4c"
+storage_version_token = "1793213269267303"
+content_type = "image/gif"
