@@ -4018,6 +4018,7 @@
   <script src="christmas-rink.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-battle.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="reindeer-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="inventory-hotbar.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -15599,7 +15600,7 @@
             // stages always do); base pets keep the mid-stride idle because
             // some old static base art (bunnies) faces the other way.
             sit: `petanim_${stem}_sit`, action: `petanim_${stem}_action`,
-            idle: stageKey || `petanim_${stem}_walk2`,
+            idle: pet === 'pet_reindeer' ? (stageKey || pet) : stageKey || `petanim_${stem}_walk2`,
           };
           obj.setTexture(obj._animSet.idle);
           if (pet === 'pet_bat') {
@@ -15692,6 +15693,7 @@
       // at the old spot after a pet switch, or leak a round-hidden player's
       // location if the owner vanishes mid-trick.
       _killPetFx(petObj) {
+        if (petObj?._reindeerTrick) window.ReindeerOffice.stop(this, petObj);
         if (petObj?._batSonar) {
           petObj.off('destroy', petObj._batSonar.onDestroy);
           petObj._batSonar = null;
@@ -15724,6 +15726,10 @@
         // location — no tricks while concealed.
         if (!petObj.visible) return;
         const sp = petSpeciesId(petObj._petId || '');
+        if (sp === 'pet_reindeer') {
+          window.ReindeerOffice.start(this, petObj);
+          return;
+        }
         if (sp === 'pet_bat' && (petObj._trickBusy || !petObj.active)) return;
         if (sp === 'pet_bat' && petObj._petStage >= 2) {
           this._startBatSonar(petObj);
@@ -17758,6 +17764,10 @@
       }
 
       _stepPet(petObj, px, py, delta, seated) {
+        if (petObj._reindeerTrick && window.ReindeerOffice.step(this, petObj, delta)) {
+          this._placePetAcc(petObj);
+          return;
+        }
         if (petObj._petId === 'pet_bat' && (!petObj.active || !petObj.visible)) {
           this._killPetFx(petObj);
           return;
@@ -17790,6 +17800,9 @@
         if (petObj._lively && !petObj._trickBusy) {
           petObj._animT = (petObj._animT || 0) + delta;
           const bs = petObj._baseScale || 1, walking = dist > gap + 1;
+          if (petObj._petId === 'pet_reindeer') {
+            petObj._restMs = walking ? 0 : (petObj._restMs || 0) + delta;
+          }
           if (walking) {
             // Final forms MOVE differently too — each spirit has its own gait:
             //   blaze (golden wolf) = powerful prowl: barely sways, long deep
@@ -17997,7 +18010,8 @@
             if (petObj._petId !== 'pet_bat') petObj.angle *= 0.85; // settle upright
             petObj.setScale(bs, petObj._petId === 'pet_bat' ? bs : bs * (1 + 0.015 * Math.sin(petObj._animT * 0.004)));
             if (petObj._animSet) {
-              const fr = seated ? petObj._animSet.sit : petObj._animSet.idle;
+              const restingReindeer = petObj._petId === 'pet_reindeer' && petObj._restMs >= 1200;
+              const fr = seated || restingReindeer ? petObj._animSet.sit : petObj._animSet.idle;
               if (petObj.texture.key !== fr) petObj.setTexture(fr);
             }
             const now = performance.now();

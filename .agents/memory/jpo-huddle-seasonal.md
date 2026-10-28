@@ -58,3 +58,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** The user requested Christmas specials, then approved snowball/gift attacks for baby, antler and Jingle Dash for adult, and a dramatic sleigh-and-exploding-presents sequence for golden.
 
 **How to apply:** Preserve stage-specific attack identity. Multiple visual impacts remain one server-resolved move, not extra damage. Office tricks are separate from these approved battle animations.
+
+**Reindeer must visibly rest seated when stationary and have an office P-key action, not just battle moves.**
+
+**Why:** The user reported a frozen raised-foot pose, no sitting, and no P-key action after battle animations were added.
+
+**How to apply:** Verify walking, stationary rest, owner-seated rest, and the office trick independently for all three forms; battle-only verification does not cover these behaviors.

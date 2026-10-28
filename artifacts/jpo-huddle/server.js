@@ -82,7 +82,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const buildHasher = crypto.createHash("sha1");
 for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
-for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
+for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/reindeer-office.js", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
