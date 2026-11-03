@@ -12299,7 +12299,7 @@
         _rnEl('round-role-sub').textContent = _roundRole === 'killer'
           ? ((_accNames.length ? `You're in it together with ${_accNames.join(' and ')} — you can't hurt each other. ` : '')
              + 'Catch people alone — get close and press K (or the 🔪 button). Don\'t get caught looking sus.')
-          : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize || 25} 🪙 if you make it!`;
+          : `Survive until the lights come back on. Someone among you isn't friendly… ${d.prize ?? 500} 🪙 if you make it!`;
         _rnEl('round-role').classList.add('open');
         clearTimeout(_roundRoleTimer);
         _roundRoleTimer = setTimeout(() => _rnEl('round-role').classList.remove('open'), 9000);
@@ -12410,7 +12410,7 @@
       const kList = kn.length > 1 ? kn.slice(0, -1).join(', ') + ' and ' + kn[kn.length - 1] : kn[0];
       const bits = [(plural ? `The killers were ${kList}.` : `The killer was ${kList}.`)
         + (d.forfeit ? (plural ? ' (The last of them vanished mid-round — automatic crew win.)' : ' (They vanished mid-round — automatic crew win.)') : '')];
-      if (d.winners && d.winners.length) bits.push(`${d.winners.join(', ')} win${d.winners.length === 1 ? 's' : ''} ${d.prize || 25} 🪙 each!`);
+      if (d.winners && d.winners.length) bits.push(`${d.winners.join(', ')} win${d.winners.length === 1 ? 's' : ''} ${d.prize ?? 500} 🪙 each!`);
       else bits.push('No survivors, no payout. Brutal.');
       _rnEl('round-end-body').textContent = bits.join(' ');
       _rnEl('round-end').classList.add('open');

@@ -64,3 +64,9 @@ description: Seasonal presentation and availability must agree; approved species
 **Why:** The user reported a frozen raised-foot pose, no sitting, and no P-key action after battle animations were added.
 
 **How to apply:** Verify walking, stationary rest, owner-seated rest, and the office trick independently for all three forms; battle-only verification does not cover these behaviors.
+
+**After Dark has a fixed 500-gold winner reward; chore increases are a Christmas bonus rather than a permanent base-price change.**
+
+**Why:** The user requested a fixed 500 gold per After Dark game and higher chores “since it's christmas.” Existing winner eligibility is retained, not expanded to participation payouts.
+
+**How to apply:** Keep After Dark independent of the season. Gate the chore bonus through the shared Christmas season and keep normal cooldowns; payout messages must match the amount actually credited.

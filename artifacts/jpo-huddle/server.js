@@ -1895,7 +1895,7 @@ const OBJECTS = {
 // ── Office chores ────────────────────────────────────────────────────────
 // Repeatable small jobs anyone can do for coins — an ACTIVE earning floor for
 // new/broke players on top of the passive tick (COIN_TICK_BASE = 2/min =
-// 120/hr). Doing every chore each hour adds at most 82/hr, so it's a floor
+// 120/hr). Base chores total 82/hr (410/hr during Christmas), so it's a floor
 // for the poor, never a farm for the rich. Cooldowns are per player per
 // CHORE (stations sharing a chore share its cooldown), in-memory like the
 // coffee cooldown — a restart forgives them, which is fine at this stakes
@@ -7025,7 +7025,7 @@ const ROUND_KILL_SLACK_PX    = 80;
 // (owner-requested); the roundBucket token limiter still caps kill spam, and
 // the client-side `|| fallback` seams must treat 0 as a real value.
 const ROUND_KILL_COOLDOWN_MS = 0;
-const ROUND_PRIZE            = 25;      // per winner
+const ROUND_PRIZE            = 500;     // fixed per winner, not a shared pot
 // Killer speed edge: alive killers of the ACTIVE round walk this much faster
 // than base speed, so they can close a chase. Delivered ONLY in the killers'
 // private roundBegin payload (never broadcast — a public value would out them).
@@ -14291,7 +14291,9 @@ io.on("connection", (socket) => {
       // proximity was checked above, the cooldown lives here, and the coins
       // move via the same atomic relative UPDATE as the daily bonus.
       const choreId = CHORE_STATIONS[object];
-      const chore = CHORES[choreId];
+      // Snapshot the seasonal reward once so SQL, toast and memory agree even
+      // if a payout crosses the season boundary. Never mutate base rewards.
+      const chore = { ...CHORES[choreId], pay: CHORES[choreId].pay * (seasonNow() === "christmas" ? 5 : 1) };
       const key = (p.email || socket.id) + "|" + choreId;
       const readyAt = choreReadyAt.get(key) || 0;
       if (now < readyAt) {
