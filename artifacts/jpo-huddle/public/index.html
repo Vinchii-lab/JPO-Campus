@@ -4805,7 +4805,7 @@
       getPlayerPos: () => _xmasScene?.player ? { x: _xmasScene.player.x, y: _xmasScene.player.y } : null,
       isInOffice: () => !!_xmasScene?.sys?.isActive?.(),
     });
-    const _seasonRowOk = (c) => c.season !== 'halloween' && (_ownedItems.includes(c.id) || (c.id !== 'pet_frog' && (!c.season || c.season === seasonNow())));
+    const _seasonRowOk = (c) => _ownedItems.includes(c.id) || (c.season !== 'halloween' && c.id !== 'pet_frog' && (!c.season || c.season === seasonNow()));
 
     // Cosmetics catalog: ids and costs MUST stay in lockstep with the server
     // SHOP map in server.js — the server rejects unknown ids and enforces the

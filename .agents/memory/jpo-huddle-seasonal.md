@@ -47,11 +47,11 @@ description: Seasonal presentation and availability must agree; approved species
 
 **How to apply:** Carry existing momentum onto ordinary floor and slow gradually; retain normal collision and action-stop behavior.
 
-**Christmas clothing: full elf outfit includes pants; Santa beard replaces the scarf. Hide Halloween options, including owned shop rows, for this release.**
+**Christmas clothing: full elf outfit includes pants; Santa beard replaces the scarf. Hide only unowned Halloween shop rows for this release. Purchased Halloween items remain accessible forever.**
 
-**Why:** The user said the elf outfit did not cover pants, requested a beard instead of a scarf, and said Halloween is already done.
+**Why:** The user said the elf outfit did not cover pants, requested a beard instead of a scarf, and said Halloween is already done. They subsequently clarified that owned Halloween items must remain visible: hiding the owned cape prevented taking it off.
 
-**How to apply:** Preserve ownership rather than deleting Halloween items. Keep existing scarf ownership valid when replacing its appearance and label with the beard.
+**How to apply:** Always show owned seasonal items with equip/unequip controls regardless of season; seasonal hiding applies only to unowned purchase rows. Preserve ownership rather than deleting Halloween items. Keep existing scarf ownership valid when replacing its appearance and label with the beard.
 
 **Reindeer battle specials must be recognizably Christmas-themed, not generic leaps with recolored sparkles.**
 
