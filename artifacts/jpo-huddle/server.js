@@ -3355,17 +3355,18 @@ function coachCoffeeMoment(socketId) {
 // player state shape (camelCase).
 function rowToPlayerState(row) {
   const officeSpawn = LOCATIONS.office.spawn;
+  // Legacy x/y have no map identity and may belong to a home, not HQ.
+  const saved = row.last_position;
+  const canRestore = saved && ["office", "city", "neighborhood"].includes(saved.locationId)
+    && Number.isFinite(saved.x) && Number.isFinite(saved.y);
   return {
-    // Location membership is deliberately live-session state. A reconnect
-    // safely returns to HQ, whose durable x/y columns already existed before
-    // homes shipped; home layouts themselves are fully durable in their own
-    // development-schema tables.
-    locationId: "office",
+    locationId: canRestore ? saved.locationId : "office",
     movementRevision: 0,
-    // Never resurrect a persisted coordinate into a different map: reconnects
-    // intentionally use the authored, painted HQ spawn (rather than stale
-    // coordinates from an older map/home session).
-    x: officeSpawn.x, y: officeSpawn.y, dir: officeSpawn.dir, anim: "idle",
+    x: canRestore ? saved.x : officeSpawn.x,
+    y: canRestore ? saved.y : officeSpawn.y,
+    dir: canRestore ? saved.dir : officeSpawn.dir,
+    anim: canRestore && saved.anim === "sit" ? "sit" : "idle",
+    ...(canRestore && saved.residentialExitBlock ? { residentialExitBlock: saved.residentialExitBlock } : {}),
     // `name` is the in-game DISPLAY name (nickname first) — every consumer
     // (nametags, chat, announcements, grace snapshot) reads this field.
     // `fullName` keeps the real name for the admin panel.
@@ -3464,6 +3465,20 @@ function durableAnimFor(player) {
   return parseLocation(locationOf(player))?.kind === "home"
     ? "idle"
     : (player?.anim === "sit" ? "sit" : "idle");
+}
+function saveLastPosition(p) {
+  if (!p?.email) return Promise.resolve();
+  const snapshot = {
+    locationId: locationOf(p), x: p.x, y: p.y, dir: p.dir,
+    anim: durableAnimFor(p),
+    residentialExitBlock: p.residentialExitBlock || null,
+    savedAt: Date.now(),
+  };
+  return pool.query(
+    `UPDATE jpo_players SET last_position = $2::jsonb WHERE email = $1
+     AND COALESCE((last_position->>'savedAt')::bigint, 0) <= $3`,
+    [p.email, JSON.stringify(snapshot), snapshot.savedAt],
+  );
 }
 function emitToLocation(locationId, event, payload, exceptId = null) {
   const room = io.to(locationRoom(locationId));
@@ -4126,7 +4141,7 @@ function dropLiveByEmail(email, exceptId, preserveOutdoorPosition = false) {
     if (players[id]) {
       const p = players[id];
       const locationId = locationOf(p);
-      if (preserveOutdoorPosition && (locationId === "city" || locationId === "neighborhood")) {
+      if (preserveOutdoorPosition && ["office", "city", "neighborhood"].includes(locationId)) {
         // The old transport may not have detected its disconnect yet. Capture
         // the same positional fields as grace BEFORE deleting its player.
         // Do not run disconnect first: that would reorder game/seat cleanup.
@@ -4135,6 +4150,7 @@ function dropLiveByEmail(email, exceptId, preserveOutdoorPosition = false) {
           residentialExitBlock: p.residentialExitBlock ? { ...p.residentialExitBlock } : null,
         };
       }
+      saveLastPosition(p).catch(err => console.error("replacement position save failed:", err));
       delete players[id];
       emitToLocation(locationId, "playerLeft", id);
     }
@@ -4173,7 +4189,9 @@ async function restorePlayer(socket, row, resumeSnapshot = null) {
   // A live replacement is newer than any parked snapshot. Both feed the same
   // outdoor restore/geometry checks below; homes still require normal access.
   const g = resumeSnapshot?.email === state.email ? resumeSnapshot : parked;
-  if (g && Number.isFinite(g.x) && Number.isFinite(g.y)) {
+  if (g && ["office", "city", "neighborhood"].includes(g.locationId)
+      && Number.isFinite(g.x) && Number.isFinite(g.y)) {
+    state.locationId = g.locationId;
     state.x = g.x; state.y = g.y; state.dir = g.dir || state.dir;
     state.anim = g.anim === "sit" ? "sit" : "idle";
     // Location is normally an ephemeral session choice, but a residential
@@ -8375,10 +8393,10 @@ io.on("connection", (socket) => {
       }
 
       // Authenticated: now it's safe to drop any older live session.
-      dropLiveByEmail(em, socket.id);
+      const resumeSnapshot = dropLiveByEmail(em, socket.id, !!row.approved);
 
       if (row.approved) {
-        await restorePlayer(socket, row);
+        await restorePlayer(socket, row, resumeSnapshot);
         _notifyAdmins();
         console.log(`Signed in: ${row.name} <${em}>`);
       } else {
@@ -14536,6 +14554,7 @@ io.on("connection", (socket) => {
         };
         // Flush final position so a restore AFTER grace expiry still resumes here.
         try {
+          await saveLastPosition(p);
           await pool.query(
             `UPDATE jpo_players SET x = $2, y = $3, dir = $4, anim = $5, updated_at = now() WHERE email = $1`,
             [email, Math.round(p.x ?? GRASS_SPAWN.x), Math.round(p.y ?? GRASS_SPAWN.y), p.dir || "down", durableAnimFor(p)],
@@ -14980,6 +14999,28 @@ await migrateLotClaims(pool);
 await migrateChristmas(pool);
 
 const port = process.env.PORT || 3000;
+// Additive migration: old untagged coordinates are intentionally not backfilled.
+await pool.query(`ALTER TABLE jpo_players ADD COLUMN IF NOT EXISTS last_position jsonb`);
+const positionCheckpoint = setInterval(() => {
+  for (const p of Object.values(players)) {
+    saveLastPosition(p).catch(err => console.error("position checkpoint failed:", err));
+  }
+}, 10_000);
+positionCheckpoint.unref();
+let stopping = false;
+async function stopWithPositions() {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(positionCheckpoint);
+  const timeout = setTimeout(() => process.exit(1), 8000);
+  timeout.unref();
+  // Capture before closing transports triggers disconnect/game cleanup.
+  await Promise.all(Object.values(players).map(p =>
+    saveLastPosition(p).catch(err => console.error("shutdown position save failed:", err))));
+  process.exit(0);
+}
+process.once("SIGTERM", stopWithPositions);
+process.once("SIGINT", stopWithPositions);
 httpServer.listen(port, () => {
   console.log(`JPO Huddle server running on port ${port}`);
 });

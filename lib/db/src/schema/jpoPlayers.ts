@@ -65,6 +65,8 @@ export const jpoPlayersTable = pgTable("jpo_players", {
   // spot as the server's GRASS_SPAWN void-rescue point). Keep in lockstep
   // with server.js GRASS_SPAWN and the client's SPAWN_X/SPAWN_Y fallback.
   x: integer("x").notNull().default(1272),
+  // Map-tagged position; legacy x/y alone cannot safely identify a location.
+  lastPosition: jsonb("last_position"),
   y: integer("y").notNull().default(2253),
   dir: text("dir").notNull().default("down"),
   // 'sit' | 'idle' — persisted so a player who was sitting is restored SEATED

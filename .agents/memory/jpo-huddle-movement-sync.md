@@ -12,7 +12,7 @@ Scope movement and corrections to their map. Keep inbound client ordering separa
 
 Treat reconnect as an authoritative scene synchronization, not only a socket restart.
 
-**Why:** City/neighborhood positions survive a short disconnect through the server's in-memory grace snapshot; absent that snapshot (or if the neighborhood directory cannot be refreshed), restore falls back to HQ. A surviving scene can keep sending the wrong map ID forever unless the server explicitly synchronizes the scene and roster.
+**Why:** A surviving scene can keep sending the wrong map ID forever unless the server explicitly synchronizes the restored scene and roster. A failed neighborhood directory refresh still requires a safe HQ fallback.
 
 **How to apply:** Test stale packets, connection interruption outside HQ, a server teleport followed by honest client movement, and HQ roster reconciliation after waking its sleeping scene. Do not relax speed or collision checks to hide corrections.
 
@@ -21,6 +21,12 @@ An authenticated replacement can arrive before the server detects the old transp
 **Why:** Deleting the old live player before disconnect cleanup means that cleanup cannot create a grace snapshot. Even a short browser network interruption can then lose its outdoor location without the grace timer ever starting.
 
 **How to apply:** Preserve the live outdoor snapshot for the authenticated resume before removing the old player, then reuse the normal restore checks. Test both disconnect-first and replacement-first ordering. Do not fix this by blindly running disconnect first: game settlement, seat cleanup and one-session identity have separate invariants. Browser offline duration is not the server's disconnect-to-resume interval.
+
+Refreshes and game restarts should retain the last safe public-map position, including HQ and seated pose. Authenticated live replacement must preserve HQ snapshots too.
+
+**Why:** The user reported everyone returning to spawn after reset. Old durable x/y were written from multiple maps without identifying the map, so treating legacy coordinates as HQ is unsafe; ignoring all saved coordinates also loses legitimate positions.
+
+**How to apply:** Restore only map-tagged snapshots, validate against current geometry, and retain spawn as a fallback for unknown/invalid data. Private home re-entry still requires access checks; never transplant a private-room coordinate into HQ.
 
 Treat a local position correction as a prediction-origin boundary, not just a coordinate assignment.
 
