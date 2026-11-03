@@ -15608,16 +15608,15 @@
             if (flight.every(key => this.textures.exists(key))) obj._animSet.walk = flight;
           }
           obj._baseScale = PET_PX / Math.max(obj.width, obj.height);
-          // Dragons are the ONLY pets allowed to break the size cap (boss
-          // rule: most expensive pet = biggest pet in the office). Stage 2
+          // Dragons have a larger office size. Stage 2
           // ~1.3x a normal pet, final form ~1.7x — towers over the turtle.
           if (pet.startsWith('pet_dragon') && (stage || 1) >= 2) {
             obj._baseScale *= (stage >= 3 ? 1.7 : 1.45);
             obj._gapMult = (stage >= 3 ? 1.9 : 1.5);   // big body = wider follow ring
           }
-          // Boss rule: mythic gift pets' FINAL FORM is dragon-final-form
-          // sized — but the baby stays its original baby size.
-          if ((pet === 'pet_unicorn' || pet === 'pet_phoenix') && (stage || 1) >= 3) {
+          // Mythic gift pets and the golden reindeer share the larger final
+          // form size; baby and intermediate forms keep their original sizes.
+          if ((pet === 'pet_unicorn' || pet === 'pet_phoenix' || pet === 'pet_reindeer') && (stage || 1) >= 3) {
             obj._baseScale *= (pet === 'pet_phoenix' ? 1.9 : 1.7);   // boss: phoenix a touch bigger
             obj._gapMult = 1.9;
           }
