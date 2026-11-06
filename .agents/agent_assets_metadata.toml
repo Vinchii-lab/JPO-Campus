@@ -1186,3 +1186,17 @@ mtime_ms = 1793966604202
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/ac55a7c5-c1c1-4386-a14d-8754985b5da1/17acc3a8-d0c8-430a-a6c9-63fa48e20f90"
 storage_version_token = "1793966618864572"
 content_type = "image/gif"
+
+[[outputs]]
+id = "K90aML4YRgFFKLyIxRxZ4"
+uri = "file://generated-artifacts/character-moving-flight-side-corrected.gif"
+type = "image"
+title = "Flight motion — corrected side wings"
+description = "Revised animated concept using the actual side-profile wing artwork, attached at the rear shoulder and mirrored for left/right flight. Shadow remains grounded. Preview only, no gameplay changes."
+logical_id = "38e39b85-e217-4ec4-9eb7-0d05801ea9b4"
+content_hash = "sha256:6d929781eb24ffcdcb0c660ce67aa2a0d56ea7b5ce50366adcf58c80a22a75c4"
+size = 3260342
+mtime_ms = 1793966784321
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/38e39b85-e217-4ec4-9eb7-0d05801ea9b4/596a1493-1acb-4272-bd9c-0bc05bd6761c"
+storage_version_token = "1793966795850211"
+content_type = "image/gif"
