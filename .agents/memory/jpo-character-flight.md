@@ -20,6 +20,12 @@ Wing previews must show the correct side profile at the shoulder/back anchor whe
 
 **How to apply:** Inspect left and right cruise frames at visible scale before presenting motion previews; correct front-view composition alone is not sufficient.
 
+Flight needs a clearly visible, dark ground shadow rather than a barely perceptible oval.
+
+**Why:** The user twice requested a darker shadow because the in-game effect did not feel like flying.
+
+**How to apply:** Judge readability on the actual snowy HQ floor, not just a plain concept background. Keep the shadow grounded and visually separated from the airborne character; do not change movement or collision behavior when adjusting its appearance.
+
 Spacebar toggles Fly/Land during normal exploration; typing, menus and existing minigame controls take precedence.
 
 **Why:** The user chose Spacebar after checking its current Quick Draw and Pool actions and explicitly asked to implement the agreed plan without breaking the app.

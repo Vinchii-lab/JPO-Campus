@@ -199,10 +199,10 @@
           sp.setFlipX(false);
         }
         // Ground shadow (unshifted, at the collision feet).
-        if (!st.shadow) st.shadow = scene.add.ellipse(sp.x, sp.y, 36, 12, 0x161a24, 0.35);
+        if (!st.shadow) st.shadow = scene.add.ellipse(sp.x, sp.y, 36, 12, 0x101217, 0.55);
         const r = st.lift / LIFT;
         st.shadow.setPosition(sp.x, sp.y + conf.bodyDy + 4)
-          .setScale(1 - 0.3 * r, 1 - 0.25 * r).setAlpha(0.38 + 0.10 * (1 - r))
+          .setScale(1 - 0.3 * r, 1 - 0.25 * r).setAlpha(0.55 + 0.10 * (1 - r))
           .setVisible(sp.visible).setDepth(sp.depth);
         const wings = a.wings && a.wings.active ? a.wings : null;
         scene.children.moveBelow(st.shadow, wings || sp);

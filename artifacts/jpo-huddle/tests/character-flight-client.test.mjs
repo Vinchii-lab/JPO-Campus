@@ -63,7 +63,7 @@ test("render lift restores sprite coordinates exactly and never moves ground sha
   function obj(x = 100, y = 100) {
     return { x, y, active: true, visible: true, depth: 4,
       setPosition(x, y) { this.x=x; this.y=y; return this; },
-      setScale() { return this; }, setAlpha() { return this; },
+      setScale() { return this; }, setAlpha(value) { this.alpha=value; return this; },
       setVisible() { return this; }, setDepth() { return this; },
       destroy() { this.destroyed=true; } };
   }
@@ -85,6 +85,7 @@ test("render lift restores sprite coordinates exactly and never moves ground sha
     events.prerender();
     assert.ok(sprite.y < 100);
     assert.equal(shadow.y, 131);
+    assert.ok(shadow.alpha >= 0.55 && shadow.alpha <= 0.65);
     assert.ok(Math.abs(name.y-sprite.y+40) < 1e-10);
     events.render();
     assert.equal(sprite.y, 100);
