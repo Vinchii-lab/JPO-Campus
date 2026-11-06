@@ -1172,3 +1172,17 @@ mtime_ms = 1793966489846
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/734ab985-0c67-4195-90fe-cc4740686ead/335f346a-a434-452d-ac99-3693b8777a73"
 storage_version_token = "1793966511791732"
 content_type = "image/png"
+
+[[outputs]]
+id = "F9nTtrxHsNcR_cc0XbAo_"
+uri = "file://generated-artifacts/character-moving-flight-concept.gif"
+type = "image"
+title = "Moving flight — animated concept"
+description = "Character accelerates right, cruises, brakes into a hover, turns and flies left. The shadow follows on the floor. Uses existing directional idle art with simulated wing folding; not implemented gameplay."
+logical_id = "ac55a7c5-c1c1-4386-a14d-8754985b5da1"
+content_hash = "sha256:84c09a542fa1dd8ffdeeafd31f3a79c2ac5d492e69be09d9c5ffed896e350949"
+size = 3213552
+mtime_ms = 1793966604202
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/ac55a7c5-c1c1-4386-a14d-8754985b5da1/17acc3a8-d0c8-430a-a6c9-63fa48e20f90"
+storage_version_token = "1793966618864572"
+content_type = "image/gif"
