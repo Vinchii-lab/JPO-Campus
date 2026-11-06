@@ -6,7 +6,7 @@ Characters with equipped wings should be able to fly, with flight speed based on
 
 **Why:** The user explicitly clarified that the backburnered flight feature is for users wearing wings, not reindeer or other pets.
 
-**How to apply:** Plan and verify character flight separately from pet animations. Controls, speed multipliers, rare-wing treatment and price-change behavior still require agreement; do not treat draft recommendations as approved.
+**How to apply:** Plan and verify character flight separately from pet animations. The user approved the proposed implementation after choosing Spacebar: fixed catalog-based speed tiers, an explicit fastest Phoenix tier, no sale-based speed changes, takeoff/hover/landing, a grounded shadow, a touch Fly/Land button, and no flight advantage during competitive games.
 
 Keep all existing collisions while characters fly.
 
@@ -19,3 +19,9 @@ Wing previews must show the correct side profile at the shoulder/back anchor whe
 **Why:** The user rejected the moving-flight concept's wing placement in side view.
 
 **How to apply:** Inspect left and right cruise frames at visible scale before presenting motion previews; correct front-view composition alone is not sufficient.
+
+Spacebar toggles Fly/Land during normal exploration; typing, menus and existing minigame controls take precedence.
+
+**Why:** The user chose Spacebar after checking its current Quick Draw and Pool actions and explicitly asked to implement the agreed plan without breaking the app.
+
+**How to apply:** Never globally consume Spacebar before checking the active UI/game state. Existing owners receive flight without repurchasing wings. Keep flight state temporary: refreshing should restore a safe grounded position.

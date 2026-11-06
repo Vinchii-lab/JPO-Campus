@@ -343,6 +343,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
   const isResidentialBlock = () => currentLocation === 'neighborhood';
   const ownHome = () => homeState?.canEdit && homeState.ownerEmail === globals()._playerEmail ? homeState : null;
   const travel = (destination, options = {}) => {
+    window.JpoCharacterFlight?.land('travel');
     const sent = movement?.sendReliableEvent('locationTransition', currentLocation, { destination, ...options });
     if (!sent) {
       recoverFailedTravel();
@@ -1121,6 +1122,22 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         this.add.text(this.player.x, this.player.y - 40, g._playerName || 'You', { fontSize: '14px', fontFamily: 'monospace', color: '#fff', backgroundColor: '#000000bb', padding: { x: 5, y: 3 } }).setOrigin(0.5, 1);
       this._setActorDepth(this.localNameTag, this.player.y, 2);
       this.cameras.main.startFollow(this.player);
+      // Wing flight: render-time lift only; body/colliders stay grounded.
+      window.JpoCharacterFlight?.attachScene(this, () => {
+        const vb = window._voiceBadges || {}, out = [];
+        const slotParts = (m) => Object.values(m || {}).map((x) => x && x.obj);
+        if (this.player?.active) out.push({ id: socket.id, sprite: this.player, texKey: this.playerTexKey,
+          dir: this.playerDir || 'down', seated: !!(this.activity || this.staticSeatState),
+          wings: this.localWings, wingsId: globals()._equippedWings || '',
+          parts: [this.localCosmetic, this.localWings, ...slotParts(this.localSlotObjs),
+            this.localNameTag, this.localBubble, vb[socket.id]?.txt] });
+        for (const [id, r] of Object.entries(this.remotes || {})) {
+          out.push({ id, sprite: r.sprite, texKey: r.texture, dir: r.lastDir || 'down', seated: !!r.activity,
+            wings: r.wings, wingsId: r.wear?.wings || '',
+            parts: [r.cosmetic, r.wings, ...slotParts(r.slotObjs), r.nameTag, r.chatBubble, vb[id]?.txt] });
+        }
+        return out;
+      }, { bodyDy: 27, dirStart: globals().DIR_START || { down: 0 } });
 
       this._geometryBlocks = this.physics.add.staticGroup();
       this._yardBlocks = this.physics.add.staticGroup();
@@ -2722,6 +2739,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         nearby.instanceId || nearby.sprite?.getData?.('instanceId');
       if (!instanceId || !action) return;
       this._activityPending = true;
+      window.JpoCharacterFlight?.land('interaction');
       if (this.location === 'furniture-shop') {
         socket.emit('furnitureDemoInteract', { phase: 'start', instanceId, action });
       } else {
@@ -2829,6 +2847,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       this._parkSeatPending = 'sit';
       this._parkSeatPendingAt = performance.now();
       this._parkSeatSitTarget = { x: Number(seat.x), y: Number(seat.y), dir: seat.dir || 'down' };
+      window.JpoCharacterFlight?.land('interaction');
       movement?.sendReliable(this.location, {
         ...this._parkSeatSitTarget, seatId: seat.id || null, anim: 'sit',
       });
@@ -3528,6 +3547,7 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
       const parkStanding = this._parkSeatPending === 'stand';
       let anim = this.activity ? (this.activity.action === 'sit' ? 'sit' : this.activity.action)
         : ((parkSeated && !parkStanding) || parkPendingSit ? 'sit' : 'idle');
+      const prevFlightV = { x: body.velocity.x, y: body.velocity.y };
       body.setVelocity(0, 0);
       if (!this.activity && !parkSeated && !this._parkSeatPending && !this._activityPending && !this.transitionRequested) {
         // Independent axes, matching HQ; diagonals retain the same total speed.
@@ -3536,6 +3556,12 @@ window.initNeighborhoodUI = function(socket, getGlobals) {
         if (left) { body.setVelocityX(-spd); dir = 'left'; anim = 'walk'; }
         else if (right) { body.setVelocityX(spd); dir = 'right'; anim = 'walk'; }
         if ((left || right) && (up || down)) body.velocity.normalize().scale(spd);
+        const flight = window.JpoCharacterFlight;
+        if (flight?.isSelfFlying()) {
+          const fv = flight.steer(prevFlightV, { x: body.velocity.x, y: body.velocity.y }, delta);
+          body.setVelocity(fv.x, fv.y);
+          if (anim !== 'walk' && Math.hypot(fv.x, fv.y) >= 6) anim = 'walk';
+        }
       }
       ui.classList.toggle('neighborhood-walking', anim === 'walk');
       this.playerDir = dir;

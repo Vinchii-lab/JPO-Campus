@@ -718,6 +718,17 @@
       bottom: 44px; width: 86px; height: 86px; font-size: 15px;
       background: rgba(108,99,255,0.88); border: 2px solid rgba(255,255,255,0.6);
     }
+    #touch-fly {
+      position: fixed; right: 122px; bottom: 50px; z-index: 250; display: none;
+      width: 58px; height: 58px; border-radius: 50%; font: bold 13px monospace; color: #fff;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.45);
+      align-items: center; justify-content: center; touch-action: none; user-select: none;
+      -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
+    }
+    body.touch-device.playing #touch-fly.has-wings { display: flex; }
+    body.touch-device.playing.chatting #touch-fly { display: none; }
+    #touch-fly.active { background: rgba(232,160,64,0.9); border-color: rgba(255,240,210,0.9); }
+    #touch-fly.pending { opacity: 0.5; pointer-events: none; }
     #touch-action:active { background: rgba(87,79,214,0.95); }
     #touch-action.disabled { opacity: 0.3; }
     #touch-chat {
@@ -3273,6 +3284,7 @@
     <button id="touch-challenge" type="button" aria-label="Challenge nearest player">⚔️</button>
     <button id="touch-voice" type="button" aria-label="Hold to talk">🎙️</button>
     <button id="touch-action" type="button" class="disabled">E</button>
+    <button id="touch-fly" type="button" aria-label="Toggle wing flight" aria-pressed="false">Fly</button>
   </div>
 
   <!-- ── Emote bar (buttons are built from EMOTES in JS) ── -->
@@ -4019,6 +4031,7 @@
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-battle.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-office.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="character-flight.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="inventory-hotbar.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -5120,7 +5133,9 @@
     // speed, After Dark chooses the larger killer edge (or clamps crew), and
     // RLGL runners always return to base speed.
     function _effectiveMovementSpeed(baseSpeed = SPEED) {
-      let spd = _boostUntil > Date.now() ? baseSpeed * COFFEE_MULT : baseSpeed;
+      // Coffee and wing flight do not stack: MAX of the two (mirrors server).
+      let spd = baseSpeed * Math.max(_boostUntil > Date.now() ? COFFEE_MULT : 1,
+        window.JpoCharacterFlight?.selfMultiplier?.() || 1);
       if (window._ph.role === 'hider' && window._ph.phase === 'hiding') {
         spd = Math.max(spd, baseSpeed * 2);
       }
@@ -13980,6 +13995,8 @@
       }
 
       _sendReliableMovement(payload) {
+        // Land before any reliable seat/interaction packet (server lands too).
+        if (payload && payload.anim === 'sit') window.JpoCharacterFlight?.land('interaction');
         return window._jpoMovementTransport?.sendReliable('office', payload) || false;
       }
 
@@ -15084,6 +15101,22 @@
         this._setLocalWings(_equippedWings);         // wings slot rides alongside
         this._setLocalSlots(_equippedSlots);         // outfit slots (top/bottom/neckwear/held)
         this._setLocalPet(_equippedPet);             // restore the active pet on (re)join
+        // Wing flight: visual lift of the body + riders at render time only.
+        window.JpoCharacterFlight?.attachScene(this, () => {
+          const vb = window._voiceBadges || {}, out = [];
+          const slotParts = (m) => Object.values(m || {}).map((s) => s && s.obj);
+          if (this.player) out.push({ id: socket.id, sprite: this.player, texKey: this.playerTexKey,
+            dir: this.lastDir, seated: !!this.sitting, wings: this.localWings, wingsId: _equippedWings,
+            parts: [this.localCosmetic, this.localWings, ...slotParts(this.localSlotObjs),
+              this.localNameTag, this.localBubble, vb[socket.id]?.txt] });
+          for (const id in this.otherPlayers) {
+            const e = this.otherPlayers[id];
+            out.push({ id, sprite: e.sprite, texKey: e.texKey, dir: e.lastDir, seated: e.seated === true,
+              wings: e.wings, wingsId: e.wear?.wings || '',
+              parts: [e.cosmetic, e.wings, ...slotParts(e.slotObjs), e.nameTag, e.chatBubble, vb[id]?.txt] });
+          }
+          return out;
+        }, { bodyDy: BODY_DY, dirStart: DIR_START });
 
         if (this._pendingPlayers) {
           Object.entries(this._pendingPlayers).forEach(([id,pdata]) => {
@@ -19277,8 +19310,17 @@
             this._rlglSlideV = null;
           }
           if ((left||right)&&(up||down)) player.body.velocity.normalize().scale(spd);
+          // Wing flight: accelerate / brake / coast toward the input velocity.
+          let flightCoast = false;
+          if (window.JpoCharacterFlight?.isSelfFlying()) {
+            const fv = window.JpoCharacterFlight.steer(previousIceVelocity,
+              { x: player.body.velocity.x, y: player.body.velocity.y }, delta);
+            player.setVelocity(fv.x, fv.y);
+            flightCoast = Math.hypot(fv.x, fv.y) >= 6;
+          }
           const iceAllowed = seasonNow() === 'christmas' && socket.connected &&
-            !_roundPhase && !_rlgl.running && !window._ph.phase && !!this._christmasRink;
+            !_roundPhase && !_rlgl.running && !window._ph.phase && !!this._christmasRink &&
+            !window.JpoCharacterFlight?.isSelfFlying();
           const skating = window.JpoIceMotion?.active(
             iceAllowed, this._christmasRink?.isSlippery(player.x, player.y),
             this._iceCoasting, previousIceVelocity);
@@ -19294,7 +19336,7 @@
 
           player.setFlipX(false);
           const moving = left || right || up || down ||
-            (skating && Math.hypot(player.body.velocity.x, player.body.velocity.y) >= 6);
+            (skating && Math.hypot(player.body.velocity.x, player.body.velocity.y) >= 6) || flightCoast;
           if (moving) {
             // vertical sets facing, horizontal overrides so diagonals show a side view
             let dir = this.lastDir;
@@ -21484,6 +21526,26 @@
     });
 
     // ── Shared City and Homes presentation ───────────────────────────────
+    // ── Character wing flight (Space / touch Fly) ──
+    window.JpoCharacterFlight?.init(socket, {
+      toast: (m) => showToast(m, 2600),
+      getWings: () => _equippedWings,
+      ready: () => document.body.classList.contains('playing') &&
+        !!(window._neighborhoodScene?.sys?.isActive?.() || window._gameScene?.player),
+      gameLock: () => !!(_rpsPhase || _roundPhase || _rlgl.running || _rlgl.joined || window._ph?.phase),
+      blocked: () => {
+        if (_chatOpen || _dmOpen || _ownerPanelOpen || _boardPanelOpen || _rpsUiOpen || _coachPanelOpen || _petPanelOpen) return 'disabled';
+        if (document.querySelector('.open[id$="-panel"], .modal.open, dialog[open]')) return 'disabled';
+        const nb = window._neighborhoodScene;
+        if (nb?.sys?.isActive?.()) {
+          if (/home|interior/i.test(String(nb.location || ''))) return 'disabled';
+          if (nb.activity || nb.staticSeatState || nb.transitionRequested) return 'seated';
+          return null;
+        }
+        if (window._gameScene?.sitting) return 'seated';
+        return null;
+      },
+    });
     if (window.initNeighborhoodUI) {
       window.initNeighborhoodUI(socket, () => ({
         showToast, DIR_START, SPEED, touchMove, touchAction,

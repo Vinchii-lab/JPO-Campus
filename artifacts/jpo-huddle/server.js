@@ -1,6 +1,7 @@
 import express from "express";
 import { migrateLotClaims, claimNeighborhoodLot } from "./lot-claims.mjs";
 import { migrateChristmas, registerChristmas } from "./christmas.mjs";
+import { ownedWingFlightSpeed, flightDeniedReason } from "./flight-rules.mjs";
 import { seasonNow, canIssueItem, HALLOWEEN_RELEASE_END, CHRISTMAS_RELEASE_END } from "./season.mjs";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -82,7 +83,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const buildHasher = crypto.createHash("sha1");
 for (const file of ["public/index.html", "public/neighborhood.js", "public/neighborhood-ui.js", "public/focused-movement-helper.js", "public/neighborhood-interiors.js", "public/neighborhood-interiors-gym.js", "gym-layout.mjs", "public/furniture-renderer.js", "public/plaza-exteriors.js", "public/commercial-layouts.json", "public/house-colors.js", "public/neighborhood.css", "public/inventory-scope.js", "public/inventory-hotbar.js", "public/inventory-hotbar.css", "neighborhood.mjs", "movement-protocol.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
-for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/reindeer-office.js", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
+for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/reindeer-office.js", "public/character-flight.js", "flight-rules.mjs", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -3362,6 +3363,7 @@ function rowToPlayerState(row) {
   return {
     locationId: canRestore ? saved.locationId : "office",
     movementRevision: 0,
+    flying: false,
     x: canRestore ? saved.x : officeSpawn.x,
     y: canRestore ? saved.y : officeSpawn.y,
     dir: canRestore ? saved.dir : officeSpawn.dir,
@@ -3446,15 +3448,58 @@ function bumpMovementRevision(player) {
 // clients during a scene transition from a delayed packet from the old map.
 function movementPayload(id, player, overrides = {}) {
   const locationId = locationOf(player);
-  const { movementRevision: _movementRevision, ...publicPlayer } = player || {};
+  const { movementRevision: _movementRevision, flightGraceUntil: _flightGraceUntil,
+    flightLastMult: _flightLastMult, ...publicPlayer } = player || {};
   return {
     id,
     ...publicPlayer,
+    flying: player?.flying === true && !flightRestriction(id, player),
     ...overrides,
     location: locationId,
     seq: movementRevisionOf(player),
   };
 }
+function flightCompetition(id) {
+  return inAnyMatch(id) || inRound(id) || !!rlgl?.members?.has(id)
+    || !!(propHunt && (propHunt.hiderId === id || propHunt.seekers.has(id)))
+    || !!bingo?.players?.has(id);
+}
+function flightRestriction(id, p) {
+  return flightDeniedReason(p, {
+    competitive: flightCompetition(id),
+    privateRoom: parseLocation(locationOf(p))?.kind === "home",
+    exercising: plazaGymActivities.has(id),
+  });
+}
+function setPlayerFlight(id, flying, reason = null) {
+  const p = players[id];
+  if (!p) return;
+  const previous = p.flying === true;
+  if (previous && !flying) {
+    p.flightLastMult = Math.max(p.flightLastMult || 1, ownedWingFlightSpeed(p));
+    p.flightGraceUntil = Date.now() + 350;
+  }
+  p.flying = flying === true;
+  if (p.flying) p.flightLastMult = ownedWingFlightSpeed(p);
+  const payload = { id, flying: p.flying, multiplier: p.flying ? ownedWingFlightSpeed(p) : 1,
+    wings: p.wings || "", location: locationOf(p), ...(reason ? { reason } : {}) };
+  // The owner always receives acknowledgement, including denied/no-op toggles.
+  io.to(id).emit("flightState", payload);
+  if (previous !== p.flying) {
+    bumpMovementRevision(p);
+    emitToLocation(locationOf(p), "flightState", payload, id);
+    emitToLocation(locationOf(p), "playerMoved", movementPayload(id, p), id);
+  }
+}
+// Equipment, games and exercise can change outside playerMove. Never rely on
+// an honest client to land itself or require movement for forced landing.
+setInterval(() => {
+  for (const [id, p] of Object.entries(players)) {
+    if (!p.flying) continue;
+    const reason = flightRestriction(id, p);
+    if (reason) setPlayerFlight(id, false, reason);
+  }
+}, 100).unref();
 function sameLocation(aId, bId) {
   return !!players[aId] && !!players[bId] && locationOf(players[aId]) === locationOf(players[bId]);
 }
@@ -9932,6 +9977,7 @@ io.on("connection", (socket) => {
       return false;
     }
     const oldLocation = locationOf(p);
+    if (p.flying) setPlayerFlight(socket.id, false);
     if (p.activity) stopFurnitureActivity(socket.id, "transition");
     // The street has one stable lot per approved account. Refresh before
     // validating a street doorway, so account joins cannot remap a painted
@@ -11103,6 +11149,20 @@ io.on("connection", (socket) => {
     } catch (err) { socket.emit("homeInviteResult", { ok: false, message: "Could not revoke invitation." }); }
   });
 
+  let lastFlightToggleAt = 0;
+  socket.on("flightToggle", (data) => {
+    const p = players[socket.id];
+    if (!p || typeof data?.flying !== "boolean") return;
+    const now = Date.now();
+    if (now - lastFlightToggleAt < 250) {
+      socket.emit("flightState", { id: socket.id, flying: !!p.flying,
+        multiplier: p.flying ? ownedWingFlightSpeed(p) : 1, wings: p.wings || "", location: locationOf(p) });
+      return;
+    }
+    lastFlightToggleAt = now;
+    const reason = data.flying ? flightRestriction(socket.id, p) : null;
+    setPlayerFlight(socket.id, data.flying && !reason, reason);
+  });
   socket.on("playerMove", (data) => {
     const me = players[socket.id];
     if (!me || !data) return;
@@ -11112,6 +11172,9 @@ io.on("connection", (socket) => {
     const envelope = inspectMovementEnvelope(data, locationOf(me), lastMoveSequence);
     if (envelope.ignore) return;
     if (!movementCorrectionFence.inspect(data, locationOf(me))) return;
+    if (me.flying && (data.anim === "sit" || flightRestriction(socket.id, me))) {
+      setPlayerFlight(socket.id, false);
+    }
     const packetSequence = envelope.hasSequence ? envelope.sequence : null;
     // A rejected packet must put the local physics body back on the last
     // authoritative point. Otherwise a client can remain visibly inside a
@@ -11283,6 +11346,13 @@ io.on("connection", (socket) => {
       // no server-side speed allowance.
       const boosted = me.boostUntil && now < me.boostUntil + BOOST_GRACE_MS && !rlglActiveRunner(socket.id);
       let mult = boosted ? COFFEE_MULT : 1;
+      if (me.flying || now < (me.flightGraceUntil || 0)) {
+        if (!flightCompetition(socket.id)) {
+          const flightMult = me.flying ? ownedWingFlightSpeed(me)
+            : (now < (me.flightGraceUntil || 0) ? me.flightLastMult || 1 : 1);
+          mult = Math.max(mult, flightMult);
+        }
+      }
       if (round && round.state === "active") {
         const rm = round.members.get(socket.id);
         if (rm && rm.alive) {
@@ -12819,6 +12889,7 @@ io.on("connection", (socket) => {
 
     if (!p.email) {
       if (item !== "" && !p.cosmetics.includes(item)) { socket.emit("shopError", "You don't own that!"); return; }
+      if (isWings && p.flying) setPlayerFlight(socket.id, false);
       if (isWings) p.wings = item; else if (isOutfit) p.slots[slot] = item; else p.equipped = item;
       socket.emit("equipUpdate", { equipped: p.equipped, wings: p.wings || "", slots: p.slots });
       emitToLocation(locationOf(p), "playerCosmeticUpdate", { id: socket.id, cosmetics: p.cosmetics, equipped: p.equipped, wings: p.wings || "", slots: p.slots });
@@ -12836,6 +12907,7 @@ io.on("connection", (socket) => {
         [p.email, item],
       );
       if (rows.length === 0) { socket.emit("shopError", "You don't own that!"); return; }
+      if (isWings && p.flying) setPlayerFlight(socket.id, false);
       p.equipped = rows[0].equipped_cosmetic || "";
       p.wings = rows[0].equipped_wings || "";
       p.slots = { top: rows[0].equipped_top || "", bottom: rows[0].equipped_bottom || "", neckwear: rows[0].equipped_neckwear || "", held: rows[0].equipped_held || "", feet: rows[0].equipped_feet || "" };
@@ -14136,6 +14208,9 @@ io.on("connection", (socket) => {
     const { object, game } = payload || {};
     const p = players[socket.id];
     if (!p) return;
+    // Reliable interaction input is also an explicit landing request. Chores
+    // and equipment must never leave the actor floating through their pose.
+    if (p.flying) setPlayerFlight(socket.id, false);
     if (typeof object === "string" && object.startsWith("plaza-gym:")) {
       // A scene's shutdown can arrive after travel has changed location.
       // Stopping only your own activity is safe from anywhere and avoids
