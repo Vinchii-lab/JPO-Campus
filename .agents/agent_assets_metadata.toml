@@ -1144,3 +1144,31 @@ mtime_ms = 1793215548951
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/54d0a1d3-23e0-484c-8f77-0f10e50291a9/8a812027-b09a-43dc-bf7c-f41801756fde"
 storage_version_token = "1793215586281030"
 content_type = "image/gif"
+
+[[outputs]]
+id = "efXJsWndh1u3jLDu0DynR"
+uri = "file://generated-artifacts/character-wing-flight-concept.gif"
+type = "image"
+title = "Character flight — animated concept"
+description = "Actual character and golden-wing artwork showing grounded, takeoff and hovering states. Shadow stays on the floor. Concept only, not implemented gameplay."
+logical_id = "0625ed8e-6da8-4487-9d46-2de97c102c39"
+content_hash = "sha256:58688bd92af4eb4dad8ddd64119cfd95ce7f894db8382eef1aacac57cf075a32"
+size = 1570875
+mtime_ms = 1793966493198
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/0625ed8e-6da8-4487-9d46-2de97c102c39/3d324101-9390-49e3-b22f-9481abac08c0"
+storage_version_token = "1793966510407578"
+content_type = "image/gif"
+
+[[outputs]]
+id = "GZWpCFAxUJxD2w8hUQiqg"
+uri = "file://generated-artifacts/character-wing-flight-concept.png"
+type = "image"
+title = "Character flight — still comparison"
+description = "Side-by-side grounded, takeoff and hovering reference."
+logical_id = "734ab985-0c67-4195-90fe-cc4740686ead"
+content_hash = "sha256:fb81fd05b0981dba7bbd73ffdc7ba4981c4e7b970ad323a9f0789cc8f9966eef"
+size = 36335
+mtime_ms = 1793966489846
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/734ab985-0c67-4195-90fe-cc4740686ead/335f346a-a434-452d-ac99-3693b8777a73"
+storage_version_token = "1793966511791732"
+content_type = "image/png"
