@@ -34,3 +34,4 @@
 - [Home layout safety](jpo-home-layout-safety.md) — snapshot reads must not repair/delete placements; version inventory changes too, and reconcile collision state after committed Store.
 - [Christmas fitting pitfalls](jpo-christmas-fit.md) — verify native anatomy rather than trusting layer bounds; pet source sheets may contain extra walking poses.
 - [Character wing flight](jpo-character-flight.md) — characters wearing wings should fly; more expensive wings mean faster flight, separate from pet animation.
+- [Discreet mobile admin access](jpo-mobile-admin-access.md) — no publicly visible Admin button; discreet entry must retain password and server authorization.
