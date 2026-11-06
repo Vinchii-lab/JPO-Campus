@@ -10,7 +10,7 @@
     snowflakewings: 1.55, angelwings: 1.65, devilwings: 1.65, jetpackwings: 1.85,
     goldenwings: 2, phoenixwings: 2.1,
   });
-  const LIFT = 26;          // px of visual elevation at cruise
+  const LIFT = 36;          // px of visual elevation at cruise
   const EASE_MS = 140;      // takeoff / landing time constant
   const STEER_MS = 130;     // flight acceleration / braking time constant
   const REASONS = {
@@ -202,7 +202,7 @@
         if (!st.shadow) st.shadow = scene.add.ellipse(sp.x, sp.y, 36, 12, 0x161a24, 0.35);
         const r = st.lift / LIFT;
         st.shadow.setPosition(sp.x, sp.y + conf.bodyDy + 4)
-          .setScale(1 - 0.3 * r, 1 - 0.25 * r).setAlpha(0.27 + 0.13 * (1 - r))
+          .setScale(1 - 0.3 * r, 1 - 0.25 * r).setAlpha(0.38 + 0.10 * (1 - r))
           .setVisible(sp.visible).setDepth(sp.depth);
         const wings = a.wings && a.wings.active ? a.wings : null;
         scene.children.moveBelow(st.shadow, wings || sp);
