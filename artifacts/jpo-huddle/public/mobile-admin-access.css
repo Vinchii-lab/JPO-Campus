@@ -1,0 +1,65 @@
+/* No new visible entry: this is the existing gold icon and balance only. */
+#coin-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+}
+#owner-panel, #owner-pwd-modal {
+  top: var(--admin-vv-top, 0px);
+  left: var(--admin-vv-left, 0px);
+  right: auto;
+  bottom: auto;
+  width: var(--admin-vv-width, 100%);
+  height: var(--admin-vv-height, 100dvh);
+}
+.owner-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+#owner-content { min-width: 0; }
+@media (max-width: 700px), (max-height: 500px), (pointer: coarse) {
+  #coin-balance { min-height: 30px; min-width: 52px; }
+  #owner-panel, #owner-pwd-modal {
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+  }
+  #owner-panel { align-items: stretch; }
+  #owner-card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    width: min(100%, 520px);
+    max-height: 100%;
+    overflow: hidden;
+  }
+  #owner-card-header { flex: 0 0 auto; padding: 8px 12px; min-height: 52px; }
+  #owner-close { min-width: 44px; min-height: 44px; color: #bbb; }
+  #owner-tabs {
+    flex: 0 0 auto;
+    max-height: min(32vh, 126px);
+    overflow-y: auto;
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  #owner-tabs .o-tab { min-height: 44px; padding: 9px 12px; }
+  #owner-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  #owner-content .owner-section { padding: 16px 12px; overflow-wrap: anywhere; }
+  #owner-content .owner-table { min-width: 530px; }
+  #owner-panel input, #owner-panel textarea, #owner-panel select,
+  #owner-pwd-input { font-size: 16px !important; max-width: 100%; }
+  #owner-panel .o-btn { min-height: 44px; padding: 9px 12px; }
+  #owner-panel input, #owner-panel select { min-height: 44px; }
+  #owner-pwd-modal { overflow-y: auto; }
+  #owner-pwd-card {
+    min-width: 0;
+    width: min(100%, 360px);
+    max-height: 100%;
+    padding: 20px 18px;
+    overflow-y: auto;
+  }
+  #owner-pwd-card h3 { margin-bottom: 12px; }
+  #owner-pwd-submit, #owner-pwd-cancel { min-height: 44px; }
+  #owner-pwd-cancel { color: #bbb; }
+}

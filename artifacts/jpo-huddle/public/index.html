@@ -2617,6 +2617,7 @@
 }
 
   </style>
+  <link rel="stylesheet" href="mobile-admin-access.css?v=__BUILD_STAMP_TOKEN__">
 </head>
 <body>
 
@@ -3303,7 +3304,7 @@
 
   <!-- ── Coin HUD ── -->
   <div id="coin-hud">
-    <img src="assets/ui/jpo_coin.png" alt="coins" style="height:17px; vertical-align:-3px;"> <span id="coin-count">0</span>
+    <span id="coin-balance"><img src="assets/ui/jpo_coin.png" alt="coins" draggable="false" style="height:17px; vertical-align:-3px;"> <span id="coin-count">0</span></span>
     <button id="shop-btn" onclick="openShop()">Shop</button>
     <button id="voice-btn" onclick="toggleVoice()" title="Voice: on — hold V to talk">🎙️</button>
   </div>
@@ -3678,7 +3679,7 @@
     <div id="owner-card">
       <div id="owner-card-header">
         <h2>⚙️ Owner Settings</h2>
-        <button id="owner-close" onclick="closeOwnerPanel()">✕</button>
+        <button id="owner-close" onclick="closeOwnerPanel()" aria-label="Close settings">✕</button>
       </div>
       <div id="owner-tabs">
         <button class="o-tab active" data-otab-btn="reg" onclick="ownerTab('reg')">📝 Registration <span class="o-tab-badge" id="op-tab-pending" style="display:none;">0</span></button>
@@ -3691,6 +3692,7 @@
         <button class="o-tab" data-otab-btn="whispers" onclick="ownerTab('whispers')" style="display:none;">💬 Message Records</button>
         <button class="o-tab" data-otab-btn="settings" onclick="ownerTab('settings')">🔧 Settings</button>
       </div>
+      <div id="owner-content">
       <div class="owner-section" data-otab="reg">
         <h3>Pending Registrations <span class="owner-badge" id="op-pending-count">0</span></h3>
         <table class="owner-table">
@@ -3960,6 +3962,7 @@
           <div id="op-ph-msg" style="font-size:12px;margin-top:8px;color:#888;"></div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 
@@ -4037,6 +4040,7 @@
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-battle.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-office.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="mobile-admin-access.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="flight-pose-data.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="flight-pose.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="character-flight.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -13196,13 +13200,23 @@
     // ── F8 Owner panel ────────────────────────────────────────────────
     let _adminAuthed    = false;
     let _ownerPanelOpen = false;
+    function toggleOwnerAccess() {
+      if (_ownerPanelOpen) { closeOwnerPanel(); return; }
+      if (!socket.connected) { showToast('Office disconnected — wait for reconnection.'); return; }
+      if (!_adminAuthed) { openOwnerPwd(); return; }
+      openOwnerPanel();
+    }
+    window.JpoMobileAdmin.fitViewport();
+    window.JpoMobileAdmin.bind({
+      target: document.getElementById('coin-balance'),
+      ready: () => document.body.classList.contains('playing') && socket.connected,
+      open: toggleOwnerAccess,
+    });
 
     document.addEventListener('keydown', e => {
       if (e.key === 'F8') {
         e.preventDefault(); e.stopImmediatePropagation();
-        if (_ownerPanelOpen) { closeOwnerPanel(); return; }
-        if (!_adminAuthed)   { openOwnerPwd();    return; }
-        openOwnerPanel();
+        toggleOwnerAccess();
       }
       if (e.key === 'Escape') {
         if (_ownerPanelOpen) { e.preventDefault(); closeOwnerPanel(); }
@@ -13238,6 +13252,10 @@
     let _adminPwdPending = '';
     let _adminPwd = '';
     function submitOwnerPwd() {
+      if (!socket.connected) {
+        document.getElementById('owner-pwd-error').textContent = 'Not connected. Please wait for reconnection.';
+        return;
+      }
       _adminPwdPending = document.getElementById('owner-pwd-input').value;
       socket.emit('adminAuth', { password: _adminPwdPending });
     }
@@ -13260,6 +13278,7 @@
     let _ownerLogPage = 1;
     let _ownerTab = 'reg';
     window.ownerTab = function (tab) {
+      if ((tab === 'prices' || tab === 'whispers') && !window._ownerAuthed) tab = 'reg';
       _ownerTab = tab;
       document.querySelectorAll('#owner-card .owner-section[data-otab]').forEach(s => {
         s.classList.toggle('otab-show', s.dataset.otab === tab);
@@ -13332,6 +13351,7 @@
 
     let _adminPollTimer = null;
     function openOwnerPanel() {
+      if (!_adminAuthed || !socket.connected) return;
       _ownerPanelOpen = true; document.getElementById('owner-panel').classList.add('open'); renderAdminAnnouncements(); _opRenderPrices();
       window.ownerTab(_ownerTab);
       socket.emit('adminRefresh');
@@ -13346,6 +13366,7 @@
     }
 
     socket.on('adminAuthOk', (d) => {
+      if (!socket.connected) return;
       // Owner key (OWNER_PASSWORD) unlocks the owner-only tools too.
       document.getElementById('op-owner-coins').style.display = (d && d.owner) ? '' : 'none';
       document.getElementById('op-owner-rare').style.display = (d && d.owner) ? '' : 'none';
@@ -13466,15 +13487,22 @@
       // Modal closed = this was a silent reconnect re-auth that failed (e.g.
       // ADMIN_PASSWORD rotated server-side): drop admin state so the gear/F8
       // reopens the unlock prompt instead of a stale, push-less panel.
-      if (!document.getElementById('owner-pwd-modal').classList.contains('open')) _adminAuthed = false;
+      _adminAuthed = false; window._ownerAuthed = false;
+      closeOwnerPanel();
       document.getElementById('owner-pwd-error').textContent = 'Incorrect password.';
     });
     // Re-assert admin status on every (re)connect — the server's admins set is
     // per-socket-id and in-memory, so both a connection blip and a server
     // restart silently drop it. Additional 'connect' listener by design
     // (socket.io multi-listener, same pattern as the resume-token replay).
+    socket.on('disconnect', () => {
+      _adminAuthed = false;
+      window._ownerAuthed = false;
+      _adminPwdPending = '';
+      closeOwnerPanel();
+    });
     socket.on('connect', () => {
-      if (_adminAuthed && _adminPwd) socket.emit('adminAuth', { password: _adminPwd });
+      if (_adminPwd) socket.emit('adminAuth', { password: _adminPwd });
     });
     // Stale-client self-heal on RECONNECT: the load-time /stamp check only runs
     // once, so a tab left open for weeks keeps running an old client forever
