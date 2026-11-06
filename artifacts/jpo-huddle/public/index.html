@@ -112,6 +112,8 @@
     }
     .join-card > p { font-size: 13px; color: #888; margin-bottom: 16px; }
     .join-card.hidden { display: none; }
+    #reconnect-recovery.hidden,
+    #card-reconnecting .spinner.hidden { display: none !important; }
 
     .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
     .form-field { flex: 1; display: flex; flex-direction: column; text-align: left; }
@@ -2766,7 +2768,11 @@
       <div class="jpo-logo-header"><img src="assets/jpo-hq-logo.png" class="jpo-logo-img" alt="JPO HQ"><h2>JPO HQ</h2></div>
       <p>Welcome back!</p>
       <div class="spinner"></div>
-      <p style="font-size:14px;color:#444;">Reconnecting you to the office…</p>
+      <p id="reconnect-status" role="status" aria-live="polite" style="font-size:14px;color:#444;">Reconnecting you to the office…</p>
+      <div id="reconnect-recovery" class="hidden" style="display:flex;flex-direction:column;gap:10px;margin-top:16px;">
+        <button id="reconnect-retry" type="button" style="padding:12px;font:inherit;cursor:pointer;">Retry loading</button>
+        <button id="reconnect-signin" type="button" style="padding:12px;font:inherit;cursor:pointer;">Sign in instead</button>
+      </div>
     </div>
 
     <!-- Step 2: Pending -->
@@ -4080,6 +4086,7 @@
     }
 
     function _showRegisterForm() {
+      _stopResumeWatch();
       document.getElementById('card-reconnecting')?.classList.add('hidden');
       document.getElementById('card-pending')?.classList.add('hidden');
       document.getElementById('card-register')?.classList.remove('hidden');
@@ -4096,7 +4103,46 @@
     // AND the game scene exists, so the currentPlayers snapshot (rendered by the
     // scene handler) is never dropped by arriving too early. _resumeSent resets on
     // disconnect so a network blip re-resumes the SAME session within the grace window.
-    let _connected = false, _resumeSent = false;
+    let _connected = false, _resumeSent = false, _resumeWatch = null;
+    function _stopResumeWatch() {
+      clearTimeout(_resumeWatch);
+      _resumeWatch = null;
+    }
+    function _watchResume() {
+      _stopResumeWatch();
+      _resumeWatch = setTimeout(() => {
+        const card = document.getElementById('card-reconnecting');
+        if (!card || card.classList.contains('hidden')) return;
+        const status = document.getElementById('reconnect-status');
+        if (status) status.textContent = !socket.connected
+          ? 'The connection to the office is taking too long. Retry loading, or sign in again.'
+          : !window._gameScene
+            ? 'The office graphics are taking too long to load. Retry loading to start fresh.'
+            : 'The saved-session response is taking too long. Retry loading, or sign in again.';
+        document.getElementById('reconnect-recovery')?.classList.remove('hidden');
+        card.querySelector('.spinner')?.classList.add('hidden');
+      }, 20_000);
+    }
+    document.getElementById('reconnect-retry')?.addEventListener('click', () => {
+      // Fresh document/asset requests without deleting the saved credential.
+      const url = new URL(location.href);
+      url.searchParams.set('_retry', String(Date.now()));
+      location.replace(url.href);
+    });
+    document.getElementById('reconnect-signin')?.addEventListener('click', () => {
+      _stopResumeWatch();
+      _clearToken();
+      // Replace the page so a delayed approval from the abandoned resume
+      // cannot remove the sign-in form while the user types new credentials.
+      const url = new URL(location.href);
+      url.searchParams.set('_signin', '1');
+      location.replace(url.href);
+    });
+    if (_loadToken()) _watchResume();
+    else if (new URL(location.href).searchParams.get('_signin') === '1') {
+      document.getElementById('card-register')?.classList.add('hidden');
+      document.getElementById('card-login')?.classList.remove('hidden');
+    }
     function _maybeResume() {
       if (_resumeSent || !_connected || !window._gameScene) return;
       const t = _loadToken();
@@ -4120,6 +4166,8 @@
     });
 
     socket.on('sessionToken', ({ token }) => { if (token) _saveToken(token); });
+    socket.on('approved', _stopResumeWatch);
+    socket.on('registrationPending', _stopResumeWatch);
 
     socket.on('resumeFailed', () => {
       _clearToken();

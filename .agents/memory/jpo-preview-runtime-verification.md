@@ -44,3 +44,9 @@ Verify HUD controls with pointer hit tests, not just viewport bounds.
 **Why:** An inventory control was fully in view but covered by its own item popup on desktop and by the home editor on touch screens. A bounding-box-only assertion incorrectly treated it as usable.
 
 **How to apply:** Check the real element at each control's center while popups and existing panels are open. Verify touch viewport and canonical home hydration before interpreting a disabled placement action as an ownership bug.
+
+Saved-session loading must have bounded recovery, without automatically deleting a valid credential on an asset or network timeout.
+
+**Why:** The user reported a white/stuck reconnecting screen in development. The anonymous sign-in page loaded successfully, but that did not exercise the saved-session gate waiting for the map loader.
+
+**How to apply:** Verify delayed asset loading as well as normal boot. Retrying should preserve the session; explicit sign-in recovery should abandon the old page so a late approval cannot interrupt the new sign-in form. Do not claim an unreproduced user's exact network failure was identified.
