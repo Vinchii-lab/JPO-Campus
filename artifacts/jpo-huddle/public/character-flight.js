@@ -164,6 +164,7 @@
     const states = new Map();
     const applied = [];
     let clock = 0;
+    let warnedMissingPose = false;
 
     const drop = (st) => {
       if (st.shadow) st.shadow.destroy();
@@ -190,12 +191,18 @@
         if (!on && st.lift < 0.4) { st.lift = 0; if (st.shadow) drop(st); continue; }
         const sp = a.sprite;
         const off = st.lift + Math.sin(clock / 260 + st.phase) * 2.2 * (st.lift / LIFT);
-        // Dangling feet: hold the standing frame (no run cycle) while airborne.
-        if (on && a.texKey && scene.textures.exists(a.texKey)) {
+        // Dedicated neutral anatomy: hands at the sides, feet hanging still.
+        // The first run frame is a stride, so simply freezing it is not idle.
+        const poseReady = window.JpoFlightPose && window.JpoFlightPoseData?.down;
+        if (on && !poseReady && !warnedMissingPose) {
+          console.warn('Flight pose graphics did not load. Reload the office to retry.');
+          warnedMissingPose = true;
+        }
+        if (on && poseReady && a.texKey && scene.textures.exists(a.texKey)) {
           if (sp.anims && sp.anims.isPlaying) sp.anims.stop();
           if (sp.anims) sp.anims.currentAnim = null;   // lets walk replay cleanly after landing
-          const fr = conf.dirStart[a.dir] ?? 0;
-          if (sp.texture.key !== a.texKey || Number(sp.frame.name) !== fr) sp.setTexture(a.texKey, fr);
+          const pose = window.JpoFlightPose.resolve(scene, a.texKey, a.dir);
+          if (sp.texture.key !== pose.key || Number(sp.frame.name) !== pose.frame) sp.setTexture(pose.key, pose.frame);
           sp.setFlipX(false);
         }
         // Ground shadow (unshifted, at the collision feet).

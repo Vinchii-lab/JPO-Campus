@@ -26,6 +26,12 @@ Flight needs a clearly visible, dark ground shadow rather than a barely percepti
 
 **How to apply:** Judge readability on the actual snowy HQ floor, not just a plain concept background. Keep the shadow grounded and visually separated from the airborne character; do not change movement or collision behavior when adjusting its appearance.
 
+Airborne characters must hold a relaxed pose with hands at the sides and feet hanging still, not a frozen step from the walking cycle.
+
+**Why:** The user explicitly asked for the in-game pose to match the generated flight movement and rejected a walking-looking airborne pose.
+
+**How to apply:** Inspect all four directions with actual equipped clothes. The wings and hover can move, but the arms and legs should not stride. Landing must restore ordinary walking.
+
 Spacebar toggles Fly/Land during normal exploration; typing, menus and existing minigame controls take precedence.
 
 **Why:** The user chose Spacebar after checking its current Quick Draw and Pool actions and explicitly asked to implement the agreed plan without breaking the app.

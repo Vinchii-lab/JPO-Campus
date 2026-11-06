@@ -6,7 +6,12 @@ import { WING_FLIGHT_SPEEDS } from "../flight-rules.mjs";
 const source = fs.readFileSync(new URL("../public/character-flight.js", import.meta.url), "utf8");
 
 function setup() {
-  const handlers = {}, keys = {}, sent = [], win = {};
+  const handlers = {}, keys = {}, sent = [], win = {
+    JpoFlightPoseData: { down: { frame:19 } },
+    JpoFlightPose: { resolve: (_scene, key, dir) => ({
+      key: `flight_${key}`, frame: { right:2, up:8, left:14, down:19 }[dir],
+    }) },
+  };
   let blocked = false;
   const context = {
     window: win, performance: { now: () => 1000 }, setInterval: () => 0,
@@ -77,12 +82,17 @@ test("render lift restores sprite coordinates exactly and never moves ground sha
       once: (name, fn) => { events[name]=fn; }, off() {} },
   };
   const sprite = Object.assign(obj(), { texture: { key: "native" }, frame: { name: 18 },
-    anims: { isPlaying: false }, setTexture() {}, setFlipX() {} });
+    anims: { isPlaying: true, stop() { this.isPlaying=false; } },
+    setTexture(key, frame) { this.texture={ key }; this.frame={ name:frame }; },
+    setFlipX() {} });
   const name = obj(100, 60);
   s.api.attachScene(scene, () => [{ id:"self", sprite, dir:"down", texKey:"native", parts:[name] }],
     { bodyDy:27, dirStart:{down:18} });
   for (let i=0; i<60; i++) {
     events.prerender();
+    assert.equal(sprite.texture.key, "flight_native");
+    assert.equal(sprite.frame.name, 19);
+    assert.equal(sprite.anims.isPlaying, false);
     assert.ok(sprite.y < 100);
     assert.equal(shadow.y, 131);
     assert.ok(shadow.alpha >= 0.55 && shadow.alpha <= 0.65);

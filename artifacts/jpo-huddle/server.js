@@ -85,6 +85,8 @@ for (const file of ["public/index.html", "public/neighborhood.js", "public/neigh
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/reindeer-office.js", "public/character-flight.js", "flight-rules.mjs", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
+for (const file of ["public/flight-pose.js", "public/flight-pose-data.js"])
+  buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
 // ── Database ───────────────────────────────────────────────────────────────

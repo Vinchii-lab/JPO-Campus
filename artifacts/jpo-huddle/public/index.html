@@ -4037,6 +4037,8 @@
   <script src="christmas-office.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-battle.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="reindeer-office.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="flight-pose-data.js?v=__BUILD_STAMP_TOKEN__"></script>
+  <script src="flight-pose.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="character-flight.js?v=__BUILD_STAMP_TOKEN__"></script>
   <script src="neighborhood.js?v=__BUILD_STAMP_TOKEN__"></script>
    <script src="inventory-scope.js?v=__BUILD_STAMP_TOKEN__"></script>
@@ -5576,6 +5578,7 @@
           catch (e) { console.warn('re-bake failed', e); }
         }
         scene.textures.get(texKey).refresh();
+        scene.textures.get(texKey)._jpoPoseRevision = (scene.textures.get(texKey)._jpoPoseRevision || 0) + 1;
         _legacyTexBuilds.delete(texKey);
       }
     }
