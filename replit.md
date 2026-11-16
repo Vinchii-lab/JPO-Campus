@@ -1,6 +1,10 @@
 # JPO Huddle
 
-A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne team: people walk around as pixel avatars, chat, earn coins, buy cosmetics, and read the announcement board. All game state is durable in Postgres.
+A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne team: people walk around as pixel avatars, chat, earn coins, buy cosmetics, and read the announcement board. Persistent account progress and content are stored in Postgres; active games and live connections also use temporary server memory.
+
+## Stakeholder project summary
+
+See [README.md](README.md) for the current project-inventory entry: purpose, weekly time, hosting, access controls, employee/company data, and security/privacy limitations. The developer reports approximately **1–2 hours per week on updates and maintenance**. Reviewed November 16, 2026. The detailed sections below remain technical working notes and do not cover every recent feature; they are not a security or compliance attestation.
 
 ## Inventory boundaries
 

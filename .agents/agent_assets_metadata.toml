@@ -1200,3 +1200,17 @@ mtime_ms = 1793966784321
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/38e39b85-e217-4ec4-9eb7-0d05801ea9b4/596a1493-1acb-4272-bd9c-0bc05bd6761c"
 storage_version_token = "1793966795850211"
 content_type = "image/gif"
+
+[[outputs]]
+id = "9IIdSGfAtTrtjyTzSYqm8"
+uri = "file://README.md"
+type = "text"
+title = "JPO Huddle — completed project inventory for Ryan"
+description = "Updated with your estimate of 1–2 hours weekly for updates and maintenance, plus hosting, access controls and data handling."
+logical_id = "3af3f6dc-5816-4fc9-b181-3ba1323b7a7f"
+content_hash = "sha256:f4ff3a519abe81cbbe9ba39053b0d6b42391d6fc862b4211f3d3a471595ae444"
+size = 6354
+mtime_ms = 1794831981039
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:5bfb9237-d8d6-488b-bc1c-3f16f8f77619/3af3f6dc-5816-4fc9-b181-3ba1323b7a7f/d27713d3-9808-45bc-bec5-afd3ba2e3346"
+storage_version_token = "1794831994186031"
+content_type = "text/markdown"
