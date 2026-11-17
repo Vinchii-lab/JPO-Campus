@@ -6,6 +6,12 @@ A top-down multiplayer virtual office (a Phaser 3 game) for the JustPressOne tea
 
 See [README.md](README.md) for the current project-inventory entry: purpose, weekly time, hosting, access controls, employee/company data, and security/privacy limitations. The developer reports approximately **1–2 hours per week on updates and maintenance**. Reviewed November 16, 2026. The detailed sections below remain technical working notes and do not cover every recent feature; they are not a security or compliance attestation.
 
+### Registered-account deletion
+
+- Owner access only, in the existing **Registered Players** tab; all approval states are listed. Typing the target email confirms permanent removal of the account, coins, pets, items, and cascading home possessions. Self-deletion and deletion of a connected administrator are blocked.
+- Active games/trades/events, occupied homes, and unresolved shop listings/bids must be resolved first. Account entry/approval is serialized with deletion so an in-flight restore cannot bring back a deleted account.
+- This is account deletion, not a permanent ban or a privacy-erasure operation: re-registration is possible with fresh approval. Shared messages, announcements, admin logs, settlement history and reward limits remain to preserve other participants' records and prevent reward replay.
+
 ## Inventory boundaries
 
 Willow Walk, Huddle Plaza, and neighborhood interiors use a neighborhood-only inventory. Do not merge HQ pets, cosmetics, or consumables into that view. This is an intentional product boundary: players should see items relevant to those maps, not their entire HQ collection. Preserve ownership and the existing HQ inventory when filtering the neighborhood view.

@@ -1,4 +1,5 @@
 import express from "express";
+import { createAccountGate, deleteRegisteredAccount, normalizeAccountEmail } from "./registered-users.mjs";
 import { migrateLotClaims, claimNeighborhoodLot } from "./lot-claims.mjs";
 import { migrateChristmas, registerChristmas } from "./christmas.mjs";
 import { ownedWingFlightSpeed, flightDeniedReason } from "./flight-rules.mjs";
@@ -85,7 +86,7 @@ for (const file of ["public/index.html", "public/neighborhood.js", "public/neigh
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 for (const file of ["public/halloween-office.js", "public/christmas-office.js", "public/reindeer-battle.js", "public/reindeer-office.js", "public/character-flight.js", "flight-rules.mjs", "public/christmas-rink.js", "public/ice-motion.js", "public/christmas-office.css", "christmas.mjs", "season.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
-for (const file of ["public/flight-pose.js", "public/flight-pose-data.js", "public/mobile-admin-access.js", "public/mobile-admin-access.css"])
+for (const file of ["public/flight-pose.js", "public/flight-pose-data.js", "public/mobile-admin-access.js", "public/mobile-admin-access.css", "registered-users.mjs"])
   buildHasher.update(readFileSync(path.join(__dirname, file)));
 const BUILD_STAMP = buildHasher.digest("hex").slice(0, 12);
 
@@ -4155,6 +4156,17 @@ async function fetchAnnouncements() {
 }
 
 // Socket ids (other than `exceptId`) currently live under `email`.
+const accountGate = createAccountGate();
+function registerAccountEvent(socket, event, emailOf, failureEvent, handler) {
+  socket.on(event, async payload => {
+    try {
+      await accountGate.enter(normalizeAccountEmail(emailOf(payload)), () => handler(payload));
+    } catch (err) {
+      socket.emit(failureEvent, failureEvent === "ownerMsg" ? err.message : { message: err.message });
+    }
+  });
+}
+
 function liveSocketsForEmail(email, exceptId) {
   const ids = [];
   for (const id in players) {
@@ -8258,7 +8270,7 @@ io.on("connection", (socket) => {
   //     by setting the password, atomically (WHERE password_hash IS NULL).
   //   • New email → row is created with the password. Everyone waits for
   //     approval as before; approved emails restore straight into the office.
-  socket.on("register", async (payload) => {
+  registerAccountEvent(socket, "register", p => p?.email, "authFailed", async (payload) => {
     let em = "";   // hoisted: the failure exits below need it for round-spot cleanup
     try {
       const { firstName, lastName, nickname, email, password, character, hairIdx, skinIdx, shirtIdx, pantsIdx, clothesIdx, department } = payload || {};
@@ -8413,7 +8425,7 @@ io.on("connection", (socket) => {
   // parameter list — `({ x } = {})` still throws on an explicit `null` payload,
   // and one malicious `socket.emit("event", null)` would crash the whole server.
   // Always take `payload` and destructure from `payload || {}`.
-  socket.on("login", async (payload) => {
+  registerAccountEvent(socket, "login", p => p?.email, "loginFailed", async (payload) => {
     const { email, password } = payload || {};
     let em = "";   // hoisted: the catch below needs it for round-spot cleanup
     try {
@@ -8475,7 +8487,7 @@ io.on("connection", (socket) => {
   // A returning browser sends its stored token instead of re-filling the form.
   // We validate it, look up the durable row, and either drop them straight back
   // into the office (approved) or back into the waiting queue (not approved).
-  socket.on("resumeSession", async (payload) => {
+  registerAccountEvent(socket, "resumeSession", p => verifyToken(p?.token)?.email, "resumeFailed", async (payload) => {
     const { token } = payload || {};
     let em = "";   // hoisted: the catch below needs it for round-spot cleanup
     try {
@@ -9729,15 +9741,14 @@ io.on("connection", (socket) => {
     } catch (err) { console.error("adminLogGet failed:", err); }
   });
 
-  // Registered directory (F8 → Registered): every approved account, online or
-  // not, straight from the DB — plus a live "online" flag matched by email.
+  // Registered directory: include pending/dismissed rows so the owner can
+  // remove stale registrations as well as approved accounts.
   socket.on("adminRegisteredList", async () => {
     if (!admins.has(socket.id)) return;
     try {
       const { rows } = await pool.query(
-        `SELECT email, name, nickname, first_name, last_name, department, coins, created_at, updated_at
+        `SELECT email, name, nickname, first_name, last_name, department, coins, created_at, updated_at, approved, dismissed
            FROM jpo_players
-          WHERE approved = TRUE AND COALESCE(dismissed, FALSE) = FALSE
           ORDER BY LOWER(COALESCE(NULLIF(first_name,''), name))`);
       const onlineEmails = new Set(
         Object.values(players).map(p => (p.email || "").toLowerCase()).filter(Boolean));
@@ -9750,6 +9761,8 @@ io.on("connection", (socket) => {
         registeredAt: r.created_at,
         lastActive:   r.updated_at || r.created_at,
         online:     onlineEmails.has((r.email || "").toLowerCase()),
+        status:     r.approved ? "Approved" : r.dismissed ? "Dismissed" : "Pending",
+        self:       r.email === players[socket.id]?.email,
       })));
     } catch (err) { console.error("adminRegisteredList failed:", err); }
   });
@@ -9760,7 +9773,8 @@ io.on("connection", (socket) => {
     socket.emit("playerList", _playerList());
   });
 
-  socket.on("approvePlayer", async (targetId) => {
+  registerAccountEvent(socket, "approvePlayer", id => pending[id]?.email ||
+    (typeof id === "string" && id.startsWith("email:") ? id.slice(6) : ""), "ownerMsg", async (targetId) => {
     if (!admins.has(socket.id)) return;
     if (typeof targetId !== "string") return;
     // Offline entries from the DB-backed pending list carry an `email:<email>`
@@ -9955,6 +9969,71 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("ownerDeleteAccount", async (payload) => {
+    const email = normalizeAccountEmail(payload?.email);
+    try {
+      const row = await withHomeOperation(email, () => deleteRegisteredAccount({
+        pool, gate: accountGate, email, confirmEmail: payload?.confirmEmail,
+        actorEmail: players[socket.id]?.email || pending[socket.id]?.email,
+        authorized: owners.has(socket.id),
+        rewardLiability: async (db, em) => {
+          const event = grandEvent;
+          if (!event?.entrants.has(em)) return null;
+          if (event.closing) return "Wait for this user's event refunds to finish before deleting their account.";
+          const expected = [];
+          if (event.state === "complete") {
+            for (const round of event.rounds || []) {
+              if (grandEventRoundReward(round) > 0) for (const match of round.matches || []) {
+                if (match.state === "done" && match.winner === em) expected.push(`round:${match.id}`);
+              }
+            }
+            if (event.champion?.email === em && event.champion.pot > 0) expected.push("champion-pot");
+          } else if (event.state === "cancelled") expected.push(`entry-refund:${em}`);
+          if (!expected.length) return null;
+          const paid = await db.query(
+            "SELECT payout_key FROM jpo_grand_event_payouts WHERE event_id = $1 AND email = $2 AND payout_key = ANY($3::text[])",
+            [event.id, em, expected]);
+          return paid.rows.length === expected.length ? null : "This user still has unpaid event rewards/refunds. Resolve them before deleting their account.";
+        },
+        busyReason: em => {
+          const ids = new Set(liveSocketsForEmail(em));
+          const parked = graceByEmail[em]; if (parked) ids.add(parked.oldId);
+          if ([...ids].some(id => admins.has(id) || owners.has(id))) return "That user has an open admin session. They must sign out first.";
+          if ([...ids].some(id => inAnyMatch(id) || inRound(id) || rlgl?.members?.has(id) ||
+            bingo?.players?.has(id) || race?.entrants?.has(id) || tradeBySocket.has(id) ||
+            (propHunt && (propHunt.hiderId === id || propHunt.seekers.has(id)))) ||
+            [...(round?.members?.values() || [])].some(p => p.email === em) ||
+            [...(rlgl?.members?.values() || [])].some(p => p.email === em) ||
+            [...(race?.entrants?.values() || [])].some(p => p.email === em) ||
+            deal?.players?.has(em) ||
+            (grandEvent && grandEvent.entrants.has(em) && !["complete", "cancelled"].includes(grandEvent.state))) {
+            return "Finish this user's games, trades and event rewards before deleting their account.";
+          }
+          if (Object.values(players).some(p => p.email !== em && locationOf(p) === `home:${em}`)) return "Ask visitors to leave this user's home before deleting the account.";
+          return null;
+        },
+        disconnect: em => {
+          for (const id of liveSocketsForEmail(em)) io.to(id).emit("kicked", { reason: "accountDeleted" });
+          dropLiveByEmail(em, null);
+          cancelGrace(em);
+          roundLeaveGoneByEmail(em);
+        },
+      }));
+      invalidateStreetHomes();
+      homeLayoutCollisionCache.delete(email);
+      logAdmin(socket, "Account permanently deleted", `${row.name} (${email}) — account, inventory and home removed; shared history retained`);
+      socket.emit("ownerDeleteAccountResult", { ok: true, email, message: `Deleted ${row.name}'s account. Shared messages and audit/game history were retained.` });
+      // Every open directory gets a fresh DB snapshot, not only the operator's.
+      for (const id of admins) io.to(id).emit("registeredListChanged");
+      _notifyAdmins();
+      refreshStreetHomes().then(() => {
+        io.to(locationRoom("neighborhood")).emit("homeStreetChanged", { refreshDirectory: true });
+      }).catch(err => console.error("deleted account street refresh failed:", err));
+    } catch (err) {
+      socket.emit("ownerDeleteAccountResult", { ok: false, email, message: err.message || "Deletion failed. Try again." });
+    }
+  });
+
   // ── Game events ──────────────────────────────────────────────────────
   // ── Shared City and Homes ─────────────────────────────────────────────
   // Transitions are the only way locationId changes.  Client scene switches
@@ -10051,6 +10130,10 @@ io.on("connection", (socket) => {
       return false;
     }
     if (sequence !== locationTransitionSequence || players[socket.id] !== p) return false;
+    if (target.kind === "home" && accountGate.isDeleting(target.ownerEmail)) {
+      socket.emit("locationTransitionResult", { ok: false, code: "unavailable", message: "This home is no longer available. Please try again shortly." });
+      return false;
+    }
     const previousHome = parseLocation(oldLocation);
     // A home exit is an address operation, not a generic street respawn. If
     // the durable lot projection is temporarily unavailable, keep the player
